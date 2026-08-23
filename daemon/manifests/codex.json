@@ -1,0 +1,7 @@
+{
+  "id": "codex",
+  "name": "Codex CLI",
+  "adapter": "terminal",
+  "bin": "codex",
+  "install": { "npm": "@openai/codex" }
+}

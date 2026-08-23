@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<link rel="stylesheet" href="vendor/xterm.min.css" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #14161a; }
+  #term { position: absolute; inset: 0; }
+</style>
+</head>
+<body>
+<div id="term"></div>
+<script src="vendor/xterm.min.js"></script>
+<script src="vendor/addon-fit.min.js"></script>
+<script>
+const term = new Terminal({ fontSize: 13, theme: { background: '#14161a' } });
+const fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open(document.getElementById('term'));
+
+function enc(s) { const u = new TextEncoder().encode(s); let b = ''; for (const c of u) b += String.fromCharCode(c); return btoa(b); }
+function doFit() { try { fit.fit(); Android.resize(term.cols, term.rows); } catch (e) {} }
+
+term.onData((d) => { try { Android.input(enc(d)); } catch (e) {} });
+term.onResize(() => { try { Android.resize(term.cols, term.rows); } catch (e) {} });
+
+window.termOut = function (b64) {
+  const bin = atob(b64);
+  const u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+  term.write(u);
+};
+
+if (window.visualViewport) visualViewport.addEventListener('resize', doFit);
+else window.addEventListener('resize', doFit);
+setTimeout(doFit, 100);
+</script>
+</body>
+</html>

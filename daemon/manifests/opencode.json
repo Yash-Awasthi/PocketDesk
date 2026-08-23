@@ -1,0 +1,7 @@
+{
+  "id": "opencode",
+  "name": "OpenCode",
+  "adapter": "terminal",
+  "bin": "opencode",
+  "install": { "npm": "opencode-ai" }
+}

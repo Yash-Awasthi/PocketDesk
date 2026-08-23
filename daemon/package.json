@@ -1,0 +1,23 @@
+{
+  "name": "pocketdesk-daemon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pocketdesk": "src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
+  }
+}

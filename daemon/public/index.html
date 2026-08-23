@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>PocketDesk</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
+<style>
+  body { font-family: Consolas, monospace; background: #14161a; color: #d7dae0; margin: 0; padding: 12px; }
+  h1 { font-size: 16px; margin: 0 0 8px; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+  input, select, button { font-family: inherit; font-size: 13px; background: #1e222a; color: #d7dae0; border: 1px solid #3a3f4b; border-radius: 4px; padding: 5px 8px; }
+  button { cursor: pointer; } button:hover { background: #2a2f3a; }
+  #log { white-space: pre-wrap; font-size: 11px; color: #9aa0aa; max-height: 140px; overflow-y: auto; border: 1px solid #2a2f3a; padding: 6px; margin-top: 6px; }
+  .card { border: 1px solid #2a2f3a; border-radius: 6px; padding: 8px; margin-bottom: 6px; }
+  .ok { color: #7ec699; } .bad { color: #e0706f; }
+  #termbox { display: none; margin-top: 10px; }
+</style>
+</head>
+<body>
+<h1>PocketDesk</h1>
+
+<div class="row">
+  <span id="status" class="bad">disconnected</span>
+</div>
+<div class="row">
+  <input id="host" size="22" placeholder="ws://localhost:8765/ws" />
+  <input id="token" size="30" placeholder="token" />
+  <button onclick="connect()">Connect</button>
+</div>
+
+<div id="main" style="display:none">
+  <div class="row"><b>Tools</b> <button onclick="send({type:'detect'})">Rescan</button></div>
+  <div id="tools"></div>
+
+  <div class="row"><b>New session</b></div>
+  <div class="row">
+    <select id="tool"></select>
+    <input id="cwd" size="34" placeholder="project folder (empty = home)" />
+    <button onclick="browse()">Browse</button>
+    <button onclick="createSession()">Start</button>
+  </div>
+
+  <div class="row"><b>Sessions</b></div>
+  <div id="sessions"></div>
+
+  <div id="termbox"><div id="term"></div></div>
+  <div id="log"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script>
+let ws = null;
+let term = null, fit = null, activeId = null;
+const tools = [];
+const live = [];
+
+function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+function log(line) { const el = document.getElementById("log"); el.textContent += line + "\n"; el.scrollTop = el.scrollHeight; }
+
+function connect() {
+  if (ws) ws.close();
+  const url = document.getElementById("host").value || "ws://localhost:8765/ws";
+  ws = new WebSocket(url);
+  ws.onopen = () => send({ type: "hello", token: document.getElementById("token").value });
+  ws.onclose = () => setStatus(false);
+  ws.onerror = () => setStatus(false);
+  ws.onmessage = (ev) => handle(JSON.parse(ev.data));
+}
+
+function setStatus(up) {
+  const s = document.getElementById("status");
+  s.textContent = up ? "connected" : "disconnected";
+  s.className = up ? "ok" : "bad";
+  document.getElementById("main").style.display = up ? "" : "none";
+}
+
+function handle(m) {
+  switch (m.type) {
+    case "welcome": setStatus(true); renderTools(m.manifests); renderSessions(m.sessions); break;
+    case "manifests": renderTools(m.items); break;
+    case "sessions": renderSessions(m.items); break;
+    case "created": openTerminal(m.id); break;
+    case "replay": if (m.id === activeId) term.write(new Uint8Array(base64ToBytes(m.data))); break;
+    case "out": if (m.id === activeId) term.write(new Uint8Array(base64ToBytes(m.data))); break;
+    case "exit":
+      for (let i = live.length - 1; i >= 0; i--) if (live[i].id === m.id) live.splice(i, 1);
+      renderSessions(live);
+      if (m.id === activeId) log(`session ${m.id} exited (${m.code})`);
+      break;
+    case "progress": log(`[${m.id}] ${m.line}`); break;
+    case "fs":
+      if (m.error) return log("fs error: " + m.error);
+      pickDir(m);
+      break;
+    case "error": log("ERROR: " + m.message); break;
+  }
+}
+
+function renderTools(items) {
+  tools.length = 0;
+  for (const it of items) tools.push(it);
+  const el = document.getElementById("tools");
+  el.innerHTML = "";
+  const sel = document.getElementById("tool");
+  sel.innerHTML = "";
+  for (const it of items) {
+    const installed = it.installed === true;
+    const d = document.createElement("div");
+    d.className = "card";
+    d.innerHTML = `<b>${it.manifest.name}</b> <code>${it.manifest.bin}</code> ` +
+      (installed ? `<span class="ok">installed ${it.version || ""}</span>` : it.installing ? `<span>installing...</span>` : `<span class="bad">not installed</span>`);
+    if (!installed && !it.installing) {
+      const b = document.createElement("button");
+      b.textContent = "Install";
+      b.onclick = () => send({ type: "install", id: it.manifest.id });
+      d.appendChild(b);
+    }
+    el.appendChild(d);
+    if (installed) {
+      const o = document.createElement("option");
+      o.value = it.manifest.id;
+      o.textContent = it.manifest.name;
+      sel.appendChild(o);
+    }
+  }
+}
+
+function renderSessions(items) {
+  live.length = 0;
+  for (const s of items) live.push(s);
+  const el = document.getElementById("sessions");
+  el.innerHTML = "";
+  for (const s of live) {
+    const d = document.createElement("div");
+    d.className = "card";
+    d.innerHTML = `<code>${s.id}</code> ${s.harnessId} @ ${s.cwd} `;
+    const at = document.createElement("button");
+    at.textContent = "Attach";
+    at.onclick = () => openTerminal(s.id);
+    const kill = document.createElement("button");
+    kill.textContent = "Kill";
+    kill.onclick = () => send({ type: "kill", id: s.id });
+    d.appendChild(at); d.appendChild(kill);
+    el.appendChild(d);
+  }
+}
+
+function createSession() {
+  send({ type: "create", harness: document.getElementById("tool").value, cwd: document.getElementById("cwd").value });
+}
+
+function browse() { send({ type: "fs", path: document.getElementById("cwd").value }); }
+
+function pickDir(m) {
+  const choice = prompt(`Folders in ${m.path}\n\n` + m.items.join("\n") + `\n\nType a name to enter, blank to pick this folder, 'up' for parent:`);
+  if (choice === null) return;
+  if (choice === "") document.getElementById("cwd").value = m.path;
+  else if (choice === "up") send({ type: "fs", path: m.parent });
+  else send({ type: "fs", path: m.path + "\\" + choice });
+}
+
+function openTerminal(id) {
+  activeId = id;
+  document.getElementById("termbox").style.display = "";
+  if (!term) {
+    term = new Terminal({ convertEol: false, fontSize: 14, theme: { background: "#14161a" } });
+    fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.open(document.getElementById("term"));
+    term.onData((d) => send({ type: "in", id: activeId, data: bytesToB64(new TextEncoder().encode(d)) }));
+    term.onResize(({ cols, rows }) => send({ type: "resize", id: activeId, cols, rows }));
+  }
+  term.reset();
+  fit.fit();
+  send({ type: "attach", id });
+  setTimeout(() => fit.fit(), 50);
+}
+
+window.addEventListener("resize", () => { if (fit) { fit.fit(); } });
+
+function base64ToBytes(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+function bytesToB64(u8) { let s = ""; for (const b of u8) s += String.fromCharCode(b); return btoa(s); }
+</script>
+</body>
+</html>

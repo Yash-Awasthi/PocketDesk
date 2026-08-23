@@ -1,0 +1,7 @@
+{
+  "id": "claude",
+  "name": "Claude Code",
+  "adapter": "terminal",
+  "bin": "claude",
+  "install": { "npm": "@anthropic-ai/claude-code" }
+}

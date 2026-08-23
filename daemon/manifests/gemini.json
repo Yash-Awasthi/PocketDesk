@@ -1,0 +1,7 @@
+{
+  "id": "gemini",
+  "name": "Gemini CLI",
+  "adapter": "terminal",
+  "bin": "gemini",
+  "install": { "npm": "@google/gemini-cli" }
+}
