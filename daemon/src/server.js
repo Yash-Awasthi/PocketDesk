@@ -144,7 +144,7 @@ export function start({ port, token, tls }) {
     const file = resolvePath(p);
     try {
       const st = fs.statSync(file);
-      if (!st.isFile()) return { type: "fchunk", error: "not a file" };
+      if (!st.isFile()) return { type: "fchunk", path: file, error: "not a file" };
       const start = Math.max(0, Number(offset) || 0);
       if (start >= st.size) return { type: "fchunk", path: file, size: st.size, data: "", eof: true };
       const len = Math.min(CHUNK, st.size - start);
@@ -164,7 +164,7 @@ export function start({ port, token, tls }) {
         eof: start + len >= st.size,
       };
     } catch (e) {
-      return { type: "fchunk", error: e.message };
+      return { type: "fchunk", path: file, error: e.message };
     }
   }
 

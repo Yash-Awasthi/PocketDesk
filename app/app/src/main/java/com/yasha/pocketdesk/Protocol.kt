@@ -4,9 +4,11 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 data class Manifest(val id: String, val name: String, val bin: String)
@@ -20,12 +22,15 @@ data class ToolInfo(
 
 data class SessionSummary(val id: String, val harnessId: String, val cwd: String)
 
-data class FsListing(val path: String, val parent: String?, val items: List<String>)
+data class FsEntry(val name: String, val isDir: Boolean, val size: Long?)
+
+data class FsListing(val path: String, val parent: String?, val items: List<FsEntry>)
 
 sealed interface RhEvent {
     data class Created(val id: String) : RhEvent
-    data class Exit(val id: String, val code: Int) : RhEvent
+    data class Exit(val id: String, val harnessId: String, val code: Int) : RhEvent
     data class Failure(val message: String) : RhEvent
+    data class TrustNeeded(val fingerprint: String) : RhEvent
 }
 
 object Proto {
@@ -54,6 +59,13 @@ object Proto {
 
     fun kill(id: String) = obj { put("type", "kill"); put("id", id) }
     fun fs(path: String?) = obj { put("type", "fs"); put("path", path ?: "") }
+    fun fread(path: String, offset: Long) = obj {
+        put("type", "fread"); put("path", path); put("offset", offset)
+    }
+
+    fun fwrite(path: String, chunkB64: String, append: Boolean) = obj {
+        put("type", "fwrite"); put("path", path); put("data", chunkB64); put("append", append)
+    }
 
     fun parseTools(el: JsonElement?): List<ToolInfo> {
         val arr = (el as? JsonObject)?.get("items") as? JsonArray ?: return emptyList()
@@ -86,8 +98,17 @@ object Proto {
         val o = el as? JsonObject ?: return null
         if (o["error"] != null) return null
         val items = (o["items"] as? JsonArray)
-            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }
+            ?.mapNotNull { e ->
+                val it = e as? JsonObject ?: return@mapNotNull null
+                FsEntry(
+                    name = str(it, "name") ?: return@mapNotNull null,
+                    isDir = bool(it, "dir") ?: false,
+                    size = (it["size"] as? JsonPrimitive)?.longOrNull,
+                )
+            }
             ?: return null
         return FsListing(path = str(o, "path") ?: "", parent = str(o, "parent"), items = items)
     }
+
+    fun exitCode(m: JsonObject): Int = (m["code"] as? JsonPrimitive)?.intOrNull ?: 0
 }

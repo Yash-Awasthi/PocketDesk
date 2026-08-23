@@ -1,5 +1,11 @@
 package com.yasha.pocketdesk.ui
 
+import android.content.Context
+import android.net.Uri
+import android.os.Build
+import android.provider.OpenableColumns
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,15 +38,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.yasha.pocketdesk.FsEntry
 import com.yasha.pocketdesk.RhEvent
 import com.yasha.pocketdesk.ToolInfo
 import com.yasha.pocketdesk.WsClient
 
 @Composable
 fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit) {
-    val installed = remember(ws.tools) { ws.tools.filter { it.installed == true } }
+    val installed = ws.tools.filter { it.installed == true }
     var tool by remember { mutableStateOf<ToolInfo?>(null) }
     LaunchedEffect(installed) {
         if (tool == null || installed.none { it.manifest.id == tool?.manifest?.id }) {
@@ -119,10 +127,14 @@ fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit) {
     }
 
     if (browsing) {
-        DirPickerDialog(ws, onSelect = {
-            cwd = it
-            browsing = false
-        }, onDismiss = { browsing = false })
+        DirPickerDialog(
+            ws = ws,
+            onSelect = {
+                cwd = it
+                browsing = false
+            },
+            onDismiss = { browsing = false },
+        )
     }
 }
 
@@ -144,9 +156,42 @@ private fun ToolPicker(installed: List<ToolInfo>, selected: ToolInfo?, onPick: (
     }
 }
 
+private fun humanBytes(n: Long?): String = when {
+    n == null -> ""
+    n >= 1 shl 20 -> "%.1f MB".format(n.toDouble() / (1 shl 20))
+    n >= 1 shl 10 -> "%.1f KB".format(n.toDouble() / (1 shl 10))
+    else -> "$n B"
+}
+
 @Composable
 private fun DirPickerDialog(ws: WsClient, onSelect: (String) -> Unit, onDismiss: () -> Unit) {
     val listing = ws.dirListing
+    val ctx = LocalContext.current
+    var transfer by remember { mutableStateOf<String?>(null) }
+    var pendingDownload by remember { mutableStateOf<FsEntry?>(null) }
+
+    fun childPath(dir: String, name: String) = dir.trimEnd('\\', '/') + "\\" + name
+
+    val uploadLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetContent(),
+    ) { uri: Uri? ->
+        val dir = listing?.path ?: return@rememberLauncherForActivityResult
+        if (uri == null) return@rememberLauncherForActivityResult
+        val display = queryDisplayName(ctx, uri)
+        val remote = childPath(dir, display)
+        transfer = "uploading $display..."
+        ws.uploadFile(
+            remotePath = remote,
+            openSource = { ctx.contentResolver.openInputStream(uri) },
+            sizeHint = null,
+            onProgress = { sent -> transfer = "uploading $display... ${humanBytes(sent)}" },
+            onDone = { err ->
+                transfer = if (err != null) "upload failed: $err" else "uploaded $display"
+                ws.browse(dir)
+            },
+        )
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(listing?.path ?: "...", style = MaterialTheme.typography.titleSmall) },
@@ -155,11 +200,27 @@ private fun DirPickerDialog(ws: WsClient, onSelect: (String) -> Unit, onDismiss:
                 when (listing) {
                     null -> Text("Loading...")
                     else -> {
-                        TextButton(onClick = { listing.parent?.let { ws.browse(it) } }) { Text(".. up") }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = { listing.parent?.let { ws.browse(it) } }) { Text(".. up") }
+                            TextButton(onClick = { uploadLauncher.launch("*/*") }) { Text("Upload here") }
+                        }
+                        transfer?.let {
+                            Text(
+                                it,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         LazyColumn(Modifier.height(320.dp)) {
-                            items(listing.items) { name ->
-                                TextButton(onClick = { ws.browse(listing.path + "\\" + name) }) {
-                                    Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            items(listing.items, key = { it.name }) { e ->
+                                TextButton(onClick = {
+                                    if (e.isDir) ws.browse(childPath(listing.path, e.name)) else pendingDownload = e
+                                }) {
+                                    Text(
+                                        if (e.isDir) e.name else "${e.name}  (${humanBytes(e.size)})",
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
                                 }
                             }
                         }
@@ -174,4 +235,86 @@ private fun DirPickerDialog(ws: WsClient, onSelect: (String) -> Unit, onDismiss:
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
+
+    pendingDownload?.let { entry ->
+        val remote = listing?.let { childPath(it.path, entry.name) } ?: return@let
+        AlertDialog(
+            onDismissRequest = { pendingDownload = null },
+            title = { Text("Download ${entry.name}?") },
+            text = { Text("${humanBytes(entry.size)} will be saved to your device's Downloads.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingDownload = null
+                    transfer = "downloading ${entry.name}..."
+                    saveToDownloads(ctx, entry.name) { out, finish ->
+                        ws.downloadFile(
+                            remotePath = remote,
+                            sink = out::write,
+                            onProgress = { sent, total ->
+                                transfer = "downloading ${entry.name}... ${humanBytes(sent)}/${humanBytes(total)}"
+                            },
+                            onDone = { err ->
+                                finish(err)
+                                transfer = if (err != null) "download failed: $err" else "saved ${entry.name}"
+                            },
+                        )
+                    }
+                }) { Text("Download") }
+            },
+            dismissButton = { TextButton(onClick = { pendingDownload = null }) { Text("Cancel") } },
+        )
+    }
+}
+
+private fun queryDisplayName(ctx: Context, uri: Uri): String {
+    ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+        if (c.moveToFirst()) {
+            val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0) return c.getString(idx)
+        }
+    }
+    return uri.lastPathSegment ?: "upload.bin"
+}
+
+/** Opens a sink in the public Downloads collection and hands back a finish() that closes it. */
+private inline fun saveToDownloads(ctx: Context, fileName: String, crossinline use: (java.io.OutputStream, (String?) -> Unit) -> Unit) {
+    if (Build.VERSION.SDK_INT >= 29) {
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+        }
+        val uri = ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        if (uri == null) {
+            use(NullOutputStream()) { "could not create download entry" }
+            return
+        }
+        val out = ctx.contentResolver.openOutputStream(uri)
+        if (out == null) {
+            use(NullOutputStream()) { "could not open output stream" }
+            return
+        }
+        use(out) { err ->
+            try {
+                out.close()
+            } catch (_: java.io.IOException) {
+            }
+            if (err != null) ctx.contentResolver.delete(uri, null, null)
+        }
+    } else {
+        val dir = ctx.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: ctx.filesDir
+        val f = java.io.File(dir, fileName)
+        val out = java.io.FileOutputStream(f)
+        use(out) { err ->
+            try {
+                out.close()
+            } catch (_: java.io.IOException) {
+            }
+            if (err != null) f.delete()
+        }
+    }
+}
+
+private class NullOutputStream : java.io.OutputStream() {
+    override fun write(b: Int) {}
+    override fun write(b: ByteArray, off: Int, len: Int) {}
 }
