@@ -49,6 +49,34 @@ Verify everything with the end-to-end test:
 npm test
 ```
 
+### PC (auto-start with tray)
+
+The tray app owns the daemon: green icon means it is running. It starts at logon.
+
+```powershell
+cd daemon\scripts
+.\install-service.ps1     # compiles the tray app and registers the logon task
+.\uninstall-service.ps1   # to remove it again
+```
+
+The tray menu can open the web UI and copy pairing info (URL, token, cert fingerprint).
+
+### TLS (wss)
+
+By default the daemon speaks plain `ws://`, which is fine inside a Tailscale tailnet.
+To encrypt the last hop yourself (plain LAN, hostile Wi-Fi, port forwarding), generate a
+self-signed certificate and restart the daemon:
+
+```powershell
+cd daemon
+npm run setup-tls
+```
+
+The daemon then serves `wss://` on the same port. On first connect the app shows the
+certificate's SHA-256 fingerprint; compare it with the value printed by `setup-tls` and
+trust it once — it is pinned for that server afterwards. The fingerprint is also written
+to `%USERPROFILE%\.pocketdesk\tls\fingerprint.txt`.
+
 ### Phone-to-PC connectivity
 
 Install [Tailscale](https://tailscale.com) on the PC and the phone. The daemon URL from
@@ -57,27 +85,51 @@ WireGuard. A plain LAN IP works at home too.
 
 ### Android app
 
-1. Open `app/` in Android Studio (it provisions Gradle automatically).
-2. Build and install the app.
-3. Enter the daemon URL and token on the connect screen.
+Build an APK from the command line (a wrapper is included; JDK 17 required):
+
+```powershell
+cd app
+.\gradlew.bat assembleDebug          # debug build for testing
+.\gradlew.bat assembleRelease        # signed release build (needs keystore.properties)
+```
+
+For release signing, create `app\keystore.properties` with `storeFile`, `storePassword`,
+`keyAlias`, `keyPassword` pointing at a keystore you keep private. Without that file the
+release build is simply unsigned.
+
+Then either install the APK on the phone, or open `app/` in Android Studio and press Run.
+On the connect screen tap **+** to add a PC (name, `ws://`/`wss://` URL, token); saved
+PCs are listed and reconnectable.
+
+## App features
+
+- Multi-PC server list with per-server pinned certificates
+- Tool detection and one-tap installs with live npm/pip output
+- Multiple concurrent PTY sessions with scrollback replay after reconnect
+- Extra keys row (Esc, Tab, Ctrl+C/D/Z, arrows, Home/End, PgUp/PgDn, shell punctuation)
+- File browsing on the PC, downloads into the phone's Downloads, uploads via the system picker
+- Notifications when a session ends while the app is in the background
 
 ## Security model
 
 - Every WebSocket client must present the token as its first message; wrong token closes
   the connection with code 4003 before anything else is accepted.
+- With TLS enabled the app refuses to send the token until you confirm the certificate
+  fingerprint; the pin is checked on every later connect.
 - Run the daemon only inside a trusted network (Tailscale tailnet recommended). Do not
   port-forward it to the public internet: the protocol has full shell control of your PC.
 
 ## Protocol (v1)
 
-JSON frames; binary payloads are base64 UTF-8.
+JSON frames; binary payloads are base64.
 
 Client → server: `hello{token}`, `detect`, `install{id}`, `create{harness,cwd}`,
-`attach{id}`, `detach{id}`, `in{id,data}`, `resize{id,cols,rows}`, `kill{id}`, `fs{path}`.
+`attach{id}`, `detach{id}`, `in{id,data}`, `resize{id,cols,rows}`, `kill{id}`, `fs{path}`,
+`fread{path,offset}`, `fwrite{path,data,append}`.
 
 Server → client: `welcome`, `manifests{items}`, `sessions{items}`, `created`,
 `replay{id,data}`, `out{id,data}`, `exit{id,code}`, `progress{id,line}`, `fs{...}`,
-`error{message}`.
+`fchunk{path,offset,size,data,eof}`, `fwritten{path,size}`, `error{message}`.
 
 ## Roadmap
 
