@@ -7,10 +7,13 @@ import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -18,6 +21,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -43,6 +47,29 @@ class TermBridge(
     @JavascriptInterface
     fun resize(cols: Int, rows: Int) = onResize(cols, rows)
 }
+
+private val EXTRA_KEYS = listOf(
+    "Esc" to "\u001b",
+    "Tab" to "\t",
+    "^C" to "\u0003",
+    "^D" to "\u0004",
+    "^Z" to "\u001a",
+    "↑" to "\u001b[A",
+    "↓" to "\u001b[B",
+    "←" to "\u001b[D",
+    "→" to "\u001b[C",
+    "Home" to "\u001b[H",
+    "End" to "\u001b[F",
+    "PgUp" to "\u001b[5~",
+    "PgDn" to "\u001b[6~",
+    "/" to "/",
+    "-" to "-",
+    "_" to "_",
+    "|" to "|",
+)
+
+private fun b64(text: String): String =
+    android.util.Base64.encodeToString(text.toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -93,6 +120,20 @@ fun TerminalScreen(ws: WsClient, sessionId: String, onClose: () -> Unit) {
             )
             IconButton(onClick = { ws.kill(sessionId) }, enabled = ended == null) {
                 Icon(Icons.Filled.Close, contentDescription = "Kill session")
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                items(EXTRA_KEYS, key = { it.first }) { (label, seq) ->
+                    TextButton(
+                        onClick = { ws.sendInput(sessionId, b64(seq)) },
+                        enabled = ended == null,
+                        contentPadding = PaddingValues(horizontal = 8.dp),
+                    ) { Text(label) }
+                }
             }
         }
         Box(Modifier.weight(1f)) {

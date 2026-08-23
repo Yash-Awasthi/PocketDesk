@@ -144,7 +144,7 @@ export function start({ port, token, tls }) {
     const file = resolvePath(p);
     try {
       const st = fs.statSync(file);
-      if (!st.isFile()) return { type: "fchunk", error: "not a file" };
+      if (!st.isFile()) return { type: "fchunk", path: file, error: "not a file" };
       const start = Math.max(0, Number(offset) || 0);
       if (start >= st.size) return { type: "fchunk", path: file, size: st.size, data: "", eof: true };
       const len = Math.min(CHUNK, st.size - start);
@@ -164,7 +164,7 @@ export function start({ port, token, tls }) {
         eof: start + len >= st.size,
       };
     } catch (e) {
-      return { type: "fchunk", error: e.message };
+      return { type: "fchunk", path: file, error: e.message };
     }
   }
 
@@ -173,10 +173,14 @@ export function start({ port, token, tls }) {
     const append = Boolean(msg.append);
     try {
       let base = 0;
-      if (append && fs.existsSync(file)) base = fs.statSync(file).size;
+      if (!append) {
+        fs.writeFileSync(file, Buffer.alloc(0));
+      } else if (fs.existsSync(file)) {
+        base = fs.statSync(file).size;
+      }
       const buf = Buffer.from(String(msg.data || ""), "base64");
-      fs.appendFileSync(file, buf);
-      return { type: "fwritten", path: file, size: append ? base + buf.length : buf.length };
+      if (buf.length > 0) fs.appendFileSync(file, buf);
+      return { type: "fwritten", path: file, size: base + buf.length };
     } catch (e) {
       return { type: "fwritten", path: file, error: e.message };
     }
