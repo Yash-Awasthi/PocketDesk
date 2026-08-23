@@ -173,10 +173,14 @@ export function start({ port, token, tls }) {
     const append = Boolean(msg.append);
     try {
       let base = 0;
-      if (append && fs.existsSync(file)) base = fs.statSync(file).size;
+      if (!append) {
+        fs.writeFileSync(file, Buffer.alloc(0));
+      } else if (fs.existsSync(file)) {
+        base = fs.statSync(file).size;
+      }
       const buf = Buffer.from(String(msg.data || ""), "base64");
-      fs.appendFileSync(file, buf);
-      return { type: "fwritten", path: file, size: append ? base + buf.length : buf.length };
+      if (buf.length > 0) fs.appendFileSync(file, buf);
+      return { type: "fwritten", path: file, size: base + buf.length };
     } catch (e) {
       return { type: "fwritten", path: file, error: e.message };
     }
