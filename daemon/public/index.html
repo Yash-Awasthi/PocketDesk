@@ -153,7 +153,8 @@ function createSession() {
 function browse() { send({ type: "fs", path: document.getElementById("cwd").value }); }
 
 function pickDir(m) {
-  const choice = prompt(`Folders in ${m.path}\n\n` + m.items.join("\n") + `\n\nType a name to enter, blank to pick this folder, 'up' for parent:`);
+  const names = m.items.filter((e) => e.dir).map((e) => e.name);
+  const choice = prompt(`Folders in ${m.path}\n\n` + names.join("\n") + `\n\nType a name to enter, blank to pick this folder, 'up' for parent:`);
   if (choice === null) return;
   if (choice === "") document.getElementById("cwd").value = m.path;
   else if (choice === "up") send({ type: "fs", path: m.parent });

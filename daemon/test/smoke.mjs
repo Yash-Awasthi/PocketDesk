@@ -78,6 +78,17 @@ async function run() {
   const fsMsg = await next((m) => m.type === "fs");
   check("fs listing works", Array.isArray(fsMsg.items));
 
+  const payload = Buffer.from("pocketdesk-file-transfer-check").toString("base64");
+  send({ type: "fwrite", path: path.join(os.tmpdir(), "rh-smoke.bin"), data: payload });
+  const fw = await next((m) => m.type === "fwritten" || m.type === "error");
+  check("fwrite stores file", fw.type === "fwritten" && !fw.error && fw.size === 33);
+  send({ type: "fread", path: fw.path, offset: 0 });
+  const fr = await next((m) => m.type === "fchunk" || m.type === "error");
+  check("fread returns identical bytes", fr.data === payload && fr.eof === true);
+  send({ type: "fread", path: fw.path, offset: 5 });
+  const fr2 = await next((m) => m.type === "fchunk");
+  check("fread honors offset", fr2.offset === 5 && fr2.eof === true);
+
   send({ type: "create", harness: "node", cwd: os.tmpdir() });
   const created = await next((m) => m.type === "created" || m.type === "error");
   check("session created", created.type === "created");

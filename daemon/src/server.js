@@ -99,13 +99,25 @@ export function start({ port, token, tls }) {
       case "fs":
         send(ws, listDir(msg.path));
         break;
+      case "fread":
+        send(ws, readFileChunk(msg.path, msg.offset));
+        break;
+      case "fwrite":
+        send(ws, writeFileChunk(msg));
+        break;
       default:
         send(ws, { type: "error", message: `unknown type: ${msg.type}` });
     }
   }
 
+  const CHUNK = 256 * 1024;
+
+  function resolvePath(p) {
+    return p && String(p).trim() ? path.resolve(String(p).replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir();
+  }
+
   function listDir(p) {
-    const dir = p && p.trim() ? path.resolve(String(p).replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir();
+    const dir = resolvePath(p);
     let entries;
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -113,11 +125,61 @@ export function start({ port, token, tls }) {
       return { type: "fs", error: e.message };
     }
     const items = entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+      .filter((e) => !e.name.startsWith("."))
       .slice(0, 500)
-      .map((e) => e.name)
-      .sort((a, b) => a.localeCompare(b));
+      .map((e) => {
+        let size = null;
+        if (!e.isDirectory()) {
+          try {
+            size = fs.statSync(path.join(dir, e.name)).size;
+          } catch {}
+        }
+        return { name: e.name, dir: e.isDirectory(), size };
+      })
+      .sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name));
     return { type: "fs", path: dir, parent: path.dirname(dir), items };
+  }
+
+  function readFileChunk(p, offset) {
+    const file = resolvePath(p);
+    try {
+      const st = fs.statSync(file);
+      if (!st.isFile()) return { type: "fchunk", error: "not a file" };
+      const start = Math.max(0, Number(offset) || 0);
+      if (start >= st.size) return { type: "fchunk", path: file, size: st.size, data: "", eof: true };
+      const len = Math.min(CHUNK, st.size - start);
+      const buf = Buffer.alloc(len);
+      const fd = fs.openSync(file, "r");
+      try {
+        fs.readSync(fd, buf, 0, len, start);
+      } finally {
+        fs.closeSync(fd);
+      }
+      return {
+        type: "fchunk",
+        path: file,
+        offset: start,
+        size: st.size,
+        data: buf.toString("base64"),
+        eof: start + len >= st.size,
+      };
+    } catch (e) {
+      return { type: "fchunk", error: e.message };
+    }
+  }
+
+  function writeFileChunk(msg) {
+    const file = resolvePath(msg.path);
+    const append = Boolean(msg.append);
+    try {
+      let base = 0;
+      if (append && fs.existsSync(file)) base = fs.statSync(file).size;
+      const buf = Buffer.from(String(msg.data || ""), "base64");
+      fs.appendFileSync(file, buf);
+      return { type: "fwritten", path: file, size: append ? base + buf.length : buf.length };
+    } catch (e) {
+      return { type: "fwritten", path: file, error: e.message };
+    }
   }
 
   function send(ws, obj) {
