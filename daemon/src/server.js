@@ -1,7 +1,9 @@
 import fs from "node:fs";
 import http from "node:http";
+import https from "node:https";
 import path from "node:path";
 import os from "node:os";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import * as registry from "./registry.js";
@@ -9,18 +11,23 @@ import * as sessions from "./sessions.js";
 
 const HELLO_TIMEOUT = 10_000;
 
-export function start({ port, token }) {
+export function start({ port, token, tls }) {
   const pagePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public", "index.html");
   const page = fs.readFileSync(pagePath);
 
-  const server = http.createServer((req, res) => {
+  const requestHandler = (req, res) => {
     if (req.method === "GET") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(page);
       return;
     }
     res.writeHead(405).end();
-  });
+  };
+
+  const useTls = Boolean(tls?.enabled && fs.existsSync(tls.cert) && fs.existsSync(tls.key));
+  const server = useTls
+    ? https.createServer({ cert: fs.readFileSync(tls.cert), key: fs.readFileSync(tls.key) }, requestHandler)
+    : http.createServer(requestHandler);
 
   const wss = new WebSocketServer({ server, path: "/ws" });
 
@@ -118,11 +125,16 @@ export function start({ port, token }) {
   }
 
   server.listen(port, async () => {
+    const scheme = useTls ? "wss" : "ws";
     console.log("");
     console.log("  PocketDesk daemon");
-    console.log(`  local     http://localhost:${port}`);
-    console.log(`  websocket ws://<this-pc>:${port}/ws`);
+    console.log(`  local     http${useTls ? "s" : ""}://localhost:${port}`);
+    console.log(`  websocket ${scheme}://<this-pc>:${port}/ws`);
     console.log(`  token     ${token}`);
+    if (useTls) {
+      const fp = new crypto.X509Certificate(fs.readFileSync(tls.cert)).fingerprint256;
+      console.log(`  tls       enabled, cert fingerprint ${fp}`);
+    }
     console.log("  config    %USERPROFILE%\\.pocketdesk\\config.json");
     console.log("");
     await registry.scanAll(broadcast);
