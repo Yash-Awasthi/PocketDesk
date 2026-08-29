@@ -102,7 +102,8 @@ export function start({ port, token, tls }) {
       plugins.callHook("onMessage", ws, msg).then(({ blocked }) => {
         if (blocked) return;
         if (!ws._authed) {
-          if (msg.type === "hello" && msg.token === token) {
+          const tokenOk = msg.type === "hello" && typeof msg.token === "string" && msg.token.length === token.length && crypto.timingSafeEqual(Buffer.from(msg.token), Buffer.from(token));
+          if (tokenOk) {
             ws._authed = true;
             clearTimeout(timer);
             send(ws, { type: "welcome", version: 1, sessions: allSessions(), manifests: registry.list() });
@@ -337,7 +338,7 @@ export function start({ port, token, tls }) {
     console.log("  PocketDesk daemon");
     console.log(`  local     http${useTls ? "s" : ""}://localhost:${port}`);
     console.log(`  websocket ${scheme}://<this-pc>:${port}/ws`);
-    console.log(`  token     ${token}`);
+    console.log(`  token     ${token.slice(0, 8)}...${token.slice(-4)}`);
     if (useTls) {
       console.log(`  tls       enabled, cert fingerprint ${fp}`);
       console.log(`  pairing   http${useTls ? "s" : ""}://localhost:${port}/pair  (scan the QR from the app)`);
