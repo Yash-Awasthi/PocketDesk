@@ -9,7 +9,8 @@ import { WebSocketServer } from "ws";
 import * as registry from "./registry.js";
 import * as sessions from "./sessions.js";
 import * as chat from "./chat.js";
-import { createPluginManager } from "./plugins.js";  const HELLO_TIMEOUT = 10_000;
+import { createPluginManager } from "./plugins.js";
+import * as proposals from "./proposals.js";  const HELLO_TIMEOUT = 10_000;
   const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
 
   function allSessions() {
@@ -192,6 +193,40 @@ export function start({ port, token, tls }) {
         }
         broadcast({ type: "sessions", items: allSessions() });
         break;
+      case "propose": {
+        const p = proposals.create({
+          type: msg.proposalType || "command_execute",
+          summary: msg.summary || "Unnamed action",
+          detail: msg.detail || {},
+          sessionId: msg.sessionId || "unknown",
+        });
+        plugins.callHook("onProposal", ws, p);
+        send(ws, { type: "proposal_created", proposal: { id: p.id, type: p.type, summary: p.summary, status: p.status } });
+        break;
+      }
+      case "approve": {
+        const p = proposals.approve(msg.id);
+        if (p) {
+          plugins.callHook("onProposalApproved", ws, p);
+          send(ws, { type: "proposal_approved", proposal: { id: p.id, status: p.status } });
+        } else {
+          send(ws, { type: "error", message: `proposal ${msg.id} not found or already decided` });
+        }
+        break;
+      }
+      case "reject": {
+        const p = proposals.reject(msg.id);
+        if (p) {
+          plugins.callHook("onProposalRejected", ws, p);
+          send(ws, { type: "proposal_rejected", proposal: { id: p.id, status: p.status } });
+        } else {
+          send(ws, { type: "error", message: `proposal ${msg.id} not found or already decided` });
+        }
+        break;
+      }
+      case "proposal_list":
+        send(ws, { type: "proposal_list", items: proposals.listPending() });
+        break;
       case "fs":
         send(ws, listDir(msg.path));
         break;
@@ -287,7 +322,7 @@ export function start({ port, token, tls }) {
   }
 
   // ─── Plugin system ───────────────────────────────────────────────────────
-  const pluginCtx = { sessions, chat, registry, broadcast: null, config: { port, token, dataDir: process.env.POCKETDESK_DATA || ".pocketdesk" } };
+  const pluginCtx = { sessions, chat, registry, proposals, broadcast: null, config: { port, token, dataDir: process.env.POCKETDESK_DATA || ".pocketdesk" } };
   const plugins = createPluginManager(pluginCtx);
   pluginCtx.broadcast = broadcast; // wire after broadcast is defined
 
@@ -309,6 +344,7 @@ export function start({ port, token, tls }) {
     }
     console.log("  config    %USERPROFILE%\\.pocketdesk\\config.json");
     console.log("");
+    proposals.init(broadcast);
     await registry.scanAll(broadcast);
     console.log("  registry scanned");
     // Load plugins

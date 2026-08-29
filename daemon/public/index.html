@@ -61,6 +61,23 @@
   @media (prefers-reduced-motion: reduce) {
     .streaming-indicator { animation: none; opacity: 1; }
   }
+  /* Proposals */
+  .proposal-panel { display: none; background: #161b22; border-top: 1px solid #30363d; max-height: 240px; overflow-y: auto; }
+  .proposal-panel.has-items { display: block; }
+  .proposal-card { border: 1px solid #d29922; border-radius: 8px; margin: 8px 12px; padding: 10px 12px; background: #1c1e13; }
+  .proposal-card .proposal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .proposal-card .proposal-type { font-size: 11px; font-weight: 600; text-transform: uppercase; color: #d29922; letter-spacing: 0.5px; }
+  .proposal-card .proposal-ttl { font-size: 10px; color: #8b949e; font-family: monospace; }
+  .proposal-card .proposal-summary { font-size: 13px; color: #c9d1d9; margin-bottom: 8px; }
+  .proposal-card .proposal-detail { font-size: 11px; color: #8b949e; font-family: monospace; background: #0d1117; padding: 6px 8px; border-radius: 4px; margin-bottom: 8px; max-height: 60px; overflow: hidden; }
+  .proposal-card .proposal-actions { display: flex; gap: 6px; }
+  .proposal-card .btn-approve { background: #238636; border: 1px solid #238636; color: #fff; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  .proposal-card .btn-approve:hover { background: #2ea043; }
+  .proposal-card .btn-reject { background: #da3633; border: 1px solid #da3633; color: #fff; padding: 4px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; }
+  .proposal-card .btn-reject:hover { background: #f85149; }
+  .proposal-card.approved { border-color: #238636; opacity: 0.6; }
+  .proposal-card.rejected { border-color: #da3633; opacity: 0.6; }
+  .proposal-card.expired { border-color: #484f58; opacity: 0.4; }
 </style>
 </head>
 <body>
@@ -113,6 +130,10 @@
         </div>
       </div>
     </div>
+    <div class="proposal-panel" id="proposalPanel">
+      <div style="padding: 6px 12px; font-size: 11px; color: #d29922; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">⏳ Pending Approvals</div>
+      <div id="proposalList"></div>
+    </div>
   </div>
 </div>
 
@@ -143,8 +164,8 @@ const tools = [], sessions = [], chats = [];
 let activeChatId = null;
 const chatTranscripts = {};
 const chatStates = {};
-// Track which DOM element each chat message index maps to, for incremental updates
-const chatDomNodes = {}; // chatId -> [HTMLElement]
+const chatDomNodes = {};
+const pendingProposals = []; // {id, type, summary, detail, created, ttlRemaining}
 
 // ── Debounce helper ──
 function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setTimeout(() => fn.apply(this, arguments), ms); }; }
@@ -228,6 +249,22 @@ function handle(m) {
       chatStates[m.id] = m.state;
       if (m.id === activeChatId) updateChatUI();
       updateChatCard(m.id);
+      break;
+    case "proposal_created":
+      pendingProposals.push(m.proposal);
+      renderProposals();
+      break;
+    case "proposal_approved":
+    case "proposal_rejected":
+    case "proposal_expired":
+      const idx = pendingProposals.findIndex(p => p.id === m.proposal.id);
+      if (idx >= 0) pendingProposals.splice(idx, 1);
+      renderProposals();
+      break;
+    case "proposal_list":
+      pendingProposals.length = 0;
+      (m.items || []).forEach(p => pendingProposals.push(p));
+      renderProposals();
       break;
     case "error": console.error("ERROR:", m.message); break;
   }
@@ -454,6 +491,42 @@ function pickDir(m) {
 function b64ToBytes(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
 function bytesToB64(u8) { let s = ""; for (const b of u8) s += String.fromCharCode(b); return btoa(s); }
 function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+// ── Proposals ──
+function renderProposals() {
+  const panel = document.getElementById("proposalPanel");
+  const list = document.getElementById("proposalList");
+  panel.classList.toggle("has-items", pendingProposals.length > 0);
+  list.innerHTML = "";
+  for (const p of pendingProposals) {
+    const card = document.createElement("div");
+    card.className = "proposal-card";
+    const ttl = Math.max(0, Math.round((p.ttlRemaining || 300000) / 1000));
+    const mins = Math.floor(ttl / 60);
+    const secs = ttl % 60;
+    card.innerHTML = `
+      <div class="proposal-header">
+        <span class="proposal-type">${esc(p.type)}</span>
+        <span class="proposal-ttl">⏱ ${mins}:${String(secs).padStart(2, "0")}</span>
+      </div>
+      <div class="proposal-summary">${esc(p.summary)}</div>
+      ${p.detail ? `<div class="proposal-detail">${esc(JSON.stringify(p.detail).slice(0, 200))}</div>` : ""}
+      <div class="proposal-actions">
+        <button class="btn-approve" onclick="approveProposal('${esc(p.id)}')">✓ Approve</button>
+        <button class="btn-reject" onclick="rejectProposal('${esc(p.id)}')">✕ Reject</button>
+      </div>
+    `;
+    list.appendChild(card);
+  }
+}
+
+function approveProposal(id) {
+  send({ type: "approve", id });
+}
+
+function rejectProposal(id) {
+  send({ type: "reject", id });
+}
 </script>
 </body>
 </html>
