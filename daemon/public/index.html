@@ -5,58 +5,142 @@
 <title>PocketDesk</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
 <style>
-  body { font-family: Consolas, monospace; background: #14161a; color: #d7dae0; margin: 0; padding: 12px; }
-  h1 { font-size: 16px; margin: 0 0 8px; }
-  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
-  input, select, button { font-family: inherit; font-size: 13px; background: #1e222a; color: #d7dae0; border: 1px solid #3a3f4b; border-radius: 4px; padding: 5px 8px; }
-  button { cursor: pointer; } button:hover { background: #2a2f3a; }
-  #log { white-space: pre-wrap; font-size: 11px; color: #9aa0aa; max-height: 140px; overflow-y: auto; border: 1px solid #2a2f3a; padding: 6px; margin-top: 6px; }
-  .card { border: 1px solid #2a2f3a; border-radius: 6px; padding: 8px; margin-bottom: 6px; }
-  .ok { color: #7ec699; } .bad { color: #e0706f; }
-  #termbox { display: none; margin-top: 10px; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; margin: 0; padding: 0; }
+  .topbar { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
+  .topbar h1 { font-size: 16px; margin: 0; color: #f0f6fc; font-weight: 600; }
+  .topbar .logo { font-size: 20px; }
+  #status { font-size: 12px; padding: 3px 8px; border-radius: 10px; font-weight: 500; }
+  .ok { background: #1b4332; color: #7ec699; } .bad { background: #3d1f1f; color: #e0706f; }
+  .connect-bar { background: #161b22; border-bottom: 1px solid #30363d; padding: 8px 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .connect-bar input { font-size: 13px; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 6px 10px; }
+  .btn { font-size: 13px; background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 6px 12px; cursor: pointer; font-family: inherit; }
+  .btn:hover { background: #30363d; } .btn.primary { background: #238636; border-color: #238636; color: #fff; }
+  .btn.primary:hover { background: #2ea043; } .btn.danger { background: #da3633; border-color: #da3633; color: #fff; }
+  .layout { display: flex; height: calc(100vh - 90px); }
+  .sidebar { width: 280px; min-width: 280px; background: #161b22; border-right: 1px solid #30363d; overflow-y: auto; padding: 12px; }
+  .sidebar h3 { font-size: 12px; text-transform: uppercase; color: #8b949e; margin: 12px 0 6px; letter-spacing: 0.5px; }
+  .sidebar h3:first-child { margin-top: 0; }
+  .tool-card, .session-card { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px; margin-bottom: 6px; cursor: pointer; transition: border-color 0.15s; }
+  .tool-card:hover, .session-card:hover { border-color: #58a6ff; }
+  .tool-card .name { font-weight: 600; font-size: 13px; } .tool-card .meta { font-size: 11px; color: #8b949e; }
+  .session-card .id { font-family: monospace; font-size: 12px; color: #58a6ff; }
+  .session-card .info { font-size: 11px; color: #8b949e; margin-top: 2px; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .tabs { display: flex; background: #161b22; border-bottom: 1px solid #30363d; }
+  .tab { padding: 8px 16px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; color: #8b949e; }
+  .tab:hover { color: #c9d1d9; } .tab.active { color: #f0f6fc; border-bottom-color: #f78166; }
+  .tab-content { flex: 1; overflow: hidden; position: relative; }
+  .tab-pane { display: none; height: 100%; } .tab-pane.active { display: flex; flex-direction: column; }
+  #terminal { height: 100%; } #terminal .xterm { padding: 8px; }
+  /* Chat styles */
+  .chat-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+  .chat-msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+  .chat-msg.user { align-self: flex-end; background: #1f6feb; color: #fff; border-bottom-right-radius: 4px; }
+  .chat-msg.assistant { align-self: flex-start; background: #21262d; color: #c9d1d9; border-bottom-left-radius: 4px; }
+  .chat-msg.tool { align-self: flex-start; background: #1b2332; color: #79c0ff; font-size: 12px; border-radius: 8px; font-family: monospace; }
+  .chat-msg.system { align-self: center; background: none; color: #8b949e; font-size: 12px; padding: 4px 8px; }
+  .chat-msg .label { font-size: 10px; color: #8b949e; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.3px; }
+  .chat-input-bar { display: flex; gap: 8px; padding: 12px 16px; background: #161b22; border-top: 1px solid #30363d; }
+  .chat-input-bar input { flex: 1; font-size: 14px; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 8px; padding: 10px 14px; font-family: inherit; outline: none; }
+  .chat-input-bar input:focus { border-color: #58a6ff; }
+  .chat-input-bar input:disabled { opacity: 0.5; }
+  .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: #484f58; font-size: 14px; flex-direction: column; gap: 8px; }
+  .empty-state .icon { font-size: 32px; }
+  /* New chat dialog */
+  .dialog-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
+  .dialog-overlay.open { display: flex; }
+  .dialog { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; width: 360px; }
+  .dialog h2 { margin: 0 0 12px; font-size: 16px; } .dialog label { font-size: 12px; color: #8b949e; display: block; margin-bottom: 4px; }
+  .dialog input, .dialog select { width: 100%; font-size: 13px; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; font-family: inherit; }
+  .dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+  .streaming-indicator { display: inline-block; width: 6px; height: 14px; background: #58a6ff; animation: blink 0.8s infinite; margin-left: 2px; vertical-align: middle; }
+  @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
 </style>
 </head>
 <body>
-<h1>PocketDesk</h1>
 
-<div class="row">
+<div class="topbar">
+  <span class="logo">🔧</span>
+  <h1>PocketDesk</h1>
   <span id="status" class="bad">disconnected</span>
 </div>
-<div class="row">
-  <input id="host" size="22" placeholder="ws://localhost:8765/ws" />
-  <input id="token" size="30" placeholder="token" />
-  <button onclick="connect()">Connect</button>
+
+<div class="connect-bar">
+  <input id="host" size="28" placeholder="ws://localhost:8765/ws" />
+  <input id="token" size="32" placeholder="token" />
+  <button class="btn primary" onclick="connect()">Connect</button>
 </div>
 
-<div id="main" style="display:none">
-  <div class="row"><b>Tools</b> <button onclick="send({type:'detect'})">Rescan</button></div>
-  <div id="tools"></div>
-
-  <div class="row"><b>New session</b></div>
-  <div class="row">
-    <select id="tool"></select>
-    <input id="cwd" size="34" placeholder="project folder (empty = home)" />
-    <button onclick="browse()">Browse</button>
-    <button onclick="createSession()">Start</button>
+<div class="layout">
+  <div class="sidebar" id="sidebar" style="display:none">
+    <h3>🔧 Tools</h3>
+    <div id="tools"></div>
+    <h3>📋 Sessions</h3>
+    <div id="sessions"></div>
+    <h3>💬 Chats</h3>
+    <button class="btn" style="width:100%;margin-bottom:6px" onclick="openNewChatDialog()">+ New Chat</button>
+    <div id="chats"></div>
   </div>
 
-  <div class="row"><b>Sessions</b></div>
-  <div id="sessions"></div>
+  <div class="main">
+    <div class="tabs" id="tabs" style="display:none">
+      <div class="tab active" data-tab="terminal" onclick="switchTab('terminal')">🖥️ Terminal</div>
+      <div class="tab" data-tab="chat" onclick="switchTab('chat')">💬 Chat</div>
+    </div>
+    <div class="tab-content">
+      <div class="tab-pane active" id="pane-terminal">
+        <div id="termbox" style="height:100%"><div id="term" style="height:100%"></div></div>
+      </div>
+      <div class="tab-pane" id="pane-chat">
+        <div class="chat-container">
+          <div class="chat-messages" id="chatMessages">
+            <div class="empty-state" id="chatEmpty">
+              <div class="icon">💬</div>
+              <div>Select a chat or start a new one</div>
+            </div>
+          </div>
+          <div class="chat-input-bar">
+            <input id="chatInput" placeholder="Type a message..." disabled onkeydown="if(event.key==='Enter')sendChat()" />
+            <button class="btn primary" onclick="sendChat()" id="chatSendBtn" disabled>Send</button>
+            <button class="btn danger" onclick="cancelChat()" id="chatCancelBtn" style="display:none">Stop</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-  <div id="termbox"><div id="term"></div></div>
-  <div id="log"></div>
+<!-- New Chat Dialog -->
+<div class="dialog-overlay" id="newChatDialog">
+  <div class="dialog">
+    <h2>💬 New Chat</h2>
+    <label>Tool</label>
+    <select id="chatTool"></select>
+    <label>Project folder (optional)</label>
+    <input id="chatCwd" placeholder="blank = home directory" />
+    <label>First message (optional)</label>
+    <input id="chatPrompt" placeholder="e.g. Fix the build errors" />
+    <div class="actions">
+      <button class="btn" onclick="closeNewChatDialog()">Cancel</button>
+      <button class="btn primary" onclick="createChat()">Start</button>
+    </div>
+  </div>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
 <script>
 let ws = null;
-let term = null, fit = null, activeId = null;
-const tools = [];
-const live = [];
+let term = null, fitAddon = null, activeTermId = null;
+const tools = [], sessions = [], chats = [];
+let activeChatId = null;
+const chatTranscripts = {}; // id -> [{role, text, name, detail}]
+const chatStates = {};      // id -> "idle"|"running"|"error"
 
+// ── WebSocket ──
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
-function log(line) { const el = document.getElementById("log"); el.textContent += line + "\n"; el.scrollTop = el.scrollHeight; }
 
 function connect() {
   if (ws) ws.close();
@@ -72,115 +156,245 @@ function setStatus(up) {
   const s = document.getElementById("status");
   s.textContent = up ? "connected" : "disconnected";
   s.className = up ? "ok" : "bad";
-  document.getElementById("main").style.display = up ? "" : "none";
+  document.getElementById("sidebar").style.display = up ? "" : "none";
+  document.getElementById("tabs").style.display = up ? "" : "none";
 }
 
+// ── Message Router ──
 function handle(m) {
   switch (m.type) {
-    case "welcome": setStatus(true); renderTools(m.manifests); renderSessions(m.sessions); break;
-    case "manifests": renderTools(m.items); break;
-    case "sessions": renderSessions(m.items); break;
-    case "created": openTerminal(m.id); break;
-    case "replay": if (m.id === activeId) term.write(new Uint8Array(base64ToBytes(m.data))); break;
-    case "out": if (m.id === activeId) term.write(new Uint8Array(base64ToBytes(m.data))); break;
+    case "welcome":
+      setStatus(true);
+      renderTools(m.manifests || []);
+      renderSessions(m.sessions || []);
+      renderChats((m.sessions || []).filter(s => s.kind === "chat"));
+      break;
+    case "manifests": renderTools(m.items || []); break;
+    case "sessions":
+      renderSessions((m.items || []).filter(s => s.kind !== "chat"));
+      renderChats((m.items || []).filter(s => s.kind === "chat"));
+      break;
+    case "created":
+      if (m.kind === "chat") { openChat(m.id); renderChats((sessions.length ? getChatSessions() : [])); }
+      else openTerminal(m.id);
+      break;
+    // Terminal
+    case "replay": case "out":
+      if (m.id === activeTermId) term.write(new Uint8Array(b64ToBytes(m.data)));
+      break;
     case "exit":
-      for (let i = live.length - 1; i >= 0; i--) if (live[i].id === m.id) live.splice(i, 1);
-      renderSessions(live);
-      if (m.id === activeId) log(`session ${m.id} exited (${m.code})`);
+      removeSession(m.id);
+      if (m.id === activeTermId) term.write(`\r\n\x1b[31m[exited ${m.code}]\x1b[0m\r\n`);
       break;
-    case "progress": log(`[${m.id}] ${m.line}`); break;
-    case "fs":
-      if (m.error) return log("fs error: " + m.error);
-      pickDir(m);
+    case "progress": break;
+    case "fs": if (m.error) break; pickDir(m); break;
+    // Chat
+    case "chatreplay":
+      chatTranscripts[m.id] = (m.items || []).map(i => ({role: i.role, text: i.text, name: i.name, detail: i.detail}));
+      if (m.id === activeChatId) renderChatMessages();
       break;
-    case "error": log("ERROR: " + m.message); break;
+    case "chatuser":
+      appendChat(m.id, {role: "user", text: m.text});
+      break;
+    case "chatdelta":
+      appendChatDelta(m.id, m.text);
+      break;
+    case "chartool":
+      appendChat(m.id, {role: "tool", name: m.name, detail: m.detail});
+      break;
+    case "chattoolresult":
+      appendChat(m.id, {role: "toolresult", text: m.text});
+      break;
+    case "chatstate":
+      chatStates[m.id] = m.state;
+      if (m.id === activeChatId) updateChatUI();
+      updateChatCard(m.id);
+      break;
+    case "error": console.error("ERROR:", m.message); break;
   }
 }
 
+// ── Tabs ──
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + tab));
+  if (tab === 'terminal' && fitAddon) setTimeout(() => fitAddon.fit(), 50);
+}
+
+// ── Tools ──
 function renderTools(items) {
-  tools.length = 0;
-  for (const it of items) tools.push(it);
-  const el = document.getElementById("tools");
-  el.innerHTML = "";
-  const sel = document.getElementById("tool");
-  sel.innerHTML = "";
+  tools.length = 0; items.forEach(t => tools.push(t));
+  const el = document.getElementById("tools"); el.innerHTML = "";
+  const sel = document.getElementById("chatTool"); sel.innerHTML = "";
   for (const it of items) {
     const installed = it.installed === true;
-    const d = document.createElement("div");
-    d.className = "card";
-    d.innerHTML = `<b>${it.manifest.name}</b> <code>${it.manifest.bin}</code> ` +
-      (installed ? `<span class="ok">installed ${it.version || ""}</span>` : it.installing ? `<span>installing...</span>` : `<span class="bad">not installed</span>`);
+    const d = document.createElement("div"); d.className = "tool-card";
+    d.innerHTML = `<div class="name">${it.manifest.name}</div><div class="meta">${it.manifest.bin} · ${installed ? "✅ installed" : it.installing ? "⏳ installing..." : "❌ not installed"}</div>`;
     if (!installed && !it.installing) {
-      const b = document.createElement("button");
-      b.textContent = "Install";
-      b.onclick = () => send({ type: "install", id: it.manifest.id });
+      const b = document.createElement("button"); b.className = "btn"; b.textContent = "Install"; b.style.marginTop = "4px";
+      b.onclick = (e) => { e.stopPropagation(); send({ type: "install", id: it.manifest.id }); };
       d.appendChild(b);
     }
     el.appendChild(d);
     if (installed) {
-      const o = document.createElement("option");
-      o.value = it.manifest.id;
-      o.textContent = it.manifest.name;
+      const o = document.createElement("option"); o.value = it.manifest.id; o.textContent = it.manifest.name;
       sel.appendChild(o);
     }
   }
 }
 
+// ── Sessions ──
 function renderSessions(items) {
-  live.length = 0;
-  for (const s of items) live.push(s);
-  const el = document.getElementById("sessions");
-  el.innerHTML = "";
-  for (const s of live) {
-    const d = document.createElement("div");
-    d.className = "card";
-    d.innerHTML = `<code>${s.id}</code> ${s.harnessId} @ ${s.cwd} `;
-    const at = document.createElement("button");
-    at.textContent = "Attach";
-    at.onclick = () => openTerminal(s.id);
-    const kill = document.createElement("button");
-    kill.textContent = "Kill";
-    kill.onclick = () => send({ type: "kill", id: s.id });
-    d.appendChild(at); d.appendChild(kill);
+  sessions.length = 0; items.forEach(s => sessions.push(s));
+  const el = document.getElementById("sessions"); el.innerHTML = "";
+  for (const s of items) {
+    const d = document.createElement("div"); d.className = "session-card";
+    d.innerHTML = `<div class="id">${s.id}</div><div class="info">${s.harnessId} · ${s.cwd || "~"}</div>`;
+    const row = document.createElement("div"); row.style.marginTop = "4px"; row.style.display = "flex"; row.style.gap = "4px";
+    const at = document.createElement("button"); at.className = "btn"; at.textContent = "Attach"; at.onclick = (e) => { e.stopPropagation(); openTerminal(s.id); };
+    const kl = document.createElement("button"); kl.className = "btn danger"; kl.textContent = "Kill"; kl.onclick = (e) => { e.stopPropagation(); send({ type: "kill", id: s.id }); };
+    row.appendChild(at); row.appendChild(kl); d.appendChild(row);
+    d.onclick = () => openTerminal(s.id);
     el.appendChild(d);
   }
 }
 
-function createSession() {
-  send({ type: "create", harness: document.getElementById("tool").value, cwd: document.getElementById("cwd").value });
+function getChatSessions() { return sessions.filter(s => s.kind === "chat"); }
+function removeSession(id) {
+  for (let i = sessions.length - 1; i >= 0; i--) { if (sessions[i].id === id) sessions.splice(i, 1); }
+  renderSessions(sessions);
 }
 
-function browse() { send({ type: "fs", path: document.getElementById("cwd").value }); }
+// ── Terminal ──
+function openTerminal(id) {
+  activeTermId = id; switchTab("terminal");
+  document.getElementById("termbox").style.display = "";
+  if (!term) {
+    term = new Terminal({ convertEol: false, fontSize: 14, fontFamily: "'Cascadia Code', 'Fira Code', monospace", theme: { background: "#0d1117", foreground: "#c9d1d9" } });
+    fitAddon = new FitAddon.FitAddon(); term.loadAddon(fitAddon);
+    term.open(document.getElementById("term"));
+    term.onData((d) => send({ type: "in", id: activeTermId, data: bytesToB64(new TextEncoder().encode(d)) }));
+    term.onResize(({ cols, rows }) => send({ type: "resize", id: activeTermId, cols, rows }));
+  }
+  term.reset(); fitAddon.fit();
+  send({ type: "attach", id });
+  setTimeout(() => fitAddon.fit(), 100);
+}
+window.addEventListener("resize", () => { if (fitAddon) fitAddon.fit(); });
 
+// ── Chats ──
+function renderChats(items) {
+  const el = document.getElementById("chats"); el.innerHTML = "";
+  for (const c of items) {
+    const d = document.createElement("div"); d.className = "session-card"; d.id = "chat-card-" + c.id;
+    const state = chatStates[c.id] || c.state || "idle";
+    const preview = c.preview || (chatTranscripts[c.id] || []).filter(i => i.role === "assistant").pop()?.text?.slice(0, 60) || "";
+    d.innerHTML = `<div class="id">💬 ${c.id}</div><div class="info">${c.harnessId} · ${state === "running" ? "⏳" : state === "error" ? "❌" : "✅"} ${preview}</div>`;
+    d.onclick = () => openChat(c.id);
+    el.appendChild(d);
+  }
+}
+
+function updateChatCard(id) {
+  const card = document.getElementById("chat-card-" + id);
+  if (card) renderChats(getChatSessions());
+}
+
+function openChat(id) {
+  activeChatId = id; switchTab("chat");
+  if (!chatTranscripts[id]) chatTranscripts[id] = [];
+  send({ type: "attach", id });
+  renderChatMessages();
+  updateChatUI();
+}
+
+function renderChatMessages() {
+  const el = document.getElementById("chatMessages");
+  const empty = document.getElementById("chatEmpty");
+  const items = chatTranscripts[activeChatId] || [];
+  if (!items.length) { empty.style.display = ""; el.querySelectorAll('.chat-msg').forEach(m => m.remove()); return; }
+  empty.style.display = "none";
+  el.innerHTML = "";
+  for (const item of items) {
+    const d = document.createElement("div");
+    if (item.role === "user") { d.className = "chat-msg user"; d.textContent = item.text; }
+    else if (item.role === "assistant") {
+      d.className = "chat-msg assistant";
+      const running = chatStates[activeChatId] === "running" && item === items[items.length - 1];
+      d.textContent = item.text + (running ? "" : "");
+      if (running) { const ind = document.createElement("span"); ind.className = "streaming-indicator"; d.appendChild(ind); }
+    }
+    else if (item.role === "tool") { d.className = "chat-msg tool"; d.innerHTML = `<div class="label">🔧 ${item.name}</div>${item.detail}`; }
+    else if (item.role === "toolresult") { d.className = "chat-msg tool"; d.innerHTML = `<div class="label">📋 result</div>${(item.text || "").slice(0, 300)}`; }
+    else if (item.role === "system") { d.className = "chat-msg system"; d.textContent = item.text; }
+    el.appendChild(d);
+  }
+  el.scrollTop = el.scrollHeight;
+}
+
+function appendChat(id, item) {
+  if (!chatTranscripts[id]) chatTranscripts[id] = [];
+  chatTranscripts[id].push(item);
+  if (id === activeChatId) renderChatMessages();
+}
+
+function appendChatDelta(id, text) {
+  if (!chatTranscripts[id]) chatTranscripts[id] = [];
+  const items = chatTranscripts[id];
+  const last = items[items.length - 1];
+  if (last && last.role === "assistant") { last.text += text; }
+  else { items.push({ role: "assistant", text }); }
+  if (id === activeChatId) renderChatMessages();
+}
+
+function updateChatUI() {
+  const running = chatStates[activeChatId] === "running";
+  document.getElementById("chatInput").disabled = running;
+  document.getElementById("chatSendBtn").disabled = running;
+  document.getElementById("chatCancelBtn").style.display = running ? "" : "none";
+}
+
+function sendChat() {
+  const input = document.getElementById("chatInput");
+  const text = input.value.trim();
+  if (!text || !activeChatId) return;
+  send({ type: "chatmsg", id: activeChatId, text });
+  input.value = "";
+}
+
+function cancelChat() {
+  if (activeChatId) send({ type: "chatcancel", id: activeChatId });
+}
+
+// ── New Chat Dialog ──
+function openNewChatDialog() {
+  document.getElementById("newChatDialog").classList.add("open");
+  document.getElementById("chatCwd").value = "";
+  document.getElementById("chatPrompt").value = "";
+}
+function closeNewChatDialog() { document.getElementById("newChatDialog").classList.remove("open"); }
+
+function createChat() {
+  const tool = document.getElementById("chatTool").value;
+  const cwd = document.getElementById("chatCwd").value.trim();
+  const prompt = document.getElementById("chatPrompt").value.trim();
+  if (!tool) return;
+  send({ type: "chatsession", harness: tool, cwd, prompt: prompt || undefined });
+  closeNewChatDialog();
+}
+
+// ── Dir Picker ──
 function pickDir(m) {
-  const names = m.items.filter((e) => e.dir).map((e) => e.name);
+  const names = m.items.filter(e => e.dir).map(e => e.name);
   const choice = prompt(`Folders in ${m.path}\n\n` + names.join("\n") + `\n\nType a name to enter, blank to pick this folder, 'up' for parent:`);
   if (choice === null) return;
-  if (choice === "") document.getElementById("cwd").value = m.path;
+  if (choice === "") document.getElementById("cwd") && (document.getElementById("cwd").value = m.path);
   else if (choice === "up") send({ type: "fs", path: m.parent });
   else send({ type: "fs", path: m.path + "\\" + choice });
 }
 
-function openTerminal(id) {
-  activeId = id;
-  document.getElementById("termbox").style.display = "";
-  if (!term) {
-    term = new Terminal({ convertEol: false, fontSize: 14, theme: { background: "#14161a" } });
-    fit = new FitAddon.FitAddon();
-    term.loadAddon(fit);
-    term.open(document.getElementById("term"));
-    term.onData((d) => send({ type: "in", id: activeId, data: bytesToB64(new TextEncoder().encode(d)) }));
-    term.onResize(({ cols, rows }) => send({ type: "resize", id: activeId, cols, rows }));
-  }
-  term.reset();
-  fit.fit();
-  send({ type: "attach", id });
-  setTimeout(() => fit.fit(), 50);
-}
-
-window.addEventListener("resize", () => { if (fit) { fit.fit(); } });
-
-function base64ToBytes(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+// ── Helpers ──
+function b64ToBytes(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
 function bytesToB64(u8) { let s = ""; for (const b of u8) s += String.fromCharCode(b); return btoa(s); }
 </script>
 </body>

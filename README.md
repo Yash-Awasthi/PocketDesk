@@ -1,37 +1,67 @@
-# PocketDesk
+# 🔧 PocketDesk
 
-Run AI coding agents (OpenCode, Claude Code, Codex, Gemini CLI, Qwen Code, Aider, or any
-CLI) on your Windows PC and drive them from an Android app, from anywhere. The phone
-connects over a WebSocket to a small daemon that spawns each CLI in a real pseudo-terminal
-(ConPTY) and streams it live.
+> **Run AI coding agents on your PC, control them from your phone.**
 
-## Components
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node](https://img.shields.io/badge/Node-≥20-green.svg)](https://nodejs.org)
+[![Android](https://img.shields.io/badge/Android-Kotlin-orange.svg)](https://developer.android.com)
 
-| Folder   | What it is                                                        |
-| -------- | ----------------------------------------------------------------- |
-| `daemon` | Node.js daemon: tool registry, installs, PTY sessions, WS server  |
-| `app`    | Kotlin + Jetpack Compose Android client                           |
+**PocketDesk** is a self-hosted bridge between your Windows PC and your Android phone. Install AI coding agents (Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, or any CLI) on your PC, and drive them from a sleek mobile app over WebSocket — with live terminal streaming, file transfer, and a brand-new **AI chat interface**.
 
-## How it works
+No cloud. No accounts. Your machine, your data, your agents.
+
+---
+
+## ✨ Features
+
+| Feature | Description |
+|---------|-------------|
+| 🖥️ **Live Terminal** | Real-time PTY streaming with extra keys (Esc, Tab, Ctrl+C/D/Z, arrows) |
+| 💬 **AI Chat** | ChatGPT-style conversation with streaming responses and tool indicators |
+| 📁 **File Browser** | Browse, upload, and download files on your PC from your phone |
+| 🔐 **TLS + Pinning** | Self-signed cert support with SHA-256 fingerprint pinning |
+| 📦 **Auto-Install** | One-tap npm/pip install with live progress output |
+| 🔌 **Plugin System** | Drop a JSON manifest to add any CLI tool |
+| 📱 **Multi-PC** | Connect to multiple PCs, each with pinned certificates |
+| 🔔 **Background Notify** | Get notified when sessions end while the app is in background |
+
+---
+
+## 🏗️ Architecture
 
 ```
-Android app ──WebSocket(JSON)──> harnessd (PC) ──ConPTY──> opencode / claude / codex / ...
-             Tailscale mesh between phone and PC
+┌──────────────┐        WebSocket (JSON)        ┌──────────────┐
+│              │ ◄─────────────────────────────► │              │
+│  Android App │        Tailscale / LAN          │  harnessd    │
+│  (Kotlin)    │                                 │  (Node.js)   │
+│              │                                 │              │
+└──────────────┘                                 └──────┬───────┘
+                                                        │
+                                                  ConPTY / spawn
+                                                        │
+                                              ┌─────────▼─────────┐
+                                              │  claude / codex /  │
+                                              │  gemini / opencode │
+                                              └───────────────────┘
 ```
 
-Every supported CLI is described by a JSON manifest (`daemon/manifests/*.json`). The
-daemon scans PATH, reports what is installed, can install missing tools via npm/pip with
-live progress, and streams terminal sessions both ways. Add support for a new CLI by
-dropping one manifest file into `%USERPROFILE%\.pocketdesk\manifests\`:
+Every coding agent is described by a JSON manifest. The daemon scans PATH, reports what's installed, and streams terminal sessions bidirectionally. Add a new agent by dropping one file:
 
 ```json
-{ "id": "kimi", "name": "Kimi Code", "adapter": "terminal",
-  "bin": "kimi", "install": { "npm": "@moonshot-ai/kimi" } }
+{
+  "id": "kimi",
+  "name": "Kimi Code",
+  "adapter": "terminal",
+  "bin": "kimi",
+  "install": { "npm": "@moonshot-ai/kimi" }
+}
 ```
 
-## Setup
+---
 
-### PC (daemon)
+## 🚀 Quick Start
+
+### 1. Start the daemon (PC)
 
 ```powershell
 cd daemon
@@ -39,103 +69,96 @@ npm install
 npm start
 ```
 
-The console prints the WebSocket URL and the auth token; the token is stored in
-`%USERPROFILE%\.pocketdesk\config.json`. A browser test client is served at
-`http://localhost:8765`.
+The console prints the WebSocket URL and auth token. A browser test client is available at `http://localhost:8765`.
 
-Verify everything with the end-to-end test:
+### 2. Install the app (Phone)
 
-```powershell
-npm test
-```
-
-### PC (auto-start with tray)
-
-The tray app owns the daemon: green icon means it is running. It starts at logon.
-
-```powershell
-cd daemon\scripts
-.\install-service.ps1     # compiles the tray app and registers the logon task
-.\uninstall-service.ps1   # to remove it again
-```
-
-The tray menu can open the web UI and copy pairing info (URL, token, cert fingerprint).
-
-### TLS (wss)
-
-By default the daemon speaks plain `ws://`, which is fine inside a Tailscale tailnet.
-To encrypt the last hop yourself (plain LAN, hostile Wi-Fi, port forwarding), generate a
-self-signed certificate and restart the daemon:
-
-```powershell
-cd daemon
-npm run setup-tls
-```
-
-The daemon then serves `wss://` on the same port. On first connect the app shows the
-certificate's SHA-256 fingerprint; compare it with the value printed by `setup-tls` and
-trust it once — it is pinned for that server afterwards. The fingerprint is also written
-to `%USERPROFILE%\.pocketdesk\tls\fingerprint.txt`.
-
-### Phone-to-PC connectivity
-
-Install [Tailscale](https://tailscale.com) on the PC and the phone. The daemon URL from
-the phone is then `ws://<pc-tailnet-name>:8765/ws` — no port forwarding, encrypted by
-WireGuard. A plain LAN IP works at home too.
-
-### Android app
-
-Build an APK from the command line (a wrapper is included; JDK 17 required):
+Build the APK:
 
 ```powershell
 cd app
-.\gradlew.bat assembleDebug          # debug build for testing
-.\gradlew.bat assembleRelease        # signed release build (needs keystore.properties)
+.\gradlew.bat assembleDebug
 ```
 
-For release signing, create `app\keystore.properties` with `storeFile`, `storePassword`,
-`keyAlias`, `keyPassword` pointing at a keystore you keep private. Without that file the
-release build is simply unsigned.
+Or open `app/` in Android Studio and press Run.
 
-Then either install the APK on the phone, or open `app/` in Android Studio and press Run.
-On the connect screen tap **+** to add a PC (name, `ws://`/`wss://` URL, token); saved
-PCs are listed and reconnectable.
+### 3. Connect
 
-## App features
+On the phone: tap **+** → enter the PC's WebSocket URL and token → done.
 
-- Multi-PC server list with per-server pinned certificates
-- Tool detection and one-tap installs with live npm/pip output
-- Multiple concurrent PTY sessions with scrollback replay after reconnect
-- Extra keys row (Esc, Tab, Ctrl+C/D/Z, arrows, Home/End, PgUp/PgDn, shell punctuation)
-- File browsing on the PC, downloads into the phone's Downloads, uploads via the system picker
-- Notifications when a session ends while the app is in the background
+---
 
-## Security model
+## 🔒 Security
 
-- Every WebSocket client must present the token as its first message; wrong token closes
-  the connection with code 4003 before anything else is accepted.
-- With TLS enabled the app refuses to send the token until you confirm the certificate
-  fingerprint; the pin is checked on every later connect.
-- Run the daemon only inside a trusted network (Tailscale tailnet recommended). Do not
-  port-forward it to the public internet: the protocol has full shell control of your PC.
+- **Token auth**: Every WebSocket client must present the token as its first message. Wrong token → connection closed (4003).
+- **TLS + certificate pinning**: With TLS enabled, the app shows the cert's SHA-256 fingerprint. Confirm once — pinned for all future connects.
+- **Local-only**: Run inside Tailscale or LAN. Do not port-forward to the internet — the protocol has full shell control of your PC.
 
-## Protocol (v1)
+---
+
+## 📖 Protocol (v1)
 
 JSON frames; binary payloads are base64.
 
-Client → server: `hello{token}`, `detect`, `install{id}`, `create{harness,cwd}`,
-`attach{id}`, `detach{id}`, `in{id,data}`, `resize{id,cols,rows}`, `kill{id}`, `fs{path}`,
-`fread{path,offset}`, `fwrite{path,data,append}`.
+**Client → Server:** `hello`, `detect`, `install`, `create`, `attach`, `detach`, `in`, `resize`, `kill`, `fs`, `fread`, `fwrite`, `chatsession`, `chatmsg`, `chatcancel`
 
-Server → client: `welcome`, `manifests{items}`, `sessions{items}`, `created`,
-`replay{id,data}`, `out{id,data}`, `exit{id,code}`, `progress{id,line}`, `fs{...}`,
-`fchunk{path,offset,size,data,eof}`, `fwritten{path,size}`, `error{message}`.
+**Server → Client:** `welcome`, `manifests`, `sessions`, `created`, `replay`, `out`, `exit`, `progress`, `fs`, `fchunk`, `fwritten`, `chatreplay`, `chatuser`, `chatdelta`, `chartool`, `chatstate`, `error`
 
-## Roadmap
+---
 
-- Structured adapters: run CLIs in their headless JSON modes
-  (`claude -p --output-format stream-json`, `codex exec --json`, OpenCode's HTTP API)
-  for a ChatGPT-style chat screen with model/effort pickers, file attachments, and
-  approve/deny cards.
-- Provider presets: point any CLI at DeepSeek/Kimi/GLM/OpenRouter endpoints.
-- Screen bridge (WebRTC) for GUI-only apps such as Antigravity.
+## 🧪 Testing
+
+```powershell
+cd daemon
+npm test          # smoke tests (sessions + chat engine)
+```
+
+---
+
+## 📂 Project Structure
+
+```
+PocketDesk/
+├── daemon/                    # Node.js daemon
+│   ├── src/
+│   │   ├── server.js          # HTTP + WebSocket server
+│   │   ├── sessions.js        # PTY session manager
+│   │   ├── chat.js            # AI chat engine (streaming)
+│   │   ├── registry.js        # Tool discovery + install
+│   │   └── tls.js             # TLS + certificate pinning
+│   ├── manifests/             # Agent JSON manifests
+│   └── test/                  # Smoke tests
+├── app/                       # Android app (Kotlin + Compose)
+│   └── app/src/main/java/com/yasha/pocketdesk/
+│       ├── ui/
+│       │   ├── ChatScreen.kt      # AI chat conversation
+│       │   ├── TerminalScreen.kt   # Live terminal
+│       │   ├── SessionsScreen.kt   # Session manager
+│       │   ├── ToolsScreen.kt     # Tool installer
+│       │   └── ConnectScreen.kt   # Server connection
+│       ├── WsClient.kt            # WebSocket client
+│       ├── Protocol.kt            # Message protocol
+│       └── MainActivity.kt        # Navigation
+└── README.md
+```
+
+---
+
+## 🗺️ Roadmap
+
+- [ ] Web-based terminal viewer (access from any browser)
+- [ ] Screen bridge (WebRTC) for GUI-only apps
+- [ ] Provider presets (DeepSeek, Kimi, GLM, OpenRouter)
+- [ ] Cross-platform app (iOS / Desktop)
+
+---
+
+## 🤝 Contributing
+
+Contributions welcome! Open an issue or PR. For major changes, please open an issue first to discuss what you'd like to change.
+
+---
+
+## 📄 License
+
+[MIT](LICENSE)
