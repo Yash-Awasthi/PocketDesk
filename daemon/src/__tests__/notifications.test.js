@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, mock } from "node:test";
+import assert from "node:assert/strict";
 import { createNotificationManager, NotificationEvents } from "../notifications.js";
 import { TelegramChannel } from "../channels/telegram.js";
 import { DiscordChannel } from "../channels/discord.js";
@@ -6,24 +7,24 @@ import { DiscordChannel } from "../channels/discord.js";
 describe("createNotificationManager", () => {
   it("creates with no channels when env is empty", () => {
     const mgr = createNotificationManager({ config: {} });
-    expect(mgr.count()).toBe(0);
-    expect(mgr.channels()).toEqual([]);
+    assert.equal(mgr.count(), 0);
+    assert.deepEqual(mgr.channels(), []);
   });
 
   it("discovers Telegram channel from config", () => {
     const mgr = createNotificationManager({
       config: { TELEGRAM_BOT_TOKEN: "test-token", TELEGRAM_CHAT_ID: "123" },
     });
-    expect(mgr.count()).toBe(1);
-    expect(mgr.channels()).toContain("telegram");
+    assert.equal(mgr.count(), 1);
+    assert.ok(mgr.channels().includes("telegram"));
   });
 
   it("discovers Discord channel from config", () => {
     const mgr = createNotificationManager({
       config: { DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/test" },
     });
-    expect(mgr.count()).toBe(1);
-    expect(mgr.channels()).toContain("discord");
+    assert.equal(mgr.count(), 1);
+    assert.ok(mgr.channels().includes("discord"));
   });
 
   it("discovers multiple channels", () => {
@@ -34,31 +35,35 @@ describe("createNotificationManager", () => {
         DISCORD_WEBHOOK_URL: "https://discord.com/api/webhooks/test",
       },
     });
-    expect(mgr.count()).toBe(2);
-    expect(mgr.channels()).toContain("telegram");
-    expect(mgr.channels()).toContain("discord");
+    assert.equal(mgr.count(), 2);
+    assert.ok(mgr.channels().includes("telegram"));
+    assert.ok(mgr.channels().includes("discord"));
   });
 
   it("does not crash when sending with no channels", () => {
     const mgr = createNotificationManager({ config: {} });
-    expect(() => mgr.send("test_event", { data: "test" })).not.toThrow();
+    assert.doesNotThrow(() => mgr.send("test_event", { data: "test" }));
   });
 
   it("rate-limits sends per channel", async () => {
     // Mock fetch to prevent actual HTTP calls
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve("") });
+    let fetchCount = 0;
+    globalThis.fetch = async () => {
+      fetchCount++;
+      return { ok: true, text: async () => "" };
+    };
 
     const mgr = createNotificationManager({
       config: { TELEGRAM_BOT_TOKEN: "token", TELEGRAM_CHAT_ID: "123" },
     });
 
     mgr.send(NotificationEvents.PROPOSAL_CREATED, { summary: "test1" });
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    assert.equal(fetchCount, 1);
 
     // Second send should be queued (rate limited)
     mgr.send(NotificationEvents.PROPOSAL_CREATED, { summary: "test2" });
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1); // Still 1
+    assert.equal(fetchCount, 1); // Still 1
 
     globalThis.fetch = originalFetch;
   });
@@ -68,29 +73,29 @@ describe("TelegramChannel", () => {
   it("formats proposal created message", () => {
     const ch = new TelegramChannel({ token: "test", chatId: "123" });
     const msg = ch._formatMessage("proposal_created", { summary: "Write file", type: "file_write", id: "abc123" });
-    expect(msg).toContain("Write file");
-    expect(msg).toContain("file_write");
-    expect(msg).toContain("abc123");
+    assert.ok(msg.includes("Write file"));
+    assert.ok(msg.includes("file_write"));
+    assert.ok(msg.includes("abc123"));
   });
 
   it("formats session error message", () => {
     const ch = new TelegramChannel({ token: "test", chatId: "123" });
     const msg = ch._formatMessage("session_error", { message: "Connection refused" });
-    expect(msg).toContain("Connection refused");
-    expect(msg).toContain("🔴");
+    assert.ok(msg.includes("Connection refused"));
+    assert.ok(msg.includes("🔴"));
   });
 
   it("formats chat completed message", () => {
     const ch = new TelegramChannel({ token: "test", chatId: "123" });
     const msg = ch._formatMessage("chat_completed", { summary: "Done" });
-    expect(msg).toContain("Done");
-    expect(msg).toContain("💬");
+    assert.ok(msg.includes("Done"));
+    assert.ok(msg.includes("💬"));
   });
 
   it("formats unknown event as generic", () => {
     const ch = new TelegramChannel({ token: "test", chatId: "123" });
     const msg = ch._formatMessage("custom_event", { key: "val" });
-    expect(msg).toContain("custom_event");
+    assert.ok(msg.includes("custom_event"));
   });
 });
 
@@ -98,22 +103,22 @@ describe("DiscordChannel", () => {
   it("builds embed with correct color for proposal", () => {
     const ch = new DiscordChannel({ webhookUrl: "https://test" });
     const embed = ch._buildEmbed("proposal_created", { summary: "Test", type: "file_write" });
-    expect(embed.title).toContain("Proposal");
-    expect(embed.color).toBe(0xf0ad4e); // amber
-    expect(embed.fields.length).toBeGreaterThan(0);
+    assert.ok(embed.title.includes("Proposal"));
+    assert.equal(embed.color, 0xf0ad4e); // amber
+    assert.ok(embed.fields.length > 0);
   });
 
   it("builds embed with green for approval", () => {
     const ch = new DiscordChannel({ webhookUrl: "https://test" });
     const embed = ch._buildEmbed("proposal_approved", { summary: "Approved" });
-    expect(embed.color).toBe(0x5cb85c); // green
+    assert.equal(embed.color, 0x5cb85c); // green
   });
 
   it("builds embed with red for error", () => {
     const ch = new DiscordChannel({ webhookUrl: "https://test" });
     const embed = ch._buildEmbed("session_error", { message: "Failed" });
-    expect(embed.color).toBe(0xd9534f); // red
-    expect(embed.fields.some(f => f.value.includes("Failed"))).toBe(true);
+    assert.equal(embed.color, 0xd9534f); // red
+    assert.ok(embed.fields.some(f => f.value.includes("Failed")));
   });
 
   it("truncates long messages to 1024 chars", () => {
@@ -121,17 +126,17 @@ describe("DiscordChannel", () => {
     const longMsg = "x".repeat(2000);
     const embed = ch._buildEmbed("session_error", { message: longMsg });
     const msgField = embed.fields.find(f => f.name === "Message");
-    expect(msgField.value.length).toBeLessThanOrEqual(1024);
+    assert.ok(msgField.value.length <= 1024);
   });
 });
 
 describe("NotificationEvents", () => {
   it("has all required event constants", () => {
-    expect(NotificationEvents.PROPOSAL_CREATED).toBe("proposal_created");
-    expect(NotificationEvents.PROPOSAL_APPROVED).toBe("proposal_approved");
-    expect(NotificationEvents.PROPOSAL_REJECTED).toBe("proposal_rejected");
-    expect(NotificationEvents.SESSION_CONNECTED).toBe("session_connected");
-    expect(NotificationEvents.SESSION_ERROR).toBe("session_error");
-    expect(NotificationEvents.CHAT_COMPLETED).toBe("chat_completed");
+    assert.equal(NotificationEvents.PROPOSAL_CREATED, "proposal_created");
+    assert.equal(NotificationEvents.PROPOSAL_APPROVED, "proposal_approved");
+    assert.equal(NotificationEvents.PROPOSAL_REJECTED, "proposal_rejected");
+    assert.equal(NotificationEvents.SESSION_CONNECTED, "session_connected");
+    assert.equal(NotificationEvents.SESSION_ERROR, "session_error");
+    assert.equal(NotificationEvents.CHAT_COMPLETED, "chat_completed");
   });
 });
