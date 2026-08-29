@@ -22,6 +22,22 @@ data class ToolInfo(
 
 data class SessionSummary(val id: String, val harnessId: String, val cwd: String)
 
+sealed interface ChatItem {
+    data class User(val text: String) : ChatItem
+    data class Assistant(val text: String) : ChatItem
+    data class Tool(val name: String, val detail: String) : ChatItem
+    data class ToolResult(val text: String) : ChatItem
+    data class System(val text: String) : ChatItem
+}
+
+data class ChatSummary(
+    val id: String,
+    val harnessId: String,
+    val cwd: String,
+    val state: String,
+    val preview: String,
+)
+
 data class FsEntry(val name: String, val isDir: Boolean, val size: Long?)
 
 data class FsListing(val path: String, val parent: String?, val items: List<FsEntry>)
@@ -58,6 +74,17 @@ object Proto {
     }
 
     fun kill(id: String) = obj { put("type", "kill"); put("id", id) }
+
+    fun chatSession(harness: String, cwd: String, prompt: String?) = obj {
+        put("type", "chatsession"); put("harness", harness); put("cwd", cwd)
+        if (!prompt.isNullOrBlank()) put("prompt", prompt)
+    }
+
+    fun chatMsg(id: String, text: String) = obj {
+        put("type", "chatmsg"); put("id", id); put("text", text)
+    }
+
+    fun chatCancel(id: String) = obj { put("type", "chatcancel"); put("id", id) }
     fun fs(path: String?) = obj { put("type", "fs"); put("path", path ?: "") }
     fun fread(path: String, offset: Long) = obj {
         put("type", "fread"); put("path", path); put("offset", offset)
@@ -86,11 +113,42 @@ object Proto {
         val arr = (el as? JsonObject)?.get("items") as? JsonArray ?: return emptyList()
         return arr.mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
+            if (str(o, "kind") == "chat") return@mapNotNull null
             SessionSummary(
                 id = str(o, "id") ?: return@mapNotNull null,
                 harnessId = str(o, "harnessId") ?: "",
                 cwd = str(o, "cwd") ?: "",
             )
+        }
+    }
+
+    fun parseChats(el: JsonElement?): List<ChatSummary> {
+        val arr = (el as? JsonObject)?.get("items") as? JsonArray ?: return emptyList()
+        return arr.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            if (str(o, "kind") != "chat") return@mapNotNull null
+            ChatSummary(
+                id = str(o, "id") ?: return@mapNotNull null,
+                harnessId = str(o, "harnessId") ?: "",
+                cwd = str(o, "cwd") ?: "",
+                state = str(o, "state") ?: "idle",
+                preview = str(o, "preview") ?: "",
+            )
+        }
+    }
+
+    fun parseChatReplay(arr: JsonElement?): List<ChatItem> {
+        val items = arr as? JsonArray ?: return emptyList()
+        return items.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            when (str(o, "role")) {
+                "user" -> ChatItem.User(str(o, "text") ?: "")
+                "assistant" -> ChatItem.Assistant(str(o, "text") ?: "")
+                "tool" -> ChatItem.Tool(name = str(o, "name") ?: "", detail = str(o, "detail") ?: "")
+                "toolresult" -> ChatItem.ToolResult(str(o, "text") ?: "")
+                "system" -> ChatItem.System(str(o, "text") ?: "")
+                else -> null
+            }
         }
     }
 

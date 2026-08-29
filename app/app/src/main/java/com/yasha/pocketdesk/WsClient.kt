@@ -26,6 +26,8 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
         private set
     var sessions by mutableStateOf<List<SessionSummary>>(emptyList())
         private set
+    var chats by mutableStateOf<List<ChatSummary>>(emptyList())
+        private set
     var progress by mutableStateOf<Map<String, String>>(emptyMap())
         private set
     var dirListing by mutableStateOf<FsListing?>(null)
@@ -33,6 +35,16 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     var lastError by mutableStateOf<String?>(null)
         private set
     var activeUrl: String? = null
+        private set
+
+    /** Live transcript for an open chat: id -> list of items. */
+    var chatTranscript by mutableStateOf<Map<String, List<ChatItem>>>(emptyMap())
+        private set
+    /** Chat state: id -> "idle" | "running" | "error". */
+    var chatStates by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    /** Streaming delta accumulator for active chat turn. */
+    var chatStreamBuf by mutableStateOf<Map<String, StringBuilder>>(emptyMap())
         private set
 
     val events = MutableSharedFlow<RhEvent>(extraBufferCapacity = 256)
@@ -125,6 +137,13 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     fun sendResize(id: String, cols: Int, rows: Int): Boolean = send(Proto.resize(id, cols, rows))
     fun kill(id: String): Boolean = send(Proto.kill(id))
     fun browse(path: String?): Boolean = send(Proto.fs(path))
+
+    fun createChat(harness: String, cwd: String, prompt: String? = null): Boolean =
+        send(Proto.chatSession(harness, cwd, prompt))
+
+    fun sendChatMessage(id: String, text: String): Boolean = send(Proto.chatMsg(id, text))
+
+    fun cancelChat(id: String): Boolean = send(Proto.chatCancel(id))
 
     private val transfers = HashMap<String, Transfer>()
 
@@ -262,10 +281,14 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
             "welcome" -> {
                 tools = Proto.parseTools(m)
                 sessions = Proto.parseSessions(m)
+                chats = Proto.parseChats(m)
                 status = Status.Connected
             }
             "manifests" -> tools = Proto.parseTools(m)
-            "sessions" -> sessions = Proto.parseSessions(m)
+            "sessions" -> {
+                sessions = Proto.parseSessions(m)
+                chats = Proto.parseChats(m)
+            }
             "created" -> str(m, "id")?.let { events.tryEmit(RhEvent.Created(it)) }
             "out", "replay" -> {
                 val id = str(m, "id") ?: return
@@ -293,7 +316,70 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
                 lastError = msg
                 events.tryEmit(RhEvent.Failure(msg))
             }
+            "chatreplay" -> {
+                val id = str(m, "id") ?: return
+                val items = Proto.parseChatReplay(m["items"])
+                chatTranscript = chatTranscript.toMutableMap().apply { put(id, items) }
+                chatStates = chatStates.toMutableMap().apply { if (!containsKey(id)) put(id, "idle") }
+            }
+            "chatuser" -> {
+                val id = str(m, "id") ?: return
+                val text = str(m, "text") ?: return
+                appendChatItem(id, ChatItem.User(text))
+            }
+            "chatdelta" -> {
+                val id = str(m, "id") ?: return
+                val text = str(m, "text") ?: return
+                // Accumulate streaming deltas into the assistant message
+                val bufs = chatStreamBuf.toMutableMap()
+                val buf = bufs.getOrPut(id) { StringBuilder() }
+                buf.append(text)
+                chatStreamBuf = bufs
+                // Merge into transcript: update or create the trailing assistant item
+                mergeAssistantDelta(id, text)
+            }
+            "chartool" -> {
+                val id = str(m, "id") ?: return
+                val name = str(m, "name") ?: ""
+                val detail = str(m, "detail") ?: ""
+                appendChatItem(id, ChatItem.Tool(name, detail))
+            }
+            "chattoolresult" -> {
+                val id = str(m, "id") ?: return
+                val text = str(m, "text") ?: ""
+                appendChatItem(id, ChatItem.ToolResult(text))
+            }
+            "chatstate" -> {
+                val id = str(m, "id") ?: return
+                val state = str(m, "state") ?: "idle"
+                chatStates = chatStates.toMutableMap().apply { put(id, state) }
+                if (state == "idle" || state == "error") {
+                    // Reset stream buffer for next turn
+                    chatStreamBuf = chatStreamBuf.toMutableMap().apply { remove(id) }
+                }
+            }
             else -> {}
+        }
+    }
+
+    private fun appendChatItem(chatId: String, item: ChatItem) {
+        chatTranscript = chatTranscript.toMutableMap().apply {
+            val list = (get(chatId) ?: emptyList()).toMutableList()
+            list.add(item)
+            put(chatId, list)
+        }
+    }
+
+    private fun mergeAssistantDelta(chatId: String, delta: String) {
+        chatTranscript = chatTranscript.toMutableMap().apply {
+            val list = (get(chatId) ?: emptyList()).toMutableList()
+            val last = list.lastOrNull()
+            if (last is ChatItem.Assistant) {
+                list[list.lastIndex] = ChatItem.Assistant(last.text + delta)
+            } else {
+                list.add(ChatItem.Assistant(delta))
+            }
+            put(chatId, list)
         }
     }
 
