@@ -61,6 +61,20 @@ Every coding agent is described by a JSON manifest. The daemon scans PATH, repor
 
 ## 🚀 Quick Start
 
+### One-liner install
+
+**macOS / Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/main/install.ps1 | iex
+```
+
+This clones the repo to `~/.pocketdesk`, installs dependencies, generates an auth token, and prints connection info.
+
 ### 1. Start the daemon (PC)
 
 ```powershell
