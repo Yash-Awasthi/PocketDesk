@@ -88,6 +88,56 @@ On the phone: tap **+** → enter the PC's WebSocket URL and token → done.
 
 ---
 
+## 🔌 Plugin System
+
+PocketDesk has a plugin system inspired by deepseek-harness (everything-is-a-plugin) and claude-code-hermit (extension hooks). Plugins extend the daemon with lifecycle hooks — no core changes needed.
+
+### Plugin Format
+
+Drop a `.js` file in `daemon/src/plugins/`:
+
+```javascript
+export default {
+  name: "my-plugin",
+  version: "1.0.0",
+  hooks: ["onMessage", "onConnect"],
+  init(ctx) { },       // called once at startup
+  start(ctx) { },      // called when daemon starts
+  stop(ctx) { },       // called on shutdown
+  onConnect(ctx, ws) { },
+  onDisconnect(ctx, ws) { },
+  onMessage(ctx, ws, msg) { },
+}
+```
+
+### Hook Return Values
+
+| Return | Effect |
+|--------|--------|
+| `undefined` | Continue processing normally |
+| `{ block: true }` | Prevent message from reaching the handler |
+| `{ modify: {...} }` | Replace the message before handling |
+
+### Built-in Plugins
+
+| Plugin | Description |
+|--------|-------------|
+| `logger-plugin.js` | Logs all WebSocket events with timestamps |
+| `metrics-plugin.js` | Collects session metrics (message count, uptime) |
+| `auth-plugin.js` | Optional token-based auth (replaces built-in) |
+
+### Plugin Context
+
+Plugins receive a `ctx` object with access to:
+
+- `ctx.sessions` — session manager (create, attach, detach, write, kill)
+- `ctx.chat` — chat manager (create, attach, send, cancel)
+- `ctx.broadcast` — send messages to all connected clients
+- `ctx.registry` — tool discovery and installation
+- `ctx.config` — daemon configuration (port, token, dataDir)
+
+---
+
 ## 🔒 Security
 
 - **Token auth**: Every WebSocket client must present the token as its first message. Wrong token → connection closed (4003).
