@@ -9,10 +9,10 @@ import { WebSocketServer } from "ws";
 import * as registry from "./registry.js";
 import * as sessions from "./sessions.js";
 import * as chat from "./chat.js";
+import { createPluginManager } from "./plugins.js";  const HELLO_TIMEOUT = 10_000;
+  const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
 
-const HELLO_TIMEOUT = 10_000;
-
-function allSessions() {
+  function allSessions() {
   return [...sessions.summary(), ...chat.summary()];
 }
 
@@ -82,11 +82,13 @@ export function start({ port, token, tls }) {
   wss.on("connection", (ws) => {
     ws._subs = new Set();
     ws._authed = false;
+    plugins.callHook("onConnect", ws);
     const timer = setTimeout(() => ws.close(4001, "auth timeout"), HELLO_TIMEOUT);
     ws.on("close", () => {
       clearTimeout(timer);
       sessions.detach(ws);
       chat.detach(ws);
+      plugins.callHook("onDisconnect", ws);
     });
     ws.on("message", (raw) => {
       let msg;
@@ -95,17 +97,21 @@ export function start({ port, token, tls }) {
       } catch {
         return;
       }
-      if (!ws._authed) {
-        if (msg.type === "hello" && msg.token === token) {
-          ws._authed = true;
-          clearTimeout(timer);
-          send(ws, { type: "welcome", version: 1, sessions: allSessions(), manifests: registry.list() });
-        } else {
-          ws.close(4003, "bad token");
+      // Plugin hook: onMessage (may block or modify)
+      plugins.callHook("onMessage", ws, msg).then(({ blocked }) => {
+        if (blocked) return;
+        if (!ws._authed) {
+          if (msg.type === "hello" && msg.token === token) {
+            ws._authed = true;
+            clearTimeout(timer);
+            send(ws, { type: "welcome", version: 1, sessions: allSessions(), manifests: registry.list() });
+          } else {
+            ws.close(4003, "bad token");
+          }
+          return;
         }
-        return;
-      }
-      handle(ws, msg);
+        handle(ws, msg);
+      });
     });
   });
 
@@ -126,6 +132,7 @@ export function start({ port, token, tls }) {
         if (!m || m.adapter !== "terminal") return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
         if (!registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
         const s = sessions.create({ harnessId: m.id, bin: m.bin, cwd: msg.cwd, args: msg.args }, broadcast);
+        plugins.callHook("onSessionCreated", s);
         broadcast({ type: "sessions", items: allSessions() });
         send(ws, { type: "created", ...s });
         break;
@@ -136,6 +143,7 @@ export function start({ port, token, tls }) {
         if (!chat.supported(m)) return send(ws, { type: "error", message: `${m.name} has no chat adapter` });
         if (!registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
         const s = chat.create({ manifest: m, cwd: msg.cwd });
+        plugins.callHook("onChatCreated", s);
         chat.attach(s.id, ws);
         send(ws, { type: "created", ...s });
         if (String(msg.prompt || "").trim()) {
@@ -278,6 +286,11 @@ export function start({ port, token, tls }) {
     if (ws.readyState === 1) ws.send(JSON.stringify(obj));
   }
 
+  // ─── Plugin system ───────────────────────────────────────────────────────
+  const pluginCtx = { sessions, chat, registry, broadcast: null, config: { port, token, dataDir: process.env.POCKETDESK_DATA || ".pocketdesk" } };
+  const plugins = createPluginManager(pluginCtx);
+  pluginCtx.broadcast = broadcast; // wire after broadcast is defined
+
   server.listen(port, async () => {
     const scheme = useTls ? "wss" : "ws";
     let fp = "";
@@ -298,5 +311,10 @@ export function start({ port, token, tls }) {
     console.log("");
     await registry.scanAll(broadcast);
     console.log("  registry scanned");
+    // Load plugins
+    await plugins.discover(pluginDir);
+    await plugins.startAll();
+    const loaded = plugins.list();
+    if (loaded.length) console.log(`  plugins: ${loaded.map(p => p.name).join(", ")}`);
   });
 }
