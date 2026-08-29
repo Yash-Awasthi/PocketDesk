@@ -1,0 +1,33 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PocketDesk pairing</title>
+<style>
+  body { background: #14161a; color: #e5e7eb; font-family: system-ui, sans-serif; display: flex;
+         flex-direction: column; align-items: center; gap: 14px; padding-top: 40px; }
+  h1 { font-size: 20px; margin: 0; color: #4ade80; }
+  #qr { background: #fff; padding: 16px; border-radius: 12px; }
+  code { background: #1f2937; padding: 6px 10px; border-radius: 6px; font-size: 13px; max-width: 90vw;
+         overflow-wrap: anywhere; display: block; text-align: center; }
+  p { margin: 0; color: #9ca3af; font-size: 13px; max-width: 480px; text-align: center; }
+</style>
+</head>
+<body>
+<h1>PocketDesk — pair your phone</h1>
+<div id="qr"></div>
+<p>Scan with the PocketDesk app. If the QR does not scan, enter these manually:</p>
+<code>__RH_URL__</code>
+<code>token: __RH_TOKEN__</code>
+<code>cert sha-256: __RH_FP__</code>
+<script src="/vendor/qrcode.min.js"></script>
+<script>
+const payload = "__RH_PAYLOAD__";
+const qr = qrcode(0, "M");
+qr.addData(payload);
+qr.make();
+document.getElementById("qr").innerHTML = qr.createSvgTag({ cellSize: 5, margin: 0 });
+</script>
+</body>
+</html>

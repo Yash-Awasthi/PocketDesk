@@ -3,5 +3,9 @@
   "name": "Gemini CLI",
   "adapter": "terminal",
   "bin": "gemini",
-  "install": { "npm": "@google/gemini-cli" }
+  "install": { "npm": "@google/gemini-cli" },
+  "chat": {
+    "args": [],
+    "format": "text"
+  }
 }

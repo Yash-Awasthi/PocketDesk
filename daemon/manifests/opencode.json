@@ -3,5 +3,10 @@
   "name": "OpenCode",
   "adapter": "terminal",
   "bin": "opencode",
-  "install": { "npm": "opencode-ai" }
+  "install": { "npm": "opencode-ai" },
+  "chat": {
+    "args": [],
+    "format": "text",
+    "resumeArgs": ["--continue"]
+  }
 }
