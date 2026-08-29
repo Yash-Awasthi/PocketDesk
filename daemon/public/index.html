@@ -56,6 +56,30 @@
   .dialog h2 { margin: 0 0 12px; font-size: 16px; } .dialog label { font-size: 12px; color: #8b949e; display: block; margin-bottom: 4px; }
   .dialog input, .dialog select { width: 100%; font-size: 13px; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; font-family: inherit; }
   .dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+  /* Dashboard */
+  .dashboard { padding: 20px; overflow-y: auto; flex: 1; }
+  .dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .stat-card { background: linear-gradient(135deg, #161b22, #1c2333); border: 1px solid #30363d; border-radius: 10px; padding: 16px; }
+  .stat-card .label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
+  .stat-card .value { font-size: 28px; font-weight: 700; color: #f0f6fc; font-family: monospace; }
+  .stat-card .sub { font-size: 11px; color: #8b949e; margin-top: 2px; }
+  .dash-section { margin-bottom: 20px; }
+  .dash-section h3 { font-size: 13px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin: 0 0 10px; }
+  .timeline { display: flex; flex-direction: column; gap: 6px; }
+  .timeline-item { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 6px; font-size: 12px; }
+  .timeline-item:hover { background: #161b22; }
+  .timeline-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .timeline-dot.green { background: #3fb950; } .timeline-dot.blue { background: #58a6ff; }
+  .timeline-dot.amber { background: #d29922; } .timeline-dot.red { background: #f85149; }
+  .timeline-dot.gray { background: #484f58; }
+  .timeline-time { font-family: monospace; color: #484f58; flex-shrink: 0; width: 70px; }
+  .timeline-text { color: #c9d1d9; flex: 1; }
+  .plugin-table, .client-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .plugin-table th, .client-table th { text-align: left; padding: 6px 10px; color: #8b949e; font-weight: 500; border-bottom: 1px solid #30363d; }
+  .plugin-table td, .client-table td { padding: 6px 10px; border-bottom: 1px solid #21262d; }
+  .plugin-table .hook-badge { display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #1b2332; color: #79c0ff; margin: 1px; }
+  .bar-chart { display: flex; align-items: flex-end; gap: 3px; height: 60px; margin-top: 8px; }
+  .bar { flex: 1; background: linear-gradient(to top, #238636, #2ea043); border-radius: 2px 2px 0 0; min-width: 4px; transition: height 0.3s; }
   .streaming-indicator { display: inline-block; width: 6px; height: 14px; background: #58a6ff; animation: blink 0.8s infinite; margin-left: 2px; vertical-align: middle; }
   @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
   @media (prefers-reduced-motion: reduce) {
@@ -109,6 +133,7 @@
     <div class="tabs" id="tabs" style="display:none">
       <div class="tab active" data-tab="terminal" onclick="switchTab('terminal')">🖥️ Terminal</div>
       <div class="tab" data-tab="chat" onclick="switchTab('chat')">💬 Chat</div>
+      <div class="tab" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</div>
     </div>
     <div class="tab-content">
       <div class="tab-pane active" id="pane-terminal">
@@ -126,6 +151,32 @@
             <input id="chatInput" placeholder="Type a message..." disabled onkeydown="if(event.key==='Enter')sendChat()" />
             <button class="btn primary" onclick="sendChat()" id="chatSendBtn" disabled>Send</button>
             <button class="btn danger" onclick="cancelChat()" id="chatCancelBtn" style="display:none">Stop</button>
+          </div>
+        </div>
+      </div>
+      <div class="tab-pane" id="pane-dashboard">
+        <div class="dashboard" id="dashContent">
+          <div class="dash-grid">
+            <div class="stat-card"><div class="label">Active Sessions</div><div class="value" id="dSessions">0</div><div class="sub">terminal + chat</div></div>
+            <div class="stat-card"><div class="label">Messages</div><div class="value" id="dMessages">0</div><div class="sub">total exchanged</div></div>
+            <div class="stat-card"><div class="label">Uptime</div><div class="value" id="dUptime">0m</div><div class="sub">since connected</div></div>
+            <div class="stat-card"><div class="label">Plugins</div><div class="value" id="dPlugins">0</div><div class="sub">loaded</div></div>
+          </div>
+          <div class="dash-section">
+            <h3>📈 Message Volume (last 30 events)</h3>
+            <div class="bar-chart" id="dBarChart"></div>
+          </div>
+          <div class="dash-section">
+            <h3>⏱️ Recent Activity</h3>
+            <div class="timeline" id="dTimeline"></div>
+          </div>
+          <div class="dash-section">
+            <h3>🔌 Plugins</h3>
+            <table class="plugin-table" id="dPluginTable"><thead><tr><th>Name</th><th>Version</th><th>Hooks</th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="dash-section">
+            <h3>👥 Connected Clients</h3>
+            <table class="client-table" id="dClientTable"><thead><tr><th>Client</th><th>Connected</th><th>Auth</th></tr></thead><tbody></tbody></table>
           </div>
         </div>
       </div>
@@ -209,15 +260,19 @@ function handle(m) {
       renderTools(m.manifests || []);
       renderSessions(m.sessions || []);
       renderChats((m.sessions || []).filter(s => s.kind === "chat"));
+      dashConnected = Date.now();
+      dashPlugins = (m.manifests || []).length;
+      renderDashboard();
       break;
     case "manifests": renderTools(m.items || []); break;
     case "sessions":
       renderSessions((m.items || []).filter(s => s.kind !== "chat"));
       renderChats((m.items || []).filter(s => s.kind === "chat"));
+      dashEvent(`${(m.items||[]).length} session(s) updated`, 'blue');
       break;
     case "created":
-      if (m.kind === "chat") { openChat(m.id); renderChats(getChatSessions()); }
-      else openTerminal(m.id);
+      if (m.kind === "chat") { openChat(m.id); renderChats(getChatSessions()); dashEvent(`chat created: ${m.id.slice(0,8)}`, 'green'); }
+      else { openTerminal(m.id); dashEvent(`session created: ${m.id.slice(0,8)}`, 'blue'); }
       break;
     case "replay": case "out":
       if (m.id === activeTermId) term.write(new Uint8Array(b64ToBytes(m.data)));
@@ -253,6 +308,7 @@ function handle(m) {
     case "proposal_created":
       pendingProposals.push(m.proposal);
       renderProposals();
+      dashEvent(`proposal: ${m.proposal.summary || m.proposal.type}`, 'amber');
       break;
     case "proposal_approved":
     case "proposal_rejected":
@@ -527,6 +583,50 @@ function approveProposal(id) {
 function rejectProposal(id) {
   send({ type: "reject", id });
 }
+
+// ── Dashboard ──
+let dashConnected = 0, dashMessages = 0, dashPlugins = 0;
+const dashActivity = [];
+const dashBars = new Array(30).fill(0);
+let dashBarIdx = 0;
+
+function dashEvent(type, color) {
+  const now = new Date();
+  const ts = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  dashActivity.unshift({ type, color, ts });
+  if (dashActivity.length > 20) dashActivity.length = 20;
+  dashMessages++;
+  dashBars[dashBarIdx % 30]++;
+  renderDashboard();
+}
+
+function renderDashboard() {
+  // Stats
+  const s = sessions.length + Object.keys(chatStates).length;
+  document.getElementById('dSessions').textContent = s;
+  document.getElementById('dMessages').textContent = dashMessages;
+  const mins = Math.floor((Date.now() - dashConnected) / 60000);
+  document.getElementById('dUptime').textContent = mins < 60 ? mins + 'm' : Math.floor(mins/60) + 'h ' + (mins%60) + 'm';
+  document.getElementById('dPlugins').textContent = dashPlugins;
+
+  // Bar chart
+  const chart = document.getElementById('dBarChart');
+  const max = Math.max(...dashBars, 1);
+  chart.innerHTML = dashBars.map(v => `<div class="bar" style="height:${Math.max(2, (v/max)*100)}%"></div>`).join('');
+
+  // Timeline
+  const tl = document.getElementById('dTimeline');
+  tl.innerHTML = dashActivity.map(a =>
+    `<div class="timeline-item"><div class="timeline-dot ${a.color}"></div><span class="timeline-time">${a.ts}</span><span class="timeline-text">${a.type}</span></div>`
+  ).join('');
+}
+
+// Hook into existing message handler for dashboard events
+const _origHandle = typeof handle === 'function' ? handle : null;
+const _dashHandler = function(m) {
+  const colors = { welcome: 'green', session: 'blue', chatdelta: 'green', chatstate: 'amber', error: 'red', proposal_created: 'amber', manifests: 'blue' };
+  if (colors[m.type]) dashEvent(m.type + (m.id ? ` (${m.id.slice(0,6)})` : ''), colors[m.type]);
+};
 </script>
 </body>
 </html>
