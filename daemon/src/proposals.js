@@ -52,7 +52,7 @@ export function init(broadcast) {
  * @returns {Proposal}
  */
 export function create({ type, summary, detail, sessionId }) {
-  const id = crypto.randomUUID().slice(0, 8);
+  const id = crypto.randomUUID().replace(/-/g, "").slice(0, 16);
   const proposal = {
     id,
     type,
