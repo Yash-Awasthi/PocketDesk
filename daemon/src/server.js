@@ -10,7 +10,8 @@ import * as registry from "./registry.js";
 import * as sessions from "./sessions.js";
 import * as chat from "./chat.js";
 import { createPluginManager } from "./plugins.js";
-import * as proposals from "./proposals.js";  const HELLO_TIMEOUT = 10_000;
+import * as proposals from "./proposals.js";
+import { createNotificationManager, NotificationEvents } from "./notifications.js";  const HELLO_TIMEOUT = 10_000;
   const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
 
   function allSessions() {
@@ -134,6 +135,7 @@ export function start({ port, token, tls }) {
         if (!m || m.adapter !== "terminal") return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
         if (!registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
         const s = sessions.create({ harnessId: m.id, bin: m.bin, cwd: msg.cwd, args: msg.args }, broadcast);
+        notifications.send(NotificationEvents.SESSION_CONNECTED, { harness: m.name, cwd: msg.cwd });
         plugins.callHook("onSessionCreated", s);
         broadcast({ type: "sessions", items: allSessions() });
         send(ws, { type: "created", ...s });
@@ -145,6 +147,7 @@ export function start({ port, token, tls }) {
         if (!chat.supported(m)) return send(ws, { type: "error", message: `${m.name} has no chat adapter` });
         if (!registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
         const s = chat.create({ manifest: m, cwd: msg.cwd });
+        notifications.send(NotificationEvents.SESSION_CONNECTED, { harness: m.name, cwd: msg.cwd });
         plugins.callHook("onChatCreated", s);
         chat.attach(s.id, ws);
         send(ws, { type: "created", ...s });
@@ -202,6 +205,7 @@ export function start({ port, token, tls }) {
           sessionId: msg.sessionId || "unknown",
         });
         plugins.callHook("onProposal", ws, p);
+        notifications.send(NotificationEvents.PROPOSAL_CREATED, { id: p.id, type: p.type, summary: p.summary });
         send(ws, { type: "proposal_created", proposal: { id: p.id, type: p.type, summary: p.summary, status: p.status } });
         break;
       }
@@ -209,6 +213,7 @@ export function start({ port, token, tls }) {
         const p = proposals.approve(msg.id);
         if (p) {
           plugins.callHook("onProposalApproved", ws, p);
+          notifications.send(NotificationEvents.PROPOSAL_APPROVED, { id: p.id, summary: p.summary });
           send(ws, { type: "proposal_approved", proposal: { id: p.id, status: p.status } });
         } else {
           send(ws, { type: "error", message: `proposal ${msg.id} not found or already decided` });
@@ -219,6 +224,7 @@ export function start({ port, token, tls }) {
         const p = proposals.reject(msg.id);
         if (p) {
           plugins.callHook("onProposalRejected", ws, p);
+          notifications.send(NotificationEvents.PROPOSAL_REJECTED, { id: p.id, summary: p.summary });
           send(ws, { type: "proposal_rejected", proposal: { id: p.id, status: p.status } });
         } else {
           send(ws, { type: "error", message: `proposal ${msg.id} not found or already decided` });
@@ -323,7 +329,19 @@ export function start({ port, token, tls }) {
   }
 
   // ─── Plugin system ───────────────────────────────────────────────────────
-  const pluginCtx = { sessions, chat, registry, proposals, broadcast: null, config: { port, token, dataDir: process.env.POCKETDESK_DATA || ".pocketdesk" } };
+  const notifConfig = {
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
+    DISCORD_WEBHOOK_URL: process.env.DISCORD_WEBHOOK_URL,
+    SMTP_HOST: process.env.SMTP_HOST,
+    SMTP_PORT: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined,
+    SMTP_USER: process.env.SMTP_USER,
+    SMTP_PASS: process.env.SMTP_PASS,
+    SMTP_FROM: process.env.SMTP_FROM,
+    NOTIFY_EMAIL: process.env.NOTIFY_EMAIL,
+  };
+  const notifications = createNotificationManager({ config: notifConfig });
+  const pluginCtx = { sessions, chat, registry, proposals, broadcast: null, notifications, config: { port, token, dataDir: process.env.POCKETDESK_DATA || ".pocketdesk" } };
   const plugins = createPluginManager(pluginCtx);
   pluginCtx.broadcast = broadcast; // wire after broadcast is defined
 
