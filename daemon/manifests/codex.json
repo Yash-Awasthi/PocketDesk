@@ -3,5 +3,10 @@
   "name": "Codex CLI",
   "adapter": "terminal",
   "bin": "codex",
-  "install": { "npm": "@openai/codex" }
+  "install": { "npm": "@openai/codex" },
+  "chat": {
+    "args": ["exec", "--json", "-"],
+    "format": "codex-json",
+    "resumeArgs": ["exec", "resume", "--last", "--json", "-"]
+  }
 }

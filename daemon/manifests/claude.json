@@ -3,5 +3,10 @@
   "name": "Claude Code",
   "adapter": "terminal",
   "bin": "claude",
-  "install": { "npm": "@anthropic-ai/claude-code" }
+  "install": { "npm": "@anthropic-ai/claude-code" },
+  "chat": {
+    "args": ["-p", "--output-format", "stream-json", "--verbose"],
+    "format": "claude-stream-json",
+    "resumeArgs": ["--continue", "-p", "--output-format", "stream-json", "--verbose"]
+  }
 }

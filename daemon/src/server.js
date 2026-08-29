@@ -8,20 +8,68 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import * as registry from "./registry.js";
 import * as sessions from "./sessions.js";
+import * as chat from "./chat.js";
 
 const HELLO_TIMEOUT = 10_000;
 
+function allSessions() {
+  return [...sessions.summary(), ...chat.summary()];
+}
+
 export function start({ port, token, tls }) {
-  const pagePath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public", "index.html");
-  const page = fs.readFileSync(pagePath);
+  const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
+  const page = fs.readFileSync(path.join(publicDir, "index.html"));
+  const pairTemplate = fs.readFileSync(path.join(publicDir, "pair.html"), "utf8");
+
+  function lanAddress() {
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const ni of list ?? []) {
+        if (ni.family === "IPv4" && !ni.internal) return ni.address;
+      }
+    }
+    return "localhost";
+  }
+
+  let pairPage = "";
+  function buildPairPage(useTls, fingerprint) {
+    const url = `${useTls ? "wss" : "ws"}://${lanAddress()}:${port}/ws`;
+    const payload = Buffer.from(
+      JSON.stringify({ u: url, t: token, f: fingerprint || "" }),
+      "utf8",
+    ).toString("base64url");
+    pairPage = pairTemplate
+      .replaceAll("__RH_PAYLOAD__", `pocketdesk://pair#${payload}`)
+      .replaceAll("__RH_URL__", url)
+      .replaceAll("__RH_TOKEN__", token)
+      .replaceAll("__RH_FP__", fingerprint || "n/a");
+  }
 
   const requestHandler = (req, res) => {
-    if (req.method === "GET") {
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(page);
+    if (req.method !== "GET") {
+      res.writeHead(405).end();
       return;
     }
-    res.writeHead(405).end();
+    if (req.url.startsWith("/vendor/") && !req.url.includes("..")) {
+      const file = path.join(publicDir, req.url);
+      if (fs.existsSync(file)) {
+        res.writeHead(200, { "content-type": req.url.endsWith(".js") ? "text/javascript" : "text/plain" });
+        res.end(fs.readFileSync(file));
+        return;
+      }
+    }
+    // /pair carries the pairing token and is only ever served to the local machine.
+    const loopback = req.socket.remoteAddress === "127.0.0.1" || req.socket.remoteAddress === "::1";
+    if (req.url === "/pair" && loopback) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.end(pairPage);
+      return;
+    }
+    if (req.url.startsWith("/pair")) {
+      res.writeHead(403).end();
+      return;
+    }
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+    res.end(page);
   };
 
   const useTls = Boolean(tls?.enabled && fs.existsSync(tls.cert) && fs.existsSync(tls.key));
@@ -38,6 +86,7 @@ export function start({ port, token, tls }) {
     ws.on("close", () => {
       clearTimeout(timer);
       sessions.detach(ws);
+      chat.detach(ws);
     });
     ws.on("message", (raw) => {
       let msg;
@@ -50,7 +99,7 @@ export function start({ port, token, tls }) {
         if (msg.type === "hello" && msg.token === token) {
           ws._authed = true;
           clearTimeout(timer);
-          send(ws, { type: "welcome", version: 1, sessions: sessions.summary(), manifests: registry.list() });
+          send(ws, { type: "welcome", version: 1, sessions: allSessions(), manifests: registry.list() });
         } else {
           ws.close(4003, "bad token");
         }
@@ -77,15 +126,49 @@ export function start({ port, token, tls }) {
         if (!m || m.adapter !== "terminal") return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
         if (!registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
         const s = sessions.create({ harnessId: m.id, bin: m.bin, cwd: msg.cwd, args: msg.args }, broadcast);
-        broadcast({ type: "sessions", items: sessions.summary() });
+        broadcast({ type: "sessions", items: allSessions() });
         send(ws, { type: "created", ...s });
         break;
       }
+      case "chatsession": {
+        const m = registry.get(msg.harness);
+        if (!m) return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
+        if (!chat.supported(m)) return send(ws, { type: "error", message: `${m.name} has no chat adapter` });
+        if (!registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
+        const s = chat.create({ manifest: m, cwd: msg.cwd });
+        chat.attach(s.id, ws);
+        send(ws, { type: "created", ...s });
+        if (String(msg.prompt || "").trim()) {
+          chat.sendUserMessage(chat.get(s.id), String(msg.prompt));
+        }
+        broadcast({ type: "sessions", items: allSessions() });
+        break;
+      }
+      case "chatmsg": {
+        const c = chat.get(msg.id);
+        if (!c) return send(ws, { type: "error", message: `no such chat: ${msg.id}` });
+        if (c.state === "running") return send(ws, { type: "error", message: "still working on the previous prompt" });
+        chat.attach(msg.id, ws);
+        chat.sendUserMessage(c, String(msg.text || ""));
+        broadcast({ type: "sessions", items: allSessions() });
+        break;
+      }
+      case "chatcancel": {
+        const c = chat.get(msg.id);
+        if (c) {
+          chat.cancel(c);
+          broadcast({ type: "sessions", items: allSessions() });
+        }
+        break;
+      }
       case "attach":
-        if (!sessions.attach(msg.id, ws)) send(ws, { type: "error", message: `no live session: ${msg.id}` });
+        if (!chat.attach(msg.id, ws) && !sessions.attach(msg.id, ws)) {
+          send(ws, { type: "error", message: `no live session: ${msg.id}` });
+        }
         break;
       case "detach":
         sessions.detach(ws, msg.id);
+        chat.detach(ws, msg.id);
         break;
       case "in":
         sessions.write(msg.id, Buffer.from(msg.data, "base64").toString("utf8"));
@@ -94,7 +177,12 @@ export function start({ port, token, tls }) {
         sessions.resize(msg.id, msg.cols, msg.rows);
         break;
       case "kill":
-        sessions.kill(msg.id);
+        if (chat.get(msg.id)) {
+          chat.cancel(chat.get(msg.id));
+        } else {
+          sessions.kill(msg.id);
+        }
+        broadcast({ type: "sessions", items: allSessions() });
         break;
       case "fs":
         send(ws, listDir(msg.path));
@@ -192,14 +280,19 @@ export function start({ port, token, tls }) {
 
   server.listen(port, async () => {
     const scheme = useTls ? "wss" : "ws";
+    let fp = "";
+    if (useTls) {
+      fp = new crypto.X509Certificate(fs.readFileSync(tls.cert)).fingerprint256;
+    }
+    buildPairPage(useTls, fp);
     console.log("");
     console.log("  PocketDesk daemon");
     console.log(`  local     http${useTls ? "s" : ""}://localhost:${port}`);
     console.log(`  websocket ${scheme}://<this-pc>:${port}/ws`);
     console.log(`  token     ${token}`);
     if (useTls) {
-      const fp = new crypto.X509Certificate(fs.readFileSync(tls.cert)).fingerprint256;
       console.log(`  tls       enabled, cert fingerprint ${fp}`);
+      console.log(`  pairing   http${useTls ? "s" : ""}://localhost:${port}/pair  (scan the QR from the app)`);
     }
     console.log("  config    %USERPROFILE%\\.pocketdesk\\config.json");
     console.log("");
