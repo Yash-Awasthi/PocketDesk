@@ -1,11 +1,13 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>PocketDesk</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
 <style>
-  * { box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; margin: 0; padding: 0; }
   .topbar { background: #161b22; border-bottom: 1px solid #30363d; padding: 10px 16px; display: flex; align-items: center; gap: 12px; }
   .topbar h1 { font-size: 16px; margin: 0; color: #f0f6fc; font-weight: 600; }
@@ -33,7 +35,7 @@
   .tab-content { flex: 1; overflow: hidden; position: relative; }
   .tab-pane { display: none; height: 100%; } .tab-pane.active { display: flex; flex-direction: column; }
   #terminal { height: 100%; } #terminal .xterm { padding: 8px; }
-  /* Chat styles */
+  /* Chat */
   .chat-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   .chat-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
   .chat-msg { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
@@ -48,7 +50,6 @@
   .chat-input-bar input:disabled { opacity: 0.5; }
   .empty-state { flex: 1; display: flex; align-items: center; justify-content: center; color: #484f58; font-size: 14px; flex-direction: column; gap: 8px; }
   .empty-state .icon { font-size: 32px; }
-  /* New chat dialog */
   .dialog-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 100; align-items: center; justify-content: center; }
   .dialog-overlay.open { display: flex; }
   .dialog { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 20px; width: 360px; }
@@ -57,6 +58,9 @@
   .dialog .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
   .streaming-indicator { display: inline-block; width: 6px; height: 14px; background: #58a6ff; animation: blink 0.8s infinite; margin-left: 2px; vertical-align: middle; }
   @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    .streaming-indicator { animation: none; opacity: 1; }
+  }
 </style>
 </head>
 <body>
@@ -112,7 +116,6 @@
   </div>
 </div>
 
-<!-- New Chat Dialog -->
 <div class="dialog-overlay" id="newChatDialog">
   <div class="dialog">
     <h2>💬 New Chat</h2>
@@ -129,27 +132,44 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
-<script>
-let ws = null;
+<!-- Deferred: xterm loads after first paint -->
+<script defer src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<script defer>
+// ── State ──
+let ws = null, reconnectTimer = null, reconnectDelay = 1000;
 let term = null, fitAddon = null, activeTermId = null;
 const tools = [], sessions = [], chats = [];
 let activeChatId = null;
-const chatTranscripts = {}; // id -> [{role, text, name, detail}]
-const chatStates = {};      // id -> "idle"|"running"|"error"
+const chatTranscripts = {};
+const chatStates = {};
+// Track which DOM element each chat message index maps to, for incremental updates
+const chatDomNodes = {}; // chatId -> [HTMLElement]
 
-// ── WebSocket ──
+// ── Debounce helper ──
+function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setTimeout(() => fn.apply(this, arguments), ms); }; }
+
+// ── WebSocket with auto-reconnect ──
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
 
 function connect() {
-  if (ws) ws.close();
+  if (ws) { ws.onclose = null; ws.close(); }
+  clearTimeout(reconnectTimer);
+  reconnectDelay = 1000;
   const url = document.getElementById("host").value || "ws://localhost:8765/ws";
   ws = new WebSocket(url);
-  ws.onopen = () => send({ type: "hello", token: document.getElementById("token").value });
-  ws.onclose = () => setStatus(false);
-  ws.onerror = () => setStatus(false);
+  ws.onopen = () => { reconnectDelay = 1000; send({ type: "hello", token: document.getElementById("token").value }); };
+  ws.onclose = () => { setStatus(false); scheduleReconnect(); };
+  ws.onerror = () => { setStatus(false); };
   ws.onmessage = (ev) => handle(JSON.parse(ev.data));
+}
+
+function scheduleReconnect() {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    connect();
+  }, reconnectDelay);
 }
 
 function setStatus(up) {
@@ -175,10 +195,9 @@ function handle(m) {
       renderChats((m.items || []).filter(s => s.kind === "chat"));
       break;
     case "created":
-      if (m.kind === "chat") { openChat(m.id); renderChats((sessions.length ? getChatSessions() : [])); }
+      if (m.kind === "chat") { openChat(m.id); renderChats(getChatSessions()); }
       else openTerminal(m.id);
       break;
-    // Terminal
     case "replay": case "out":
       if (m.id === activeTermId) term.write(new Uint8Array(b64ToBytes(m.data)));
       break;
@@ -188,9 +207,9 @@ function handle(m) {
       break;
     case "progress": break;
     case "fs": if (m.error) break; pickDir(m); break;
-    // Chat
     case "chatreplay":
       chatTranscripts[m.id] = (m.items || []).map(i => ({role: i.role, text: i.text, name: i.name, detail: i.detail}));
+      chatDomNodes[m.id] = [];
       if (m.id === activeChatId) renderChatMessages();
       break;
     case "chatuser":
@@ -218,10 +237,10 @@ function handle(m) {
 function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + tab));
-  if (tab === 'terminal' && fitAddon) setTimeout(() => fitAddon.fit(), 50);
+  if (tab === 'terminal' && fitAddon) requestAnimationFrame(() => fitAddon.fit());
 }
 
-// ── Tools ──
+// ── Tools (full rebuild is fine — rare event) ──
 function renderTools(items) {
   tools.length = 0; items.forEach(t => tools.push(t));
   const el = document.getElementById("tools"); el.innerHTML = "";
@@ -229,7 +248,7 @@ function renderTools(items) {
   for (const it of items) {
     const installed = it.installed === true;
     const d = document.createElement("div"); d.className = "tool-card";
-    d.innerHTML = `<div class="name">${it.manifest.name}</div><div class="meta">${it.manifest.bin} · ${installed ? "✅ installed" : it.installing ? "⏳ installing..." : "❌ not installed"}</div>`;
+    d.innerHTML = `<div class="name">${esc(it.manifest.name)}</div><div class="meta">${esc(it.manifest.bin)} · ${installed ? "✅ installed" : it.installing ? "⏳ installing..." : "❌ not installed"}</div>`;
     if (!installed && !it.installing) {
       const b = document.createElement("button"); b.className = "btn"; b.textContent = "Install"; b.style.marginTop = "4px";
       b.onclick = (e) => { e.stopPropagation(); send({ type: "install", id: it.manifest.id }); };
@@ -243,13 +262,13 @@ function renderTools(items) {
   }
 }
 
-// ── Sessions ──
+// ── Sessions (full rebuild — infrequent) ──
 function renderSessions(items) {
   sessions.length = 0; items.forEach(s => sessions.push(s));
   const el = document.getElementById("sessions"); el.innerHTML = "";
   for (const s of items) {
     const d = document.createElement("div"); d.className = "session-card";
-    d.innerHTML = `<div class="id">${s.id}</div><div class="info">${s.harnessId} · ${s.cwd || "~"}</div>`;
+    d.innerHTML = `<div class="id">${esc(s.id)}</div><div class="info">${esc(s.harnessId)} · ${esc(s.cwd || "~")}</div>`;
     const row = document.createElement("div"); row.style.marginTop = "4px"; row.style.display = "flex"; row.style.gap = "4px";
     const at = document.createElement("button"); at.className = "btn"; at.textContent = "Attach"; at.onclick = (e) => { e.stopPropagation(); openTerminal(s.id); };
     const kl = document.createElement("button"); kl.className = "btn danger"; kl.textContent = "Kill"; kl.onclick = (e) => { e.stopPropagation(); send({ type: "kill", id: s.id }); };
@@ -278,31 +297,33 @@ function openTerminal(id) {
   }
   term.reset(); fitAddon.fit();
   send({ type: "attach", id });
-  setTimeout(() => fitAddon.fit(), 100);
+  requestAnimationFrame(() => fitAddon.fit());
 }
-window.addEventListener("resize", () => { if (fitAddon) fitAddon.fit(); });
 
-// ── Chats ──
+const debouncedFit = debounce(() => { if (fitAddon) fitAddon.fit(); }, 100);
+window.addEventListener("resize", debouncedFit);
+
+// ── Chats: incremental DOM updates ──
 function renderChats(items) {
   const el = document.getElementById("chats"); el.innerHTML = "";
   for (const c of items) {
     const d = document.createElement("div"); d.className = "session-card"; d.id = "chat-card-" + c.id;
     const state = chatStates[c.id] || c.state || "idle";
     const preview = c.preview || (chatTranscripts[c.id] || []).filter(i => i.role === "assistant").pop()?.text?.slice(0, 60) || "";
-    d.innerHTML = `<div class="id">💬 ${c.id}</div><div class="info">${c.harnessId} · ${state === "running" ? "⏳" : state === "error" ? "❌" : "✅"} ${preview}</div>`;
+    d.innerHTML = `<div class="id">💬 ${esc(c.id)}</div><div class="info">${esc(c.harnessId)} · ${state === "running" ? "⏳" : state === "error" ? "❌" : "✅"} ${esc(preview)}</div>`;
     d.onclick = () => openChat(c.id);
     el.appendChild(d);
   }
 }
 
 function updateChatCard(id) {
-  const card = document.getElementById("chat-card-" + id);
-  if (card) renderChats(getChatSessions());
+  if (id === activeChatId) renderChats(getChatSessions());
 }
 
 function openChat(id) {
   activeChatId = id; switchTab("chat");
   if (!chatTranscripts[id]) chatTranscripts[id] = [];
+  if (!chatDomNodes[id]) chatDomNodes[id] = [];
   send({ type: "attach", id });
   renderChatMessages();
   updateChatUI();
@@ -312,23 +333,59 @@ function renderChatMessages() {
   const el = document.getElementById("chatMessages");
   const empty = document.getElementById("chatEmpty");
   const items = chatTranscripts[activeChatId] || [];
-  if (!items.length) { empty.style.display = ""; el.querySelectorAll('.chat-msg').forEach(m => m.remove()); return; }
+  if (!items.length) { empty.style.display = ""; el.querySelectorAll('.chat-msg').forEach(m => m.remove()); chatDomNodes[activeChatId] = []; return; }
   empty.style.display = "none";
-  el.innerHTML = "";
-  for (const item of items) {
-    const d = document.createElement("div");
-    if (item.role === "user") { d.className = "chat-msg user"; d.textContent = item.text; }
-    else if (item.role === "assistant") {
-      d.className = "chat-msg assistant";
-      const running = chatStates[activeChatId] === "running" && item === items[items.length - 1];
-      d.textContent = item.text + (running ? "" : "");
-      if (running) { const ind = document.createElement("span"); ind.className = "streaming-indicator"; d.appendChild(ind); }
+
+  // Incremental: only update what changed
+  const nodes = chatDomNodes[activeChatId] || [];
+  const isRunning = chatStates[activeChatId] === "running";
+
+  // Remove excess nodes if transcript shrunk
+  while (nodes.length > items.length) { const old = nodes.pop(); old?.remove(); }
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    let d = nodes[i];
+    const isLast = i === items.length - 1;
+
+    if (!d) {
+      // Create new node
+      d = document.createElement("div");
+      nodes[i] = d;
+      el.appendChild(d);
     }
-    else if (item.role === "tool") { d.className = "chat-msg tool"; d.innerHTML = `<div class="label">🔧 ${item.name}</div>${item.detail}`; }
-    else if (item.role === "toolresult") { d.className = "chat-msg tool"; d.innerHTML = `<div class="label">📋 result</div>${(item.text || "").slice(0, 300)}`; }
-    else if (item.role === "system") { d.className = "chat-msg system"; d.textContent = item.text; }
-    el.appendChild(d);
+
+    // Update class and content
+    const cls = item.role === "user" ? "chat-msg user"
+      : item.role === "assistant" ? "chat-msg assistant"
+      : item.role === "tool" ? "chat-msg tool"
+      : item.role === "toolresult" ? "chat-msg tool"
+      : "chat-msg system";
+    if (d.className !== cls) d.className = cls;
+
+    if (item.role === "user") {
+      d.textContent = item.text;
+    } else if (item.role === "assistant") {
+      const streaming = isRunning && isLast;
+      const text = item.text;
+      // Only update text content if it changed (avoids reflow during streaming)
+      if (d._lastText !== text) { d.textContent = text; d._lastText = text; }
+      // Streaming indicator
+      if (streaming && !d.querySelector('.streaming-indicator')) {
+        const ind = document.createElement("span"); ind.className = "streaming-indicator"; d.appendChild(ind);
+      } else if (!streaming) {
+        const ind = d.querySelector('.streaming-indicator'); if (ind) ind.remove();
+      }
+    } else if (item.role === "tool") {
+      d.innerHTML = `<div class="label">🔧 ${esc(item.name)}</div>${esc(item.detail)}`;
+    } else if (item.role === "toolresult") {
+      d.innerHTML = `<div class="label">📋 result</div>${esc((item.text || "").slice(0, 300))}`;
+    } else {
+      d.textContent = item.text;
+    }
   }
+
+  chatDomNodes[activeChatId] = nodes;
   el.scrollTop = el.scrollHeight;
 }
 
@@ -396,6 +453,7 @@ function pickDir(m) {
 // ── Helpers ──
 function b64ToBytes(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
 function bytesToB64(u8) { let s = ""; for (const b of u8) s += String.fromCharCode(b); return btoa(s); }
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 </script>
 </body>
 </html>
