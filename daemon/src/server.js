@@ -9,7 +9,11 @@ import { WebSocketServer } from "ws";
 import * as registry from "./registry.js";
 import * as sessions from "./sessions.js";
 import * as chat from "./chat.js";
-import { createPluginManager } from "./plugins.js";  const HELLO_TIMEOUT = 10_000;
+import { createPluginManager } from "./plugins.js";
+import * as proposals from "./proposals.js";
+import { createNotificationManager, NotificationEvents } from "./notifications.js";  const HELLO_TIMEOUT = 10_000;
+  const MAX_AUTH_ATTEMPTS = 5;
+  const authAttempts = new Map();
   const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
 
   function allSessions() {
@@ -101,8 +105,19 @@ export function start({ port, token, tls }) {
       plugins.callHook("onMessage", ws, msg).then(({ blocked }) => {
         if (blocked) return;
         if (!ws._authed) {
-          if (msg.type === "hello" && msg.token === token) {
+          // Rate limit auth attempts
+          const clientIp = ws.socket?.remoteAddress || 'unknown';
+          const attempts = authAttempts.get(clientIp) || 0;
+          if (attempts >= MAX_AUTH_ATTEMPTS) {
+            ws.close(4029, "too many auth attempts");
+            return;
+          }
+          authAttempts.set(clientIp, attempts + 1);
+          
+          const tokenOk = msg.type === "hello" && typeof msg.token === "string" && msg.token.length === token.length && crypto.timingSafeEqual(Buffer.from(msg.token), Buffer.from(token));
+          if (tokenOk) {
             ws._authed = true;
+            authAttempts.delete(clientIp);
             clearTimeout(timer);
             send(ws, { type: "welcome", version: 1, sessions: allSessions(), manifests: registry.list() });
           } else {
@@ -132,6 +147,7 @@ export function start({ port, token, tls }) {
         if (!m || m.adapter !== "terminal") return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
         if (!registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
         const s = sessions.create({ harnessId: m.id, bin: m.bin, cwd: msg.cwd, args: msg.args }, broadcast);
+        notifications.send(NotificationEvents.SESSION_CONNECTED, { harness: m.name, cwd: msg.cwd });
         plugins.callHook("onSessionCreated", s);
         broadcast({ type: "sessions", items: allSessions() });
         send(ws, { type: "created", ...s });
@@ -143,6 +159,7 @@ export function start({ port, token, tls }) {
         if (!chat.supported(m)) return send(ws, { type: "error", message: `${m.name} has no chat adapter` });
         if (!registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
         const s = chat.create({ manifest: m, cwd: msg.cwd });
+        notifications.send(NotificationEvents.SESSION_CONNECTED, { harness: m.name, cwd: msg.cwd });
         plugins.callHook("onChatCreated", s);
         chat.attach(s.id, ws);
         send(ws, { type: "created", ...s });
@@ -192,6 +209,43 @@ export function start({ port, token, tls }) {
         }
         broadcast({ type: "sessions", items: allSessions() });
         break;
+      case "propose": {
+        const p = proposals.create({
+          type: msg.proposalType || "command_execute",
+          summary: msg.summary || "Unnamed action",
+          detail: msg.detail || {},
+          sessionId: msg.sessionId || "unknown",
+        });
+        plugins.callHook("onProposal", ws, p);
+        notifications.send(NotificationEvents.PROPOSAL_CREATED, { id: p.id, type: p.type, summary: p.summary });
+        send(ws, { type: "proposal_created", proposal: { id: p.id, type: p.type, summary: p.summary, status: p.status } });
+        break;
+      }
+      case "approve": {
+        const p = proposals.approve(msg.id);
+        if (p) {
+          plugins.callHook("onProposalApproved", ws, p);
+          notifications.send(NotificationEvents.PROPOSAL_APPROVED, { id: p.id, summary: p.summary });
+          send(ws, { type: "proposal_approved", proposal: { id: p.id, status: p.status } });
+        } else {
+          send(ws, { type: "error", message: `proposal ${msg.id} not found or already decided` });
+        }
+        break;
+      }
+      case "reject": {
+        const p = proposals.reject(msg.id);
+        if (p) {
+          plugins.callHook("onProposalRejected", ws, p);
+          notifications.send(NotificationEvents.PROPOSAL_REJECTED, { id: p.id, summary: p.summary });
+          send(ws, { type: "proposal_rejected", proposal: { id: p.id, status: p.status } });
+        } else {
+          send(ws, { type: "error", message: `proposal ${msg.id} not found or already decided` });
+        }
+        break;
+      }
+      case "proposal_list":
+        send(ws, { type: "proposal_list", items: proposals.listPending() });
+        break;
       case "fs":
         send(ws, listDir(msg.path));
         break;
@@ -209,7 +263,13 @@ export function start({ port, token, tls }) {
   const CHUNK = 256 * 1024;
 
   function resolvePath(p) {
-    return p && String(p).trim() ? path.resolve(String(p).replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir();
+    const resolved = p && String(p).trim() ? path.resolve(String(p).replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir();
+    // Security: prevent path traversal outside home directory
+    const home = os.homedir();
+    if (!resolved.startsWith(home)) {
+      throw new Error('Path traversal not allowed');
+    }
+    return resolved;
   }
 
   function listDir(p) {
@@ -287,7 +347,19 @@ export function start({ port, token, tls }) {
   }
 
   // ─── Plugin system ───────────────────────────────────────────────────────
-  const pluginCtx = { sessions, chat, registry, broadcast: null, config: { port, token, dataDir: process.env.POCKETDESK_DATA || ".pocketdesk" } };
+  const notifConfig = {
+    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
+    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
+    DISCORD_WEBHOOK_URL: process.env.DISCORD_WEBHOOK_URL,
+    SMTP_HOST: process.env.SMTP_HOST,
+    SMTP_PORT: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined,
+    SMTP_USER: process.env.SMTP_USER,
+    SMTP_PASS: process.env.SMTP_PASS,
+    SMTP_FROM: process.env.SMTP_FROM,
+    NOTIFY_EMAIL: process.env.NOTIFY_EMAIL,
+  };
+  const notifications = createNotificationManager({ config: notifConfig });
+  const pluginCtx = { sessions, chat, registry, proposals, broadcast: null, notifications, config: { port, token, dataDir: process.env.POCKETDESK_DATA || ".pocketdesk" } };
   const plugins = createPluginManager(pluginCtx);
   pluginCtx.broadcast = broadcast; // wire after broadcast is defined
 
@@ -302,13 +374,17 @@ export function start({ port, token, tls }) {
     console.log("  PocketDesk daemon");
     console.log(`  local     http${useTls ? "s" : ""}://localhost:${port}`);
     console.log(`  websocket ${scheme}://<this-pc>:${port}/ws`);
-    console.log(`  token     ${token}`);
+    // Security: Don't log token in production
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`  token     ${token.slice(0, 8)}...${token.slice(-4)}`);
+    }
     if (useTls) {
       console.log(`  tls       enabled, cert fingerprint ${fp}`);
       console.log(`  pairing   http${useTls ? "s" : ""}://localhost:${port}/pair  (scan the QR from the app)`);
     }
     console.log("  config    %USERPROFILE%\\.pocketdesk\\config.json");
     console.log("");
+    proposals.init(broadcast);
     await registry.scanAll(broadcast);
     console.log("  registry scanned");
     // Load plugins

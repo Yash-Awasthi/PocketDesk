@@ -61,7 +61,7 @@ export function attach(id, ws) {
   if (!c) return false;
   c.subs.add(ws);
   ws._subs.add("chat:" + id);
-  ws.send(JSON.stringify({ type: "chatreplay", id, items: c.transcript }));
+  if (ws.readyState === 1) ws.send(JSON.stringify({ type: "chatreplay", id, items: c.transcript }));
   return true;
 }
 
