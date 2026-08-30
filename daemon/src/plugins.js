@@ -22,6 +22,7 @@ const VALID_HOOKS = new Set([
   "onConnect", "onDisconnect", "onMessage",
   "onSessionCreated", "onSessionExit",
   "onChatCreated", "onChatMessage",
+  "onProposal", "onProposalApproved", "onProposalRejected",
 ]);
 
 /**
