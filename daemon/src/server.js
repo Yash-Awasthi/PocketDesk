@@ -12,6 +12,8 @@ import * as chat from "./chat.js";
 import { createPluginManager } from "./plugins.js";
 import * as proposals from "./proposals.js";
 import { createNotificationManager, NotificationEvents } from "./notifications.js";  const HELLO_TIMEOUT = 10_000;
+  const MAX_AUTH_ATTEMPTS = 5;
+  const authAttempts = new Map();
   const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
 
   function allSessions() {
@@ -103,9 +105,19 @@ export function start({ port, token, tls }) {
       plugins.callHook("onMessage", ws, msg).then(({ blocked }) => {
         if (blocked) return;
         if (!ws._authed) {
+          // Rate limit auth attempts
+          const clientIp = ws.socket?.remoteAddress || 'unknown';
+          const attempts = authAttempts.get(clientIp) || 0;
+          if (attempts >= MAX_AUTH_ATTEMPTS) {
+            ws.close(4029, "too many auth attempts");
+            return;
+          }
+          authAttempts.set(clientIp, attempts + 1);
+          
           const tokenOk = msg.type === "hello" && typeof msg.token === "string" && msg.token.length === token.length && crypto.timingSafeEqual(Buffer.from(msg.token), Buffer.from(token));
           if (tokenOk) {
             ws._authed = true;
+            authAttempts.delete(clientIp);
             clearTimeout(timer);
             send(ws, { type: "welcome", version: 1, sessions: allSessions(), manifests: registry.list() });
           } else {
@@ -251,7 +263,13 @@ export function start({ port, token, tls }) {
   const CHUNK = 256 * 1024;
 
   function resolvePath(p) {
-    return p && String(p).trim() ? path.resolve(String(p).replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir();
+    const resolved = p && String(p).trim() ? path.resolve(String(p).replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir();
+    // Security: prevent path traversal outside home directory
+    const home = os.homedir();
+    if (!resolved.startsWith(home)) {
+      throw new Error('Path traversal not allowed');
+    }
+    return resolved;
   }
 
   function listDir(p) {
@@ -356,7 +374,10 @@ export function start({ port, token, tls }) {
     console.log("  PocketDesk daemon");
     console.log(`  local     http${useTls ? "s" : ""}://localhost:${port}`);
     console.log(`  websocket ${scheme}://<this-pc>:${port}/ws`);
-    console.log(`  token     ${token.slice(0, 8)}...${token.slice(-4)}`);
+    // Security: Don't log token in production
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`  token     ${token.slice(0, 8)}...${token.slice(-4)}`);
+    }
     if (useTls) {
       console.log(`  tls       enabled, cert fingerprint ${fp}`);
       console.log(`  pairing   http${useTls ? "s" : ""}://localhost:${port}/pair  (scan the QR from the app)`);
