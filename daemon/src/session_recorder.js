@@ -6,8 +6,8 @@
  * and supports replay with variable speed.
  */
 
-const { EventEmitter } = require('events');
-const crypto = require('crypto');
+import { EventEmitter } from 'node:events';
+import crypto from 'node:crypto';
 
 class SessionRecorder extends EventEmitter {
   constructor() {
@@ -186,11 +186,29 @@ class SessionRecorder extends EventEmitter {
     if (format === 'json') return JSON.stringify(data, null, 2);
     if (format === 'text') return this._exportAsText(session);
     if (format === 'html') return this._exportAsHtml(session);
+    if (format === 'asciicast') return this._exportAsAsciicast(session);
     return data;
   }
 
   deleteSession(sessionId) {
     return this.sessions.delete(sessionId);
+  }
+
+  /**
+   * Asciicast v2 export (asciinema): first line = JSON header, then one JSON
+   * event per line as [elapsedSeconds, "o", data]. Input events are skipped
+   * (secrets never leak into casts); resize events are emitted as "r".
+   */
+  _exportAsAsciicast(session) {
+    const width = session.metadata?.terminalSize?.cols ?? 80;
+    const height = session.metadata?.terminalSize?.rows ?? 24;
+    const lines = [JSON.stringify({ version: 2, width, height, timestamp: Math.floor(session.startTime / 1000) })];
+    for (const ev of session.events) {
+      const t = (ev.timestamp / 1000).toFixed(6);
+      if (ev.type === 'output') lines.push(JSON.stringify([t, 'o', ev.data]));
+      else if (ev.type === 'resize') lines.push(JSON.stringify([t, 'r', `${ev.cols}x${ev.rows}`]));
+    }
+    return lines.join('\n');
   }
 
   _exportAsText(session) {
@@ -357,4 +375,4 @@ class SessionReplayer extends EventEmitter {
   }
 }
 
-module.exports = { SessionRecorder, SessionReplayer };
+export { SessionRecorder, SessionReplayer };

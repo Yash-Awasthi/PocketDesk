@@ -55,7 +55,11 @@ function check(name, cond) {
 }
 
 const waiters = [];
+const seen = []; // every message — next() must match these too, else fast
+                 // senders lose the race against waiter re-registration
 function next(pred, timeoutMs = 15000) {
+  const hit = seen.find(pred);
+  if (hit) return Promise.resolve(hit);
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("timeout waiting for message")), timeoutMs);
     waiters.push({ pred, resolve, timer: t });
@@ -65,15 +69,18 @@ function send(o) {
   ws.send(JSON.stringify(o));
 }
 async function collect(preds, timeoutMs = 15000) {
-  // resolves when every pred has matched at least once; returns array of first matches
+  // Resolves when every pred has matched at least once; returns array of first
+  // matches. Scans the seen log forward from a cursor so already-matched
+  // messages can't starve the remaining preds.
   const got = new Array(preds.length).fill(null);
   const deadline = Date.now() + timeoutMs;
-  while (got.some((g) => g === null)) {
-    if (Date.now() > deadline) throw new Error("timeout collecting chat events");
-    const m = await Promise.race([
-      next((x) => preds.some((p, i) => p(x)), 2000).catch(() => null),
-    ]);
-    if (!m) continue;
+  for (let idx = 0; got.some((g) => g === null); ) {
+    if (idx >= seen.length) {
+      if (Date.now() > deadline) throw new Error("timeout collecting chat events");
+      await new Promise((r) => setTimeout(r, 100));
+      continue;
+    }
+    const m = seen[idx++];
     for (let i = 0; i < preds.length; i++) {
       if (got[i] === null && preds[i](m)) got[i] = m;
     }
@@ -88,6 +95,7 @@ async function run() {
     await new Promise((res) => ws.on("open", res));
     ws.on("message", (raw) => {
       const m = JSON.parse(raw.toString());
+      seen.push(m);
       const i = waiters.findIndex((w) => w.pred(m));
       if (i >= 0) {
         const [w] = waiters.splice(i, 1);
@@ -120,7 +128,9 @@ async function run() {
     check("result flips state to idle", Boolean(doneEv));
 
     send({ type: "attach", id });
-    const replay = await next((m) => m.type === "chatreplay");
+    // a first, empty chatreplay went out at session creation — wait for the
+    // populated replay that this attach triggers
+    const replay = await next((m) => m.type === "chatreplay" && m.id === id && m.items.length > 0);
     check(
       "attach replays full transcript",
       replay.id === id && replay.items.some((i) => i.role === "user") && replay.items.some((i) => i.role === "tool"),

@@ -1,14 +1,12 @@
 /**
- * Auth plugin — optional token-based auth for WebSocket connections.
+ * Auth plugin — early gate in front of the built-in handshake in server.js.
  *
- * When enabled, clients must send a "hello" message with a valid token
- * within the timeout window. This replaces the built-in auth in server.js
- * with a more configurable version.
+ * Blocks pre-auth traffic before it reaches the server handler. The hello →
+ * welcome exchange itself stays with server.js (constant-time compare, rate
+ * limiting, close codes) — this plugin never marks the socket authed.
  *
  * Config:
  *   token: the required auth token (from daemon --token)
- *   timeout: auth timeout in ms (default 10000)
- *   allowAnonymous: allow connections without token (default false)
  */
 export default {
   name: "auth",
@@ -16,30 +14,16 @@ export default {
   hooks: ["init", "onMessage"],
 
   _token: null,
-  _timeout: 10_000,
-  _authenticated: new WeakSet(),
 
   init(ctx) {
     this._token = ctx.config?.token;
-    this._timeout = ctx.config?.authTimeout || 10_000;
   },
 
   onMessage(ctx, ws, msg) {
-    // If already authenticated, pass through
-    if (ws._authed) return;
-
-    // Only handle "hello" messages
-    if (msg.type !== "hello") {
-      return { block: true };
-    }
-
-    // Validate token
-    if (this._token && msg.token !== this._token) {
-      return { block: true };
-    }
-
-    // Token valid — mark as authed
-    ws._authed = true;
-    return undefined; // let server.js handle the welcome
+    if (ws._authed) return; // post-auth: pass through
+    if (msg.type !== "hello") return { block: true }; // nothing leaks pre-auth
+    // Wrong-token hellos MUST reach server.js: it owns the close contract
+    // (4003 bad token, 4029 rate limit) that clients depend on.
+    return undefined;
   },
 };

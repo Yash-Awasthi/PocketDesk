@@ -4,77 +4,38 @@
  * Inspired by remodex-android and rustdesk.
  * Provides screen streaming, input forwarding, and file transfer
  * for remote desktop control.
+ *
+ * NOTE: ported from TS-syntax-in-.js to plain ESM (it could not be imported
+ * under the package's "type": "module" before).
  */
 
-import { createHash, randomBytes } from 'crypto';
-import { EventEmitter } from 'events';
+import { randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 
-// ============================================================================
-// Types
-// ============================================================================
-
-export type DesktopSessionStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
-
-export interface DesktopSession {
-  id: string;
-  hostName: string;
-  hostIp: string;
-  status: DesktopSessionStatus;
-  connectedAt: Date;
-  lastActivity: Date;
-  resolution: { width: number; height: number };
-  fps: number;
-  bandwidth: number;
-  isEncrypted: boolean;
-  quality: 'low' | 'medium' | 'high' | 'ultra';
-}
-
-export interface ScreenFrame {
-  sessionId: string;
-  data: Buffer;
-  width: number;
-  height: number;
-  timestamp: number;
-  frameNumber: number;
-}
-
-export interface InputEvent {
-  type: 'mouse_move' | 'mouse_click' | 'mouse_scroll' | 'key_press' | 'key_release';
-  x?: number;
-  y?: number;
-  button?: number;
-  key?: string;
-  modifiers: string[];
-}
-
-export interface FileTransfer {
-  id: string;
-  sessionId: string;
-  filename: string;
-  size: number;
-  direction: 'upload' | 'download';
-  progress: number;
-  status: 'pending' | 'transferring' | 'completed' | 'error';
-}
-
-// ============================================================================
-// Remote Desktop Bridge Manager
-// ============================================================================
-
+/**
+ * Remote-desktop session manager: session lifecycle, frame buffering,
+ * input forwarding, and file-transfer simulation.
+ */
 export class RemoteDesktopBridgeManager extends EventEmitter {
-  private sessions: Map<string, DesktopSession> = new Map();
-  private frameBuffers: Map<string, ScreenFrame[]> = new Map();
-  private fileTransfers: Map<string, FileTransfer> = new Map();
+  constructor() {
+    super();
+    /** @type {Map<string, object>} */
+    this.sessions = new Map();
+    /** @type {Map<string, object[]>} */
+    this.frameBuffers = new Map();
+    /** @type {Map<string, object>} */
+    this.fileTransfers = new Map();
+  }
 
   /**
-   * Create a new desktop session.
+   * Create a new desktop session (connects asynchronously).
    */
-  createSession(hostName: string, hostIp: string, quality: 'low' | 'medium' | 'high' | 'ultra' = 'medium'): DesktopSession {
-    const session: DesktopSession = {
-      id: randomBytes(16).toString('hex'),
+  createSession(hostName, hostIp, quality = "medium") {
+    const session = {
+      id: randomBytes(16).toString("hex"),
       hostName,
       hostIp,
-      status: 'connecting',
+      status: "connecting",
       connectedAt: new Date(),
       lastActivity: new Date(),
       resolution: { width: 1920, height: 1080 },
@@ -89,32 +50,31 @@ export class RemoteDesktopBridgeManager extends EventEmitter {
 
     // Simulate connection
     setTimeout(() => {
-      session.status = 'connected';
-      this.emit('session:connected', session);
+      session.status = "connected";
+      this.emit("session:connected", session);
     }, 500);
 
     return session;
   }
 
   /**
-   * Process a screen frame.
+   * Process a screen frame (buffers the last 30 per session).
    */
-  processFrame(sessionId: string, frame: ScreenFrame): void {
+  processFrame(sessionId, frame) {
     const session = this.sessions.get(sessionId);
-    if (!session || session.status !== 'connected') return;
+    if (!session || session.status !== "connected") return;
 
     session.lastActivity = new Date();
 
     const buffer = this.frameBuffers.get(sessionId) || [];
     buffer.push(frame);
 
-    // Keep only last 30 frames
     while (buffer.length > 30) {
       buffer.shift();
     }
     this.frameBuffers.set(sessionId, buffer);
 
-    this.emit('frame:received', {
+    this.emit("frame:received", {
       sessionId,
       frameNumber: frame.frameNumber,
       timestamp: frame.timestamp,
@@ -122,15 +82,15 @@ export class RemoteDesktopBridgeManager extends EventEmitter {
   }
 
   /**
-   * Send input event to remote desktop.
+   * Send an input event to the remote desktop.
    */
-  sendInput(sessionId: string, event: InputEvent): boolean {
+  sendInput(sessionId, event) {
     const session = this.sessions.get(sessionId);
-    if (!session || session.status !== 'connected') return false;
+    if (!session || session.status !== "connected") return false;
 
     session.lastActivity = new Date();
 
-    this.emit('input:forwarded', {
+    this.emit("input:forwarded", {
       sessionId,
       event,
       timestamp: Date.now(),
@@ -139,116 +99,104 @@ export class RemoteDesktopBridgeManager extends EventEmitter {
   }
 
   /**
-   * Start a file transfer.
+   * Start a file transfer (simulated progress).
    */
-  startFileTransfer(
-    sessionId: string,
-    filename: string,
-    size: number,
-    direction: 'upload' | 'download'
-  ): FileTransfer {
-    const transfer: FileTransfer = {
-      id: randomBytes(8).toString('hex'),
+  startFileTransfer(sessionId, filename, size, direction) {
+    const transfer = {
+      id: randomBytes(8).toString("hex"),
       sessionId,
       filename,
       size,
       direction,
       progress: 0,
-      status: 'pending',
+      status: "pending",
     };
 
     this.fileTransfers.set(transfer.id, transfer);
 
-    // Simulate transfer
-    transfer.status = 'transferring';
+    transfer.status = "transferring";
     const interval = setInterval(() => {
       transfer.progress += 10;
       if (transfer.progress >= 100) {
         transfer.progress = 100;
-        transfer.status = 'completed';
+        transfer.status = "completed";
         clearInterval(interval);
-        this.emit('transfer:completed', transfer);
+        this.emit("transfer:completed", transfer);
       }
-      this.emit('transfer:progress', { transferId: transfer.id, progress: transfer.progress });
+      this.emit("transfer:progress", { transferId: transfer.id, progress: transfer.progress });
     }, 100);
 
     return transfer;
   }
 
   /**
-   * Update session quality.
+   * Update session quality (adjusts fps/resolution presets).
    */
-  updateQuality(sessionId: string, quality: 'low' | 'medium' | 'high' | 'ultra'): boolean {
+  updateQuality(sessionId, quality) {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
 
     session.quality = quality;
 
-    // Adjust FPS and resolution based on quality
     switch (quality) {
-      case 'low':
+      case "low":
         session.fps = 15;
         session.resolution = { width: 640, height: 480 };
         break;
-      case 'medium':
+      case "medium":
         session.fps = 30;
         session.resolution = { width: 1280, height: 720 };
         break;
-      case 'high':
+      case "high":
         session.fps = 60;
         session.resolution = { width: 1920, height: 1080 };
         break;
-      case 'ultra':
+      case "ultra":
         session.fps = 120;
         session.resolution = { width: 2560, height: 1440 };
         break;
     }
 
-    this.emit('quality:updated', { sessionId, quality });
+    this.emit("quality:updated", { sessionId, quality });
     return true;
   }
 
   /**
-   * Disconnect a session.
+   * Disconnect a session and drop its frame buffer.
    */
-  disconnect(sessionId: string): boolean {
+  disconnect(sessionId) {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
 
-    session.status = 'disconnected';
+    session.status = "disconnected";
     this.frameBuffers.delete(sessionId);
-    this.emit('session:disconnected', session);
+    this.emit("session:disconnected", session);
     return true;
   }
 
   /**
-   * Get all active sessions.
+   * Get all connected sessions.
    */
-  getActiveSessions(): DesktopSession[] {
-    return Array.from(this.sessions.values()).filter((s) => s.status === 'connected');
+  getActiveSessions() {
+    return Array.from(this.sessions.values()).filter((s) => s.status === "connected");
   }
 
   /**
    * Get file transfers for a session.
    */
-  getSessionTransfers(sessionId: string): FileTransfer[] {
+  getSessionTransfers(sessionId) {
     return Array.from(this.fileTransfers.values()).filter((t) => t.sessionId === sessionId);
   }
 
   /**
    * Get statistics.
    */
-  getStats(): {
-    totalSessions: number;
-    activeSessions: number;
-    totalTransfers: number;
-    activeTransfers: number;
-  } {
+  getStats() {
     return {
       totalSessions: this.sessions.size,
-      activeSessions: Array.from(this.sessions.values()).filter((s) => s.status === 'connected').length,
+      activeSessions: Array.from(this.sessions.values()).filter((s) => s.status === "connected").length,
       totalTransfers: this.fileTransfers.size,
-      activeTransfers: Array.from(this.fileTransfers.values()).filter((t) => t.status === 'transferring').length,
+      activeTransfers: Array.from(this.fileTransfers.values()).filter((t) => t.status === "transferring").length,
     };
   }
 }

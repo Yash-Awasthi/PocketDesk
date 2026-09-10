@@ -6,7 +6,7 @@
  * assertions, stale status detection, and auto-mode switching.
  */
 
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 
 // --- Constants ---
 
@@ -48,36 +48,32 @@ function getPlatform() {
 class MacosAssertion {
   constructor(logger = console) {
     this.logger = logger;
-    this.assertionId = null;
+    this.child = null;
   }
 
+  // `caffeinate -is` holds a per-process sleep assertion (idle + system sleep);
+  // unlike `pmset -a sleep 0` it never mutates the user's global power settings.
   start(reason) {
-    if (this.assertionId !== null) return;
+    if (this.child) return;
     try {
-      // macOS: use pmset to prevent sleep
-      execSync('pmset -a sleep 0', { stdio: 'ignore' });
-      this.assertionId = Date.now();
-      this.logger.debug(`[power] macOS sleep disabled: ${reason}`);
+      this.child = spawn('caffeinate', ['-is'], { stdio: 'ignore' });
+      this.child.unref();
+      this.logger.debug(`[power] macOS caffeinate started: ${reason}`);
     } catch (e) {
-      this.logger.warn(`[power] Failed to disable macOS sleep: ${e.message}`);
+      this.logger.warn(`[power] Failed to start caffeinate: ${e.message}`);
+      this.child = null;
     }
   }
 
   stop(reason) {
-    if (this.assertionId === null) return;
-    try {
-      execSync('pmset -a sleep 1', { stdio: 'ignore' });
-      this.assertionId = null;
-      this.logger.debug(`[power] macOS sleep restored: ${reason}`);
-    } catch (e) {
-      this.logger.warn(`[power] Failed to restore macOS sleep: ${e.message}`);
-    }
+    if (!this.child) return;
+    try { this.child.kill(); } catch {}
+    this.child = null;
+    this.logger.debug(`[power] macOS caffeinate stopped: ${reason}`);
   }
 
   dispose() {
-    if (this.assertionId !== null) {
-      this.stop('dispose');
-    }
+    this.stop('dispose');
   }
 }
 
@@ -112,30 +108,33 @@ class LinuxAssertion {
 class WindowsAssertion {
   constructor(logger = console) {
     this.logger = logger;
-    this.executed = false;
+    this.child = null;
   }
 
+  // Keep the machine awake with SetThreadExecutionState (ES_CONTINUOUS |
+  // ES_SYSTEM_REQUIRED) held by a helper process. Unlike `powercfg /change`,
+  // this never mutates the user's global power settings and dies with us.
   start(reason) {
-    if (this.executed) return;
+    if (this.child) return;
     try {
-      // Windows: use powercfg to prevent sleep
-      execSync('powercfg /change standby-timeout-ac 0', { stdio: 'ignore' });
-      this.executed = true;
-      this.logger.debug(`[power] Windows standby disabled: ${reason}`);
+      this.child = spawn('powershell.exe', [
+        '-NoProfile', '-NonInteractive', '-Command',
+        "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class RHKeepAwake { [DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint f); }'; " +
+        'while($true) { [RHKeepAwake]::SetThreadExecutionState(2147483649); Start-Sleep -Seconds 60 }',
+      ], { stdio: 'ignore', windowsHide: true });
+      this.child.unref();
+      this.logger.debug(`[power] Windows keep-awake helper started: ${reason}`);
     } catch (e) {
-      this.logger.warn(`[power] Failed to disable Windows standby: ${e.message}`);
+      this.logger.warn(`[power] Failed to start keep-awake helper: ${e.message}`);
+      this.child = null;
     }
   }
 
   stop(reason) {
-    if (!this.executed) return;
-    try {
-      execSync('powercfg /change standby-timeout-ac 30', { stdio: 'ignore' });
-      this.executed = false;
-      this.logger.debug(`[power] Windows standby restored: ${reason}`);
-    } catch (e) {
-      this.logger.warn(`[power] Failed to restore Windows standby: ${e.message}`);
-    }
+    if (!this.child) return;
+    try { this.child.kill(); } catch {}
+    this.child = null;
+    this.logger.debug(`[power] Windows keep-awake helper stopped: ${reason}`);
   }
 
   dispose() {

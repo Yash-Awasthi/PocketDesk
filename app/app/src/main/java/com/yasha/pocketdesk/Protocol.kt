@@ -1,5 +1,6 @@
 package com.yasha.pocketdesk
 
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -40,6 +41,9 @@ data class ChatSummary(
 
 data class FsEntry(val name: String, val isDir: Boolean, val size: Long?)
 
+data class FbSkill(val name: String, val description: String, val dir: String)
+data class FbConfig(val name: String, val size: Long, val mtime: String)
+
 data class FsListing(val path: String, val parent: String?, val items: List<FsEntry>)
 
 sealed interface RhEvent {
@@ -64,6 +68,9 @@ object Proto {
     }
 
     fun attach(id: String) = obj { put("type", "attach"); put("id", id) }
+    fun attachSince(id: String, since: Long) = obj {
+        put("type", "attach"); put("id", id); put("since", since)
+    }
     fun detach(id: String) = obj { put("type", "detach"); put("id", id) }
     fun input(id: String, dataB64: String) = obj {
         put("type", "in"); put("id", id); put("data", dataB64)
@@ -74,6 +81,34 @@ object Proto {
     }
 
     fun kill(id: String) = obj { put("type", "kill"); put("id", id) }
+
+    // ── Freebuff control (fb_*) ──
+    fun fbStatus() = obj { put("type", "fb_status") }
+    fun fbSkillList() = obj { put("type", "fb_skill_list") }
+    fun fbSkillGet(name: String) = obj { put("type", "fb_skill_get"); put("name", name) }
+    fun fbSkillRun(name: String, harness: String, args: String?) = obj {
+        put("type", "fb_skill_run"); put("name", name); put("harness", harness)
+        if (args != null) put("args", args)
+    }
+    fun fbConfigList() = obj { put("type", "fb_config_list") }
+    fun fbConfigGet(name: String) = obj { put("type", "fb_config_get"); put("name", name) }
+    fun fbConfigSet(name: String, patchJson: String) = obj {
+        put("type", "fb_config_set"); put("name", name)
+        put("patch", Json.parseToJsonElement(patchJson))
+    }
+    fun fbAuthStatus() = obj { put("type", "fb_auth_status") }
+    fun fbAuthLogout(restart: Boolean) = obj {
+        put("type", "fb_auth_logout"); put("confirm", "CLEAR"); put("restart", restart)
+    }
+    fun fbAppOpen() = obj { put("type", "fb_app_open") }
+    fun fbAppQuit() = obj { put("type", "fb_app_quit") }
+
+    // ── Model selection ──
+    fun modelList(chatId: String) = obj { put("type", "model_list"); put("id", chatId) }
+    fun chatModelSet(chatId: String, model: String?) = obj {
+        put("type", "chat_model_set"); put("id", chatId)
+        if (model != null) put("model", model)
+    }
 
     fun chatSession(harness: String, cwd: String, prompt: String?) = obj {
         put("type", "chatsession"); put("harness", harness); put("cwd", cwd)
@@ -95,7 +130,9 @@ object Proto {
     }
 
     fun parseTools(el: JsonElement?): List<ToolInfo> {
-        val arr = (el as? JsonObject)?.get("items") as? JsonArray ?: return emptyList()
+        // welcome sends `manifests`; rescan broadcasts send `items`.
+        val o = el as? JsonObject ?: return emptyList()
+        val arr = (o["items"] as? JsonArray) ?: (o["manifests"] as? JsonArray) ?: return emptyList()
         return arr.mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
             val m = o["manifest"] as? JsonObject ?: return@mapNotNull null
@@ -110,7 +147,9 @@ object Proto {
     }
 
     fun parseSessions(el: JsonElement?): List<SessionSummary> {
-        val arr = (el as? JsonObject)?.get("items") as? JsonArray ?: return emptyList()
+        // welcome sends `sessions`; refreshes broadcast `items`.
+        val o = el as? JsonObject ?: return emptyList()
+        val arr = (o["items"] as? JsonArray) ?: (o["sessions"] as? JsonArray) ?: return emptyList()
         return arr.mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
             if (str(o, "kind") == "chat") return@mapNotNull null
@@ -123,7 +162,9 @@ object Proto {
     }
 
     fun parseChats(el: JsonElement?): List<ChatSummary> {
-        val arr = (el as? JsonObject)?.get("items") as? JsonArray ?: return emptyList()
+        // welcome sends `sessions` (mixed kinds); refreshes broadcast `items`.
+        val o = el as? JsonObject ?: return emptyList()
+        val arr = (o["items"] as? JsonArray) ?: (o["sessions"] as? JsonArray) ?: return emptyList()
         return arr.mapNotNull { e ->
             val o = e as? JsonObject ?: return@mapNotNull null
             if (str(o, "kind") != "chat") return@mapNotNull null

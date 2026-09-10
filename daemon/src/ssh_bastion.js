@@ -1,99 +1,30 @@
 /**
- * SSH Bastion — Jump host / transparent SSH bastion server.
+ * SSH Bastion — jump-host / transparent SSH bastion manager.
  *
- * Inspired by sshportal and skerryssh.
- * Provides SSH proxying, session recording, access control,
- * and user/host management.
+ * Inspired by sshportal, ssh_bastion_cardea and skerryssh.
+ * Provides users/hosts registry, access rules (with expiry and time
+ * conditions), session recording and invite tokens. Exposed over the daemon
+ * protocol via the `bastion_*` messages.
  */
-
-import { createHash, randomBytes } from 'crypto';
-import { EventEmitter } from 'events';
-
-// ============================================================================
-// Types
-// ============================================================================
-
-export type AccessLevel = 'readonly' | 'limited' | 'admin' | 'superadmin';
-
-export interface BastionUser {
-  id: string;
-  username: string;
-  email?: string;
-  publicKey: string;
-  accessLevel: AccessLevel;
-  createdAt: Date;
-  lastLogin?: Date;
-  isActive: boolean;
-  allowedHosts: string[];
-  maxSessions: number;
-  tags: string[];
-}
-
-export interface BastionHost {
-  id: string;
-  name: string;
-  hostname: string;
-  port: number;
-  username: string;
-  group: string;
-  tags: string[];
-  createdAt: Date;
-  lastConnected?: Date;
-  isActive: boolean;
-  requiresJumpHost?: string;
-  environment: Record<string, string>;
-}
-
-export interface SessionRecord {
-  id: string;
-  userId: string;
-  hostId: string;
-  startTime: Date;
-  endTime?: Date;
-  clientIp: string;
-  inputBytes: number;
-  outputBytes: number;
-  commandCount: number;
-  isActive: boolean;
-  recordingPath?: string;
-}
-
-export interface AccessRule {
-  id: string;
-  userId: string;
-  hostId: string;
-  accessLevel: AccessLevel;
-  allowed: boolean;
-  createdAt: Date;
-  expiresAt?: Date;
-  conditions?: {
-    timeOfDay?: { start: string; end: string };
-    dayOfWeek?: number[];
-    maxDuration?: number;
-  };
-}
-
-// ============================================================================
-// SSH Bastion
-// ============================================================================
+import { createHash, randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 
 export class SSHBastion extends EventEmitter {
-  private users: Map<string, BastionUser> = new Map();
-  private hosts: Map<string, BastionHost> = new Map();
-  private sessions: Map<string, SessionRecord> = new Map();
-  private accessRules: Map<string, AccessRule> = new Map();
+  constructor() {
+    super();
+    this.users = new Map();
+    this.hosts = new Map();
+    this.sessions = new Map();
+    this.accessRules = new Map();
+    this.invites = new Map();
+  }
 
   /**
    * Register a new user.
    */
-  registerUser(
-    username: string,
-    publicKey: string,
-    accessLevel: AccessLevel = 'limited',
-    email?: string
-  ): BastionUser {
-    const user: BastionUser = {
-      id: randomBytes(8).toString('hex'),
+  registerUser(username, publicKey, accessLevel = "limited", email) {
+    const user = {
+      id: randomBytes(8).toString("hex"),
       username,
       email,
       publicKey,
@@ -101,27 +32,20 @@ export class SSHBastion extends EventEmitter {
       createdAt: new Date(),
       isActive: true,
       allowedHosts: [],
-      maxSessions: accessLevel === 'admin' ? 10 : accessLevel === 'superadmin' ? 50 : 3,
+      maxSessions: accessLevel === "admin" ? 10 : accessLevel === "superadmin" ? 50 : 3,
       tags: [],
     };
-
     this.users.set(user.id, user);
-    this.emit('user:registered', user);
+    this.emit("user:registered", user);
     return user;
   }
 
   /**
    * Register a new host.
    */
-  registerHost(
-    name: string,
-    hostname: string,
-    port: number,
-    username: string,
-    group: string = 'default'
-  ): BastionHost {
-    const host: BastionHost = {
-      id: randomBytes(8).toString('hex'),
+  registerHost(name, hostname, port, username, group = "default") {
+    const host = {
+      id: randomBytes(8).toString("hex"),
       name,
       hostname,
       port,
@@ -132,81 +56,76 @@ export class SSHBastion extends EventEmitter {
       isActive: true,
       environment: {},
     };
-
     this.hosts.set(host.id, host);
-    this.emit('host:registered', host);
+    this.emit("host:registered", host);
     return host;
   }
 
   /**
-   * Create an access rule.
+   * Create an access rule (explicit allow/deny for a user→host pair).
    */
-  createAccessRule(
-    userId: string,
-    hostId: string,
-    accessLevel: AccessLevel,
-    allowed: boolean = true
-  ): AccessRule {
-    const rule: AccessRule = {
-      id: randomBytes(8).toString('hex'),
+  createAccessRule(userId, hostId, accessLevel, allowed = true, options = {}) {
+    const rule = {
+      id: randomBytes(8).toString("hex"),
       userId,
       hostId,
       accessLevel,
       allowed,
       createdAt: new Date(),
+      expiresAt: options.expiresAt ? new Date(options.expiresAt) : undefined,
+      conditions: options.conditions,
     };
-
     this.accessRules.set(rule.id, rule);
+    this.emit("access:created", rule);
     return rule;
   }
 
   /**
    * Check if a user can access a host.
    */
-  canAccess(userId: string, hostId: string): { allowed: boolean; reason: string } {
+  canAccess(userId, hostId) {
     const user = this.users.get(userId);
     const host = this.hosts.get(hostId);
 
-    if (!user || !user.isActive) return { allowed: false, reason: 'User not found or inactive' };
-    if (!host || !host.isActive) return { allowed: false, reason: 'Host not found or inactive' };
+    if (!user || !user.isActive) return { allowed: false, reason: "User not found or inactive" };
+    if (!host || !host.isActive) return { allowed: false, reason: "Host not found or inactive" };
 
-    // Check explicit rules
+    // Explicit rules win (first match); expired rules deny.
     for (const rule of this.accessRules.values()) {
       if (rule.userId === userId && rule.hostId === hostId) {
         if (rule.expiresAt && rule.expiresAt < new Date()) {
-          return { allowed: false, reason: 'Access rule expired' };
+          return { allowed: false, reason: "Access rule expired" };
         }
-        return { allowed: rule.allowed, reason: rule.allowed ? 'Access granted by rule' : 'Access denied by rule' };
+        return { allowed: rule.allowed, reason: rule.allowed ? "Access granted by rule" : "Access denied by rule" };
       }
     }
 
-    // Check host group access
+    // Host-group access falls back to the user's allowedHosts.
     if (user.allowedHosts.includes(host.group)) {
-      return { allowed: true, reason: 'Access granted by host group' };
+      return { allowed: true, reason: "Access granted by host group" };
     }
 
-    // Default: deny
-    return { allowed: false, reason: 'No matching access rule' };
+    return { allowed: false, reason: "No matching access rule" };
   }
 
   /**
-   * Start a session.
+   * Start a session (denied unless canAccess passes and the user is under
+   * their session limit).
    */
-  startSession(userId: string, hostId: string, clientIp: string): SessionRecord | null {
+  startSession(userId, hostId, clientIp) {
     const access = this.canAccess(userId, hostId);
     if (!access.allowed) return null;
 
     const user = this.users.get(userId);
     if (!user) return null;
 
-    // Check session limit
     const activeSessions = Array.from(this.sessions.values()).filter(
       (s) => s.userId === userId && s.isActive
     );
     if (activeSessions.length >= user.maxSessions) return null;
 
-    const session: SessionRecord = {
-      id: randomBytes(8).toString('hex'),
+    const session = {
+      id: randomBytes(8).toString("hex"),
       userId,
       hostId,
       startTime: new Date(),
@@ -219,36 +138,27 @@ export class SSHBastion extends EventEmitter {
 
     this.sessions.set(session.id, session);
     user.lastLogin = new Date();
-    this.emit('session:started', session);
+    this.emit("session:started", session);
     return session;
   }
 
-  /**
-   * End a session.
-   */
-  endSession(sessionId: string): boolean {
+  endSession(sessionId) {
     const session = this.sessions.get(sessionId);
     if (!session || !session.isActive) return false;
 
     session.endTime = new Date();
     session.isActive = false;
-    this.emit('session:ended', session);
+    this.emit("session:ended", session);
     return true;
   }
 
-  /**
-   * Get active sessions for a user.
-   */
-  getActiveSessions(userId: string): SessionRecord[] {
+  getActiveSessions(userId) {
     return Array.from(this.sessions.values()).filter(
       (s) => s.userId === userId && s.isActive
     );
   }
 
-  /**
-   * Get session history for a host.
-   */
-  getHostSessions(hostId: string, limit: number = 50): SessionRecord[] {
+  getHostSessions(hostId, limit = 50) {
     return Array.from(this.sessions.values())
       .filter((s) => s.hostId === hostId)
       .sort((a, b) => b.startTime.getTime() - a.startTime.getTime())
@@ -256,56 +166,41 @@ export class SSHBastion extends EventEmitter {
   }
 
   /**
-   * Generate user invite token.
+   * Generate a user invite token (stored so acceptInvite can validate it).
    */
-  generateInviteToken(email: string, accessLevel: AccessLevel = 'limited'): string {
+  generateInviteToken(email, accessLevel = "limited") {
     const payload = `${email}:${accessLevel}:${Date.now()}`;
-    const token = createHash('sha256').update(payload).digest('hex');
-    return token.slice(0, 32);
+    const token = createHash("sha256").update(payload).digest("hex").slice(0, 32);
+    this.invites.set(token, { email, accessLevel, createdAt: new Date(), used: false });
+    return token;
   }
 
   /**
-   * Accept an invite token.
+   * Accept an invite token (validates against generated invites).
    */
-  acceptInvite(
-    token: string,
-    username: string,
-    publicKey: string
-  ): BastionUser | null {
-    // In production, validate token against stored invites
-    // For now, create user directly
-    return this.registerUser(username, publicKey, 'limited');
+  acceptInvite(token, username, publicKey) {
+    const invite = this.invites.get(token);
+    if (!invite || invite.used) return null;
+    invite.used = true;
+    return this.registerUser(username, publicKey, invite.accessLevel, invite.email);
   }
 
-  /**
-   * List all users.
-   */
-  listUsers(): BastionUser[] {
+  listUsers() {
     return Array.from(this.users.values());
   }
 
-  /**
-   * List all hosts.
-   */
-  listHosts(): BastionHost[] {
+  listHosts() {
     return Array.from(this.hosts.values());
   }
 
-  /**
-   * Get statistics.
-   */
-  getStats(): {
-    totalUsers: number;
-    activeUsers: number;
-    totalHosts: number;
-    activeHosts: number;
-    activeSessions: number;
-    totalSessions: number;
-  } {
+  listAccessRules() {
+    return Array.from(this.accessRules.values());
+  }
+
+  getStats() {
     const users = Array.from(this.users.values());
     const hosts = Array.from(this.hosts.values());
     const sessions = Array.from(this.sessions.values());
-
     return {
       totalUsers: users.length,
       activeUsers: users.filter((u) => u.isActive).length,

@@ -4,65 +4,42 @@
  * Inspired by whatsapp-claude-plugin.
  * Connects to WhatsApp as a linked device and exposes it
  * as a messaging channel for terminal interaction.
+ *
+ * NOTE: ported from TS-syntax-in-.js to plain ESM (it could not be imported
+ * under the package's "type": "module" before). The auth state machine was
+ * also fixed: `markReady()` bridges authenticated → ready (nothing set
+ * `ready` before, so incoming messages were permanently gated).
+ * Real WhatsApp transport (baileys) remains roadmap — this is the
+ * daemon-side channel/session surface.
  */
 
-import { createHash, randomBytes } from 'crypto';
-import { EventEmitter } from 'events';
+import { randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 
-// ============================================================================
-// Types
-// ============================================================================
-
-export type WhatsAppStatus = 'disconnected' | 'qr_pending' | 'authenticated' | 'ready' | 'error';
-
-export interface WhatsAppMessage {
-  id: string;
-  from: string;
-  to: string;
-  body: string;
-  timestamp: Date;
-  isGroup: boolean;
-  groupId?: string;
-  mediaUrl?: string;
-  mediaType?: string;
-}
-
-export interface WhatsAppChannel {
-  id: string;
-  status: WhatsAppStatus;
-  phoneNumber: string;
-  connectedAt?: Date;
-  lastMessageAt?: Date;
-  sessionId: string;
-  messageCount: number;
-}
-
-export interface ChannelConfig {
-  sessionId: string;
-  allowedNumbers: string[];
-  commandPrefix: string;
-  autoReply: boolean;
-  maxMessageLength: number;
-}
-
-// ============================================================================
-// WhatsApp Bridge Manager
-// ============================================================================
-
+/**
+ * WhatsApp channel manager: QR auth lifecycle, allowlisted message intake,
+ * command-prefix dispatch, replies, and history.
+ */
 export class WhatsAppBridgeManager extends EventEmitter {
-  private channels: Map<string, WhatsAppChannel> = new Map();
-  private messages: Map<string, WhatsAppMessage[]> = new Map();
-  private configs: Map<string, ChannelConfig> = new Map();
-  private qrCode: string | null = null;
+  constructor() {
+    super();
+    /** @type {Map<string, object>} */
+    this.channels = new Map();
+    /** @type {Map<string, object[]>} */
+    this.messages = new Map();
+    /** @type {Map<string, object>} */
+    this.configs = new Map();
+    this.qrCode = null;
+  }
 
   /**
-   * Create a new WhatsApp channel.
+   * Create a new WhatsApp channel bound to a session.
    */
-  createChannel(sessionId: string, config?: Partial<ChannelConfig>): WhatsAppChannel {
-    const channel: WhatsAppChannel = {
-      id: randomBytes(8).toString('hex'),
-      status: 'disconnected',
-      phoneNumber: '',
+  createChannel(sessionId, config = {}) {
+    const channel = {
+      id: randomBytes(8).toString("hex"),
+      status: "disconnected",
+      phoneNumber: "",
       sessionId,
       messageCount: 0,
     };
@@ -70,10 +47,10 @@ export class WhatsAppBridgeManager extends EventEmitter {
     this.channels.set(channel.id, channel);
     this.configs.set(channel.id, {
       sessionId,
-      allowedNumbers: config?.allowedNumbers || [],
-      commandPrefix: config?.commandPrefix || '!',
-      autoReply: config?.autoReply ?? true,
-      maxMessageLength: config?.maxMessageLength || 4096,
+      allowedNumbers: config.allowedNumbers || [],
+      commandPrefix: config.commandPrefix || "!",
+      autoReply: config.autoReply ?? true,
+      maxMessageLength: config.maxMessageLength || 4096,
     });
     this.messages.set(channel.id, []);
 
@@ -83,38 +60,50 @@ export class WhatsAppBridgeManager extends EventEmitter {
   /**
    * Start QR code authentication.
    */
-  startAuthentication(channelId: string): string | null {
+  startAuthentication(channelId) {
     const channel = this.channels.get(channelId);
     if (!channel) return null;
 
-    channel.status = 'qr_pending';
-    this.qrCode = randomBytes(32).toString('base64');
-    this.emit('auth:qr', { channelId, qr: this.qrCode });
+    channel.status = "qr_pending";
+    this.qrCode = randomBytes(32).toString("base64");
+    this.emit("auth:qr", { channelId, qr: this.qrCode });
     return this.qrCode;
   }
 
   /**
    * Complete authentication (called after QR scan).
    */
-  completeAuthentication(channelId: string, phoneNumber: string): boolean {
+  completeAuthentication(channelId, phoneNumber) {
     const channel = this.channels.get(channelId);
-    if (!channel || channel.status !== 'qr_pending') return false;
+    if (!channel || channel.status !== "qr_pending") return false;
 
-    channel.status = 'authenticated';
+    channel.status = "authenticated";
     channel.phoneNumber = phoneNumber;
     channel.connectedAt = new Date();
     this.qrCode = null;
 
-    this.emit('auth:completed', channel);
+    this.emit("auth:completed", channel);
+    return true;
+  }
+
+  /**
+   * Mark an authenticated channel ready (handshake complete).
+   */
+  markReady(channelId) {
+    const channel = this.channels.get(channelId);
+    if (!channel || channel.status !== "authenticated") return false;
+
+    channel.status = "ready";
+    this.emit("channel:ready", channel);
     return true;
   }
 
   /**
    * Handle incoming message.
    */
-  handleMessage(channelId: string, message: WhatsAppMessage): void {
+  handleMessage(channelId, message) {
     const channel = this.channels.get(channelId);
-    if (!channel || channel.status !== 'ready') return;
+    if (!channel || channel.status !== "ready") return;
 
     const config = this.configs.get(channelId);
     if (!config) return;
@@ -134,14 +123,14 @@ export class WhatsAppBridgeManager extends EventEmitter {
     // Check if it's a command
     if (message.body.startsWith(config.commandPrefix)) {
       const command = message.body.slice(config.commandPrefix.length).trim();
-      this.emit('command:received', {
+      this.emit("command:received", {
         channelId,
         messageId: message.id,
         from: message.from,
         command,
       });
     } else {
-      this.emit('message:received', {
+      this.emit("message:received", {
         channelId,
         message,
       });
@@ -151,18 +140,17 @@ export class WhatsAppBridgeManager extends EventEmitter {
   /**
    * Send a reply message.
    */
-  sendReply(channelId: string, to: string, body: string): boolean {
+  sendReply(channelId, to, body) {
     const channel = this.channels.get(channelId);
-    if (!channel || channel.status !== 'ready') return false;
+    if (!channel || channel.status !== "ready") return false;
 
     const config = this.configs.get(channelId);
     if (!config) return false;
 
-    // Truncate if too long
     const truncated = body.slice(0, config.maxMessageLength);
 
-    const reply: WhatsAppMessage = {
-      id: randomBytes(8).toString('hex'),
+    const reply = {
+      id: randomBytes(8).toString("hex"),
       from: channel.phoneNumber,
       to,
       body: truncated,
@@ -174,21 +162,21 @@ export class WhatsAppBridgeManager extends EventEmitter {
     messages.push(reply);
     this.messages.set(channelId, messages);
 
-    this.emit('message:sent', { channelId, message: reply });
+    this.emit("message:sent", { channelId, message: reply });
     return true;
   }
 
   /**
    * Send a command response.
    */
-  sendCommandResponse(channelId: string, to: string, command: string, response: string): boolean {
+  sendCommandResponse(channelId, to, command, response) {
     return this.sendReply(channelId, to, `*${command}*\n${response}`);
   }
 
   /**
    * Get message history for a channel.
    */
-  getMessages(channelId: string, limit: number = 50): WhatsAppMessage[] {
+  getMessages(channelId, limit = 50) {
     const messages = this.messages.get(channelId) || [];
     return messages.slice(-limit);
   }
@@ -196,36 +184,32 @@ export class WhatsAppBridgeManager extends EventEmitter {
   /**
    * Disconnect a channel.
    */
-  disconnect(channelId: string): boolean {
+  disconnect(channelId) {
     const channel = this.channels.get(channelId);
     if (!channel) return false;
 
-    channel.status = 'disconnected';
-    this.emit('channel:disconnected', channel);
+    channel.status = "disconnected";
+    this.emit("channel:disconnected", channel);
     return true;
   }
 
   /**
    * Get all channels.
    */
-  getChannels(): WhatsAppChannel[] {
+  getChannels() {
     return Array.from(this.channels.values());
   }
 
   /**
    * Get statistics.
    */
-  getStats(): {
-    totalChannels: number;
-    activeChannels: number;
-    totalMessages: number;
-  } {
+  getStats() {
     const channels = Array.from(this.channels.values());
     const totalMessages = channels.reduce((sum, c) => sum + c.messageCount, 0);
 
     return {
       totalChannels: channels.length,
-      activeChannels: channels.filter((c) => c.status === 'ready').length,
+      activeChannels: channels.filter((c) => c.status === "ready").length,
       totalMessages,
     };
   }

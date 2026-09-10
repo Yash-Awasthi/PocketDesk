@@ -1,18 +1,23 @@
 /**
  * Session Monitor — real-time session status tracking.
  * Extracted from c9watch — process scanning, session discovery, status tracking.
+ *
+ * NOTE: ported from CJS to ESM (it could not be imported under the package's
+ * "type": "module" before). History persists under the daemon data dir
+ * (POCKETDESK_DATA), not a hardcoded ~/.pocketdesk.
  */
 
-const { execSync, spawn } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-const EventEmitter = require('events');
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { EventEmitter } from "node:events";
 
 const SESSION_SCAN_INTERVAL = 5000;
-const SESSION_HISTORY_FILE = path.join(os.homedir(), '.pocketdesk', 'session_history.json');
+const DATA_DIR = process.env.POCKETDESK_DATA || ".pocketdesk";
+const SESSION_HISTORY_FILE = path.join(os.homedir(), DATA_DIR, "session_history.json");
 
-class SessionMonitor extends EventEmitter {
+export class SessionMonitor extends EventEmitter {
   constructor() {
     super();
     this.sessions = new Map();
@@ -22,6 +27,7 @@ class SessionMonitor extends EventEmitter {
   }
 
   start() {
+    if (this.scanTimer) return;
     this.scanTimer = setInterval(() => this.scanSessions(), SESSION_SCAN_INTERVAL);
     this.scanSessions();
   }
@@ -36,37 +42,37 @@ class SessionMonitor extends EventEmitter {
   scanSessions() {
     const currentPids = new Set();
     try {
-      const output = execSync('tasklist /FO CSV /NH 2>NUL || ps aux 2>/dev/null', {
-        encoding: 'utf-8',
+      const output = execSync("tasklist /FO CSV /NH 2>NUL || ps aux 2>/dev/null", {
+        encoding: "utf-8",
         timeout: 5000,
       });
 
-      const lines = output.split('\n').filter(Boolean);
+      const lines = output.split("\n").filter(Boolean);
       for (const line of lines) {
-        const parts = line.split(',').map(s => s.replace(/"/g, '').trim());
-        const processName = parts[0]?.toLowerCase() || '';
+        const parts = line.split(",").map((s) => s.replace(/"/g, "").trim());
+        const processName = parts[0]?.toLowerCase() || "";
         const pid = parseInt(parts[1]);
 
-        if (processName.includes('node') || processName.includes('claude') || processName.includes('python')) {
+        if (processName.includes("node") || processName.includes("claude") || processName.includes("python")) {
           if (!isNaN(pid)) {
             currentPids.add(pid);
             if (!this.sessions.has(pid)) {
               const session = this.createSession(pid, processName);
               this.sessions.set(pid, session);
-              this.emit('session:discovered', session);
+              this.emit("session:discovered", session);
             }
           }
         }
       }
-    } catch (e) {
+    } catch {
       // Fallback: check common ports
     }
 
     for (const [pid, session] of this.sessions) {
       if (!currentPids.has(pid)) {
-        session.status = 'terminated';
+        session.status = "terminated";
         session.terminatedAt = Date.now();
-        this.emit('session:terminated', session);
+        this.emit("session:terminated", session);
         this.history.push(session);
         this.sessions.delete(pid);
         this.saveHistory();
@@ -79,7 +85,7 @@ class SessionMonitor extends EventEmitter {
       id: `session-${pid}-${Date.now()}`,
       pid,
       processName,
-      status: 'active',
+      status: "active",
       createdAt: Date.now(),
       messageCount: 0,
       metadata: {},
@@ -90,7 +96,7 @@ class SessionMonitor extends EventEmitter {
     const session = this.sessions.get(pid);
     if (session) {
       Object.assign(session, updates);
-      this.emit('session:updated', session);
+      this.emit("session:updated", session);
     }
   }
 
@@ -102,7 +108,7 @@ class SessionMonitor extends EventEmitter {
   }
 
   getActiveSessions() {
-    return Array.from(this.sessions.values()).filter(s => s.status === 'active');
+    return Array.from(this.sessions.values()).filter((s) => s.status === "active");
   }
 
   getHistory(limit = 50) {
@@ -122,9 +128,9 @@ class SessionMonitor extends EventEmitter {
   loadHistory() {
     try {
       if (fs.existsSync(SESSION_HISTORY_FILE)) {
-        this.history = JSON.parse(fs.readFileSync(SESSION_HISTORY_FILE, 'utf-8'));
+        this.history = JSON.parse(fs.readFileSync(SESSION_HISTORY_FILE, "utf-8"));
       }
-    } catch (e) {
+    } catch {
       this.history = [];
     }
   }
@@ -134,10 +140,8 @@ class SessionMonitor extends EventEmitter {
       const dir = path.dirname(SESSION_HISTORY_FILE);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(SESSION_HISTORY_FILE, JSON.stringify(this.history.slice(-500), null, 2));
-    } catch (e) {
+    } catch {
       // Silent fail
     }
   }
 }
-
-module.exports = { SessionMonitor };

@@ -1,9 +1,9 @@
-"""
-Tunnel management from cli-tunnel — port forwarding and remote access.
-"""
-const net = require('net');
-const crypto = require('crypto');
-const EventEmitter = require('events');
+/**
+ * Tunnel management from cli-tunnel — port forwarding and remote access.
+ */
+import net from 'node:net';
+import crypto from 'node:crypto';
+import { EventEmitter } from 'node:events';
 
 class TunnelManager extends EventEmitter {
     constructor(options = {}) {
@@ -56,4 +56,4 @@ class TunnelManager extends EventEmitter {
     }
 }
 
-module.exports = { TunnelManager };
+export { TunnelManager };

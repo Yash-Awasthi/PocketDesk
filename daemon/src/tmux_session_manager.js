@@ -18,6 +18,20 @@ function tmuxArgs(args) {
   return TMUX_SOCKET ? ['-L', TMUX_SOCKET, ...args] : args;
 }
 
+let _available = null;
+
+/** Whether the tmux binary is installed (cached; never throws). */
+export async function isAvailable() {
+  if (_available !== null) return _available;
+  try {
+    await execFileP(TMUX_BIN, ['-V'], { encoding: 'utf8' });
+    _available = true;
+  } catch {
+    _available = false;
+  }
+  return _available;
+}
+
 /**
  * List all active tmux sessions with metadata.
  * Returns array of { id, name, created, attached, windows, command }
@@ -93,6 +107,21 @@ export async function sendKeys(name, keys) {
     await execFileP(TMUX_BIN, tmuxArgs([
       'send-keys', '-t', name, keys, 'Enter'
     ]), { encoding: 'utf8' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Respawn a pane's command (tmux remain-on-exit pattern): restart the pane's
+ * process without destroying the session. `cmd` optional — reuses the last.
+ */
+export async function respawnPane(name, cmd) {
+  try {
+    const args = tmuxArgs(['respawn-pane', '-t', name]);
+    if (cmd) args.push(cmd);
+    await execFileP(TMUX_BIN, args, { encoding: 'utf8' });
     return true;
   } catch {
     return false;

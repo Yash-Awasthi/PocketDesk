@@ -7,6 +7,11 @@
   "chat": {
     "args": ["-p", "--output-format", "stream-json", "--verbose"],
     "format": "claude-stream-json",
-    "resumeArgs": ["--continue", "-p", "--output-format", "stream-json", "--verbose"]
+    "resumeArgs": ["--continue", "-p", "--output-format", "stream-json", "--verbose"],
+    "models": {
+      "opus": { "args": ["--model", "claude-opus-4-1"] },
+      "sonnet": { "args": ["--model", "claude-sonnet-4-5"] },
+      "haiku": { "args": ["--model", "claude-haiku-4-5"] }
+    }
   }
 }

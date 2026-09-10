@@ -273,7 +273,7 @@ class TerminalRenderer {
     }
 }
 
-module.exports = {
+export {
     TerminalRenderer,
     VTParser,
     charWidth,

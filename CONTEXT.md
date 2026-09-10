@@ -1,6 +1,7 @@
 # PocketDesk — Session Context
 
-Date: 2026-08-24. Repo: `C:\Users\yasha\Desktop\PROJECTS\PocketDesk` (git initialized, 6 commits on master).
+Date: 2026-09-08 (state section refreshed; original notes 2026-08-24). Repo:
+`C:\Users\yasha\PROJECTS\PROJECTS\PocketDesk`.
 
 ## What the project is
 
@@ -45,20 +46,46 @@ prompt always via stdin. claude: `-p --output-format stream-json --verbose` +
 `--continue` resume; codex: `exec --json -` + `exec resume --last`; opencode/gemini/qwen:
 text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
 
-## State at save (IMPORTANT — mid-task)
+## State at save (IMPORTANT — current)
 
-1. Just exported `sendUserMessage` in chat.js (was unexported → TypeError in smoke-chat).
-   **Not yet re-run**: `npm.cmd test` must go ALL PASS ×2 before commit. Commit pending for:
-   chat engine, manifests chat configs, smoke-chat.mjs, /pair page + static /vendor serving,
-   buildPairPage wiring in server.listen.
-2. TODO next (user-approved scope): `launch` adapter in registry/server (GUI apps open on
-   PC screen) + VS Code tunnel adapter (`code tunnel`, parse URL from stdout, broadcast
-   {type:"tunnel",id,url}) + vscode.json manifest + ToolsScreen Launch/Open buttons;
-   App: WsClient transcript state + RhEvent additions, ChatScreen UI, nav tabs
-   Chats(default)/Terminals/Tools, zxing-embedded QR scan + pocketdesk:// deep link
-   intent-filter, attachments→`.rh-uploads/<name>` mention in prompt; root one-shot
-   `install.ps1` (npm install → setup-tls → install-service → start → open /pair);
-   README update.
+0. 2026-09-10 absorption sweep (this workstream's current head): every one of the 241
+   corpus repos is processed, then **rechecked one-by-one** (README + feature lists
+   re-investigated per repo; repos renamed back from `done_<repo>` as they cleared).
+   The recheck added chat forking, BYOK env profiles, plan mode, attention-first
+   session ordering, Mattermost push, and fixed a latent `_execSync` crash in the
+   mux_* protocol surface. All repos are accounted for in `docs/ABSORPTION-LEDGER.md` (per-repo
+   rows: absorbed ✅ / already-covered ⚙️ / module-present 🧩 / reference-only ➖).
+   New daemon modules wired this pass: prompt_queue (queued follow-ups, auto-drain),
+   agent_todos (todo boards, markdown-derived), scheduler (interval/once/count jobs,
+   persisted), mentions (@file expansion in prompts), doctor (self-diagnosis),
+   wake_on_lan, approval_guard (run-level auto-deny, RH_APPROVAL_TIMEOUT_MS),
+   mcp_server (embedded MCP endpoint, RH_MCP_PORT), live_digest (digest_attach row
+   diffs), stats_usage (usage_list/usage_get from stream usage fields).
+   App side: ReconnectPolicy (exp backoff + jitter) + WsClient auto-reconnect and
+   since-reattach — the last 🧩 row is now ✅. `npm.cmd test` = 22 files / 202 checks
+   ALL PASS (absorb.test.mjs added; features.test.mjs quiet test made deterministic
+   via RH_QUIET_MS=3000 and its broken imports/summary fixed). `assembleDebug` builds
+   clean (fixed pre-existing Chat-icon + TunnelManager errors too). Corpus repos are
+   being renamed done_<repo> after processing.
+1. The inspiration-corpus absorption pass (tracked in `docs/FEATURE-MATRIX.md`) is the
+   active workstream. 2026-09-08 slices (all wired, tested, matrix-updated): relay link,
+   tmux session manager (graceful gate), terminal digest render, agent orchestrator
+   (`agent_*`), LAN file transfer (LocalSend v2, byte-verified e2e), file sync engine
+   (TS→ESM), stream JSON parser (TS→ESM), QR session sharing (phone connects directly
+   to a relay port with `?token=`), session monitor (real process discovery + crash
+   history), shooter notifications (coalescing/dedupe/telemetry — two latent bugs
+   fixed), fleet view (TS→ESM, agent states project into the grid), session
+   multiplexer (tmux gate), remote desktop bridge (TS→ESM), WhatsApp channel surface
+   (TS→ESM + fixed unreachable `ready` state; e2e drives a real REPL from an
+   allowlisted number).2. **`npm.cmd test` is ALL PASS ×3** (now 22 test files incl. absorb.test.mjs) — the
+   whole uncommitted batch is green, uncommitted on master for review. Modules ported from CJS/TS-in-.js to
+   working ESM this pass: relay_server, terminal_renderer, file_sync_engine,
+   stream_json_parser, session_monitor, shooter_notifications, fleet_view,
+   remote_desktop_bridge, whatsapp_bridge.
+3. TODO next (matrix): all 🧩 rows are ✅ now; remaining 🗺️ surfaces: full WebRTC
+   screen transport (rd_* currently simulates frames), real baileys WhatsApp transport
+   (wa_* is the daemon-side channel surface), mosh-style UDP roam, E2EE shares,
+   Android foreground service + biometric lock.
 
 ## Environment facts
 
