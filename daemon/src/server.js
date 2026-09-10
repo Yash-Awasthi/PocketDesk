@@ -1563,11 +1563,15 @@ export function start({ port, token, tls, relay: relayCfg }) {
 
   function resolvePath(p) {
     const resolved = p && String(p).trim() ? path.resolve(String(p).replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir();
-    // Security: prevent path traversal outside home directory
+    // Security: block path traversal outside home, with an escape hatch for
+    // the OS temp dir (tests and file-transfer staging legitimately live
+    // there, and on Linux /tmp is NOT under home). ponytail: per-user tmp
+    // roots if this ever runs multi-tenant.
     const home = os.homedir();
-    if (!resolved.startsWith(home)) {
-      throw new Error('Path traversal not allowed');
-    }
+    const tmpRoot = fs.realpathSync(os.tmpdir());
+    const allowed = resolved === home || resolved.startsWith(home + path.sep) ||
+      resolved.startsWith(tmpRoot + path.sep) || path.dirname(resolved) === tmpRoot;
+    if (!allowed) throw new Error("Path traversal not allowed");
     return resolved;
   }
 
