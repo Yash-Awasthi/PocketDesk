@@ -4,69 +4,40 @@
  * Inspired by terminalcontrol (FleetView).
  * Provides a grid view of multiple terminal sessions with status indicators,
  * notification chips, and focus management.
+ *
+ * NOTE: ported from TS-syntax-in-.js to plain ESM (it could not be imported
+ * under the package's "type": "module" before).
  */
 
-import { createHash, randomBytes } from 'crypto';
-import { EventEmitter } from 'events';
+import { randomBytes } from "node:crypto";
+import { EventEmitter } from "node:events";
 
-// ============================================================================
-// Types
-// ============================================================================
-
-export type AgentStatus = 'idle' | 'running' | 'waiting' | 'done' | 'error';
-
-export interface FleetTerminal {
-  id: string;
-  name: string;
-  sessionId: string;
-  status: AgentStatus;
-  statusMessage: string;
-  lastActivity: Date;
-  createdAt: Date;
-  position: { row: number; col: number };
-  size: { cols: number; rows: number };
-  isFocused: boolean;
-  notificationPending: boolean;
-}
-
-export interface NotificationChip {
-  id: string;
-  terminalId: string;
-  message: string;
-  priority: 'low' | 'medium' | 'high';
-  createdAt: Date;
-  dismissed: boolean;
-}
-
-export interface FleetGrid {
-  rows: number;
-  cols: number;
-  terminals: FleetTerminal[];
-  focusedTerminalId: string | null;
-}
-
-// ============================================================================
-// Fleet View Manager
-// ============================================================================
-
+/**
+ * Grid view of terminal sessions with status chips + focus management.
+ */
 export class FleetViewManager extends EventEmitter {
-  private terminals: Map<string, FleetTerminal> = new Map();
-  private chips: Map<string, NotificationChip> = new Map();
-  private grid: FleetGrid = { rows: 2, cols: 2, terminals: [], focusedTerminalId: null };
-  private chipCounter = 0;
+  constructor() {
+    super();
+    /** @type {Map<string, object>} */
+    this.terminals = new Map();
+    /** @type {Map<string, object>} */
+    this.chips = new Map();
+    this.grid = { rows: 2, cols: 2, terminals: [], focusedTerminalId: null };
+    this.chipCounter = 0;
+  }
 
   /**
    * Add a terminal to the fleet.
    */
-  addTerminal(name: string, sessionId: string): FleetTerminal {
+  addTerminal(name, sessionId) {
     const position = this.findNextPosition();
 
-    const terminal: FleetTerminal = {
-      id: randomBytes(8).toString('hex'),
+    const terminal = {
+      id: randomBytes(8).toString("hex"),
       name,
       sessionId,
-      status: 'idle',
-      statusMessage: '',
+      status: "idle",
+      statusMessage: "",
       lastActivity: new Date(),
       createdAt: new Date(),
       position,
@@ -77,27 +48,27 @@ export class FleetViewManager extends EventEmitter {
 
     this.terminals.set(terminal.id, terminal);
     this.grid.terminals = Array.from(this.terminals.values());
-    this.emit('terminal:added', terminal);
+    this.emit("terminal:added", terminal);
     return terminal;
   }
 
   /**
    * Remove a terminal from the fleet.
    */
-  removeTerminal(terminalId: string): boolean {
+  removeTerminal(terminalId) {
     const terminal = this.terminals.get(terminalId);
     if (!terminal) return false;
 
     this.terminals.delete(terminalId);
     this.grid.terminals = Array.from(this.terminals.values());
-    this.emit('terminal:removed', terminal);
+    this.emit("terminal:removed", terminal);
     return true;
   }
 
   /**
-   * Update terminal status.
+   * Update terminal status. Waiting/done transitions raise notification chips.
    */
-  updateStatus(terminalId: string, status: AgentStatus, message: string = ''): void {
+  updateStatus(terminalId, status, message = "") {
     const terminal = this.terminals.get(terminalId);
     if (!terminal) return;
 
@@ -106,23 +77,20 @@ export class FleetViewManager extends EventEmitter {
     terminal.statusMessage = message;
     terminal.lastActivity = new Date();
 
-    // Create notification chip for status changes
-    if (status === 'waiting' || (status === 'done' && prevStatus !== 'done')) {
-      this.createChip(terminalId, message || `${status}`, status === 'waiting' ? 'high' : 'medium');
+    if (status === "waiting" || (status === "done" && prevStatus !== "done")) {
+      this.createChip(terminalId, message || `${status}`, status === "waiting" ? "high" : "medium");
     }
 
-    // Update visual glow
-    terminal.notificationPending = status === 'waiting';
-
-    this.emit('status:updated', terminal);
+    terminal.notificationPending = status === "waiting";
+    this.emit("status:updated", terminal);
   }
 
   /**
    * Create a notification chip.
    */
-  createChip(terminalId: string, message: string, priority: 'low' | 'medium' | 'high' = 'medium'): NotificationChip {
+  createChip(terminalId, message, priority = "medium") {
     this.chipCounter++;
-    const chip: NotificationChip = {
+    const chip = {
       id: `chip-${this.chipCounter}`,
       terminalId,
       message,
@@ -132,30 +100,29 @@ export class FleetViewManager extends EventEmitter {
     };
 
     this.chips.set(chip.id, chip);
-    this.emit('chip:created', chip);
+    this.emit("chip:created", chip);
     return chip;
   }
 
   /**
    * Dismiss a notification chip.
    */
-  dismissChip(chipId: string): boolean {
+  dismissChip(chipId) {
     const chip = this.chips.get(chipId);
     if (!chip) return false;
 
     chip.dismissed = true;
-    this.emit('chip:dismissed', chip);
+    this.emit("chip:dismissed", chip);
     return true;
   }
 
   /**
-   * Focus on a terminal.
+   * Focus a terminal (unfocuses others, clears its chips and pending flag).
    */
-  focusTerminal(terminalId: string): boolean {
+  focusTerminal(terminalId) {
     const terminal = this.terminals.get(terminalId);
     if (!terminal) return false;
 
-    // Unfocus all others
     for (const t of this.terminals.values()) {
       t.isFocused = false;
     }
@@ -164,31 +131,27 @@ export class FleetViewManager extends EventEmitter {
     terminal.notificationPending = false;
     this.grid.focusedTerminalId = terminalId;
 
-    // Dismiss related chips
     for (const chip of this.chips.values()) {
       if (chip.terminalId === terminalId && !chip.dismissed) {
         chip.dismissed = true;
       }
     }
 
-    this.emit('terminal:focused', terminal);
+    this.emit("terminal:focused", terminal);
     return true;
   }
 
   /**
-   * Resize the grid.
+   * Resize the grid and relayout terminal positions.
    */
-  resizeGrid(rows: number, cols: number): void {
+  resizeGrid(rows, cols) {
     this.grid.rows = rows;
     this.grid.cols = cols;
     this.relayout();
-    this.emit('grid:resized', this.grid);
+    this.emit("grid:resized", this.grid);
   }
 
-  /**
-   * Relayout terminals in the grid.
-   */
-  private relayout(): void {
+  relayout() {
     let pos = 0;
     for (const terminal of this.terminals.values()) {
       terminal.position = {
@@ -199,14 +162,9 @@ export class FleetViewManager extends EventEmitter {
     }
   }
 
-  /**
-   * Find the next available grid position.
-   */
-  private findNextPosition(): { row: number; col: number } {
+  findNextPosition() {
     const occupied = new Set(
-      Array.from(this.terminals.values()).map(
-        (t) => `${t.position.row},${t.position.col}`
-      )
+      Array.from(this.terminals.values()).map((t) => `${t.position.row},${t.position.col}`),
     );
 
     for (let r = 0; r < this.grid.rows; r++) {
@@ -223,42 +181,36 @@ export class FleetViewManager extends EventEmitter {
   }
 
   /**
-   * Get all pending chips.
+   * Get all pending (undismissed) chips.
    */
-  getPendingChips(): NotificationChip[] {
+  getPendingChips() {
     return Array.from(this.chips.values()).filter((c) => !c.dismissed);
   }
 
   /**
    * Get all terminals.
    */
-  getTerminals(): FleetTerminal[] {
+  getTerminals() {
     return Array.from(this.terminals.values());
   }
 
   /**
-   * Get focused terminal.
+   * Get the focused terminal, if any.
    */
-  getFocusedTerminal(): FleetTerminal | undefined {
+  getFocusedTerminal() {
     if (!this.grid.focusedTerminalId) return undefined;
     return this.terminals.get(this.grid.focusedTerminalId);
   }
 
   /**
-   * Get statistics.
+   * Get fleet statistics.
    */
-  getStats(): {
-    totalTerminals: number;
-    activeTerminals: number;
-    waitingTerminals: number;
-    pendingChips: number;
-    grid: { rows: number; cols: number };
-  } {
+  getStats() {
     const terminals = Array.from(this.terminals.values());
     return {
       totalTerminals: terminals.length,
-      activeTerminals: terminals.filter((t) => t.status === 'running').length,
-      waitingTerminals: terminals.filter((t) => t.status === 'waiting').length,
+      activeTerminals: terminals.filter((t) => t.status === "running").length,
+      waitingTerminals: terminals.filter((t) => t.status === "waiting").length,
       pendingChips: this.getPendingChips().length,
       grid: { rows: this.grid.rows, cols: this.grid.cols },
     };

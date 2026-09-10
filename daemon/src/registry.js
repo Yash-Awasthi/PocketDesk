@@ -3,6 +3,9 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+const IS_WIN = process.platform === "win32";
+const cmdWrap = (cmd) => (IS_WIN ? ["cmd.exe", ["/c", cmd]] : ["/bin/sh", ["-c", cmd]]);
+
 const builtinDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "manifests");
 const userDir = process.env.RH_MANIFESTS || path.join(process.env.USERPROFILE || process.env.HOME, ".pocketdesk", "manifests");
 
@@ -26,10 +29,16 @@ function loadManifests() {
 }
 
 const state = new Map(); // id -> { installed, version, installing }
+const pinned = new Set(); // ids of pinned tools
+
+export function pin(id) { pinned.add(id); }
+export function unpin(id) { pinned.delete(id); }
+export function listPinned() { return [...pinned]; }
 
 function shell(cmd, timeoutMs = 8000) {
   return new Promise((resolve) => {
-    const p = spawn("cmd.exe", ["/c", cmd], { windowsHide: true });
+    const [bin, args] = cmdWrap(cmd);
+    const p = spawn(bin, args, { windowsHide: true });
     let out = "";
     const t = setTimeout(() => {
       p.kill();
@@ -91,12 +100,18 @@ export async function install(id, broadcast) {
   if (s.installing) return;
   s.installing = true;
   state.set(id, s);
+  if (!m.install || (!m.install.npm && !m.install.pip)) {
+    s.installing = false;
+    broadcast({ type: "progress", id, line: `no installer defined for ${m.id}` });
+    return;
+  }
   broadcast({ type: "progress", id, line: `$ ${m.install.npm ? `npm install -g ${m.install.npm}` : `pip install ${m.install.pip}`}` });
 
   const [kind, pkg] = m.install.npm ? ["npm", m.install.npm] : ["pip", m.install.pip];
   const cmd = kind === "npm" ? `npm install -g ${pkg}` : `pip install ${pkg}`;
   await new Promise((resolve) => {
-    const p = spawn("cmd.exe", ["/c", cmd], { windowsHide: true });
+    const [bin, args] = cmdWrap(cmd);
+    const p = spawn(bin, args, { windowsHide: true });
     let buf = "";
     const push = (d) => {
       buf += d;

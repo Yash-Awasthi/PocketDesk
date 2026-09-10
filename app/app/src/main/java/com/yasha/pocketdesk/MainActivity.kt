@@ -10,7 +10,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.filled.Email
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -28,8 +30,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.yasha.pocketdesk.ui.ChatScreen
 import com.yasha.pocketdesk.ui.ConnectScreen
+import com.yasha.pocketdesk.ui.FreebuffScreen
 import com.yasha.pocketdesk.ui.SessionsScreen
 import com.yasha.pocketdesk.ui.TerminalScreen
+import com.yasha.pocketdesk.SessionRecorder
+import com.yasha.pocketdesk.TunnelManager
 import com.yasha.pocketdesk.ui.ToolsScreen
 
 sealed interface Screen {
@@ -37,6 +42,7 @@ sealed interface Screen {
     data object Tools : Screen
     data object Sessions : Screen
     data object Chats : Screen
+    data object Freebuff : Screen
     data class Terminal(val sessionId: String) : Screen
 }
 
@@ -65,7 +71,9 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun Root() {
         val client = remember { WsClient() }
-        DisposableEffect(Unit) { onDispose { client.close() } }
+        val sessionRecorder = remember { SessionRecorder() }
+        val tunnelManager = remember { TunnelManager() }
+        DisposableEffect(Unit) { onDispose { client.close(); kotlinx.coroutines.runBlocking { tunnelManager.closeAll() } } }
 
         var screen by remember { mutableStateOf<Screen>(Screen.Connect) }
 
@@ -101,8 +109,14 @@ class MainActivity : ComponentActivity() {
                         NavigationBarItem(
                             selected = screen == Screen.Chats,
                             onClick = { screen = Screen.Chats },
-                            icon = { Icon(Icons.Filled.Chat, contentDescription = null) },
+                            icon = { Icon(Icons.Filled.Email, contentDescription = null) },
                             label = { Text("Chats") },
+                        )
+                        NavigationBarItem(
+                            selected = screen == Screen.Freebuff,
+                            onClick = { screen = Screen.Freebuff },
+                            icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
+                            label = { Text("Freebuff") },
                         )
                     }
                 }
@@ -114,6 +128,7 @@ class MainActivity : ComponentActivity() {
                     Screen.Tools -> ToolsScreen(client)
                     Screen.Sessions -> SessionsScreen(client, openTerminal = { screen = Screen.Terminal(it) })
                     Screen.Chats -> ChatScreen(client)
+                    Screen.Freebuff -> FreebuffScreen(client)
                     is Screen.Terminal -> TerminalScreen(client, s.sessionId, onClose = { screen = Screen.Sessions })
                 }
             }

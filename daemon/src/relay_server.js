@@ -1,11 +1,15 @@
 /**
  * Relay server from hermes-relay — message relay and forwarding.
+ *
+ * Small TCP pub/sub relay: clients connect, subscribe to a channel, and either
+ * publish (broadcast to channel members) or direct-message a specific peer.
+ * Ported to ESM so it loads under the daemon's `"type": "module"` package.
  */
-const net = require('net');
-const crypto = require('crypto');
-const EventEmitter = require('events');
+import net from "node:net";
+import crypto from "node:crypto";
+import { EventEmitter } from "node:events";
 
-class RelayServer extends EventEmitter {
+export class RelayServer extends EventEmitter {
     constructor(port = 8790) {
         super();
         this.port = port;
@@ -21,20 +25,43 @@ class RelayServer extends EventEmitter {
 
     handleConnection(socket) {
         const id = crypto.randomUUID().slice(0, 8);
-        this.connections.set(id, { socket, channels: new Set(), connectedAt: Date.now() });
-        socket.on('data', (data) => this.handleMessage(id, data));
+        this.connections.set(id, { socket, channels: new Set(), connectedAt: Date.now(), buf: '' });
+        socket.on('data', (data) => this.handleData(id, data));
         socket.on('close', () => {
             const conn = this.connections.get(id);
             if (conn) { for (const ch of conn.channels) this.leaveChannel(id, ch); }
             this.connections.delete(id);
         });
         socket.on('error', () => this.connections.delete(id));
-        socket.write(JSON.stringify({ type: 'connected', id }));
+        // Newline-terminated framing: a full frame can arrive split across
+        // several TCP segments, or several frames can arrive in one chunk.
+        socket.write(JSON.stringify({ type: 'connected', id }) + '\n');
     }
 
-    handleMessage(connId, data) {
+    handleData(connId, data) {
+        const conn = this.connections.get(connId);
+        if (!conn) return;
+        conn.buf += data.toString();
+        for (;;) {
+            const nl = conn.buf.indexOf('\n');
+            if (nl < 0) break;
+            const line = conn.buf.slice(0, nl).trim();
+            conn.buf = conn.buf.slice(nl + 1);
+            if (line) this.handleMessage(connId, line);
+        }
+        // Tolerant fallback: a client that writes one JSON frame without a
+        // trailing newline (old protocol) still gets parsed.
+        if (conn.buf.trim()) {
+            try {
+                this.handleMessage(connId, conn.buf.trim());
+                conn.buf = '';
+            } catch {}
+        }
+    }
+
+    handleMessage(connId, line) {
         try {
-            const msg = JSON.parse(data.toString());
+            const msg = JSON.parse(line);
             switch (msg.type) {
                 case 'subscribe': this.joinChannel(connId, msg.channel); break;
                 case 'unsubscribe': this.leaveChannel(connId, msg.channel); break;
@@ -59,7 +86,7 @@ class RelayServer extends EventEmitter {
     broadcast(channel, message) {
         const members = this.channels.get(channel);
         if (!members) return;
-        const data = JSON.stringify(message);
+        const data = JSON.stringify(message) + '\n';
         for (const connId of members) {
             const conn = this.connections.get(connId);
             if (conn?.socket.writable) conn.socket.write(data);
@@ -68,7 +95,7 @@ class RelayServer extends EventEmitter {
 
     sendTo(connId, message) {
         const conn = this.connections.get(connId);
-        if (conn?.socket.writable) conn.socket.write(JSON.stringify(message));
+        if (conn?.socket.writable) conn.socket.write(JSON.stringify(message) + '\n');
     }
 
     getConnectionCount() { return this.connections.size; }
@@ -76,5 +103,3 @@ class RelayServer extends EventEmitter {
 
     stop() { for (const [, conn] of this.connections) conn.socket.destroy(); this.connections.clear(); this.channels.clear(); if (this.server) this.server.close(); }
 }
-
-module.exports = { RelayServer };

@@ -12,7 +12,7 @@
   "scripts": {
     "start": "node src/index.js",
     "setup-tls": "node scripts/gen-cert.js",
-    "test": "node test/smoke.mjs && node test/smoke-chat.mjs"
+    "test": "node test/smoke.mjs && node test/smoke-chat.mjs && node test/features.test.mjs && node test/plugins.test.mjs && node test/proposals.test.mjs && node test/graceful-shutdown.test.mjs && node test/reconnect.test.mjs && node test/sessions-leakguard.test.mjs && node test/relay.test.mjs && node test/tmux.test.mjs && node test/digest.test.mjs && node test/agents.test.mjs && node test/lan.test.mjs && node test/sync.test.mjs && node test/stream.test.mjs && node test/qr.test.mjs && node test/monitor.test.mjs && node test/notify.test.mjs && node test/fleet.test.mjs && node test/mux.test.mjs && node test/rd.test.mjs && node test/wa.test.mjs && node test/bastion.test.mjs && node test/freebuff.test.mjs && node test/relay-bridge.test.mjs && node test/channels.test.mjs && node test/absorb.test.mjs"
   },
   "dependencies": {
     "node-pty": "^1.0.0",

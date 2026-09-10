@@ -7,6 +7,11 @@
   "chat": {
     "args": ["exec", "--json", "-"],
     "format": "codex-json",
-    "resumeArgs": ["exec", "resume", "--last", "--json", "-"]
+    "resumeArgs": ["exec", "resume", "--last", "--json", "-"],
+    "models": {
+      "gpt-5-codex": { "args": ["--model", "gpt-5-codex"] },
+      "gpt-5.1-codex": { "args": ["--model", "gpt-5.1-codex"] },
+      "gpt-5.2-codex": { "args": ["--model", "gpt-5.2-codex"] }
+    }
   }
 }

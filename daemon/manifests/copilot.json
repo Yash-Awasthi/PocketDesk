@@ -1,0 +1,7 @@
+{
+  "id": "copilot",
+  "name": "GitHub Copilot CLI",
+  "adapter": "terminal",
+  "bin": "copilot",
+  "install": { "npm": "@github/copilot" }
+}

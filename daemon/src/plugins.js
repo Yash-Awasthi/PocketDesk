@@ -98,7 +98,9 @@ export function createPluginManager(ctx) {
     for (const p of plugins) {
       for (const hook of (p.manifest.hooks || [])) {
         if (!hookCache[hook]) hookCache[hook] = [];
-        hookCache[hook].push({ name: p.manifest.name, fn: p.manifest[hook] });
+        // Keep the manifest so the hook can be invoked with `this` bound —
+        // plugins hold per-instance state (e.g. logger._stream) on `this`.
+        hookCache[hook].push({ name: p.manifest.name, manifest: p.manifest, fn: p.manifest[hook] });
       }
     }
 
@@ -123,9 +125,9 @@ export function createPluginManager(ctx) {
     if (!hooks || hooks.length === 0) return { blocked: false, msg: null };
 
     let currentMsg = args[1]; // msg is usually the second arg (after ctx)
-    for (const { name, fn } of hooks) {
+    for (const { name, manifest, fn } of hooks) {
       try {
-        const result = await fn(ctx, ...args);
+        const result = await fn.call(manifest, ctx, ...args);
         if (result && result.block) {
           return { blocked: true, msg: null };
         }

@@ -192,7 +192,18 @@ private fun ChatConversation(ws: WsClient, chatId: String, onClose: () -> Unit) 
     val chat = ws.chats.firstOrNull { it.id == chatId }
 
     var input by remember { mutableStateOf("") }
+    var modelMenuOpen by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+
+    // Attach on open so the daemon replays the transcript and streams deltas
+    // (without attach only the creating client ever sees a chat's content).
+    LaunchedEffect(chatId) {
+        ws.attach(chatId)
+        ws.modelList(chatId)
+    }
+    LaunchedEffect(chatId, ws.chatCurrentModel[chatId]) {
+        ws.modelList(chatId)
+    }
 
     // Auto-scroll to bottom when new items arrive
     LaunchedEffect(transcript.size) {
@@ -222,6 +233,33 @@ private fun ChatConversation(ws: WsClient, chatId: String, onClose: () -> Unit) 
                 if (running) {
                     IconButton(onClick = { ws.cancelChat(chatId) }) {
                         Icon(Icons.Filled.Close, contentDescription = "Stop", tint = MaterialTheme.colorScheme.error)
+                    }
+                }
+                // Model picker — per-chat model selection (where the CLI offers it).
+                val models = ws.chatModels[chatId] ?: emptyList()
+                if (models.isNotEmpty()) {
+                    Box {
+                        TextButton(onClick = { modelMenuOpen = true }) {
+                            Text(ws.chatCurrentModel[chatId] ?: "model: default")
+                        }
+                        DropdownMenu(expanded = modelMenuOpen, onDismissRequest = { modelMenuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("(default)") },
+                                onClick = {
+                                    ws.chatModelSet(chatId, null)
+                                    modelMenuOpen = false
+                                },
+                            )
+                            models.forEach { mdl ->
+                                DropdownMenuItem(
+                                    text = { Text(mdl) },
+                                    onClick = {
+                                        ws.chatModelSet(chatId, mdl)
+                                        modelMenuOpen = false
+                                    },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -366,4 +404,4 @@ private fun SystemBubble(text: String) {
 }
 
 /** Tools that support the chat adapter (mirrors daemon manifest IDs). */
-private val CHAT_TOOLS = setOf("claude", "codex", "opencode", "gemini", "qwen")
+private val CHAT_TOOLS = setOf("claude", "codex", "opencode", "gemini", "qwen", "antigravity", "copilot", "cline", "zcode")

@@ -6,3 +6,11 @@ local.properties
 *.keystore
 keystore.properties
 .cxx/
+
+# Test/runtime artifacts
+.pocketdesk-test/
+.pocketdesk/
+
+# Local-only files
+.freebuff/
+notes.md

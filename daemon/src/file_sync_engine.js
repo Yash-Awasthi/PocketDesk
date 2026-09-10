@@ -3,73 +3,26 @@
  *
  * Inspired by syncthing and tailscale.
  * Provides real-time file sync, conflict resolution, and peer discovery.
+ * Ported from TS-syntax-in-js to plain ESM (matches the daemon runtime).
  */
 
-import { createHash, randomBytes } from 'crypto';
+import { randomBytes } from 'crypto';
 import { EventEmitter } from 'events';
 
-// ============================================================================
-// Types
-// ============================================================================
-
-export type SyncStatus = 'idle' | 'syncing' | 'paused' | 'error';
-
-export interface SyncDevice {
-  id: string;
-  name: string;
-  hostname: string;
-  addresses: string[];
-  isOnline: boolean;
-  lastSeen: Date;
-  compression: boolean;
-  paused: boolean;
-}
-
-export interface SyncFolder {
-  id: string;
-  label: string;
-  path: string;
-  devices: string[];
-  status: SyncStatus;
-  totalFiles: number;
-  syncedFiles: number;
-  lastSync: Date;
-  ignorePatterns: string[];
-}
-
-export interface SyncFile {
-  path: string;
-  hash: string;
-  size: number;
-  modifiedAt: Date;
-  version: number;
-  deviceId: string;
-  status: 'synced' | 'pending' | 'conflict' | 'deleted';
-}
-
-export interface SyncEvent {
-  type: 'file_synced' | 'file_conflict' | 'device_connected' | 'device_disconnected';
-  folderId: string;
-  deviceId: string;
-  filePath?: string;
-  timestamp: Date;
-}
-
-// ============================================================================
-// File Sync Engine Manager
-// ============================================================================
-
 export class FileSyncEngineManager extends EventEmitter {
-  private devices: Map<string, SyncDevice> = new Map();
-  private folders: Map<string, SyncFolder> = new Map();
-  private files: Map<string, SyncFile[]> = new Map();
-  private events: SyncEvent[] = [];
+  constructor() {
+    super();
+    this.devices = new Map();
+    this.folders = new Map();
+    this.files = new Map();
+    this.events = [];
+  }
 
   /**
    * Register a device.
    */
-  registerDevice(name: string, hostname: string, addresses: string[]): SyncDevice {
-    const device: SyncDevice = {
+  registerDevice(name, hostname, addresses) {
+    const device = {
       id: randomBytes(8).toString('hex'),
       name,
       hostname,
@@ -88,8 +41,8 @@ export class FileSyncEngineManager extends EventEmitter {
   /**
    * Create a sync folder.
    */
-  createFolder(label: string, path: string, deviceIds: string[]): SyncFolder {
-    const folder: SyncFolder = {
+  createFolder(label, path, deviceIds) {
+    const folder = {
       id: randomBytes(8).toString('hex'),
       label,
       path,
@@ -108,10 +61,10 @@ export class FileSyncEngineManager extends EventEmitter {
   }
 
   /**
-   * Add a file to sync.
+   * Add a file to sync (starts as 'pending').
    */
-  addFile(folderId: string, file: Omit<SyncFile, 'status'>): SyncFile {
-    const syncFile: SyncFile = { ...file, status: 'pending' };
+  addFile(folderId, file) {
+    const syncFile = { ...file, status: 'pending' };
     const files = this.files.get(folderId) || [];
     files.push(syncFile);
     this.files.set(folderId, files);
@@ -127,7 +80,7 @@ export class FileSyncEngineManager extends EventEmitter {
   /**
    * Sync a file between devices.
    */
-  syncFile(folderId: string, filePath: string, sourceDeviceId: string): boolean {
+  syncFile(folderId, filePath, sourceDeviceId) {
     const files = this.files.get(folderId) || [];
     const file = files.find((f) => f.path === filePath);
     if (!file) return false;
@@ -141,7 +94,7 @@ export class FileSyncEngineManager extends EventEmitter {
       folder.lastSync = new Date();
     }
 
-    const event: SyncEvent = {
+    const event = {
       type: 'file_synced',
       folderId,
       deviceId: sourceDeviceId,
@@ -157,14 +110,14 @@ export class FileSyncEngineManager extends EventEmitter {
   /**
    * Detect a file conflict.
    */
-  detectConflict(folderId: string, filePath: string, deviceId1: string, deviceId2: string): SyncFile | null {
+  detectConflict(folderId, filePath, deviceId1, deviceId2) {
     const files = this.files.get(folderId) || [];
     const file = files.find((f) => f.path === filePath);
     if (!file) return null;
 
     file.status = 'conflict';
 
-    const event: SyncEvent = {
+    const event = {
       type: 'file_conflict',
       folderId,
       deviceId: deviceId1,
@@ -180,7 +133,7 @@ export class FileSyncEngineManager extends EventEmitter {
   /**
    * Resolve a conflict by keeping one version.
    */
-  resolveConflict(folderId: string, filePath: string, keepDeviceId: string): boolean {
+  resolveConflict(folderId, filePath, keepDeviceId) {
     const files = this.files.get(folderId) || [];
     const file = files.find((f) => f.path === filePath);
     if (!file || file.status !== 'conflict') return false;
@@ -194,9 +147,9 @@ export class FileSyncEngineManager extends EventEmitter {
   }
 
   /**
-   * Check device connectivity.
+   * Check device connectivity (1-minute timeout).
    */
-  checkDevices(): void {
+  checkDevices() {
     const now = Date.now();
     for (const device of this.devices.values()) {
       const timeSinceLastSeen = now - device.lastSeen.getTime();
@@ -214,7 +167,7 @@ export class FileSyncEngineManager extends EventEmitter {
   /**
    * Get folder status.
    */
-  getFolderStatus(folderId: string): { synced: number; pending: number; conflicts: number } | null {
+  getFolderStatus(folderId) {
     const files = this.files.get(folderId);
     if (!files) return null;
 
@@ -226,37 +179,37 @@ export class FileSyncEngineManager extends EventEmitter {
   }
 
   /**
+   * Get all files in a folder.
+   */
+  getFiles(folderId) {
+    return this.files.get(folderId) || [];
+  }
+
+  /**
    * Get all devices.
    */
-  getDevices(): SyncDevice[] {
+  getDevices() {
     return Array.from(this.devices.values());
   }
 
   /**
    * Get all folders.
    */
-  getFolders(): SyncFolder[] {
+  getFolders() {
     return Array.from(this.folders.values());
   }
 
   /**
    * Get sync events.
    */
-  getEvents(limit: number = 100): SyncEvent[] {
+  getEvents(limit = 100) {
     return this.events.slice(-limit);
   }
 
   /**
    * Get statistics.
    */
-  getStats(): {
-    totalDevices: number;
-    onlineDevices: number;
-    totalFolders: number;
-    totalFiles: number;
-    syncedFiles: number;
-    conflicts: number;
-  } {
+  getStats() {
     const devices = Array.from(this.devices.values());
     const files = Array.from(this.files.values()).flat();
 

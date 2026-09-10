@@ -1,0 +1,7 @@
+{
+  "id": "cline",
+  "name": "Cline",
+  "adapter": "terminal",
+  "bin": "cline",
+  "install": { "npm": "cline" }
+}

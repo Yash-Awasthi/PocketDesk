@@ -119,7 +119,11 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
             Text("PocketDesk", style = MaterialTheme.typography.headlineMedium)
             if (servers.isEmpty()) {
                 Text(
-                    "No PCs saved yet. Tap + to add one. On the PC run: cd daemon && npm start",
+                    "No PCs saved yet. Tap + to add one. On the PC run: cd daemon && npm start\n\n" +
+                        "Same Wi-Fi: ws://<pc-ip>:8765/ws\n" +
+                        "Kilometers away: relay://<relay-host>:8790/<channel> — the PC dials OUT " +
+                        "to the relay, so no port forwarding is needed. Start the PC side with " +
+                        "RH_RELAY_PORT=8790 npm start.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -192,7 +196,7 @@ private fun ServerFormDialog(initial: ServerEntry?, onSave: (ServerEntry) -> Uni
                     value = url,
                     onValueChange = { url = it },
                     label = { Text("URL") },
-                    placeholder = { Text("ws://192.168.1.10:8765/ws or wss://...") },
+                    placeholder = { Text("ws://192.168.1.10:8765/ws · wss://… · relay://host:8790/channel") },
                     singleLine = true,
                 )
                 OutlinedTextField(value = token, onValueChange = { token = it }, label = { Text("Token") }, singleLine = true)

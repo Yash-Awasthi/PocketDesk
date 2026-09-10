@@ -82,6 +82,14 @@
   .bar { flex: 1; background: linear-gradient(to top, #238636, #2ea043); border-radius: 2px 2px 0 0; min-width: 4px; transition: height 0.3s; }
   .streaming-indicator { display: inline-block; width: 6px; height: 14px; background: #58a6ff; animation: blink 0.8s infinite; margin-left: 2px; vertical-align: middle; }
   @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+  .queue-chip { display: inline-block; font-size: 11px; background: #1b2332; color: #79c0ff; border: 1px solid #1f3a5f; border-radius: 10px; padding: 2px 8px; }
+  .chat-actions { display:flex; gap:6px; padding:6px 16px; background:#161b22; border-top:1px solid #30363d; align-items:center; font-size:12px; flex-wrap:wrap; }
+  .chat-actions select { font-size:12px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:4px 6px; }
+  .mini-panel { padding:10px 16px; background:#161b22; border-top:1px solid #30363d; font-size:12px; }
+  .mini-panel h4 { margin:0 0 8px; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#8b949e; }
+  .todo-row { padding:3px 0; cursor:pointer; color:#c9d1d9; }
+  .todo-row:hover { color:#f0f6fc; }
+  .mini-panel input { font-size:12px; background:#0d1117; color:#c9d1d9; border:1px solid #30363d; border-radius:6px; padding:5px 8px; margin:0 6px 8px 0; }
   @media (prefers-reduced-motion: reduce) {
     .streaming-indicator { animation: none; opacity: 1; }
   }
@@ -134,6 +142,7 @@
       <div class="tab active" data-tab="terminal" onclick="switchTab('terminal')">🖥️ Terminal</div>
       <div class="tab" data-tab="chat" onclick="switchTab('chat')">💬 Chat</div>
       <div class="tab" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</div>
+      <div class="tab" data-tab="freebuff" onclick="switchTab('freebuff'); send({type:'fb_status'}); send({type:'fb_skill_list'}); send({type:'fb_config_list'});">🦾 Freebuff</div>
     </div>
     <div class="tab-content">
       <div class="tab-pane active" id="pane-terminal">
@@ -147,10 +156,78 @@
               <div>Select a chat or start a new one</div>
             </div>
           </div>
+          <div class="chat-actions" id="chatActions" style="display:none">
+            <button class="btn" onclick="openFork()" title="Clone this chat into a new one">⑂ Fork</button>
+            <button class="btn" onclick="togglePanel('planPanel', 'plan_get')" title="Agent's checklist plan">📋 Plan</button>
+            <button class="btn" onclick="togglePanel('todosPanel', 'todos_get')" title="Agent's todo board">☑ Todos</button>
+            <span style="color:#8b949e">mode</span>
+            <select id="permMode" onchange="if(activeChatId) send({type:'chat_permission', id: activeChatId, mode: this.value})">
+              <option value="default">default</option>
+              <option value="autopilot">autopilot</option>
+              <option value="readonly">readonly</option>
+              <option value="yolo">yolo</option>
+            </select>
+            <span style="color:#8b949e">model</span>
+            <select id="modelSel" onchange="if(activeChatId) send({type:'chat_model_set', id: activeChatId, model: this.value || null})">
+              <option value="">(default)</option>
+            </select>
+          </div>
+          <div class="mini-panel" id="forkPanel" style="display:none">
+            <h4>⑂ Fork chat</h4>
+            <input id="forkCwd" placeholder="folder for the fork (blank = same)" style="width:280px" />
+            <button class="btn primary" onclick="doFork()">Fork</button>
+            <button class="btn" onclick="document.getElementById('forkPanel').style.display='none'">Cancel</button>
+          </div>
+          <div class="mini-panel" id="planPanel" style="display:none">
+            <h4>📋 Plan <span id="planProgress" style="color:#8b949e;text-transform:none"></span></h4>
+            <div id="planItems"></div>
+            <div style="margin-top:8px;display:flex;gap:6px">
+              <button class="btn primary" id="planApproveBtn" onclick="planApprove(true)">✓ Approve</button>
+              <button class="btn" id="planRejectBtn" onclick="planApprove(false)">✕ Reject</button>
+              <button class="btn" id="planProceedBtn" style="display:none" onclick="planProceed()">▶ Tell agent to proceed</button>
+            </div>
+          </div>
+          <div class="mini-panel" id="todosPanel" style="display:none">
+            <h4>☑ Todo board <span style="color:#8b949e;text-transform:none">(click to cycle)</span></h4>
+            <div id="todoItems"></div>
+          </div>
           <div class="chat-input-bar">
             <input id="chatInput" placeholder="Type a message..." disabled onkeydown="if(event.key==='Enter')sendChat()" />
             <button class="btn primary" onclick="sendChat()" id="chatSendBtn" disabled>Send</button>
             <button class="btn danger" onclick="cancelChat()" id="chatCancelBtn" style="display:none">Stop</button>
+          </div>
+          <div id="queueStrip" style="display:none;gap:6px;padding:6px 16px;background:#161b22;border-top:1px solid #30363d;align-items:center;flex-wrap:wrap"></div>
+        </div>
+      </div>
+      <div class="tab-pane" id="pane-freebuff">
+        <div class="dashboard">
+          <div class="dash-grid">
+            <div class="stat-card"><div class="label">App</div><div class="value" id="fbRunning">—</div><div class="sub" id="fbProfile" style="max-width:260px;overflow:hidden;text-overflow:ellipsis"></div></div>
+            <div class="stat-card"><div class="label">Skills</div><div class="value" id="fbSkillCount">0</div><div class="sub">~/.claude/skills</div></div>
+            <div class="stat-card"><div class="label">Configs</div><div class="value" id="fbConfigCount">0</div><div class="sub">allowlisted profile files</div></div>
+            <div class="stat-card"><div class="label">Login</div><div class="value" id="fbAuth">—</div><div class="sub" id="fbAuthExp"></div></div>
+          </div>
+          <div class="dash-section">
+            <h4>🦾 Freebuff app</h4>
+            <button class="btn" onclick="send({type:'fb_app_open'})">Open app</button>
+            <button class="btn danger" onclick="send({type:'fb_app_quit'})">Quit app</button>
+            <button class="btn" onclick="send({type:'fb_auth_status'})">Refresh login</button>
+            <button class="btn danger" onclick="fbLogout()">Logout (clear app login)</button>
+          </div>
+          <div class="dash-section">
+            <h4>🧠 Skills <button class="btn" onclick="send({type:'fb_skill_list'})" style="margin-left:8px">Refresh</button></h4>
+            <div id="fbSkills"></div>
+          </div>
+          <div class="dash-section">
+            <h4>⚙️ Configs</h4>
+            <div id="fbConfigs"></div>
+          </div>
+          <div class="dash-section">
+            <h4>▶ Run skill as agent</h4>
+            <select id="fbSkillPick"></select>
+            <select id="fbSkillHarness" style="margin-left:6px"></select>
+            <input id="fbSkillArgs" placeholder="task for the skill (optional)" style="margin-left:6px;width:280px" />
+            <button class="btn primary" onclick="fbRunSkill()" style="margin-left:6px">Run</button>
           </div>
         </div>
       </div>
@@ -178,6 +255,46 @@
             <h3>👥 Connected Clients</h3>
             <table class="client-table" id="dClientTable"><thead><tr><th>Client</th><th>Connected</th><th>Auth</th></tr></thead><tbody></tbody></table>
           </div>
+          <div class="dash-section" id="dUsageSection" style="display:none">
+            <h3>💰 Usage & Cost</h3>
+            <div id="dUsageTotals" style="font-size:12px;color:#8b949e;margin-bottom:6px;"></div>
+            <table class="plugin-table" id="dUsageTable"><thead><tr><th>Chat</th><th>In tok</th><th>Out tok</th><th>Cost</th><th>Turns</th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="dash-section" id="dDevicesSection" style="display:none">
+            <h3>📱 Devices</h3>
+            <table class="client-table" id="dDeviceTable"><thead><tr><th>Name</th><th>Platform</th><th>Last IP</th><th>Seen</th><th></th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="dash-section" id="dSchedSection" style="display:none">
+            <h3>⏰ Scheduled Runs</h3>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;margin-bottom:8px">
+              <select id="schedChat" style="max-width:140px"><option value="">chat…</option></select>
+              <input id="schedText" placeholder="prompt to fire" style="flex:1;min-width:160px" />
+              <select id="schedKind" onchange="document.getElementById('schedMax').style.display = this.value === 'count' ? '' : 'none'; document.getElementById('schedMaxWrap').style.display = this.value === 'count' ? '' : 'none';">
+                <option value="interval">every</option>
+                <option value="once">after</option>
+                <option value="count">×N</option>
+              </select>
+              <input id="schedEvery" type="number" min="5" value="60" style="width:70px" title="seconds" />
+              <span id="schedMaxWrap" style="display:none">×</span>
+              <input id="schedMax" type="number" min="1" value="5" style="width:56px;display:none" title="max runs" />
+              <button class="btn" onclick="scheduleCreate()">Schedule</button>
+              <span id="schedHint" style="color:#f85149;font-size:11px"></span>
+            </div>
+            <table class="client-table" id="dSchedTable"><thead><tr><th>Chat</th><th>Prompt</th><th>Kind</th><th>Next</th><th>Runs</th><th></th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="dash-section" id="dQuietSection" style="display:none">
+            <h3>🌙 Quiet Hours</h3>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px">
+              <select id="quietMode">
+                <option value="off">off</option>
+                <option value="priority">priority</option>
+                <option value="silent">silent</option>
+              </select>
+              <input id="quietWindows" placeholder="22:00-07:30, 12:00-13:00" style="flex:1;min-width:180px" />
+              <button class="btn" onclick="quietSet()">Apply</button>
+              <span id="quietActive" style="color:#8b949e"></span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -204,6 +321,18 @@
   </div>
 </div>
 
+<!-- Inline confirmation (native confirm/alert freeze embedded webviews) -->
+<div class="dialog-overlay" id="confirmDialog">
+  <div class="dialog">
+    <h2>Confirm</h2>
+    <p id="confirmText" style="font-size:13px;margin:0 0 12px"></p>
+    <div class="actions">
+      <button class="btn" onclick="closeConfirm()">Cancel</button>
+      <button class="btn danger" id="confirmYes">Yes</button>
+    </div>
+  </div>
+</div>
+
 <!-- Deferred: xterm loads after first paint -->
 <script defer src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
@@ -217,6 +346,10 @@ const chatTranscripts = {};
 const chatStates = {};
 const chatDomNodes = {};
 const pendingProposals = []; // {id, type, summary, detail, created, ttlRemaining}
+let myClientId = null; // this browser's device id (from welcome)
+const queued = {}; // chatId -> queued prompts
+const todoBoards = {}; // chatId -> todo items
+const permModes = {}; // chatId -> permission mode
 
 // ── Debounce helper ──
 function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setTimeout(() => fn.apply(this, arguments), ms); }; }
@@ -257,6 +390,11 @@ function handle(m) {
   switch (m.type) {
     case "welcome":
       setStatus(true);
+      myClientId = m.clientId || myClientId;
+      send({ type: "usage_list" });
+      send({ type: "device_list" });
+      send({ type: "quiet_status" });
+      send({ type: "schedule_list" });
       renderTools(m.manifests || []);
       renderSessions(m.sessions || []);
       renderChats((m.sessions || []).filter(s => s.kind === "chat"));
@@ -271,8 +409,17 @@ function handle(m) {
       dashEvent(`${(m.items||[]).length} session(s) updated`, 'blue');
       break;
     case "created":
-      if (m.kind === "chat") { openChat(m.id); renderChats(getChatSessions()); dashEvent(`chat created: ${m.id.slice(0,8)}`, 'green'); }
+      if (m.kind === "chat") {
+        if (!chats.some(c => c.id === m.id)) chats.push({ id: m.id, kind: "chat", harnessId: m.harnessId, cwd: m.cwd, state: "idle" });
+        openChat(m.id); renderChats(chats); dashEvent(`chat created: ${m.id.slice(0,8)}`, 'green');
+      }
       else { openTerminal(m.id); dashEvent(`session created: ${m.id.slice(0,8)}`, 'blue'); }
+      break;
+    case "chat_forked":
+      if (m.ok && m.chat) {
+        if (!chats.some(c => c.id === m.chat.id)) chats.push({ id: m.chat.id, kind: "chat", harnessId: m.chat.harnessId, cwd: m.chat.cwd, state: "idle", forkedFrom: m.chat.forkedFrom });
+        renderChats(chats); openChat(m.chat.id); dashEvent(`forked → ${m.chat.id.slice(0,8)}`, 'green');
+      }
       break;
     case "replay": case "out":
       if (m.id === activeTermId) term.write(new Uint8Array(b64ToBytes(m.data)));
@@ -284,6 +431,10 @@ function handle(m) {
     case "progress": break;
     case "fs": if (m.error) break; pickDir(m); break;
     case "chatreplay":
+      // Drop the tracked DOM nodes BEFORE the rebuild — otherwise a replay that
+      // arrives after chatuser re-appends a fresh node while the original
+      // (untracked) one lingers, duplicating the message on screen.
+      (chatDomNodes[m.id] || []).forEach(n => n?.remove());
       chatTranscripts[m.id] = (m.items || []).map(i => ({role: i.role, text: i.text, name: i.name, detail: i.detail}));
       chatDomNodes[m.id] = [];
       if (m.id === activeChatId) renderChatMessages();
@@ -304,6 +455,9 @@ function handle(m) {
       chatStates[m.id] = m.state;
       if (m.id === activeChatId) updateChatUI();
       updateChatCard(m.id);
+      if (m.state === "running") send({ type: "prompt_queue", id: m.id });
+      // A finished turn may have produced a new checklist plan — re-fetch it.
+      if (m.state === "idle" && m.id === activeChatId) send({ type: "plan_get", id: m.id });
       break;
     case "proposal_created":
       pendingProposals.push(m.proposal);
@@ -321,6 +475,88 @@ function handle(m) {
       pendingProposals.length = 0;
       (m.items || []).forEach(p => pendingProposals.push(p));
       renderProposals();
+      break;
+    case "usage_list": renderUsage(m); break;
+    case "usage_updated": send({ type: "usage_list" }); break;
+    case "plan": renderPlan(m); break;
+    case "plan_ok": send({ type: "plan_get", id: m.id }); break;
+    case "todos": todoBoards[m.id] = m.items || []; if (m.id === activeChatId) renderTodos(); break;
+    case "todos_updated":
+      todoBoards[m.id] = m.items || [];
+      if (m.id === activeChatId) renderTodos();
+      break;
+    case "chat_permission_ok":
+      permModes[m.id] = m.mode;
+      if (m.id === activeChatId) document.getElementById("permMode").value = m.mode;
+      break;
+    case "schedule_list": renderSchedules(m); break;
+    case "schedule_created": case "schedule_paused": case "schedule_resumed": case "schedule_cancelled":
+      send({ type: "schedule_list" });
+      break;
+    case "prompt_queued": case "prompt_removed":
+      if (m.id) send({ type: "prompt_queue", id: m.id });
+      break;
+    case "prompt_queue": renderPromptQueue(m); break;
+    case "device_list": renderDevices(m); break;
+    case "device_revoked": case "device_allowed": send({ type: "device_list" }); break;
+    case "quiet_status":
+      document.getElementById("dQuietSection").style.display = "";
+      document.getElementById("quietMode").value = m.mode || "off";
+      document.getElementById("quietWindows").value = (m.windows || []).join(", ");
+      document.getElementById("quietActive").textContent = m.active ? "· active now" : "";
+      break;
+    case "model_list":
+      if (m.ok) renderModelPicker(m.models || [], m.current);
+      break;
+    case "chat_model_set":
+      if (m.ok) { dashEvent(`model → ${m.current || "default"}`, 'blue'); if (activeChatId === m.id) renderModelPicker(m.models || [], m.current); }
+      else if (m.error) inlineConfirm(`Model error: ${m.error}`, () => {});
+      break;
+    case "fb_status":
+      document.getElementById("fbRunning").textContent = m.running ? "running" : "stopped";
+      document.getElementById("fbProfile").textContent = m.profile || "";
+      document.getElementById("fbSkillCount").textContent = m.skillCount ?? 0;
+      document.getElementById("fbConfigCount").textContent = m.configCount ?? 0;
+      document.getElementById("fbAuth").textContent = m.auth?.loggedIn ? "logged in" : "logged out";
+      document.getElementById("fbAuthExp").textContent = m.auth?.expiresAt ? `token expires ${new Date(m.auth.expiresAt).toLocaleString()}` : "";
+      {
+        const hp = document.getElementById("fbSkillHarness");
+        if (hp && hp.options.length === 0) {
+          for (const t of tools.filter(t => t.installed)) { const o = document.createElement("option"); o.value = t.manifest.id; o.textContent = t.manifest.name; hp.appendChild(o); }
+        }
+      }
+      break;
+    case "fb_skill_list":
+      renderFbSkills(m.items || []);
+      break;
+    case "fb_skill_get":
+      if (m.ok) inlineConfirm(`${m.name} — ${m.dir}\n\n${m.content || "(empty SKILL.md)"}`, () => {});
+      break;
+    case "fb_config_list":
+      renderFbConfigs(m.items || []);
+      break;
+    case "fb_config_get":
+      if (m.ok) showFbConfig(m.name, m.content);
+      break;
+    case "fb_config_set":
+      if (m.ok) { dashEvent(`config ${m.name} saved (backup ${m.backedUp})`, 'green'); send({ type: "fb_config_list" }); }
+      else if (m.error) inlineConfirm(`Config error: ${m.error}`, () => {});
+      break;
+    case "fb_auth_status":
+      document.getElementById("fbAuth").textContent = m.loggedIn ? "logged in" : "logged out";
+      document.getElementById("fbAuthExp").textContent = m.expiresAt ? `token expires ${new Date(m.expiresAt).toLocaleString()}` : "";
+      break;
+    case "fb_auth_logout":
+      if (m.ok) { dashEvent(`app login cleared${m.restarted ? " + app restarted" : ""}`, 'green'); send({ type: "fb_auth_status" }); }
+      else if (m.error) inlineConfirm(`Logout error: ${m.error}`, () => {});
+      break;
+    case "fb_app_open":
+      dashEvent(m.alreadyRunning ? "app already running" : "app launched", 'blue');
+      setTimeout(() => send({ type: "fb_status" }), 1500);
+      break;
+    case "fb_app_quit":
+      dashEvent(m.ok ? "app quit" : "quit failed", m.ok ? 'blue' : 'red');
+      setTimeout(() => send({ type: "fb_status" }), 1500);
       break;
     case "error": console.error("ERROR:", m.message); break;
   }
@@ -371,7 +607,7 @@ function renderSessions(items) {
   }
 }
 
-function getChatSessions() { return sessions.filter(s => s.kind === "chat"); }
+function getChatSessions() { return chats.slice(); }
 function removeSession(id) {
   for (let i = sessions.length - 1; i >= 0; i--) { if (sessions[i].id === id) sessions.splice(i, 1); }
   renderSessions(sessions);
@@ -398,6 +634,7 @@ window.addEventListener("resize", debouncedFit);
 
 // ── Chats: incremental DOM updates ──
 function renderChats(items) {
+  chats.length = 0; items.forEach(c => chats.push(c));
   const el = document.getElementById("chats"); el.innerHTML = "";
   for (const c of items) {
     const d = document.createElement("div"); d.className = "session-card"; d.id = "chat-card-" + c.id;
@@ -407,10 +644,18 @@ function renderChats(items) {
     d.onclick = () => openChat(c.id);
     el.appendChild(d);
   }
+  refreshSchedChatPicker();
 }
 
 function updateChatCard(id) {
   if (id === activeChatId) renderChats(getChatSessions());
+}
+
+// Keep the scheduler's chat picker in step with live chats (a chat created
+// seconds ago must be selectable without waiting for the next poll).
+function refreshSchedChatPicker() {
+  const sel = document.getElementById("schedChat");
+  if (sel) syncSchedChatOptions(Object.keys(queued));
 }
 
 function openChat(id) {
@@ -418,9 +663,145 @@ function openChat(id) {
   if (!chatTranscripts[id]) chatTranscripts[id] = [];
   if (!chatDomNodes[id]) chatDomNodes[id] = [];
   send({ type: "attach", id });
+  send({ type: "prompt_queue", id });
+  renderPromptQueue({ id, items: queued[id] || [] });
   renderChatMessages();
   updateChatUI();
+  document.getElementById("chatActions").style.display = "";
+  document.getElementById("forkPanel").style.display = "none";
+  document.getElementById("permMode").value = permModes[id] || "default";
+  hideMiniPanel("planPanel"); hideMiniPanel("todosPanel");
+  send({ type: "plan_get", id });
+  send({ type: "todos_get", id });
+  send({ type: "model_list", id });
 }
+function hideMiniPanel(id) { document.getElementById(id).style.display = "none"; }
+function togglePanel(id, fetchType) {
+  const el = document.getElementById(id);
+  const show = el.style.display === "none";
+  el.style.display = show ? "" : "none";
+  if (show && activeChatId) send({ type: fetchType, id: activeChatId });
+}
+// ── Freebuff panel ──
+function renderFbSkills(items) {
+  const el = document.getElementById("fbSkills");
+  const pick = document.getElementById("fbSkillPick");
+  el.innerHTML = ""; pick.innerHTML = "";
+  for (const s of items) {
+    const d = document.createElement("div"); d.className = "session-card";
+    d.innerHTML = `<div class="id">${esc(s.name)}</div><div class="info">${esc(s.description || "")}</div>`;
+    const row = document.createElement("div"); row.style.cssText = "margin-top:4px;display:flex;gap:4px";
+    const view = document.createElement("button"); view.className = "btn"; view.textContent = "View"; view.onclick = () => send({ type: "fb_skill_get", name: s.name });
+    const run = document.createElement("button"); run.className = "btn"; run.textContent = "Run"; run.onclick = () => { document.getElementById("fbSkillPick").value = s.name; fbRunSkill(); };
+    row.appendChild(view); row.appendChild(run); d.appendChild(row);
+    el.appendChild(d);
+    const o = document.createElement("option"); o.value = s.name; o.textContent = s.name; pick.appendChild(o);
+  }
+}
+
+function renderFbConfigs(items) {
+  const el = document.getElementById("fbConfigs");
+  el.innerHTML = "";
+  for (const c of items) {
+    const d = document.createElement("div"); d.className = "session-card";
+    d.innerHTML = `<div class="id">${esc(c.name)}</div><div class="info">${c.size} bytes · ${new Date(c.mtime).toLocaleString()}</div>`;
+    const b = document.createElement("button"); b.className = "btn"; b.textContent = "View / Edit"; b.onclick = () => send({ type: "fb_config_get", name: c.name });
+    d.appendChild(b); el.appendChild(d);
+  }
+}
+
+function showFbConfig(name, content) {
+  const next = prompt(`Edit ${name} (JSON; applied as a deep merge):`, JSON.stringify(content, null, 2));
+  if (next == null) return;
+  try {
+    const patch = JSON.parse(next);
+    send({ type: "fb_config_set", name, patch });
+  } catch (e) {
+    inlineConfirm(`Invalid JSON: ${e.message}`, () => {});
+  }
+}
+
+function fbRunSkill() {
+  const name = document.getElementById("fbSkillPick").value;
+  const harness = document.getElementById("fbSkillHarness").value;
+  const args = document.getElementById("fbSkillArgs").value.trim();
+  if (!name) return;
+  send({ type: "fb_skill_run", name, harness: harness || "claude", args: args || undefined });
+}
+
+function fbLogout() {
+  // Two-step inline confirm — native confirm() freezes embedded webviews.
+  inlineConfirm("Clear the Freebuff app's saved login on this PC? A backup is kept.", () => {
+    inlineConfirm("Also restart the Freebuff app now? (kill + relaunch so logout takes effect immediately)", () => {
+      send({ type: "fb_auth_logout", confirm: "CLEAR", restart: true });
+    });
+  });
+}
+
+// ── Model picker ──
+let modelCatalog = [];
+function renderModelPicker(models, current) {
+  modelCatalog = models.slice();
+  const sel = document.getElementById("modelSel");
+  if (!sel) return;
+  sel.innerHTML = "";
+  const def = document.createElement("option"); def.value = ""; def.textContent = "(default)"; sel.appendChild(def);
+  for (const mdl of models) { const o = document.createElement("option"); o.value = mdl; o.textContent = mdl; sel.appendChild(o); }
+  sel.value = current || "";
+}
+
+function openFork() {
+  document.getElementById("forkCwd").value = "";
+  document.getElementById("forkPanel").style.display = "";
+}
+function doFork() {
+  if (!activeChatId) return;
+  const cwd = document.getElementById("forkCwd").value.trim();
+  send({ type: "chat_fork", id: activeChatId, cwd: cwd || undefined });
+  document.getElementById("forkPanel").style.display = "none";
+}
+function renderPlan(m) {
+  const panel = document.getElementById("planPanel");
+  if (!m.plan) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+  document.getElementById("planItems").innerHTML = m.plan.items.map(it =>
+    `<div class="todo-row" style="cursor:default">${it.done ? "☑" : "☐"} ${esc(it.text)}</div>`
+  ).join("");
+  document.getElementById("planProgress").textContent = `· ${m.plan.progress}% · ${m.approved ? "approved" : "not approved"}`;
+  document.getElementById("planApproveBtn").disabled = m.approved;
+  document.getElementById("planRejectBtn").disabled = false;
+  document.getElementById("planProceedBtn").style.display = m.approved ? "" : "none";
+}
+function planApprove(yes) {
+  if (!activeChatId) return;
+  send({ type: "plan_approve", id: activeChatId, approved: yes });
+}
+function planProceed() {
+  if (!activeChatId) return;
+  send({ type: "chatmsg", id: activeChatId, text: "Plan approved — proceed with the plan." });
+}
+function renderTodos() {
+  const items = todoBoards[activeChatId] || [];
+  const panel = document.getElementById("todosPanel");
+  if (!items.length) { panel.style.display = "none"; return; }
+  panel.style.display = "";
+  document.getElementById("todoItems").innerHTML = items.map(t =>
+    `<div class="todo-row" onclick="todoCycle('${esc(t.id)}')">${t.status === "completed" ? "☑" : t.status === "in_progress" ? "◐" : "☐"} ${esc(t.content)}</div>`
+  ).join("");
+}
+function todoCycle(tid) {
+  const t = (todoBoards[activeChatId] || []).find(x => x.id === tid);
+  if (!t) return;
+  const next = t.status === "pending" ? "in_progress" : t.status === "in_progress" ? "completed" : "pending";
+  send({ type: "todos_status", id: activeChatId, todoId: tid, status: next });
+}
+// Inline confirmation — native confirm() freezes embedded webviews.
+function inlineConfirm(text, onYes) {
+  document.getElementById("confirmText").textContent = text;
+  document.getElementById("confirmYes").onclick = () => { closeConfirm(); onYes(); };
+  document.getElementById("confirmDialog").classList.add("open");
+}
+function closeConfirm() { document.getElementById("confirmDialog").classList.remove("open"); }
 
 function renderChatMessages() {
   const el = document.getElementById("chatMessages");
@@ -499,8 +880,11 @@ function appendChatDelta(id, text) {
 
 function updateChatUI() {
   const running = chatStates[activeChatId] === "running";
-  document.getElementById("chatInput").disabled = running;
-  document.getElementById("chatSendBtn").disabled = running;
+  // Input stays enabled while running — typing queues a follow-up instead.
+  document.getElementById("chatInput").disabled = false;
+  document.getElementById("chatInput").placeholder = running ? "Working… type to queue a follow-up" : "Type a message...";
+  document.getElementById("chatSendBtn").disabled = false;
+  document.getElementById("chatSendBtn").textContent = running ? "Queue" : "Send";
   document.getElementById("chatCancelBtn").style.display = running ? "" : "none";
 }
 
@@ -508,7 +892,9 @@ function sendChat() {
   const input = document.getElementById("chatInput");
   const text = input.value.trim();
   if (!text || !activeChatId) return;
-  send({ type: "chatmsg", id: activeChatId, text });
+  // Busy → queue the follow-up (drains automatically when the turn ends).
+  if (chatStates[activeChatId] === "running") send({ type: "prompt_enqueue", id: activeChatId, text });
+  else send({ type: "chatmsg", id: activeChatId, text });
   input.value = "";
 }
 
@@ -538,9 +924,11 @@ function pickDir(m) {
   const names = m.items.filter(e => e.dir).map(e => e.name);
   const choice = prompt(`Folders in ${m.path}\n\n` + names.join("\n") + `\n\nType a name to enter, blank to pick this folder, 'up' for parent:`);
   if (choice === null) return;
-  if (choice === "") document.getElementById("cwd") && (document.getElementById("cwd").value = m.path);
+  // path.sep-aware join: the daemon resolves with path.resolve() which
+  // normalizes both separators, so forward slash is safe on every OS.
+  if (choice === "") { const el = document.getElementById("chatCwd"); if (el) el.value = m.path; }
   else if (choice === "up") send({ type: "fs", path: m.parent });
-  else send({ type: "fs", path: m.path + "\\" + choice });
+  else send({ type: "fs", path: m.path.replace(/[\\/]+$/, "") + "/" + choice });
 }
 
 // ── Helpers ──
@@ -621,12 +1009,101 @@ function renderDashboard() {
   ).join('');
 }
 
+// ── Status surfaces (usage/cost, devices, quiet hours) ──
+function fmtTok(n) { n = n || 0; return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n); }
+function renderUsage(m) {
+  document.getElementById("dUsageSection").style.display = "";
+  const t = m.totals || {};
+  document.getElementById("dUsageTotals").textContent =
+    `total: in ${fmtTok(t.inputTokens)} · out ${fmtTok(t.outputTokens)} · $${Number(t.costUsd || 0).toFixed(4)} · ${t.turns || 0} turns`;
+  const tb = document.querySelector("#dUsageTable tbody");
+  tb.innerHTML = (m.items || []).map(u =>
+    `<tr><td>${esc(u.sessionId)}</td><td>${fmtTok(u.inputTokens)}</td><td>${fmtTok(u.outputTokens)}</td><td>$${u.costUsd.toFixed(4)}</td><td>${u.turns}</td></tr>`
+  ).join("") || `<tr><td colspan="5" style="color:#8b949e">no usage recorded yet</td></tr>`;
+}
+function renderDevices(m) {
+  document.getElementById("dDevicesSection").style.display = "";
+  const tb = document.querySelector("#dDeviceTable tbody");
+  tb.innerHTML = (m.items || []).map(d =>
+    `<tr><td>${esc(d.name)}${d.id === myClientId ? ' <span style="color:#58a6ff">(this device)</span>' : ""}${d.online ? ' <span style="color:#3fb950">●</span>' : ""}</td>` +
+    `<td>${esc(d.platform)}</td><td>${esc(d.lastIp || "—")}</td><td>${new Date(d.lastSeen).toLocaleTimeString()}</td>` +
+    `<td>${d.revoked
+      ? `<button class="btn" onclick="deviceAllow('${esc(d.id)}')">Allow</button>`
+      : `<button class="btn danger" onclick="deviceRevoke('${esc(d.id)}')">Revoke</button>`}</td></tr>`
+  ).join("") || `<tr><td colspan="5" style="color:#8b949e">no devices seen</td></tr>`;
+}
+function deviceRevoke(id) {
+  if (id === myClientId) {
+    inlineConfirm("Revoke THIS device? You will be disconnected and locked out until another device allows it again.", () => send({ type: "device_revoke", clientId: id }));
+    return;
+  }
+  send({ type: "device_revoke", clientId: id });
+}
+function deviceAllow(id) { send({ type: "device_allow", clientId: id }); }
+function quietSet() {
+  const windows = document.getElementById("quietWindows").value.split(",").map(s => s.trim()).filter(Boolean);
+  send({ type: "quiet_set", mode: document.getElementById("quietMode").value, windows });
+}
+
+// ── Scheduler (⏰) ──
+function syncSchedChatOptions(extraIds) {
+  const sel = document.getElementById("schedChat");
+  const cur = sel.value;
+  const chatIds = [...new Set([...getChatSessions().map(c => c.id), ...(extraIds || [])])].filter(Boolean);
+  sel.innerHTML = '<option value="">chat…</option>' + chatIds.map(id => `<option value="${esc(id)}">${esc(id.slice(0, 10))}</option>`).join("");
+  sel.value = cur;
+}
+function renderSchedules(m) {
+  document.getElementById("dSchedSection" ).style.display = "";
+  syncSchedChatOptions((m.items || []).map(j => j.chatId));
+  const sel = document.getElementById("schedChat");
+  const tb = document.querySelector("#dSchedTable tbody");
+  tb.innerHTML = (m.items || []).map(j => {
+    const nextIn = j.paused ? "paused" : fmtIn(j.nextRunAt - Date.now());
+    const runs = j.maxRuns ? `${j.runCount}/${j.maxRuns}` : String(j.runCount);
+    const kind = j.kind === "interval" ? `every ${Math.round(j.intervalMs / 1000)}s` : j.kind === "once" ? "once" : `every ${Math.round(j.intervalMs / 1000)}s`;
+    return `<tr><td>${esc(j.chatId.slice(0, 10))}</td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.text)}</td>` +
+      `<td>${j.kind === "count" ? kind + " ×" + j.maxRuns : kind}</td><td>${nextIn}</td><td>${runs}</td>` +
+      `<td>${j.paused
+        ? `<button class="btn" onclick="schedResume('${esc(j.id)}')">Resume</button>`
+        : `<button class="btn" onclick="schedPause('${esc(j.id)}')">Pause</button>`}
+         <button class="btn danger" onclick="schedCancel('${esc(j.id)}')">✕</button></td></tr>`;
+  }).join("") || `<tr><td colspan="6" style="color:#8b949e">no scheduled runs</td></tr>`;
+}
+function fmtIn(ms) { if (ms <= 0) return "now"; const s = Math.round(ms / 1000); return s < 90 ? s + "s" : Math.round(s / 60) + "m"; }
+function scheduleCreate() {
+  const chatId = document.getElementById("schedChat").value;
+  const text = document.getElementById("schedText").value.trim();
+  const hint = document.getElementById("schedHint");
+  if (!chatId || !text) { hint.textContent = "pick a chat and enter a prompt"; setTimeout(() => hint.textContent = "", 3000); return; }
+  hint.textContent = "";
+  const kind = document.getElementById("schedKind").value;
+  const secs = Math.max(5, Number(document.getElementById("schedEvery").value) || 60);
+  send({ type: "schedule_create", chatId, text, kind, intervalMs: secs * 1000, delayMs: secs * 1000, maxRuns: kind === "count" ? Number(document.getElementById("schedMax").value) || 5 : 0 });
+  document.getElementById("schedText").value = "";
+}
+function schedPause(id) { send({ type: "schedule_pause", jobId: id }); }
+function schedResume(id) { send({ type: "schedule_resume", jobId: id }); }
+function schedCancel(id) { inlineConfirm("Cancel this scheduled run?", () => send({ type: "schedule_cancel", jobId: id })); }
+
+// ── Prompt queue (per-chat strip) ──
+function renderPromptQueue(m) {
+  queued[m.id] = m.items || [];
+  if (m.id !== activeChatId) return;
+  const bar = document.getElementById("queueStrip");
+  if (!queued[m.id].length) { bar.style.display = "none"; return; }
+  bar.style.display = "";
+  bar.innerHTML = `<span style="font-size:11px;color:#8b949e;flex-shrink:0">⏭ queued (${queued[m.id].length}):</span>` +
+    queued[m.id].map(q =>
+      `<span class="queue-chip">${esc(q.text.length > 38 ? q.text.slice(0, 38) + "…" : q.text)} <a onclick="promptRemove('${esc(q.id)}')" style="cursor:pointer;color:#f85149">✕</a></span>`
+    ).join("");
+}
+function promptRemove(pid) { if (activeChatId) send({ type: "prompt_remove", id: activeChatId, promptId: pid }); }
+
+// Keep the scheduler "Next" column honest between events.
+setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" }); }, 15000);
+
 // Hook into existing message handler for dashboard events
-const _origHandle = typeof handle === 'function' ? handle : null;
-const _dashHandler = function(m) {
-  const colors = { welcome: 'green', session: 'blue', chatdelta: 'green', chatstate: 'amber', error: 'red', proposal_created: 'amber', manifests: 'blue' };
-  if (colors[m.type]) dashEvent(m.type + (m.id ? ` (${m.id.slice(0,6)})` : ''), colors[m.type]);
-};
 </script>
 </body>
 </html>

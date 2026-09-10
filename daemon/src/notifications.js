@@ -7,6 +7,11 @@
 import { TelegramChannel } from "./channels/telegram.js";
 import { DiscordChannel } from "./channels/discord.js";
 import { EmailChannel } from "./channels/email.js";
+import { LineChannel } from "./channels/line.js";
+import { SlackChannel } from "./channels/slack.js";
+import { MattermostChannel } from "./channels/mattermost.js";
+import { NtfyChannel } from "./channels/ntfy.js";
+import { PushoverChannel } from "./channels/pushover.js";
 
 const RATE_LIMIT_MS = 10_000; // 1 message per channel per 10 seconds
 
@@ -40,6 +45,36 @@ export function createNotificationManager(ctx) {
       pass: ctx.config.SMTP_PASS,
       to: ctx.config.NOTIFY_EMAIL,
       from: ctx.config.SMTP_FROM || "PocketDesk <noreply@localhost>",
+    }));
+  }
+
+  if (ctx.config?.LINE_CHANNEL_ACCESS_TOKEN && (ctx.config?.LINE_USER_ID || ctx.config?.LINE_GROUP_ID)) {
+    channels.push(new LineChannel({
+      channelAccessToken: ctx.config.LINE_CHANNEL_ACCESS_TOKEN,
+      userId: ctx.config.LINE_USER_ID,
+      groupId: ctx.config.LINE_GROUP_ID,
+    }));
+  }
+
+  if (ctx.config?.SLACK_WEBHOOK_URL) {
+    channels.push(new SlackChannel({ webhookUrl: ctx.config.SLACK_WEBHOOK_URL }));
+  }
+
+  if (ctx.config?.MATTERMOST_WEBHOOK_URL) {
+    channels.push(new MattermostChannel({ webhookUrl: ctx.config.MATTERMOST_WEBHOOK_URL }));
+  }
+
+  // Phone push (salvaged from corpus push_notification_bridge): ntfy needs no
+  // account; Pushover uses app+user keys. Both buzz the phone when an agent
+  // finishes, errors, or waits for an answer.
+  if (ctx.config?.NTFY_TOPIC) {
+    channels.push(new NtfyChannel({ topic: ctx.config.NTFY_TOPIC, server: ctx.config.NTFY_SERVER }));
+  }
+  if (ctx.config?.PUSHOVER_TOKEN && ctx.config?.PUSHOVER_USER) {
+    channels.push(new PushoverChannel({
+      token: ctx.config.PUSHOVER_TOKEN,
+      user: ctx.config.PUSHOVER_USER,
+      device: ctx.config.PUSHOVER_DEVICE,
     }));
   }
 
@@ -109,4 +144,6 @@ export const NotificationEvents = {
   SESSION_CONNECTED: "session_connected",
   SESSION_ERROR: "session_error",
   CHAT_COMPLETED: "chat_completed",
+  SESSION_QUIET: "session_quiet",
+  SESSION_ASKING: "session_asking",
 };

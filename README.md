@@ -29,7 +29,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 
 | Feature | Description |
 |---------|-------------|
-| 🖥️ **Live Terminal** | Real-time PTY streaming with extra keys (Esc, Tab, Ctrl+C/D/Z, arrows) |
+| 🖥️ **Live Terminal** | Real-time PTY streaming with extra keys (Esc, Tab, Ctrl+C/D/Z, arrows) — seq-numbered output with missed-output backfill after reconnect |
 | 💬 **AI Chat** | ChatGPT-style conversation with streaming responses and tool indicators |
 | 📊 **Dashboard** | Real-time stats, activity timeline, plugin status, connected clients |
 | 📁 **File Browser** | Browse, upload, and download files on your PC from your phone |
@@ -39,6 +39,29 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📝 **Proposals** | Agent actions require human approval — safety by default |
 | 📱 **Multi-PC** | Connect to multiple PCs, each with pinned certificates |
 | 🔔 **Background Notify** | Get notified when sessions end while the app is in background |
+| 👥 **Session Sharing** | Read-only spectator links with TTL — phone, browser, second PC watch one session |
+| 🎬 **Session Recording** | Record any session and replay/export it later |
+| 📈 **Activity Monitor** | Per-session working/asking/quiet states with busy→quiet push |
+| 🔀 **Tunnels** | Reach any PC-local service from your phone over the harness connection |
+| 🖥️ **VNC Bridge** | Share a screen frame feed over a local TCP port (`vnc_start/stop/status/frame` + `vnc_event`) |
+| 🛡️ **SSH Bastion** | Jump-host access control: users, hosts, access rules with expiry, session gating, invite tokens (`bastion_*`) |
+| 🔒 **SSH Server Control** | Per-user auth + command allowlists with session recording (`sshserver_*`) |
+| 📇 **Connection Profiles** | Multi-protocol SSH/VNC/SFTP profiles, host-key TOFU, SSH key management (`profile_*`/`hostkey_*`/`sshkey_*`) |
+| ⚡ **Keep-Awake** | PC stays awake while agents run (per-process, never touches your power settings) |
+| 🤖 **Telegram Control** | Prompt sessions and approve proposals from a Telegram chat |
+| ♻️ **Chat Resurrection** | Conversations survive daemon restarts — one tap re-opens them via the CLI's own history |
+| 🌿 **Git Panel** | Branch/diff/log/status of any repo on the PC, read-only |
+| ⏭️ **Prompt Queue** | Queue follow-ups while the agent works — they drain automatically when the turn finishes |
+| ✅ **Todo Boards** | Live task lists per session — auto-derived from the agent's markdown checkboxes |
+| ⏰ **Scheduler** | Auto-continue loops: fire a prompt on an interval, after a delay, or N times |
+| 📣 **@file Mentions** | Reference PC-side files in prompts — content is inlined before the agent sees it |
+| 🩺 **Doctor** | One message returns a full self-diagnosis of the daemon and its agents |
+| 🌁 **Wake-on-LAN** | Magic-packet wake of a sleeping PC from the phone |
+| ⏱️ **Approval Auto-Deny** | Unattended agents never stall — unanswered approvals are auto-denied on a timer |
+| 💰 **Usage Dashboard** | Per-session token + cost aggregates straight from the agent's stream events |
+| 📉 **Live Digest** | Attach to a terminal as diffed plain-text rows instead of raw bytes |
+| 🔌 **MCP Endpoint** | Any MCP client on the PC can drive the agents (`tools/list`, `tools/call`) |
+| 📶 **Auto-Reconnect** | The app reconnects with exponential backoff + jitter and replays only missed output |
 
 ---
 
@@ -61,6 +84,153 @@ cd PocketDesk/daemon
 npm install
 npm start
 ```
+
+---
+
+## 📱 Connect your phone
+
+On first start the daemon prints everything you need — WebSocket URL, pairing
+URL and (in dev) the full auth token. It also persists them to
+`~/.pocketdesk/config.json` (`%USERPROFILE%\.pocketdesk\config.json` on
+Windows).
+
+1. **QR pairing (easiest)** — on the PC, open `http://localhost:8765/pair` and
+   scan the QR with the Android app. The app receives the URL, token and
+   (with TLS) the cert fingerprint automatically.
+2. **Manual entry** — in the app tap **＋**, then enter
+   `ws://<pc-ip>:8765/ws` as the URL and the token from the banner or
+   `config.json` as the token. On the same LAN the PC's IP is enough; off-LAN
+   use the relay (`relay://…`, see the [Operations Manual](#-operations-manual)
+   below) or Tailscale.
+3. **Browser smoke test** — open `http://localhost:8765` on the PC, paste the
+   token, hit **Connect**, then **＋ New Chat** → pick an installed agent
+   (Claude Code / Codex / OpenCode) → prompt → **Start**. Live terminal and
+   chat sessions appear under SESSIONS / CHATS and can be attached from the
+   phone.
+
+Install agents the daemon manages from the phone too: any tool card marked
+"not installed" has an **Install** button (one-tap npm/pip install with live
+progress).
+
+### 🦾 Controlling Freebuff itself from the phone
+
+The Freebuff tab (browser) / Freebuff screen (app) gives full control of the
+Freebuff desktop app on the PC: app status (running/exe/profile), **open &
+quit**, login state and **logout**, all **28 skills** in `~/.claude/skills`
+(view SKILL.md or run a skill as a real agent chat), and allowlisted
+**config files** with view/edit (every edit is backed up as `.bak`).
+
+### 🤖 Agent fleet & model selection
+
+Beyond Claude Code, Codex and OpenCode the daemon manages **Antigravity,
+GitHub Copilot CLI, Cline, ZCode, Gemini, Qwen and Aider** — install and
+launch any of them from the phone. Chats support **model selection** where the
+CLI offers it (e.g. Claude: opus / sonnet / haiku) via the model picker in the
+chat toolbar; the choice drives the agent's runtime flags.
+
+---
+
+## 📖 Operations Manual
+
+### Starting the daemon
+
+```bash
+cd PocketDesk/daemon
+npm start          # first run generates + persists the token
+```
+
+The banner prints everything: local URL, WebSocket URL, the full auth token
+(dev only), the pairing-QR URL, and (if configured) the relay line. Everything
+also persists to `~/.pocketdesk/config.json`:
+
+```json
+{
+  "port": 8765,
+  "token": "<your-token>",
+  "relay": { "url": "", "channel": "", "hostPort": 8790 }
+}
+```
+
+Environment overrides (win each over the config file): `RH_PORT`, `RH_TOKEN`,
+`RH_RELAY_URL`, `RH_RELAY_CHANNEL`, `RH_RELAY_PORT`. TLS: `node scripts/gen-cert.js`
+then set `tls.enabled: true` in the config.
+
+Keep it running after logout with PM2 (`npm i -g pm2 && pm2 start src/index.js --name pocketdesk && pm2 save`)
+or NSSM on Windows.
+
+### How access works — three ways to reach your PC
+
+The phone never touches your PC directly unless it's on the same network.
+Authentication is always the same: the app sends the token once at connect
+(`hello`), and every command thereafter is authenticated by that socket.
+
+| Mode | Phone URL | When to use | PC needs |
+|---|---|---|---|
+| **LAN** | `ws://<pc-ip>:8765/ws` | Phone on same Wi-Fi | Nothing special |
+| **Relay** | `relay://<relay-host>:8790/<channel>` | Any network — kilometers away, mobile data, hotel Wi-Fi | Outbound internet only |
+| **Tailscale/VPN** | `ws://<tailscale-ip>:8765/ws` | You manage a tailnet | Tailscale on both ends |
+| **Port-forward** | `wss://your.domain:8765/ws` (TLS!) | You control the router | Forwarded port + TLS cert |
+
+**LAN (same Wi-Fi) — default.** Start the daemon, scan the QR at
+`http://localhost:8765/pair`, done.
+
+**Kilometers away — the relay (no VPN, no port forwarding).** The daemon dials
+OUT to a relay server and subscribes to a channel; your phone dials the same
+relay and publishes protocol requests on that channel. No inbound port on the
+PC, works through NAT/carrier-grade NAT/firewalls on both ends:
+
+```bash
+# On the PC — host a relay AND link to it in one go:
+RH_RELAY_PORT=8790 npm start
+# banner now shows:  relay  hosting :8790  (phone URL: relay://<this-pc>:8790/rh-<hostname>)
+```
+
+In the app add a server with URL `relay://<pc-public-ip-or-ddns>:8790/rh-<hostname>`
+and the same token.
+
+But wait — if the PC must be reachable on 8790, isn't that port forwarding?
+Only in the hosting case, which is a convenience for LAN peers. The fully
+remote-proof setup needs **no inbound port at all**: run the tiny relay
+*anywhere else* — a $4 VPS, a home NAS, any always-on box — and point **both**
+ends at it:
+
+```bash
+# On the VPS (any Node 18+ box):
+npx pocketdesk-relay --port 8790        # or: git clone … && node daemon/src/relay_server.js
+
+# On the PC — dial OUT to it (persist by putting it in config.json "relay": {"url": ...}):
+RH_RELAY_URL=relay://vps.example.com:8790 RH_RELAY_CHANNEL=rh-my-laptop npm start
+
+# On the phone, any network on earth:
+#   URL:   relay://vps.example.com:8790/rh-my-laptop
+#   Token: same as the PC's
+```
+
+Both ends keep an **outbound** TCP connection to the relay; the relay just
+shuttles framed JSON between members of a channel. The token still guards every
+command (the relay bridge validates it with the same timing-safe check as the
+WebSocket handshake — a wrong token gets nothing), and TLS is available end to
+end (`wss` pair page / pinned cert in the app) if you terminate it on the relay
+host.
+
+What works over the relay: everything the protocol does — sessions, terminal
+streaming, chats with live deltas, Freebuff control, files, models — because the
+bridge feeds relay messages through the daemon's normal command path and pushes
+every broadcast (output chunks, chat deltas, state changes) back to the channel.
+
+**Tailscale** is the zero-config alternative if you can install it on both
+ends: `ws://<tailscale-ip>:8765/ws` behaves exactly like LAN.
+
+### Security checklist
+
+- The token is the root credential — treat it like a password. It lives in
+  `~/.pocketdesk/config.json` and prints in the banner (dev only).
+- `/pair` (the QR page) is served **only** to loopback — never exposed.
+- Put TLS on for anything beyond localhost: `node scripts/gen-cert.js`, set
+  `tls.enabled: true`, and pin the fingerprint shown in the app.
+- The relay channel is not encryption; the token is the gate. Prefer a relay
+  you control over a public one.
+- Revoking a phone = change the token (and update your other devices).
 
 ---
 
@@ -214,10 +384,31 @@ Proposals auto-expire after 5 minutes.
 JSON frames; binary payloads are base64.
 
 **Client → Server:**
-`hello` · `detect` · `install` · `create` · `attach` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `propose` · `approve` · `reject` · `proposal_list`
+`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `propose` · `approve` · `reject` · `proposal_list` · `chat_history` · `pin`/`unpin` · `forward_*` · `sdk_*` · `transcribe` · `audit_log`
+<details>
+<summary>Absorbed-feature messages</summary>
+
+`prompt_enqueue` · `prompt_queue` · `prompt_remove` — queued follow-ups ·
+`todos_set` · `todos_get` · `todos_status` — live todo boards (+ `todos_updated` broadcasts) ·
+`schedule_create` · `schedule_list` · `schedule_pause` · `schedule_resume` · `schedule_cancel` — auto-continue runs ·
+`doctor` — self-diagnosis report · `wake` — Wake-on-LAN magic packet ·
+`approval_waiting` — chats on the auto-deny countdown ·
+`usage_list` · `usage_get` — token/cost dashboards ·
+`digest_attach` · `digest_detach` — live plain-text terminal digest ·
+`mcp_start` · `mcp_stop` · `mcp_status` — embedded MCP endpoint control ·
+
+`share_create` · `share_join` · `share_list` · `share_revoke` — read-only spectator links ·
+`stats` — host CPU/mem/uptime · `git_status` · `git_diff` · `git_log` · `git_branches` — read-only repo inspection ·
+`record_start` · `record_stop` · `record_list` · `record_get` — session recording/export ·
+`tunnel_create` · `tunnel_close` · `tunnel_list` — TCP tunnels to PC-local services ·
+`power_set` · `power_status` — keep-awake · `activity_list` — per-session activity states ·
+`resurrect_list` · `resume` — restore chats after a daemon restart
+</details>
 
 **Server → Client:**
-`welcome` · `manifests` · `sessions` · `created` · `replay` · `out` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `chatreplay` · `chatuser` · `chatdelta` · `chartool` · `chatstate` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `error`
+`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `chatreplay` · `chatuser` · `chatdelta` · `chartool` · `chatstate` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `activity` · `error`
+
+Every `out` frame carries a monotonic `seq`; on reconnect send `attach {id, since: <last seq>}` and the daemon replays only what you missed.
 
 ---
 
@@ -225,9 +416,28 @@ JSON frames; binary payloads are base64.
 
 ```bash
 cd daemon
-node test/proposals.test.mjs    # Proposal system (7 tests)
-node test/smoke.mjs              # Session smoke tests
+npm.cmd test                    # full suite (8 files, 100+ checks)
+node test/smoke.mjs             # session smoke tests
+node test/features.test.mjs     # absorbed-features suite (shares, backfill, recording, tunnels, resurrection…)
 ```
+
+---
+
+## 🎛️ Environment knobs
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `RH_PORT` / `RH_TOKEN` | config file | Listen port and auth token |
+| `RH_AWAKE` | `auto` | Keep PC awake: `off` / `auto` (while sessions run) / `on` |
+| `RH_APPROVAL_TIMEOUT_MS` | `120000` | Auto-deny an agent stuck waiting for approval (0 disables) |
+| `RH_MCP_PORT` | off | Serve the embedded MCP endpoint on localhost |
+| `RH_QUIET_MS` | `20000` | Silence before a session counts as *quiet* (busy→quiet push) |
+| `RH_IDLE_KILL_MINUTES` | off | Kill live sessions idle longer than N minutes |
+| `RH_CLI_PORT` | `4679` | Local CLI status endpoint (`/sessions /status /query`) |
+| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOW_CHAT_IDS` | off | Two-way Telegram control (comma-separated chat IDs) |
+| `NTFY_TOPIC` (+ optional `NTFY_SERVER`) | off | Phone push via ntfy.sh — install the ntfy app and subscribe to the same topic (the topic is the credential; use a hard-to-guess one). High priority on approval/error events |
+| `PUSHOVER_TOKEN` + `PUSHOVER_USER` (+ `PUSHOVER_DEVICE`) | off | Phone push via Pushover (app key + user key) |
+| `POCKETDESK_DATA` | `.pocketdesk` | Data dir (chat history, resurrection store) |
 
 ---
 
@@ -279,12 +489,16 @@ PocketDesk/
 
 ## 🗺️ Roadmap
 
-- [ ] Web-based terminal viewer (access from any browser)
+- [ ] Web-based terminal viewer with share links (browser access to spectator URLs)
 - [ ] Screen bridge (WebRTC) for GUI-only apps
 - [ ] Provider presets (DeepSeek, Kimi, GLM, OpenRouter)
 - [ ] Cross-platform app (iOS / Desktop)
-- [ ] OAuth2 plugin for third-party auth
-- [ ] Webhook notifications (Discord, Slack, email)
+- [ ] Foreground service holding sessions through screen-off
+- [ ] Diff viewer / approval cards in the app chat
+
+One-by-one status of **every feature from the inspiration corpus** (241 reference repos):
+see [docs/FEATURE-MATRIX.md](docs/FEATURE-MATRIX.md); the **per-repo ledger** is
+[docs/ABSORPTION-LEDGER.md](docs/ABSORPTION-LEDGER.md).
 
 ---
 

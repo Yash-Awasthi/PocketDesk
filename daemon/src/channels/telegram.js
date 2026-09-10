@@ -54,6 +54,12 @@ export class TelegramChannel {
         lines.push(`💬 Chat task completed`);
         if (data.summary) lines.push(data.summary);
         break;
+      case "session_quiet":
+        lines.push(`✅ Agent finished — session ${data.id} went quiet`);
+        break;
+      case "session_asking":
+        lines.push(`❓ Agent needs input — session ${data.id} is waiting`);
+        break;
       default:
         lines.push(`📢 ${event}: ${JSON.stringify(data)}`);
     }

@@ -1,0 +1,7 @@
+{
+  "id": "antigravity",
+  "name": "Antigravity",
+  "adapter": "terminal",
+  "bin": "antigravity",
+  "install": { "npm": "@google/antigravity" }
+}

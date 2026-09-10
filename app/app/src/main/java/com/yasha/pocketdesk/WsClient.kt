@@ -5,18 +5,22 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
-enum class Status { Disconnected, Connecting, AwaitingTrust, Connected }
+enum class Status { Disconnected, Connecting, AwaitingTrust, Connected, Reconnecting }
 
 class WsClient(private val base: OkHttpClient = OkHttpClient()) {
 
@@ -37,6 +41,17 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     var activeUrl: String? = null
         private set
 
+    // ── Auto-reconnect (client-kt/krossbow backoff + cc-pocket since-reattach) ──
+    private var lastToken: String? = null
+    private var lastFingerprint: String? = null
+    private var userClosed = false
+    private val reconnectScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private val policy = ReconnectPolicy()
+    /** Last output seq seen per session, for missed-output backfill on reattach. */
+    private val lastSeq = HashMap<String, Long>()
+    /** Sessions attached before the drop — reattached automatically. */
+    private val attachedSessions = LinkedHashSet<String>()
+
     /** Live transcript for an open chat: id -> list of items. */
     var chatTranscript by mutableStateOf<Map<String, List<ChatItem>>>(emptyMap())
         private set
@@ -45,6 +60,29 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
         private set
     /** Streaming delta accumulator for active chat turn. */
     var chatStreamBuf by mutableStateOf<Map<String, StringBuilder>>(emptyMap())
+        private set
+
+    // ── Freebuff control state ──
+    var fbRunning by mutableStateOf<Boolean?>(null)
+        private set
+    var fbProfile by mutableStateOf<String?>(null)
+        private set
+    var fbSkills by mutableStateOf<List<FbSkill>>(emptyList())
+        private set
+    var fbConfigs by mutableStateOf<List<FbConfig>>(emptyList())
+        private set
+    var fbAuthLoggedIn by mutableStateOf<Boolean?>(null)
+        private set
+    var fbAuthExpiresAt by mutableStateOf<String?>(null)
+        private set
+    /** Last fb_skill_get / fb_config_get payload, consumed by dialogs. */
+    val _skillContent = kotlinx.coroutines.flow.MutableStateFlow("")
+    val _configContent = kotlinx.coroutines.flow.MutableStateFlow("")
+
+    // ── Model selection state (chatId -> models/current) ──
+    var chatModels by mutableStateOf<Map<String, List<String>>>(emptyMap())
+        private set
+    var chatCurrentModel by mutableStateOf<Map<String, String?>>(emptyMap())
         private set
 
     val events = MutableSharedFlow<RhEvent>(extraBufferCapacity = 256)
@@ -56,13 +94,37 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     private var hello: String? = null
     private var collectingTm: Tls.CollectingTrustManager? = null
 
+    /** Off-LAN transport (relay://host:port/channel) — raw TCP relay client. */
+    private var relayLink: AtomicReference<RelayLink?> = AtomicReference(null)
+
     fun connect(url: String, token: String, pinnedFingerprint: String?) {
         close()
+        userClosed = false
+        policy.reset()
         status = Status.Connecting
         activeUrl = url
         lastError = null
+        lastToken = token
+        lastFingerprint = pinnedFingerprint
         hello = Proto.hello(token)
         collectingTm = null
+
+        // relay:// URLs bypass OkHttp entirely: the phone dials OUT to the
+        // relay server (works from any network, no inbound port on the PC)
+        // and the daemon bridges rhreq envelopes to its protocol handler.
+        if (url.startsWith("relay://")) {
+            val (host, port, channel) = RelayLink.parse(url)
+                ?: run { lastError = "bad relay url"; status = Status.Disconnected; return }
+            val link = RelayLink(host, port, channel,
+                onFrame = { frame -> handleRelayFrame(frame) },
+                onClosed = {
+                    status = Status.Disconnected
+                    if (!userClosed) scheduleReconnect()
+                })
+            relayLink.set(link)
+            link.start()
+            return
+        }
 
         val client: OkHttpClient = when {
             !url.startsWith("wss") -> base
@@ -86,7 +148,9 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     }
 
     fun close() {
+        userClosed = true
         socket.getAndSet(null)?.close(1000, "bye")
+        relayLink.getAndSet(null)?.close()
         status = Status.Disconnected
         collectingTm = null
     }
@@ -112,10 +176,14 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             status = Status.Disconnected
             lastError = t.message ?: "connection failed"
+            scheduleReconnect()
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             status = Status.Disconnected
+            // Server-initiated close (bad token, killed) — still retry with
+            // backoff unless the user explicitly disconnected.
+            if (!userClosed) scheduleReconnect()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -124,15 +192,73 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     }
 
     private fun send(line: String): Boolean {
+        relayLink.get()?.let { link ->
+            // Relay transport: wrap the protocol message in an rh envelope for
+            // the daemon's relay bridge (same shape the daemon expects).
+            val reqId = relayReqId.getAndIncrement()
+            val inner = line
+            link.publish("""{"rh":true,"type":"rhreq","reqId":$reqId,"msg":$inner}""")
+            return true
+        }
         val ws = socket.get() ?: return false
         return ws.send(line)
     }
 
+    private val relayReqId = java.util.concurrent.atomic.AtomicLong(0)
+
+    /** Relay frames: `rhresp` (reply to our rhreq) and `rhpush` (broadcasts). */
+    private fun handleRelayFrame(frame: String) {
+        val env = runCatching { Json.parseToJsonElement(frame) as? JsonObject }.getOrNull() ?: return
+        when (env["type"]?.jsonPrimitive?.contentOrNull) {
+            "connected" -> {
+                val link = relayLink.get() ?: return
+                link.subscribe()
+            }
+            "message", "direct" -> {
+                val data = env["data"] as? JsonObject ?: return
+                when (data["type"]?.jsonPrimitive?.contentOrNull) {
+                    "rherr" -> {
+                        lastError = "relay: " + (data["error"]?.jsonPrimitive?.contentOrNull ?: "rejected")
+                        relayLink.getAndSet(null)?.close()
+                        status = Status.Disconnected
+                    }
+                    "rhresp", "rhpush" -> {
+                        val payload = data["data"] as? JsonObject ?: return
+                        handle(payload.toString())
+                    }
+                }
+            }
+        }
+    }
+
     fun rescan(): Boolean = send(Proto.detect())
+
+    // ── Freebuff control methods ──
+    fun fbStatus() = send(Proto.fbStatus())
+    fun fbSkillList() = send(Proto.fbSkillList())
+    fun fbSkillGet(name: String) = send(Proto.fbSkillGet(name))
+    fun fbSkillRun(name: String, harness: String, args: String?) = send(Proto.fbSkillRun(name, harness, args))
+    fun fbConfigList() = send(Proto.fbConfigList())
+    fun fbConfigGet(name: String) = send(Proto.fbConfigGet(name))
+    fun fbConfigSet(name: String, patchJson: String) = send(Proto.fbConfigSet(name, patchJson))
+    fun fbAuthStatus() = send(Proto.fbAuthStatus())
+    fun fbAuthLogout(restart: Boolean) = send(Proto.fbAuthLogout(restart))
+    fun fbAppOpen() = send(Proto.fbAppOpen())
+    fun fbAppQuit() = send(Proto.fbAppQuit())
+    fun modelList(chatId: String) = send(Proto.modelList(chatId))
+    fun chatModelSet(chatId: String, model: String?) = send(Proto.chatModelSet(chatId, model))
     fun install(id: String): Boolean = send(Proto.install(id))
     fun createSession(harness: String, cwd: String): Boolean = send(Proto.create(harness, cwd))
-    fun attach(id: String): Boolean = send(Proto.attach(id))
-    fun detach(id: String): Boolean = send(Proto.detach(id))
+    fun attach(id: String): Boolean {
+        attachedSessions.add(id)
+        val since = lastSeq[id]
+        return if (since != null) send(Proto.attachSince(id, since)) else send(Proto.attach(id))
+    }
+    fun detach(id: String): Boolean {
+        attachedSessions.remove(id)
+        lastSeq.remove(id)
+        return send(Proto.detach(id))
+    }
     fun sendInput(id: String, dataB64: String): Boolean = send(Proto.input(id, dataB64))
     fun sendResize(id: String, cols: Int, rows: Int): Boolean = send(Proto.resize(id, cols, rows))
     fun kill(id: String): Boolean = send(Proto.kill(id))
@@ -283,6 +409,8 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
                 sessions = Proto.parseSessions(m)
                 chats = Proto.parseChats(m)
                 status = Status.Connected
+                policy.reset()
+                reattachAll()
             }
             "manifests" -> tools = Proto.parseTools(m)
             "sessions" -> {
@@ -292,6 +420,7 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
             "created" -> str(m, "id")?.let { events.tryEmit(RhEvent.Created(it)) }
             "out", "replay" -> {
                 val id = str(m, "id") ?: return
+                m["seq"]?.jsonPrimitive?.longOrNull?.let { seq -> if (seq > (lastSeq[id] ?: 0L)) lastSeq[id] = seq }
                 val data = str(m, "data") ?: return
                 onTerminalData?.invoke(id, data)
             }
@@ -358,6 +487,62 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
                     chatStreamBuf = chatStreamBuf.toMutableMap().apply { remove(id) }
                 }
             }
+            "fb_status" -> {
+                fbRunning = bool(m, "running")
+                fbProfile = str(m, "profile")
+                fbAuthLoggedIn = (m["auth"] as? JsonObject)?.let { bool(it, "loggedIn") }
+                fbAuthExpiresAt = (m["auth"] as? JsonObject)?.let { str(it, "expiresAt") }
+            }
+            "fb_skill_list" -> {
+                val items = (m["items"] as? JsonArray)?.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    FbSkill(
+                        name = str(o, "name") ?: return@mapNotNull null,
+                        description = str(o, "description") ?: "",
+                        dir = str(o, "dir") ?: "",
+                    )
+                } ?: emptyList()
+                fbSkills = items
+            }
+            "fb_config_list" -> {
+                val items = (m["items"] as? JsonArray)?.mapNotNull { el ->
+                    val o = el as? JsonObject ?: return@mapNotNull null
+                    FbConfig(
+                        name = str(o, "name") ?: return@mapNotNull null,
+                        size = (o["size"] as? JsonPrimitive)?.longOrNull ?: 0L,
+                        mtime = str(o, "mtime") ?: "",
+                    )
+                } ?: emptyList()
+                fbConfigs = items
+            }
+            "fb_auth_status" -> {
+                fbAuthLoggedIn = bool(m, "loggedIn")
+                fbAuthExpiresAt = str(m, "expiresAt")
+            }
+            "fb_skill_get" -> {
+                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                    _skillContent.value = str(m, "content") ?: ""
+                }
+            }
+            "fb_config_get" -> {
+                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                    _configContent.value = m["content"]?.toString() ?: ""
+                }
+            }
+            "model_list" -> {
+                val id = str(m, "id") ?: return
+                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                    val models = (m["models"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                    chatModels = chatModels.toMutableMap().apply { put(id, models) }
+                    chatCurrentModel = chatCurrentModel.toMutableMap().apply { put(id, str(m, "current")) }
+                }
+            }
+            "chat_model_set" -> {
+                val id = str(m, "id") ?: return
+                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                    chatCurrentModel = chatCurrentModel.toMutableMap().apply { put(id, str(m, "current")) }
+                }
+            }
             else -> {}
         }
     }
@@ -388,4 +573,44 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     private fun num(o: JsonObject, key: String): Long? = o[key]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
 
     private fun str(o: JsonObject, key: String): String? = o[key]?.jsonPrimitive?.contentOrNull
+
+    /** Re-attach every session the UI had open, replaying only missed seqs. */
+    private fun reattachAll() {
+        for (id in attachedSessions.toList()) {
+            val since = lastSeq[id]
+            if (since != null) send(Proto.attachSince(id, since)) else send(Proto.attach(id))
+        }
+    }
+
+    /** Exponential backoff + jitter reconnect loop. */
+    private fun scheduleReconnect() {
+        if (userClosed) return
+        val url = activeUrl ?: return
+        val token = lastToken ?: return
+        val delay = policy.nextDelayMs() ?: run {
+            lastError = "gave up after ${policy.attemptsSoFar} reconnect attempts"
+            return
+        }
+        status = Status.Reconnecting
+        reconnectScope.launch {
+            kotlinx.coroutines.delay(delay)
+            if (userClosed) return@launch
+            status = Status.Connecting
+            hello = Proto.hello(token)
+            collectingTm = null
+            if (url.startsWith("relay://")) {
+                connect(url, token, lastFingerprint)
+                return@launch
+            }
+            val client: OkHttpClient = when {
+                !url.startsWith("wss") -> base
+                else -> {
+                    val fp = lastFingerprint
+                    if (fp != null) Tls.pinnedClient(base, fp)
+                    else Tls.collectingClient(base).also { collectingTm = it.second }.first
+                }
+            }
+            socket.set(client.newWebSocket(Request.Builder().url(url).build(), listener))
+        }
+    }
 }
