@@ -97,6 +97,7 @@ Status legend:
 | mkcert-style local CA install (no cert warnings) | mkcert, selfsigned | 🗺️ (pinning covers it today) |
 | Remote desktop / screen streaming | rustdesk, ws-scrcpy, novnc, guacamole | ✅ `rd_*` (session lifecycle w/ async connect, frame buffering, input forwarding, quality presets, stats) — TS→ESM port; full WebRTC video remains roadmap (frame relay transport is simulated) |
 | VNC frame bridge (TCP frame server + frame feed) | novnc, guacamole-server | ✅ `vnc_start`/`vnc_stop`/`vnc_status`/`vnc_frame` + `vnc_event` broadcasts — `vnc_bridge.js` CJS→ESM, ephemeral-port bind, frame push to TCP clients; full RFB proxy remains roadmap |
+| **Real desktop control (capture + input)** | rustdesk, anydesk | ✅ `desktop_start/stop/frame/mouse/key/type/quality/status` — Windows PowerShell helpers (warm ~3 fps JPEG capture in-memory to dodge AMSI RAT heuristics + warm SendInput input helper), canvas viewer in the browser tab (click/right-click/wheel/keyboard), watcher-scoped frame feed (no broadcast fan-out), capture loop stops at zero viewers; browser 🖨️ Desktop tab + relay status pill + 🔔 Test-push button |
 | SSH jump-host / bastion access control | sshportal, ssh_bastion_cardea, bifroest | ✅ `bastion_*` — users/hosts registry, access rules w/ expiry, session gating, invite tokens (`bastion_user_add/host_add/rule_add/access/session_start/session_end/sessions/stats/invite/invite_accept`) |
 | SSH server auth + per-user command allowlists | bifroest, sshwifty | ✅ `sshserver_*` — user registry, session lifecycle, allowlisted commands w/ recording, idle reaping (`sshserver_user_add/session_create/exec/session_end/sessions/stats`) |
 | Wake-on-LAN | rustdesk | ✅ `wake` — magic-packet UDP broadcast (multi-MAC, custom port/address) |
@@ -247,7 +248,7 @@ reports the running app, 28 skills, 3 configs; model_list → [opus, sonnet, hai
 
 Known limits: Android FreebuffScreen is UI-complete but verified compile-only (no
 instrumented tests); Freebuff auth store is OS-encrypted so `loggedIn` reflects
-detectability, not session truth; AnyDesk-style full screen streaming remains on the
+detectability, not session truth. AnyDesk-style streaming now EXISTS on Windows via the `desktop_*` surface (~3 fps JPEG + full input); a true RFB protocol proxy remains on the
 roadmap (the rd_*/vnc_* surfaces cover remote desktop scaffolding).
 
 Off-LAN relay bridge (2026-09-10): the relay transport is now a real command

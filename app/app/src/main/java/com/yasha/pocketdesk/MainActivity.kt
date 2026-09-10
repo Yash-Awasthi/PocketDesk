@@ -4,9 +4,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Build
@@ -123,6 +125,27 @@ class MainActivity : ComponentActivity() {
             },
         ) { pad ->
             Box(Modifier.fillMaxSize().padding(pad)) {
+                // Connection state banner (surfaces Reconnecting — previously
+                // the app dropped to a bare "disconnected" with no hint).
+                when (client.status) {
+                    Status.Reconnecting -> Text(
+                        "⟳ reconnecting…",
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier
+                            .align(androidx.compose.ui.Alignment.TopCenter)
+                            .background(androidx.compose.material3.MaterialTheme.colorScheme.errorContainer)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                    Status.Connecting -> Text(
+                        "connecting…",
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier
+                            .align(androidx.compose.ui.Alignment.TopCenter)
+                            .background(androidx.compose.material3.MaterialTheme.colorScheme.errorContainer)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                    else -> {}
+                }
                 when (val s = screen) {
                     Screen.Connect -> ConnectScreen(client) { screen = Screen.Sessions }
                     Screen.Tools -> ToolsScreen(client)

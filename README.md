@@ -44,6 +44,8 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states with busy→quiet push |
 | 🔀 **Tunnels** | Reach any PC-local service from your phone over the harness connection |
 | 🖥️ **VNC Bridge** | Share a screen frame feed over a local TCP port (`vnc_start/stop/status/frame` + `vnc_event`) |
+| 🖨️ **Desktop Control** | Watch the whole PC screen live (~3 fps) from the browser and drive it — click, right-click, scroll, type, hotkeys (`desktop_*`; Windows, PowerShell-powered) |
+| 🔔 **Push Test** | One click in the browser fires a test push through every configured channel — verify your ntfy/Pushover phone subscription instantly |
 | 🛡️ **SSH Bastion** | Jump-host access control: users, hosts, access rules with expiry, session gating, invite tokens (`bastion_*`) |
 | 🔒 **SSH Server Control** | Per-user auth + command allowlists with session recording (`sshserver_*`) |
 | 📇 **Connection Profiles** | Multi-protocol SSH/VNC/SFTP profiles, host-key TOFU, SSH key management (`profile_*`/`hostkey_*`/`sshkey_*`) |

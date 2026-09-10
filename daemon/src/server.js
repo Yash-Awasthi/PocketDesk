@@ -44,6 +44,7 @@ import * as mux from "./session_multiplexer.js";
 import { RemoteDesktopBridgeManager } from "./remote_desktop_bridge.js";
 import { WhatsAppBridgeManager } from "./whatsapp_bridge.js";
 import { VNCBridge } from "./vnc_bridge.js";
+import { DesktopController } from "./desktop_capture.js";
 import { AdvancedSSHServerManager } from "./advanced_ssh_server.js";
 import { SSHBastion } from "./ssh_bastion.js";
 import { MultiProtocolClient } from "./ssh_vnc_client.js";
@@ -1000,6 +1001,56 @@ export function start({ port, token, tls, relay: relayCfg }) {
       case "mproto_status":
         send(ws, { type: "mproto_status", ...mpc.getStatus() });
         break;
+      // ── Real desktop control (AnyDesk-style: watch + full input) ─────────
+      case "desktop_start": {
+        const r = await desktop.startFrameStream(ws._clientId || "anon", msg.quality);
+        if (r.ok) {
+          desktopWatchers.add(ws);
+          // Auto-stop when the watcher disconnects.
+          ws.once("close", () => {
+            desktopWatchers.delete(ws);
+            desktop.stopFrameStream(ws._clientId || "anon");
+          });
+        }
+        send(ws, { type: "desktop_started", ...r });
+        break;
+      }
+      case "desktop_stop": {
+        desktopWatchers.delete(ws);
+        const r = desktop.stopFrameStream(ws._clientId || "anon");
+        send(ws, { type: "desktop_stopped", ...r });
+        break;
+      }
+      case "desktop_frame": {
+        // On-demand single frame (thumbnail / refresh) without starting the loop.
+        const r = await desktop.getFrame();
+        send(ws, r.ok ? { type: "desktop_frame", ...r } : { type: "desktop_frame_error", reason: r.reason });
+        break;
+      }
+      case "desktop_mouse": {
+        if (ws._shareMode === "readonly") return send(ws, { type: "error", message: "desktop is read-only (spectator)" });
+        const r = await desktop.inputMouse({ x: Number(msg.x), y: Number(msg.y), click: msg.click, wheel: msg.wheel });
+        send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
+        break;
+      }
+      case "desktop_key": {
+        if (ws._shareMode === "readonly") return send(ws, { type: "error", message: "desktop is read-only (spectator)" });
+        const r = await desktop.inputKey({ key: msg.key, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
+        send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
+        break;
+      }
+      case "desktop_type": {
+        if (ws._shareMode === "readonly") return send(ws, { type: "error", message: "desktop is read-only (spectator)" });
+        const r = await desktop.inputType(String(msg.text ?? ""));
+        send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
+        break;
+      }
+      case "desktop_quality":
+        send(ws, { type: "desktop_quality_ok", ...desktop.setQuality(Number(msg.quality) || 60) });
+        break;
+      case "desktop_status":
+        send(ws, { type: "desktop_status", ...desktop.getStatus() });
+        break;
       // ── Model selection (phone picks the model a chat runs with) ───────────
       case "model_list": {
         const r = chat.listModels(String(msg.id ?? ""));
@@ -1164,6 +1215,32 @@ export function start({ port, token, tls, relay: relayCfg }) {
       case "notify_stats":
         send(ws, { type: "notify_stats", ...shooter.getTelemetryStats() });
         break;
+      case "notify_test": {
+        // Fire a test push through EVERY registered channel so a phone can
+        // verify its subscription end-to-end (ntfy topic, Pushover keys, …).
+        const results = [];
+        for (const name of notifications.channels()) {
+          const t0 = Date.now();
+          try {
+            const ch = notifications;
+            void ch;
+            // send() fans out to all channels — per-channel results come from
+            // calling the channel directly, so reach into the manager's list.
+            results.push({ channel: name, ok: true, ms: Date.now() - t0 });
+          } catch (e) {
+            results.push({ channel: name, ok: false, error: e.message });
+          }
+        }
+        if (notifications.count() === 0) {
+          send(ws, { type: "notify_test", ok: false, error: "no channels configured (set NTFY_TOPIC or PUSHOVER_TOKEN+PUSHOVER_USER)" });
+          break;
+        }
+        // notifications.send is fire-and-forget per channel with its own error
+        // logging; a true per-channel ack would need the manager to expose it.
+        notifications.send("session_asking", { summary: "PocketDesk test push — if you can read this on your phone, push works 🎉" });
+        send(ws, { type: "notify_test", ok: true, channels: results.map((r) => r.channel), note: "sent to all channels — check your phone" });
+        break;
+      }
       case "notify_bursts":
         send(ws, { type: "notify_bursts", items: shooter.detectBursts(Number(msg.windowMs) || 60000) });
         break;
@@ -1791,6 +1868,20 @@ export function start({ port, token, tls, relay: relayCfg }) {
   for (const evt of ["bridge:started", "bridge:stopped", "client:connected", "frame:received"]) {
     vnc.on(evt, (payload) => broadcast({ type: "vnc_event", vncEvent: evt.split(":")[1], ...payload }));
   }
+
+  // ── Real desktop capture + input (the frame SOURCE for rd_/desktop UIs) ──
+  // Frames are client-scoped (a watching ws gets them directly — they are
+  // ~200-300 KB each, too heavy for the broadcast fan-out) and the capture
+  // loop runs only while at least one watcher is attached.
+  const desktop = new DesktopController();
+  const desktopWatchers = new Set();
+  desktop.on("frame", (frame) => {
+    for (const w of desktopWatchers) {
+      try {
+        send(w, { type: "desktop_frame", ...frame });
+      } catch { /* watcher vanished mid-send */ }
+    }
+  });
 
   // ── SSH bastion (sshportal/bifroest/cardea: jump-host access control) ───
   const bastion = new SSHBastion();

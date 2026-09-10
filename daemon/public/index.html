@@ -118,6 +118,8 @@
   <span class="logo">🔧</span>
   <h1>PocketDesk</h1>
   <span id="status" class="bad">disconnected</span>
+  <span id="relayPill" style="display:none;margin-left:8px;padding:2px 8px;border-radius:10px;font-size:12px;background:#30363d;color:#8b949e">relay: —</span>
+  <button class="btn" style="margin-left:auto" onclick="send({type:'notify_test'})" title="Send a test push to every configured channel (NTFY_TOPIC / Pushover)">🔔 Test push</button>
 </div>
 
 <div class="connect-bar">
@@ -143,6 +145,7 @@
       <div class="tab" data-tab="chat" onclick="switchTab('chat')">💬 Chat</div>
       <div class="tab" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</div>
       <div class="tab" data-tab="freebuff" onclick="switchTab('freebuff'); send({type:'fb_status'}); send({type:'fb_skill_list'}); send({type:'fb_config_list'});">🦾 Freebuff</div>
+      <div class="tab" data-tab="desktop" onclick="switchTab('desktop'); desktopOnShow();">🖨️ Desktop</div>
     </div>
     <div class="tab-content">
       <div class="tab-pane active" id="pane-terminal">
@@ -228,6 +231,35 @@
             <select id="fbSkillHarness" style="margin-left:6px"></select>
             <input id="fbSkillArgs" placeholder="task for the skill (optional)" style="margin-left:6px;width:280px" />
             <button class="btn primary" onclick="fbRunSkill()" style="margin-left:6px">Run</button>
+          </div>
+        </div>
+      </div>
+      <div class="tab-pane" id="pane-desktop">
+        <div class="dashboard">
+          <div class="dash-section" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn primary" id="deskToggle" onclick="desktopToggle()">▶ Start viewing</button>
+            <span style="color:#8b949e">quality</span>
+            <select id="deskQuality" onchange="send({type:'desktop_quality', quality:Number(this.value)})">
+              <option value="30">low (50%)</option>
+              <option value="50">medium (75%)</option>
+              <option value="80" selected>high (100%)</option>
+            </select>
+            <span id="deskStatus" style="color:#8b949e"></span>
+          </div>
+          <div class="dash-section" style="display:flex;gap:6px;flex-wrap:wrap">
+            <input id="deskTypeBox" placeholder="type text into the desktop…" style="width:260px"
+                   onkeydown="if(event.key==='Enter'){desktopTypeText();}" />
+            <button class="btn" onclick="desktopTypeText()">Type</button>
+            <button class="btn" onclick="send({type:'desktop_key', key:13})">Enter</button>
+            <button class="btn" onclick="send({type:'desktop_key', key:27})">Esc</button>
+            <button class="btn" onclick="send({type:'desktop_key', key:9})">Tab</button>
+            <button class="btn" onclick="send({type:'desktop_key', key:0x11+0x57, modifiers:[]}); send({type:'desktop_key', key:87, modifiers:['ctrl']})">Ctrl+W</button>
+            <button class="btn" onclick="send({type:'desktop_key', key:0x74, modifiers:[]})">F5</button>
+            <button class="btn danger" onclick="if(confirm('Press Ctrl+Alt+Del equivalent? (secure-desktop may block it)')) desktopSAS()">CAD</button>
+          </div>
+          <div class="dash-section" style="padding:0">
+            <canvas id="deskCanvas" width="1280" height="720"
+                    style="width:100%;background:#0d1117;border-radius:8px;cursor:crosshair;display:block"></canvas>
           </div>
         </div>
       </div>
@@ -395,6 +427,7 @@ function handle(m) {
       send({ type: "device_list" });
       send({ type: "quiet_status" });
       send({ type: "schedule_list" });
+      send({ type: "relay_status" });
       renderTools(m.manifests || []);
       renderSessions(m.sessions || []);
       renderChats((m.sessions || []).filter(s => s.kind === "chat"));
@@ -558,6 +591,48 @@ function handle(m) {
       dashEvent(m.ok ? "app quit" : "quit failed", m.ok ? 'blue' : 'red');
       setTimeout(() => send({ type: "fb_status" }), 1500);
       break;
+    case "desktop_frame": {
+      desktopLastFrame = m;
+      desktopDraw();
+      break;
+    }
+    case "desktop_frame_error":
+      document.getElementById("deskStatus").textContent = m.reason === "unsupported_platform" ? "desktop control is Windows-only" : "capture failed";
+      break;
+    case "desktop_started":
+      desktopViewing = !!m.ok;
+      document.getElementById("deskToggle").textContent = desktopViewing ? "⏸ Stop viewing" : "▶ Start viewing";
+      document.getElementById("deskStatus").textContent = m.ok ? `streaming (~3 fps, q${m.quality})` : (m.reason || "unavailable");
+      if (m.ok) send({ type: "desktop_frame" });
+      break;
+    case "desktop_stopped":
+      desktopViewing = false;
+      document.getElementById("deskToggle").textContent = "▶ Start viewing";
+      document.getElementById("deskStatus").textContent = "stopped";
+      break;
+    case "desktop_input_ok":
+      if (!m.ok) dashEvent(`desktop input failed: ${m.error || "?"}`, 'red');
+      break;
+    case "desktop_quality_ok":
+      dashEvent(`desktop quality → ${m.quality}`, 'blue');
+      break;
+    case "relay_status": {
+      const pill = document.getElementById("relayPill");
+      pill.style.display = "inline";
+      if (m.connected) { pill.textContent = `relay: connected`; pill.style.background = "#1a7f37"; pill.style.color = "#fff"; }
+      else if (m.reconnecting) { pill.textContent = `relay: retrying (×${m.retryCount})`; pill.style.background = "#9e6a03"; pill.style.color = "#fff"; }
+      else if (m.hosting) { pill.textContent = `relay: hosting :${m.hostPort}`; pill.style.background = "#30363d"; }
+      else { pill.textContent = "relay: off"; pill.style.background = "#30363d"; pill.style.color = "#8b949e"; }
+      break;
+    }
+    case "relay_state": {
+      // Pushed by the daemon on every link transition — keep the pill live.
+      if (m.state === "connected" || m.state === "reconnecting" || m.state === "disconnected" || m.state === "error" || m.state === "failed") send({ type: "relay_status" });
+      break;
+    }
+    case "notify_test":
+      dashEvent(m.ok ? `push sent via [${(m.channels || []).join(", ")}] — check your phone` : `push test failed: ${m.error}`, m.ok ? 'green' : 'red');
+      break;
     case "error": console.error("ERROR:", m.message); break;
   }
 }
@@ -568,6 +643,56 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + tab));
   if (tab === 'terminal' && fitAddon) requestAnimationFrame(() => fitAddon.fit());
 }
+
+// ── Desktop control (AnyDesk-style: canvas viewer + input) ──
+let desktopViewing = false;
+let desktopLastFrame = null;
+function desktopOnShow() {
+  // A single on-demand frame even when not streaming — instant preview.
+  if (!desktopViewing) send({ type: "desktop_frame" });
+}
+function desktopToggle() {
+  if (desktopViewing) send({ type: "desktop_stop" });
+  else send({ type: "desktop_start", quality: Number(document.getElementById("deskQuality").value) });
+}
+function desktopDraw() {
+  const f = desktopLastFrame;
+  if (!f || !f.base64) return;
+  const cv = document.getElementById("deskCanvas");
+  const ctx = cv.getContext("2d");
+  const img = new Image();
+  img.onload = () => {
+    const scale = Math.min(cv.width / img.width, cv.height / img.height);
+    const w = img.width * scale, h = img.height * scale;
+    ctx.fillStyle = "#0d1117"; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.drawImage(img, (cv.width - w) / 2, (cv.height - h) / 2, w, h);
+  };
+  img.src = "data:image/jpeg;base64," + f.base64;
+}
+function desktopToScreen(ev) {
+  // Map a canvas click to full virtual-screen pixel coords, accounting for
+  // the letterbox fit and the frame's own scale (frame w/h are post-scale).
+  const f = desktopLastFrame;
+  if (!f) return null;
+  const cv = document.getElementById("deskCanvas");
+  const rect = cv.getBoundingClientRect();
+  const cx = (ev.clientX - rect.left) * (cv.width / rect.width);
+  const cy = (ev.clientY - rect.top) * (cv.height / rect.height);
+  const scale = Math.min(cv.width / f.width, cv.height / f.height);
+  const w = f.width * scale, h = f.height * scale;
+  const ox = (cv.width - w) / 2, oy = (cv.height - h) / 2;
+  const fx = (cx - ox) / (w / f.width);
+  const fy = (cy - oy) / (h / f.height);
+  if (fx < 0 || fy < 0 || fx > f.width || fy > f.height) return null;
+  // frame pixels → real desktop pixels (frame may be downscaled by quality)
+  const ratio = Math.max(1, Math.round((f.width / window.screen.width) * 4) / 4);
+  return { x: Math.round(fx * ratio), y: Math.round(fy * ratio) };
+}
+function desktopTypeText() {
+  const el = document.getElementById("deskTypeBox");
+  if (el.value) { send({ type: "desktop_type", text: el.value }); el.value = ""; el.focus(); }
+}
+function desktopSAS() { send({ type: "desktop_key", key: 0x1d, modifiers: [] }); }
 
 // ── Tools (full rebuild is fine — rare event) ──
 function renderTools(items) {
@@ -1102,6 +1227,49 @@ function promptRemove(pid) { if (activeChatId) send({ type: "prompt_remove", id:
 
 // Keep the scheduler "Next" column honest between events.
 setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" }); }, 15000);
+
+// ── Desktop canvas input (mousemove throttled; click/right-click/wheel direct) ──
+(() => {
+  const cv = document.getElementById("deskCanvas");
+  if (!cv) return;
+  let lastMove = 0;
+  cv.addEventListener("mousemove", (ev) => {
+    const now = Date.now();
+    if (now - lastMove < 80) return; // ~12 moves/sec is plenty
+    lastMove = now;
+    const p = desktopToScreen(ev);
+    if (p) send({ type: "desktop_mouse", x: p.x, y: p.y });
+  });
+  cv.addEventListener("click", (ev) => {
+    const p = desktopToScreen(ev);
+    if (p) send({ type: "desktop_mouse", x: p.x, y: p.y, click: "left" });
+  });
+  cv.addEventListener("contextmenu", (ev) => {
+    ev.preventDefault();
+    const p = desktopToScreen(ev);
+    if (p) send({ type: "desktop_mouse", x: p.x, y: p.y, click: "right" });
+  });
+  cv.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    send({ type: "desktop_mouse", wheel: ev.deltaY > 0 ? -120 : 120 });
+  }, { passive: false });
+  // Keyboard goes to the desktop while the canvas has focus.
+  cv.tabIndex = 0;
+  cv.addEventListener("keydown", (ev) => {
+    if (!desktopViewing) return;
+    const vkMap = { Enter: 13, Escape: 27, Tab: 9, Backspace: 8, Delete: 46, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39 };
+    if (ev.key.length === 1) {
+      send({ type: "desktop_type", text: ev.key });
+    } else if (vkMap[ev.key]) {
+      const mods = [];
+      if (ev.ctrlKey) mods.push("ctrl");
+      if (ev.altKey) mods.push("alt");
+      if (ev.shiftKey) mods.push("shift");
+      send({ type: "desktop_key", key: vkMap[ev.key], modifiers: mods });
+    } else return;
+    ev.preventDefault();
+  });
+})();
 
 // Hook into existing message handler for dashboard events
 </script>
