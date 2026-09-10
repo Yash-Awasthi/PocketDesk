@@ -44,6 +44,9 @@ data class FsEntry(val name: String, val isDir: Boolean, val size: Long?)
 data class FbSkill(val name: String, val description: String, val dir: String)
 data class FbConfig(val name: String, val size: Long, val mtime: String)
 
+/** One captured desktop frame: base64 JPEG, full virtual-screen geometry. */
+data class DesktopFrame(val base64: String, val width: Int, val height: Int)
+
 data class FsListing(val path: String, val parent: String?, val items: List<FsEntry>)
 
 sealed interface RhEvent {
@@ -81,6 +84,21 @@ object Proto {
     }
 
     fun kill(id: String) = obj { put("type", "kill"); put("id", id) }
+
+    // ── Desktop control (AnyDesk-style watch + full input) ──
+    fun desktopStart(quality: Int) = obj { put("type", "desktop_start"); put("quality", quality) }
+    fun desktopStop() = obj { put("type", "desktop_stop") }
+    fun desktopFrame() = obj { put("type", "desktop_frame") }
+    fun desktopMouse(x: Int, y: Int, click: String?, wheel: Int?) = obj {
+        put("type", "desktop_mouse"); put("x", x); put("y", y)
+        if (click != null) put("click", click)
+        if (wheel != null) put("wheel", wheel)
+    }
+    fun desktopKey(vk: Int, modifiers: List<String>) = obj {
+        put("type", "desktop_key"); put("key", vk)
+        put("modifiers", JsonArray(modifiers.map { JsonPrimitive(it) }))
+    }
+    fun desktopType(text: String) = obj { put("type", "desktop_type"); put("text", text) }
 
     // ── Freebuff control (fb_*) ──
     fun fbStatus() = obj { put("type", "fb_status") }

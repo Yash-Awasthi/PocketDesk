@@ -19,6 +19,35 @@ fs.writeFileSync(
 );
 fs.writeFileSync(path.join(fbSkills, "hello-skill", "SKILL.md"), "# Hello Skill\nSay hello, kindly.\n");
 
+// Hermetic claude override: the builtin claude manifest needs a real CLI.
+// A node fake agent + manifest override keeps the chat/model tests hermetic.
+const fakeAgentJs = path.join(tmp, "fakeagent.js");
+fs.writeFileSync(fakeAgentJs, `
+let input = "";
+process.stdin.on("data", (d) => (input += d));
+process.stdin.on("end", () => {
+  const line = (o) => process.stdout.write(JSON.stringify(o) + "\\n");
+  line({ type: "system", subtype: "init" });
+  line({ type: "assistant", message: { content: [{ type: "text", text: "echo: " + input.trim() }] } });
+  line({ type: "result", is_error: false, result: "" });
+});
+`);
+fs.writeFileSync(path.join(tmp, "claude.json"), JSON.stringify({
+  id: "claude",
+  name: "Claude Code (fake)",
+  adapter: "terminal",
+  bin: "node",
+  install: {},
+  chat: {
+    args: [fakeAgentJs],
+    format: "claude-stream-json",
+    models: {
+      opus: { args: ["--model", "fake-opus"] },
+      sonnet: { args: ["--model", "fake-sonnet"] },
+    },
+  },
+}));
+
 const PORT = 8827;
 const CLI_PORT = 46827;
 const TOKEN = "fbtoken";

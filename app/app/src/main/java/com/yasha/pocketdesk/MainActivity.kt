@@ -4,10 +4,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Email
@@ -29,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.yasha.pocketdesk.ui.ChatScreen
+import com.yasha.pocketdesk.ui.DesktopScreen
 import com.yasha.pocketdesk.ui.ConnectScreen
 import com.yasha.pocketdesk.ui.FreebuffScreen
 import com.yasha.pocketdesk.ui.SessionsScreen
@@ -43,6 +47,7 @@ sealed interface Screen {
     data object Sessions : Screen
     data object Chats : Screen
     data object Freebuff : Screen
+    data object Desktop : Screen
     data class Terminal(val sessionId: String) : Screen
 }
 
@@ -118,17 +123,45 @@ class MainActivity : ComponentActivity() {
                             icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
                             label = { Text("Freebuff") },
                         )
+                        NavigationBarItem(
+                            selected = screen == Screen.Desktop,
+                            onClick = { screen = Screen.Desktop },
+                            icon = { Icon(Icons.Filled.Build, contentDescription = null) },
+                            label = { Text("Desktop") },
+                        )
                     }
                 }
             },
         ) { pad ->
             Box(Modifier.fillMaxSize().padding(pad)) {
+                // Connection state banner (surfaces Reconnecting — previously
+                // the app dropped to a bare "disconnected" with no hint).
+                when (client.status) {
+                    Status.Reconnecting -> Text(
+                        "⟳ reconnecting…",
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier
+                            .align(androidx.compose.ui.Alignment.TopCenter)
+                            .background(androidx.compose.material3.MaterialTheme.colorScheme.errorContainer)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                    Status.Connecting -> Text(
+                        "connecting…",
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier
+                            .align(androidx.compose.ui.Alignment.TopCenter)
+                            .background(androidx.compose.material3.MaterialTheme.colorScheme.errorContainer)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+                    else -> {}
+                }
                 when (val s = screen) {
                     Screen.Connect -> ConnectScreen(client) { screen = Screen.Sessions }
                     Screen.Tools -> ToolsScreen(client)
                     Screen.Sessions -> SessionsScreen(client, openTerminal = { screen = Screen.Terminal(it) })
                     Screen.Chats -> ChatScreen(client)
                     Screen.Freebuff -> FreebuffScreen(client)
+                    Screen.Desktop -> DesktopScreen(client, onClose = { screen = Screen.Sessions })
                     is Screen.Terminal -> TerminalScreen(client, s.sessionId, onClose = { screen = Screen.Sessions })
                 }
             }

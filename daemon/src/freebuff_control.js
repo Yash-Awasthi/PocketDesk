@@ -20,7 +20,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execSync, spawn } from "node:child_process";
+import { execSync, execFileSync, spawn } from "node:child_process";
 
 const PROFILE_DIR = process.env.FB_PROFILE_DIR || (process.env.APPDATA
   ? path.join(process.env.APPDATA, "Freebuff")
@@ -79,7 +79,9 @@ function isRunning(exeName = appBasename()) {
       });
       return new RegExp(exeName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(out);
     }
-    const out = execSync(`pgrep -f ${JSON.stringify(exeName)} || true`, { encoding: "utf8", timeout: 5000 });
+    // execFileSync (no sh -c): pgrep -f would otherwise match the shell
+    // wrapper's own command line, which contains the pattern → always true.
+    const out = execFileSync("pgrep", ["-f", exeName], { encoding: "utf8", timeout: 5000 });
     return out.trim().length > 0;
   } catch {
     return false;

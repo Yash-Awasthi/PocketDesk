@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import okhttp3.OkHttpClient
@@ -78,6 +79,16 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     /** Last fb_skill_get / fb_config_get payload, consumed by dialogs. */
     val _skillContent = kotlinx.coroutines.flow.MutableStateFlow("")
     val _configContent = kotlinx.coroutines.flow.MutableStateFlow("")
+
+    // ── Desktop control state (AnyDesk-style screen viewer) ──
+    /** Latest desktop frame (base64 JPEG + geometry) — null until first frame. */
+    var desktopFrame by mutableStateOf<DesktopFrame?>(null)
+        private set
+    /** True while the daemon's frame loop is running for us. */
+    var desktopStreaming by mutableStateOf(false)
+        private set
+    /** Set on desktop_frame_error / input failures — consumed by the screen. */
+    val _desktopError = kotlinx.coroutines.flow.MutableStateFlow("")
 
     // ── Model selection state (chatId -> models/current) ──
     var chatModels by mutableStateOf<Map<String, List<String>>>(emptyMap())
@@ -245,6 +256,16 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     fun fbAuthLogout(restart: Boolean) = send(Proto.fbAuthLogout(restart))
     fun fbAppOpen() = send(Proto.fbAppOpen())
     fun fbAppQuit() = send(Proto.fbAppQuit())
+    // ── Desktop control methods ──
+    fun desktopStart(quality: Int = 55) { desktopStreaming = true; send(Proto.desktopStart(quality)) }
+    fun desktopStop() { desktopStreaming = false; send(Proto.desktopStop()) }
+    fun desktopSnapshot() = send(Proto.desktopFrame())
+    fun desktopTap(x: Int, y: Int) = send(Proto.desktopMouse(x, y, "left", null))
+    fun desktopLongTap(x: Int, y: Int) = send(Proto.desktopMouse(x, y, "right", null))
+    fun desktopScroll(down: Boolean) = send(Proto.desktopMouse(0, 0, null, if (down) 120 else -120))
+    fun desktopKey(vk: Int, modifiers: List<String> = emptyList()) = send(Proto.desktopKey(vk, modifiers))
+    fun desktopType(text: String) = send(Proto.desktopType(text))
+
     fun modelList(chatId: String) = send(Proto.modelList(chatId))
     fun chatModelSet(chatId: String, model: String?) = send(Proto.chatModelSet(chatId, model))
     fun install(id: String): Boolean = send(Proto.install(id))
@@ -529,6 +550,27 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
                     _configContent.value = m["content"]?.toString() ?: ""
                 }
             }
+            "desktop_started" -> {
+                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) desktopStreaming = true
+                else {
+                    desktopStreaming = false
+                    _desktopError.value = str(m, "reason") ?: "desktop unavailable"
+                }
+            }
+            "desktop_stopped" -> desktopStreaming = false
+            "desktop_frame" -> {
+                val b64 = str(m, "base64") ?: return
+                desktopFrame = DesktopFrame(
+                    base64 = b64,
+                    width = (m["width"] as? JsonPrimitive)?.intOrNull ?: 1,
+                    height = (m["height"] as? JsonPrimitive)?.intOrNull ?: 1,
+                )
+            }
+            "desktop_frame_error" ->
+                _desktopError.value = str(m, "reason") ?: "capture failed"
+            "desktop_input_ok" ->
+                if (m["ok"]?.jsonPrimitive?.booleanOrNull == false)
+                    _desktopError.value = str(m, "error") ?: "input rejected"
             "model_list" -> {
                 val id = str(m, "id") ?: return
                 if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
