@@ -42,16 +42,28 @@ export class SessionMonitor extends EventEmitter {
   scanSessions() {
     const currentPids = new Set();
     try {
-      const output = execSync("tasklist /FO CSV /NH 2>NUL || ps aux 2>/dev/null", {
+      // Windows tasklist is CSV; Linux ps aux is whitespace-separated — one
+      // command per platform, parsed accordingly (the old `tasklist || ps`
+      // fallback parsed Linux output as CSV and found nothing).
+      const isWin = process.platform === "win32";
+      const output = execSync(isWin ? "tasklist /FO CSV /NH" : "ps aux", {
         encoding: "utf-8",
         timeout: 5000,
       });
 
       const lines = output.split("\n").filter(Boolean);
       for (const line of lines) {
-        const parts = line.split(",").map((s) => s.replace(/"/g, "").trim());
-        const processName = parts[0]?.toLowerCase() || "";
-        const pid = parseInt(parts[1]);
+        let processName = "";
+        let pid = NaN;
+        if (isWin) {
+          const parts = line.split(",").map((s) => s.replace(/"/g, "").trim());
+          processName = parts[0]?.toLowerCase() || "";
+          pid = parseInt(parts[1]);
+        } else {
+          const parts = line.trim().split(/\s+/);
+          pid = parseInt(parts[1]);
+          processName = (parts[10] || parts[0] || "").toLowerCase();
+        }
 
         if (processName.includes("node") || processName.includes("claude") || processName.includes("python")) {
           if (!isNaN(pid)) {
