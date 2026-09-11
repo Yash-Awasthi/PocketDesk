@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Email
@@ -31,6 +32,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.yasha.pocketdesk.ui.ChatScreen
+import com.yasha.pocketdesk.ui.DesktopScreen
 import com.yasha.pocketdesk.ui.ConnectScreen
 import com.yasha.pocketdesk.ui.FreebuffScreen
 import com.yasha.pocketdesk.ui.SessionsScreen
@@ -45,6 +47,7 @@ sealed interface Screen {
     data object Sessions : Screen
     data object Chats : Screen
     data object Freebuff : Screen
+    data object Desktop : Screen
     data class Terminal(val sessionId: String) : Screen
 }
 
@@ -120,6 +123,12 @@ class MainActivity : ComponentActivity() {
                             icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
                             label = { Text("Freebuff") },
                         )
+                        NavigationBarItem(
+                            selected = screen == Screen.Desktop,
+                            onClick = { screen = Screen.Desktop },
+                            icon = { Icon(Icons.Filled.Build, contentDescription = null) },
+                            label = { Text("Desktop") },
+                        )
                     }
                 }
             },
@@ -152,6 +161,7 @@ class MainActivity : ComponentActivity() {
                     Screen.Sessions -> SessionsScreen(client, openTerminal = { screen = Screen.Terminal(it) })
                     Screen.Chats -> ChatScreen(client)
                     Screen.Freebuff -> FreebuffScreen(client)
+                    Screen.Desktop -> DesktopScreen(client, onClose = { screen = Screen.Sessions })
                     is Screen.Terminal -> TerminalScreen(client, s.sessionId, onClose = { screen = Screen.Sessions })
                 }
             }

@@ -1006,6 +1006,9 @@ export function start({ port, token, tls, relay: relayCfg }) {
         const r = await desktop.startFrameStream(ws._clientId || "anon", msg.quality);
         if (r.ok) {
           desktopWatchers.add(ws);
+          // Remember the quality so every watcher's input coordinates can be
+          // mapped from frame px to real desktop px with the same factor.
+          desktopQuality = r.quality;
           // Auto-stop when the watcher disconnects.
           ws.once("close", () => {
             desktopWatchers.delete(ws);
@@ -1029,7 +1032,14 @@ export function start({ port, token, tls, relay: relayCfg }) {
       }
       case "desktop_mouse": {
         if (ws._shareMode === "readonly") return send(ws, { type: "error", message: "desktop is read-only (spectator)" });
-        const r = await desktop.inputMouse({ x: Number(msg.x), y: Number(msg.y), click: msg.click, wheel: msg.wheel });
+        // Frame px -> real desktop px: the capture helper downscales the full
+        // virtual screen by the quality factor (1 / 0.75 / 0.5), so client
+        // coords measured on the frame must be divided back out. Wheel-only
+        // events carry no meaningful x/y and skip the transform.
+        const factor = desktopScale();
+        const x = msg.wheel != null ? 0 : Math.round(Number(msg.x) / factor);
+        const y = msg.wheel != null ? 0 : Math.round(Number(msg.y) / factor);
+        const r = await desktop.inputMouse({ x, y, click: msg.click, wheel: msg.wheel });
         send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
         break;
       }
@@ -1879,6 +1889,11 @@ export function start({ port, token, tls, relay: relayCfg }) {
   // loop runs only while at least one watcher is attached.
   const desktop = new DesktopController();
   const desktopWatchers = new Set();
+  let desktopQuality = 60;
+  // Quality → capture downscale factor (mirrors desktop_capture.js's mapping:
+  // >=70 → 1, 40-69 → 0.75, else 0.5); used to convert client frame coords
+  // back to real desktop pixels.
+  const desktopScale = () => (desktopQuality >= 70 ? 1 : desktopQuality >= 40 ? 0.75 : 0.5);
   desktop.on("frame", (frame) => {
     for (const w of desktopWatchers) {
       try {

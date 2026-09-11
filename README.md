@@ -44,7 +44,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states with busy→quiet push |
 | 🔀 **Tunnels** | Reach any PC-local service from your phone over the harness connection |
 | 🖥️ **VNC Bridge** | Share a screen frame feed over a local TCP port (`vnc_start/stop/status/frame` + `vnc_event`) |
-| 🖨️ **Desktop Control** | Watch the whole PC screen live (~3 fps) from the browser and drive it — click, right-click, scroll, type, hotkeys (`desktop_*`; Windows, PowerShell-powered) |
+| 🖨️ **Desktop Control** | Watch the whole PC screen live (~3 fps) and drive it — from the **browser AND the Android app** (tap = click, long-press = right-click, drag = move, scroll, type, keys) (`desktop_*`; Windows, PowerShell-powered) |
 | 🔔 **Push Test** | One click in the browser fires a test push through every configured channel — verify your ntfy/Pushover phone subscription instantly |
 | 🛡️ **SSH Bastion** | Jump-host access control: users, hosts, access rules with expiry, session gating, invite tokens (`bastion_*`) |
 | 🔒 **SSH Server Control** | Per-user auth + command allowlists with session recording (`sshserver_*`) |
@@ -89,30 +89,63 @@ npm start
 
 ---
 
-## 📱 Connect your phone
+## 📱 Connect your phone (complete guide)
 
-On first start the daemon prints everything you need — WebSocket URL, pairing
-URL and (in dev) the full auth token. It also persists them to
-`~/.pocketdesk/config.json` (`%USERPROFILE%\.pocketdesk\config.json` on
-Windows).
+The Android app is the primary remote: chats, live terminals, the agent fleet,
+the Freebuff control plane, files, models and **full desktop control** — every
+daemon feature is reachable from it.
+
+### Step 1 — Get the app on your phone
+
+Pick one:
+
+- **Download the APK from CI** (easiest): open the repo's
+  [Actions tab](https://github.com/Yash-Awasthi/PocketDesk/actions) → click
+  the latest green run → download the **PocketDesk-debug-apk** artifact →
+  unzip → copy `app-debug.apk` to your phone and install it
+  (allow "install unknown apps" when asked).
+- **Build it yourself**: `cd app && ./gradlew assembleDebug` → APK at
+  `app/app/build/outputs/apk/debug/app-debug.apk`.
+
+### Step 2 — Start the daemon on the PC
+
+```bash
+cd PocketDesk/daemon
+npm start
+```
+
+The banner prints everything: the pairing URL, the WebSocket URL and the full
+auth token (also persisted to `~/.pocketdesk/config.json` —
+`%USERPROFILE%\.pocketdesk\config.json` on Windows).
+
+### Step 3 — Pair
 
 1. **QR pairing (easiest)** — on the PC, open `http://localhost:8765/pair` and
-   scan the QR with the Android app. The app receives the URL, token and
-   (with TLS) the cert fingerprint automatically.
+   scan the QR **with the PocketDesk app** (tap **＋ → Scan QR**). The app
+   receives the URL, token and (with TLS) the cert fingerprint automatically.
+   > Note: the QR page is loopback-only by design — open it on the PC itself,
+   not on the phone.
 2. **Manual entry** — in the app tap **＋**, then enter
-   `ws://<pc-ip>:8765/ws` as the URL and the token from the banner or
-   `config.json` as the token. On the same LAN the PC's IP is enough; off-LAN
-   use the relay (`relay://…`, see the [Operations Manual](#-operations-manual)
-   below) or Tailscale.
+   `ws://<pc-ip>:8765/ws` (find the PC's IP with `ipconfig` / `ip a`) and the
+   token from the banner or `config.json`.
 3. **Browser smoke test** — open `http://localhost:8765` on the PC, paste the
-   token, hit **Connect**, then **＋ New Chat** → pick an installed agent
-   (Claude Code / Codex / OpenCode) → prompt → **Start**. Live terminal and
-   chat sessions appear under SESSIONS / CHATS and can be attached from the
-   phone.
+   token, hit **Connect**, then **＋ New Chat** → pick an installed agent →
+   prompt → **Start**.
 
-Install agents the daemon manages from the phone too: any tool card marked
-"not installed" has an **Install** button (one-tap npm/pip install with live
-progress).
+When the app's status bar shows **Connected**, you're paired.
+
+### Step 4 — Control everything
+
+| App screen | What you can do |
+|---|---|
+| **Tools** | See every managed agent CLI (Claude Code, Codex, OpenCode, Antigravity, Copilot, Cline, ZCode, Gemini, Qwen, Aider) — install/uninstall, versions |
+| **Sessions** | Live PTY terminals of any session — full keyboard streaming, like SSH |
+| **Chats** | Create agent chats, stream replies token-by-token, pick the **model** (opus/sonnet/haiku…) per chat, cancel a running turn |
+| **Desktop** | AnyDesk-style view of the whole PC screen (~3 fps): tap = move+click, long-press = right-click, drag = move, two-finger/▲▼ = scroll, type into any window |
+| **Freebuff** | The Freebuff desktop app itself: open/quit, login state and **logout**, browse & run all skills, view & edit allowlisted configs (each edit backed up) |
+
+Install agents from the phone too: any tool card marked "not installed" has an
+**Install** button (one-tap npm/pip install with live progress).
 
 ### 🦾 Controlling Freebuff itself from the phone
 
