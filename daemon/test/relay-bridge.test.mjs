@@ -22,7 +22,9 @@ import { spawn } from "node:child_process";
 import WebSocket from "ws";
 
 const PORT = 8812;
-const RELAY_PORT = 8813;
+// Not 8813: mux.test.mjs runs immediately before this and its daemon binds 8813;
+// on Windows a lingering socket made every relay peer connection fail.
+const RELAY_PORT = 8898;
 const CHANNEL = "rh-relay-test";
 const TOKEN = "relay-bridge-token";
 const failures = [];
