@@ -66,12 +66,12 @@ function tmux(args) {
 
 export function hasSession(name) {
   validateName(name);
-  const result = tmux(`has-session -t =${name} 2>/dev/null`);
+  const result = tmux(`has-session -t =${name}`);
   return result.success;
 }
 
 export function listSessions() {
-  const result = tmux('list-sessions -F "#{session_name}\\t#{session_created}\\t#{session_attached}\\t#{@agentpeek_group}\\t#{@agentpeek_cwd}\\t#{window_activity}" 2>/dev/null');
+  const result = tmux('list-sessions -F "#{session_name}\\t#{session_created}\\t#{session_attached}\\t#{@agentpeek_group}\\t#{@agentpeek_cwd}\\t#{window_activity}"');
 
   if (!result.success) {
     // No tmux server = no sessions
@@ -82,7 +82,7 @@ export function listSessions() {
   }
 
   // Get pane info for activity detection
-  const paneResult = tmux('list-panes -a -F "#{session_name}\\t#{pane_active}\\t#{pane_current_command}\\t#{pane_current_path}" 2>/dev/null');
+  const paneResult = tmux('list-panes -a -F "#{session_name}\\t#{pane_active}\\t#{pane_current_command}\\t#{pane_current_path}"');
 
   const foreground = {};
   const liveCwd = {};
@@ -125,7 +125,7 @@ export function listSessions() {
 
 export function paneWaiting(name) {
   validateName(name);
-  const result = tmux(`capture-pane -p -t =${name}: 2>/dev/null`);
+  const result = tmux(`capture-pane -p -t =${name}:`);
   if (!result.success) return false;
   return WAITING_MARKERS.some(m => result.stdout.includes(m));
 }
@@ -165,7 +165,7 @@ export function createSession(name, options = {}) {
 
 export function killSession(name) {
   validateName(name);
-  const result = tmux(`kill-session -t ="${name}" 2>/dev/null`);
+  const result = tmux(`kill-session -t ="${name}"`);
   return result.success;
 }
 
