@@ -71,7 +71,8 @@ export function hasSession(name) {
 }
 
 export function listSessions() {
-  const result = tmux('list-sessions -F "#{session_name}\\t#{session_created}\\t#{session_attached}\\t#{@agentpeek_group}\\t#{@agentpeek_cwd}\\t#{window_activity}"');
+  // Real TAB separator (\t) — tmux formats do not expand backslash escapes.
+  const result = tmux('list-sessions -F "#{session_name}\t#{session_created}\t#{session_attached}\t#{@agentpeek_group}\t#{@agentpeek_cwd}\t#{window_activity}"');
 
   if (!result.success) {
     // No tmux server = no sessions
@@ -82,7 +83,7 @@ export function listSessions() {
   }
 
   // Get pane info for activity detection
-  const paneResult = tmux('list-panes -a -F "#{session_name}\\t#{pane_active}\\t#{pane_current_command}\\t#{pane_current_path}"');
+  const paneResult = tmux('list-panes -a -F "#{session_name}\t#{pane_active}\t#{pane_current_command}\t#{pane_current_path}"');
 
   const foreground = {};
   const liveCwd = {};
