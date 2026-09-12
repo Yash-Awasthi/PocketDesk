@@ -162,7 +162,9 @@ check("chat_permission acks", (await next((m) => m.type === "chat_permission_ok"
 // c9watch/nexting: OS process scan
 send({ type: "sessions_scan" });
 const scan = await next((m) => m.type === "sessions_scan", 20000);
-check("sessions_scan returns items", Array.isArray(scan.items));
+// The handler answers an empty list when its probe throws, so the shape alone
+// cannot tell a scan that found nothing from one that failed outright.
+check("sessions_scan returns items", Array.isArray(scan.items) && !scan.error);
 // vmux/orca: worktree create/list against this repo
 send({ type: "wt_create", repo: process.env.RH_TEST_REPO || process.cwd() + "/..", name: "recheck1" });
 const wt = await next((m) => m.type === "worktree_created");

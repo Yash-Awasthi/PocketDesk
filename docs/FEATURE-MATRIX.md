@@ -266,3 +266,20 @@ persisted in config.json; pair-QR payload carries `r`/`c` relay fields. README
 gained an Operations Manual (start, LAN/relay/Tailscale/port-forward modes,
 security checklist). Tests: relay-bridge.test.mjs (9 checks, full 293 PASS);
 live-verified against the running daemon on channel rh-legion.
+
+Desktop IDE launch (2026-09-12): the harness now reaches GUI IDEs, not only CLIs. A
+manifest may declare `"adapter": "gui"` with per-platform `paths` instead of a
+`bin`/`install` pair; the registry reports presence by `fs.existsSync` on the expanded
+path and `gui_open` starts the process detached (`open -a` for a macOS `.app` bundle).
+Five manifests ship: vscode, zed, antigravity (converted from a terminal stub whose npm
+package does not exist), opencode-desktop, freebuff-desktop. The phone and the browser
+both gained an **Open** button, and `gui_opened` reports a refusal because the window
+opens where the client cannot see it. GUI manifests are excluded from the session and
+chat pickers — they have no PTY. Two live regressions fixed on the way: `sessions_scan`
+threw on a binless manifest (`bin.toLowerCase` of undefined) and `doctor` spawned
+`undefined` as a command; a third, pre-existing one surfaced when the absorb assertion
+was tightened — `wmic` is gone on Windows 11 24H2, and the `tasklist /v` fallback took
+~21s against an 8s timeout, so every `sessions_scan` had been silently returning an
+error payload that the old assertion could not tell from an empty result. Tests:
+gui-manifests.test.mjs (19 checks incl. a real detached launch and the `gui_open` round
+trip) + ProtocolTest.kt (6); full daemon suite 326 PASS, Gradle 20 tests / 0 failures.

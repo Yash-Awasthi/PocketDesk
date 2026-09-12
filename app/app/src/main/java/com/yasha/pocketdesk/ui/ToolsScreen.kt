@@ -56,7 +56,7 @@ private fun ToolCard(tool: ToolInfo, ws: WsClient) {
                         else -> "not installed"
                     }
                     Text(
-                        "${tool.manifest.bin} · $state",
+                        if (tool.manifest.isGui) state else "${tool.manifest.bin} · $state",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1,
@@ -65,6 +65,11 @@ private fun ToolCard(tool: ToolInfo, ws: WsClient) {
                 }
                 when {
                     tool.installing -> CircularProgressIndicator(Modifier.size(22.dp))
+                    tool.manifest.isGui -> if (tool.installed == true) {
+                        androidx.compose.material3.TextButton(onClick = { ws.guiOpen(tool.manifest.id) }) {
+                            Text("Open")
+                        }
+                    }
                     tool.installed == true -> Icon(
                         Icons.Filled.Check,
                         contentDescription = "Installed",

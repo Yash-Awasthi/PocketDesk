@@ -68,7 +68,7 @@ fun ChatScreen(ws: WsClient) {
 @Composable
 private fun ChatList(ws: WsClient, openChat: (String) -> Unit) {
     var showCreate by remember { mutableStateOf(false) }
-    val installed = ws.tools.filter { it.installed == true && it.manifest.id in CHAT_TOOLS }
+    val installed = ws.tools.filter { it.installed == true && it.manifest.chat }
 
     LazyColumn(
         Modifier.fillMaxSize().padding(16.dp),
@@ -402,6 +402,3 @@ private fun SystemBubble(text: String) {
         )
     }
 }
-
-/** Tools that support the chat adapter (mirrors daemon manifest IDs). */
-private val CHAT_TOOLS = setOf("claude", "codex", "opencode", "gemini", "qwen", "antigravity", "copilot", "cline", "zcode")
