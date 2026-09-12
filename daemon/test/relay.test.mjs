@@ -24,9 +24,16 @@ async function relayPeer(port, channel) {
   let buf = "";
   sock.on("data", (chunk) => {
     buf += chunk.toString();
-    try {
-      const msg = JSON.parse(buf);
-      buf = "";
+    // Newline-terminated framing, as the relay itself uses: one chunk may hold
+    // several frames, so parse line by line rather than the whole buffer.
+    for (;;) {
+      const nl = buf.indexOf("\n");
+      if (nl < 0) break;
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let msg;
+      try { msg = JSON.parse(line); } catch { continue; }
       const i = waiters.findIndex((w) => w.pred(msg));
       if (i >= 0) {
         const [w] = waiters.splice(i, 1);
@@ -35,15 +42,15 @@ async function relayPeer(port, channel) {
       } else {
         queue.push(msg);
       }
-    } catch { /* partial frame */ }
+    }
   });
   await new Promise((res, rej) => { sock.on("connect", res); sock.on("error", rej); });
   const handshake = await peerNext((m) => m.type === "connected", 5000);
-  sock.write(JSON.stringify({ type: "subscribe", channel }));
+  sock.write(JSON.stringify({ type: "subscribe", channel }) + "\n");
   return {
     id: handshake.id,
     sock,
-    send: (o) => sock.write(JSON.stringify(o)),
+    send: (o) => sock.write(JSON.stringify(o) + "\n"),
     next: (pred, timeoutMs = 15000) => {
       const hit = queue.find(pred);
       if (hit) return Promise.resolve(hit);
@@ -128,6 +135,45 @@ async function main() {
   c.send({ type: "relay_host_stop" });
   const stopped = await c.next((m) => m.type === "relay_host" && m.state === "stopped");
   check("relay_host_stop stops embedded relay", !!stopped);
+
+  // ── Phase 3: framing edge cases ───────────────────────────────────────────
+  // The relay's read path has a tolerant fallback for a client that omits the
+  // trailing newline. Bytes that do not yet form a complete frame must be kept,
+  // not discarded, and a peer that never completes one must be cut off.
+  const framer = new RelayServer(8893);
+  framer.start();
+  await sleep(150);
+  const frameSub = await relayPeer(8893, "frame-chan");
+
+  const half = net.connect(8893, "127.0.0.1");
+  half.on("error", () => {});
+  await new Promise((res, rej) => { half.on("connect", res); half.on("error", rej); });
+  await sleep(100);
+  const whole = JSON.stringify({ type: "publish", channel: "frame-chan", data: { split: "frame" } });
+  // Two writes, no newline: the first is incomplete JSON and must be buffered.
+  half.write(whole.slice(0, 20));
+  await sleep(150);
+  half.write(whole.slice(20));
+  const split = await frameSub.next((m) => m.type === "message" && m.data?.split === "frame", 3000);
+  check("frame split across two writes is delivered", split.data?.split === "frame");
+  half.destroy();
+
+  const flood = net.connect(8893, "127.0.0.1");
+  flood.on("error", () => {});
+  await new Promise((res, rej) => { flood.on("connect", res); flood.on("error", rej); });
+  // More than the 1 MiB cap, and never a complete frame. The assertion is on the
+  // relay's own registry, because a peer cut off mid-write does not reliably see
+  // the close event on its side.
+  flood.write("x".repeat((1 << 20) + 4096));
+  await sleep(1200);
+  check("peer that never completes a frame is dropped", framer.connections.size === 1);
+
+  // Dropping it must not disturb the peer that frames correctly.
+  frameSub.send({ type: "publish", channel: "frame-chan", data: { after: "flood" } });
+  const afterFlood = await frameSub.next((m) => m.type === "message" && m.data?.after === "flood", 3000);
+  check("well-behaved peer still served after the cap fires", afterFlood.data?.after === "flood");
+  flood.destroy();
+  framer.stop();
 
   // Cleanup.
   await c.close();

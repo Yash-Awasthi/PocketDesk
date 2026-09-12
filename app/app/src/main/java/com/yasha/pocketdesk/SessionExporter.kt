@@ -131,6 +131,10 @@ object SessionExporter {
 
     /**
      * Extract unique commands used across sessions for analytics.
+     *
+     * Ranked by use count, most used first. Ties are broken on the program name,
+     * because a comparator that compares counts alone reports every tie as equal
+     * and a sorted map then keeps one of the tied programs and discards the rest.
      */
     fun extractCommandStats(sessions: List<TerminalSession>): Map<String, Int> {
         val stats = mutableMapOf<String, Int>()
@@ -142,6 +146,8 @@ object SessionExporter {
                 }
             }
         }
-        return stats.toSortedMap(compareByDescending { stats[it] ?: 0 })
+        return stats.entries
+            .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            .associate { it.toPair() }
     }
 }

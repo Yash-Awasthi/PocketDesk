@@ -4,6 +4,7 @@ import https from "node:https";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { execSync as _execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
@@ -1125,14 +1126,12 @@ export function start({ port, token, tls, relay: relayCfg }) {
         break;
       // ── Session multiplexer (agentpeek: named tmux sessions + waiting detection) ──
       case "mux_status": {
-        let available = false;
-        try { _execSync("tmux -V", { encoding: "utf-8", timeout: 3000, stdio: "pipe" }); available = true; } catch {}
+        const available = await tmux.isAvailable();
         send(ws, { type: "mux_status", available });
         break;
       }
       case "mux_list": {
-        let available = false;
-        try { _execSync("tmux -V", { encoding: "utf-8", timeout: 3000, stdio: "pipe" }); available = true; } catch {}
+        const available = await tmux.isAvailable();
         if (!available) { send(ws, { type: "mux_list", available: false, items: [] }); break; }
         try {
           send(ws, { type: "mux_list", available: true, items: mux.listSessions() });
@@ -1160,8 +1159,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
         break;
       }
       case "mux_summary": {
-        let available = false;
-        try { _execSync("tmux -V", { encoding: "utf-8", timeout: 3000, stdio: "pipe" }); available = true; } catch {}
+        const available = await tmux.isAvailable();
         if (!available) { send(ws, { type: "mux_summary", available: false, summary: null }); break; }
         try {
           send(ws, { type: "mux_summary", available: true, summary: mux.getActivitySummary() });
@@ -1720,45 +1718,68 @@ export function start({ port, token, tls, relay: relayCfg }) {
   // relay, so this works from any network, kilometers away, VPN-free.
   const relayShims = new Map(); // relay peer connId -> shim ws-like object
   const RELAY_SHIM_MAX = 64;
-  let relayAuthFails = { n: 0, at: 0 }; // brute-force counter over the relay
+  // Brute-force counters, one per relay peer. A single shared counter would let
+  // any one source spend the budget for every honest peer on the channel.
+  const relayAuthFails = new Map(); // relay peer connId -> { n, at }
+  const RELAY_AUTH_FAIL_WINDOW = 10 * 60_000;
+  const RELAY_AUTH_FAIL_MAX = 20;
+  // Request id for the reply being produced right now. Held in async context
+  // rather than on the shim, because one shim serves concurrent requests and by
+  // the time a handler replies the shim may have seen a later request.
+  const relayReqCtx = new AsyncLocalStorage();
+
+  function relayAuthFailsFor(from, now) {
+    const rec = relayAuthFails.get(from);
+    if (!rec) return null;
+    if (now - rec.at > RELAY_AUTH_FAIL_WINDOW) {
+      relayAuthFails.delete(from);
+      return null;
+    }
+    return rec;
+  }
 
   function relayShimFor(from) {
-    let shim = relayShims.get(from);
-    if (!shim) {
-      const s = {
-        readyState: 1,
-        _authed: false,
-        _subs: new Set(),
-        _clientId: `relay-${from}`,
-        _isRelayShim: true,
-        _currentReqId: null,
-        send(str) {
-          let data = str;
-          try {
-            data = JSON.parse(str);
-          } catch {
-            /* non-JSON send — forward raw */
-          }
-          relayPublish({ rh: true, type: "rhresp", reqId: s._currentReqId, data });
-        },
-      };
-      // Bounded: a peer that auths then silently dies leaves its shim behind
-      // (the relay never announces member departures) — evict the oldest.
-      if (relayShims.size >= RELAY_SHIM_MAX) {
-        const oldest = relayShims.keys().next().value;
-        const dead = relayShims.get(oldest);
-        if (dead) {
-          try {
-            sessions.detach(dead);
-            chat.detach(dead);
-          } catch {}
-          relayShims.delete(oldest);
-        }
-      }
-      relayShims.set(from, s);
-      shim = s;
+    const existing = relayShims.get(from);
+    if (existing) {
+      // Re-insert so Map order tracks recency: eviction below must drop the
+      // least recently used shim, and a cache hit is a use.
+      relayShims.delete(from);
+      relayShims.set(from, existing);
+      return existing;
     }
-    return shim;
+    const s = {
+      readyState: 1,
+      _authed: false,
+      _subs: new Set(),
+      _clientId: `relay-${from}`,
+      _isRelayShim: true,
+      send(str) {
+        let data = str;
+        try {
+          data = JSON.parse(str);
+        } catch {
+          /* non-JSON send — forward raw */
+        }
+        // null when nothing is being answered: stream output driven by a
+        // session or chat rather than by a request.
+        relayPublish({ rh: true, type: "rhresp", reqId: relayReqCtx.getStore() ?? null, data });
+      },
+    };
+    // Bounded: a peer that auths then silently dies leaves its shim behind
+    // (the relay never announces member departures) — evict the oldest.
+    if (relayShims.size >= RELAY_SHIM_MAX) {
+      const oldest = relayShims.keys().next().value;
+      const dead = relayShims.get(oldest);
+      if (dead) {
+        try {
+          sessions.detach(dead);
+          chat.detach(dead);
+        } catch {}
+        relayShims.delete(oldest);
+      }
+    }
+    relayShims.set(from, s);
+    return s;
   }
 
   function relayDetachAll() {
@@ -1790,30 +1811,33 @@ export function start({ port, token, tls, relay: relayCfg }) {
       if (data && data.rh === true && data.type === "rhreq") {
         // Bridge path: a remote peer's protocol request.
         const shim = relayShimFor(evt.from);
-        shim._currentReqId = data.reqId ?? null;
+        const reqId = data.reqId ?? null;
         const inner = data.msg || {};
+        const now = Date.now();
+        // Brute-force gate (WS path has MAX_AUTH_ATTEMPTS). Checked before the
+        // token test, because every failed hello returns below and would
+        // otherwise never reach it — the peer just gets a fresh shim and tries
+        // again. Per peer, so one attacker cannot lock out the channel.
+        const fails = relayAuthFailsFor(evt.from, now);
+        if (fails && fails.n >= RELAY_AUTH_FAIL_MAX) {
+          relayPublish({ rh: true, type: "rherr", reqId, error: "too many failed auth attempts" });
+          return;
+        }
         if (!shim._authed) {
           const t = typeof inner.token === "string" ? inner.token : "";
           const ok = inner.type === "hello" && t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token));
           if (!ok) {
-            // Brute-force gate over the relay (WS path has MAX_AUTH_ATTEMPTS):
-            // a failed hello costs the peer its shim AND counts against a
-            // 10-minute window shared across relay peers.
-            relayAuthFails.n += 1;
-            if (Date.now() - relayAuthFails.at > 10 * 60_000) relayAuthFails = { n: 1, at: Date.now() };
-            relayPublish({ rh: true, type: "rherr", reqId: shim._currentReqId, error: "bad token" });
+            relayAuthFails.set(evt.from, { n: (fails?.n ?? 0) + 1, at: fails?.at ?? now });
+            relayPublish({ rh: true, type: "rherr", reqId, error: "bad token" });
             relayShims.delete(evt.from);
             return;
           }
           shim._authed = true;
-          relayPublish({ rh: true, type: "rhresp", reqId: shim._currentReqId, data: { type: "welcome", version: 1, clientId: shim._clientId, sessions: allSessions(), manifests: registry.list() } });
+          relayAuthFails.delete(evt.from); // an honest hello clears its own count
+          relayPublish({ rh: true, type: "rhresp", reqId, data: { type: "welcome", version: 1, clientId: shim._clientId, sessions: allSessions(), manifests: registry.list() } });
           return;
         }
-        if (relayAuthFails.n >= 20 && Date.now() - relayAuthFails.at < 10 * 60_000) {
-          relayPublish({ rh: true, type: "rherr", reqId: shim._currentReqId, error: "too many failed auth attempts" });
-          return;
-        }
-        handle(shim, inner).catch((e) => {
+        relayReqCtx.run(reqId, () => handle(shim, inner)).catch((e) => {
           try {
             shim.send({ type: "error", message: `handler error: ${e?.message || e}` });
           } catch {}

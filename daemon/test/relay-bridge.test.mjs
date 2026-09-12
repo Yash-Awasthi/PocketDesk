@@ -16,6 +16,7 @@
  *   5. a real protocol command (fb_status) round-trips through the relay
  *   6. daemon broadcasts (manifests from registry scan, relay_state) are
  *      mirrored to the relay peer as `rhpush`
+ *   7. repeated bad hellos lock out that peer, and only that peer
  */
 import net from "node:net";
 import { spawn } from "node:child_process";
@@ -41,23 +42,23 @@ function relayClient(port, onMsg) {
   let buf = "";
   socket.on("data", (chunk) => {
     buf += chunk.toString();
-    // The relay frames one JSON object per TCP write; parse greedily.
+    // Newline-terminated framing, same as the daemon's own relay link: one
+    // chunk may carry several frames, and a frame may split across chunks.
     for (;;) {
-      try {
-        const msg = JSON.parse(buf);
-        buf = "";
-        onMsg(msg);
-      } catch {
-        break;
-      }
+      const nl = buf.indexOf("\n");
+      if (nl < 0) break;
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      try { onMsg(JSON.parse(line)); } catch { /* ignore malformed frame */ }
     }
   });
   socket.on("error", () => {}); // daemon shutdown resets — ignore
   let id = null;
   const api = {
     get id() { return id; },
-    sub(channel) { socket.write(JSON.stringify({ type: "subscribe", channel })); },
-    publish(channel, data) { socket.write(JSON.stringify({ type: "publish", channel, data })); },
+    sub(channel) { socket.write(JSON.stringify({ type: "subscribe", channel }) + "\n"); },
+    publish(channel, data) { socket.write(JSON.stringify({ type: "publish", channel, data }) + "\n"); },
     close() { socket.destroy(); },
   };
   socket.on("connect", () => {});
@@ -92,6 +93,8 @@ async function run() {
   daemon.stderr.on("data", (d) => (daemonLogs.v += d.toString()));
 
   let peer = null;
+  let attacker = null;
+  let innocent = null;
   try {
     // Wait for the daemon HTTP + relay to come up.
     let up = false;
@@ -103,7 +106,7 @@ async function run() {
 
     // 1+2: remote peer connects to the relay (TCP) and subscribes.
     const events = [];
-    const peer = relayClient(RELAY_PORT, () => {});
+    peer = relayClient(RELAY_PORT, () => {});
     peer.onMessage((m) => {
       peer.grabId(m);
       events.push(m);
@@ -148,10 +151,50 @@ async function run() {
     const lanWelcome = await new Promise((res) => ws.once("message", (d) => res(JSON.parse(d.toString()))));
     check("LAN websocket still authenticates", lanWelcome?.type === "welcome");
     ws.close();
+
+    // 7: the relay is a second door onto the same token, so it needs the same
+    // brute-force budget the /ws hello has. One peer exhausting it must not
+    // spend that budget for anyone else on the channel.
+    attacker = relayClient(RELAY_PORT, () => {});
+    const attackerEvents = [];
+    attacker.onMessage((m) => { attacker.grabId(m); attackerEvents.push(m); });
+    await sleep(300);
+    attacker.sub(CHANNEL);
+    await sleep(300);
+    for (let i = 0; i < 21; i++) {
+      attacker.publish(CHANNEL, { rh: true, type: "rhreq", reqId: `bad${i}`, msg: { type: "hello", token: "WRONG" } });
+      await sleep(20);
+    }
+    await sleep(1200);
+    const badTokens = attackerEvents.filter((m) => m?.data?.type === "rherr" && /bad token/i.test(m.data.error || ""));
+    const throttled = attackerEvents.filter((m) => m?.data?.type === "rherr" && /too many/i.test(m.data.error || ""));
+    check("relay rejects bad hellos", badTokens.length > 0);
+    check("relay locks a peer out once the failure budget is spent", throttled.length > 0);
+
+    // The lockout must not be defeatable by finally guessing right.
+    attackerEvents.length = 0;
+    attacker.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "bad-then-good", msg: { type: "hello", token: TOKEN } });
+    await sleep(800);
+    check("lockout outlives a correct token from the locked-out peer",
+      !attackerEvents.some((m) => m?.data?.data?.type === "welcome"));
+
+    // A different peer still gets in — the counter is per peer, not per relay.
+    innocent = relayClient(RELAY_PORT, () => {});
+    const innocentEvents = [];
+    innocent.onMessage((m) => { innocent.grabId(m); innocentEvents.push(m); });
+    await sleep(300);
+    innocent.sub(CHANNEL);
+    await sleep(300);
+    innocent.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "good-after", msg: { type: "hello", token: TOKEN } });
+    await sleep(800);
+    check("a second peer is unaffected by the first peer's lockout",
+      innocentEvents.some((m) => m?.data?.data?.type === "welcome"));
   } catch (e) {
     check(`unexpected: ${e.message}`, false);
   } finally {
     peer?.close();
+    attacker?.close();
+    innocent?.close();
     daemon.kill("SIGTERM");
     await sleep(500);
     daemon.kill("SIGKILL");
