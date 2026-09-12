@@ -269,6 +269,9 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     fun modelList(chatId: String) = send(Proto.modelList(chatId))
     fun chatModelSet(chatId: String, model: String?) = send(Proto.chatModelSet(chatId, model))
     fun install(id: String): Boolean = send(Proto.install(id))
+
+    /** Start a GUI application on the PC. It has no terminal to attach to. */
+    fun guiOpen(id: String): Boolean = send(Proto.guiOpen(id))
     fun createSession(harness: String, cwd: String): Boolean = send(Proto.create(harness, cwd))
     fun attach(id: String): Boolean {
         attachedSessions.add(id)
@@ -450,6 +453,17 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
                 val harnessId = sessions.firstOrNull { it.id == id }?.harnessId ?: id
                 sessions = sessions.filterNot { it.id == id }
                 events.tryEmit(RhEvent.Exit(id, harnessId, Proto.exitCode(m)))
+            }
+            "gui_opened" -> {
+                // The window opens on the PC, so only a refusal is worth
+                // reporting back here.
+                if (m["ok"]?.jsonPrimitive?.booleanOrNull == false) {
+                    val reason = str(m, "reason") ?: "could not open the app"
+                    val app = str(m, "harness") ?: ""
+                    val msg = if (app.isEmpty()) reason else "$app: $reason"
+                    lastError = msg
+                    events.tryEmit(RhEvent.Failure(msg))
+                }
             }
             "progress" -> {
                 val id = str(m, "id") ?: return

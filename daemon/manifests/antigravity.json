@@ -1,7 +1,10 @@
 {
   "id": "antigravity",
   "name": "Antigravity",
-  "adapter": "terminal",
-  "bin": "antigravity",
-  "install": { "npm": "@google/antigravity" }
+  "adapter": "gui",
+  "paths": {
+    "win32": "%LOCALAPPDATA%\\Programs\\antigravity\\Antigravity.exe",
+    "darwin": "/Applications/Antigravity.app"
+  },
+  "docs": "https://antigravity.google"
 }

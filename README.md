@@ -35,6 +35,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📁 **File Browser** | Browse, upload, and download files on your PC from your phone |
 | 🔐 **TLS + Pinning** | Self-signed cert support with SHA-256 fingerprint pinning |
 | 📦 **Auto-Install** | One-tap npm/pip install with live progress output |
+| 🪟 **IDE Launch** | Open any installed desktop IDE or GUI app on the PC from the phone (VS Code, Zed, Antigravity, OpenCode Desktop, Freebuff Desktop) — the window opens on the PC, then the Desktop screen drives it (`gui_open`) |
 | 🔌 **Plugin System** | Drop a JS file to extend the daemon — no core changes needed |
 | 📝 **Proposals** | Agent actions require human approval — safety by default |
 | 📱 **Multi-PC** | Connect to multiple PCs, each with pinned certificates |
@@ -138,7 +139,7 @@ When the app's status bar shows **Connected**, you're paired.
 
 | App screen | What you can do |
 |---|---|
-| **Tools** | See every managed agent CLI (Claude Code, Codex, OpenCode, Antigravity, Copilot, Cline, ZCode, Gemini, Qwen, Aider) — install/uninstall, versions |
+| **Tools** | See every managed agent CLI (Claude Code, Codex, OpenCode, Antigravity, Copilot, Cline, ZCode, Gemini, Qwen, Aider) — install/uninstall, versions — plus the desktop IDEs found on the PC, each with an **Open** button |
 | **Sessions** | Live PTY terminals of any session — full keyboard streaming, like SSH |
 | **Chats** | Create agent chats, stream replies token-by-token, pick the **model** (opus/sonnet/haiku…) per chat, cancel a running turn |
 | **Desktop** | AnyDesk-style view of the whole PC screen (~3 fps): tap = move+click, long-press = right-click, drag = move, two-finger/▲▼ = scroll, type into any window |
@@ -157,11 +158,19 @@ quit**, login state and **logout**, all **28 skills** in `~/.claude/skills`
 
 ### 🤖 Agent fleet & model selection
 
-Beyond Claude Code, Codex and OpenCode the daemon manages **Antigravity,
-GitHub Copilot CLI, Cline, ZCode, Gemini, Qwen and Aider** — install and
-launch any of them from the phone. Chats support **model selection** where the
-CLI offers it (e.g. Claude: opus / sonnet / haiku) via the model picker in the
-chat toolbar; the choice drives the agent's runtime flags.
+Beyond Claude Code, Codex and OpenCode the daemon manages **GitHub Copilot
+CLI, Cline, ZCode, Gemini, Qwen and Aider** — install and launch any of them
+from the phone. Chats support **model selection** where the CLI offers it
+(e.g. Claude: opus / sonnet / haiku) via the model picker in the chat toolbar;
+the choice drives the agent's runtime flags.
+
+### 🪟 Desktop IDEs
+
+Some of these agents ship as desktop applications rather than CLIs. The daemon
+finds the ones installed on the PC and the Tools screen offers **Open** for
+each: **VS Code, Zed, Antigravity, OpenCode Desktop** and **Freebuff Desktop**.
+There is no PTY behind them, so opening starts the window on the PC and the
+**Desktop** screen is how you see and drive it from the phone.
 
 ---
 
@@ -419,7 +428,7 @@ Proposals auto-expire after 5 minutes.
 JSON frames; binary payloads are base64.
 
 **Client → Server:**
-`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `propose` · `approve` · `reject` · `proposal_list` · `chat_history` · `pin`/`unpin` · `forward_*` · `sdk_*` · `transcribe` · `audit_log`
+`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `propose` · `approve` · `reject` · `proposal_list` · `chat_history` · `pin`/`unpin` · `forward_*` · `sdk_*` · `transcribe` · `gui_open` — open a desktop IDE on the PC · `audit_log`
 <details>
 <summary>Absorbed-feature messages</summary>
 
@@ -441,7 +450,7 @@ JSON frames; binary payloads are base64.
 </details>
 
 **Server → Client:**
-`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `chatreplay` · `chatuser` · `chatdelta` · `chartool` · `chatstate` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `activity` · `error`
+`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `chatreplay` · `chatuser` · `chatdelta` · `chartool` · `chatstate` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `activity` · `gui_opened` · `error`
 
 Every `out` frame carries a monotonic `seq`; on reconnect send `attach {id, since: <last seq>}` and the daemon replays only what you missed.
 

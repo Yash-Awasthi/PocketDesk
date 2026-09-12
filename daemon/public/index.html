@@ -555,7 +555,9 @@ function handle(m) {
       {
         const hp = document.getElementById("fbSkillHarness");
         if (hp && hp.options.length === 0) {
-          for (const t of tools.filter(t => t.installed)) { const o = document.createElement("option"); o.value = t.manifest.id; o.textContent = t.manifest.name; hp.appendChild(o); }
+          // A skill runs as a chat turn, which needs a terminal agent: a GUI
+          // application cannot be driven that way.
+          for (const t of tools.filter(t => t.installed && t.manifest.adapter !== "gui")) { const o = document.createElement("option"); o.value = t.manifest.id; o.textContent = t.manifest.name; hp.appendChild(o); }
         }
       }
       break;
@@ -633,6 +635,10 @@ function handle(m) {
     case "notify_test":
       dashEvent(m.ok ? `push sent via [${(m.channels || []).join(", ")}] — check your phone` : `push test failed: ${m.error}`, m.ok ? 'green' : 'red');
       break;
+    // The window opens on the PC, so only a refusal is worth reporting here.
+    case "gui_opened":
+      if (!m.ok) dashEvent(`${m.harness || "app"}: ${m.reason || "could not open the app"}`, "red");
+      break;
     case "error": console.error("ERROR:", m.message); break;
   }
 }
@@ -701,18 +707,29 @@ function renderTools(items) {
   const sel = document.getElementById("chatTool"); sel.innerHTML = "";
   for (const it of items) {
     const installed = it.installed === true;
+    // A GUI application has no command and no installer: it is opened, not installed.
+    const isGui = it.manifest.adapter === "gui";
+    const state = installed ? "✅ installed" : it.installing ? "⏳ installing..." : "❌ not installed";
     const d = document.createElement("div"); d.className = "tool-card";
-    d.innerHTML = `<div class="name">${esc(it.manifest.name)}</div><div class="meta">${esc(it.manifest.bin)} · ${installed ? "✅ installed" : it.installing ? "⏳ installing..." : "❌ not installed"}</div>`;
-    if (!installed && !it.installing) {
-      const b = document.createElement("button"); b.className = "btn"; b.textContent = "Install"; b.style.marginTop = "4px";
-      b.onclick = (e) => { e.stopPropagation(); send({ type: "install", id: it.manifest.id }); };
-      d.appendChild(b);
+    d.innerHTML = `<div class="name">${esc(it.manifest.name)}</div><div class="meta">${isGui ? state : `${esc(it.manifest.bin)} · ${state}`}</div>`;
+    if (isGui) {
+      if (installed) {
+        const b = document.createElement("button"); b.className = "btn"; b.textContent = "Open"; b.style.marginTop = "4px";
+        b.onclick = (e) => { e.stopPropagation(); send({ type: "gui_open", harness: it.manifest.id }); };
+        d.appendChild(b);
+      }
+    } else {
+      if (!installed && !it.installing) {
+        const b = document.createElement("button"); b.className = "btn"; b.textContent = "Install"; b.style.marginTop = "4px";
+        b.onclick = (e) => { e.stopPropagation(); send({ type: "install", id: it.manifest.id }); };
+        d.appendChild(b);
+      }
+      if (installed) {
+        const o = document.createElement("option"); o.value = it.manifest.id; o.textContent = it.manifest.name;
+        sel.appendChild(o);
+      }
     }
     el.appendChild(d);
-    if (installed) {
-      const o = document.createElement("option"); o.value = it.manifest.id; o.textContent = it.manifest.name;
-      sel.appendChild(o);
-    }
   }
 }
 

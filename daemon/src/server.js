@@ -397,9 +397,19 @@ export function start({ port, token, tls, relay: relayCfg }) {
         // Zero-touch OS-level agent scan (c9watch/nexting): which known agent
         // binaries have live processes right now, with their command lines.
         try {
-          const out = _execSync("wmic process get processid,commandline /format:csv 2>nul || tasklist /fo csv /v", { encoding: "utf-8", timeout: 8000, stdio: "pipe", windowsHide: true });
+          // `wmic` was removed in Windows 11 24H2, so the tasklist fallback is
+          // the normal path there. It must not use `/v`: window titles take it
+          // from ~0.35s to ~21s, past the timeout, and only image names are
+          // matched here anyway.
+          const out = _execSync("wmic process get processid,commandline /format:csv 2>nul || tasklist /fo csv /nh", { encoding: "utf-8", timeout: 8000, stdio: "pipe", windowsHide: true });
           const lines = String(out).split(/\r?\n/).filter(Boolean);
-          const known = registry.list().map((r) => r.manifest.bin.toLowerCase().replace(/\.(exe|cmd|bat)$/, ""));
+          // GUI manifests have no `bin`: they are detected by path, not by a
+          // process name, so they cannot be matched against a command line.
+          const known = registry
+            .list()
+            .map((r) => r.manifest.bin)
+            .filter(Boolean)
+            .map((bin) => bin.toLowerCase().replace(/\.(exe|cmd|bat)$/, ""));
           const found = [];
           for (const line of lines) {
             const low = line.toLowerCase();
@@ -1002,6 +1012,16 @@ export function start({ port, token, tls, relay: relayCfg }) {
       case "mproto_status":
         send(ws, { type: "mproto_status", ...mpc.getStatus() });
         break;
+      // ── Launch a GUI application (IDEs) ──────────────────────────────────
+      // GUI apps have no PTY to stream, so this only starts the process. The
+      // phone then watches and drives it through the desktop frame stream.
+      case "gui_open": {
+        const r = registry.launchGui(msg.harness);
+        if (!r.ok) return send(ws, { type: "gui_opened", ok: false, reason: r.reason });
+        auditLog.log("gui_open", { harness: msg.harness, path: r.path });
+        send(ws, { type: "gui_opened", ok: true, harness: msg.harness });
+        break;
+      }
       // ── Real desktop control (AnyDesk-style: watch + full input) ─────────
       case "desktop_start": {
         const r = await desktop.startFrameStream(ws._clientId || "anon", msg.quality);

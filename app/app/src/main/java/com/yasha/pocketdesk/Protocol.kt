@@ -12,7 +12,25 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
-data class Manifest(val id: String, val name: String, val bin: String)
+/**
+ * A daemon manifest. `bin` is absent for a GUI application, which has no
+ * command and is started by absolute path instead. `chat` is present only for
+ * agents that can stream a conversation.
+ */
+data class Manifest(
+    val id: String,
+    val name: String,
+    val bin: String?,
+    val adapter: String = ADAPTER_TERMINAL,
+    val chat: Boolean = false,
+) {
+    val isGui: Boolean get() = adapter == ADAPTER_GUI
+
+    companion object {
+        const val ADAPTER_TERMINAL = "terminal"
+        const val ADAPTER_GUI = "gui"
+    }
+}
 
 data class ToolInfo(
     val manifest: Manifest,
@@ -66,6 +84,7 @@ object Proto {
     fun hello(token: String) = obj { put("type", "hello"); put("token", token) }
     fun detect() = obj { put("type", "detect") }
     fun install(id: String) = obj { put("type", "install"); put("id", id) }
+    fun guiOpen(id: String) = obj { put("type", "gui_open"); put("harness", id) }
     fun create(harness: String, cwd: String) = obj {
         put("type", "create"); put("harness", harness); put("cwd", cwd)
     }
@@ -156,7 +175,15 @@ object Proto {
             val m = o["manifest"] as? JsonObject ?: return@mapNotNull null
             val id = str(m, "id") ?: return@mapNotNull null
             ToolInfo(
-                manifest = Manifest(id = id, name = str(m, "name") ?: id, bin = str(m, "bin") ?: id),
+                manifest = Manifest(
+                    id = id,
+                    name = str(m, "name") ?: id,
+                    bin = str(m, "bin"),
+                    adapter = str(m, "adapter") ?: Manifest.ADAPTER_TERMINAL,
+                    // The daemon treats a chat adapter as present only when the
+                    // manifest carries the runtime args for it.
+                    chat = (m["chat"] as? JsonObject)?.containsKey("args") == true,
+                ),
                 installed = bool(o, "installed"),
                 version = str(o, "version"),
                 installing = bool(o, "installing") ?: false,

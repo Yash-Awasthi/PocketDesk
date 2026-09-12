@@ -48,7 +48,8 @@ import com.yasha.pocketdesk.WsClient
 
 @Composable
 fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit) {
-    val installed = ws.tools.filter { it.installed == true }
+    // A session is a PTY: a GUI application has no terminal to attach to.
+    val installed = ws.tools.filter { it.installed == true && !it.manifest.isGui }
     var tool by remember { mutableStateOf<ToolInfo?>(null) }
     LaunchedEffect(installed) {
         if (tool == null || installed.none { it.manifest.id == tool?.manifest?.id }) {

@@ -90,6 +90,9 @@ export async function diagnose({ tls, manifests } = {}) {
       }
     }
     for (const m of manifestList.slice(0, 20)) {
+      // A GUI application has no `bin` and is not on PATH; the registry reports
+      // its presence by path, so there is nothing for this probe to test.
+      if (m.adapter === "gui" || !m.bin) continue;
       const r = await new Promise((resolve) => {
         const p = spawn("cmd.exe", ["/c", m.bin, "--version"], { windowsHide: true });
         let out = "";
