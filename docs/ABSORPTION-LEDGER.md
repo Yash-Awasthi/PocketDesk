@@ -15,8 +15,18 @@ Per-repo status legend:
 | ⚙️ | **Already covered** — PocketDesk had the equivalent before this pass |
 | 🧩 | **Module present, unwired** — the absorbed module exists in `daemon/src/` but stays optional until wired |
 | ➖ | **Reference-only** — no feature applicable to a self-hosted phone-driven harness (native terminal emulators, unrelated tools, empty/deprecated clones); studied for patterns only |
+| 🗺️ | **Deferred** — a named feature from this repo is understood and deliberately not built yet; every one of them is listed in the verification section |
 
-Counts: ✅ 99 · ⚙️ 74 · 🧩 0 · ➖ 68 · **total 241**.
+Counts, per row of the tables below: ✅ 71 · ⚙️ 77 · 🧩 0 · ➖ 13 · 🗺️ 3 · cross-references 2 · **total 166 rows**.
+
+These are row counts, not repository counts, and the two differ on purpose. A row
+sometimes stands for a group of related repositories (the 42 `pty_basic_*`
+tutorial clones share one row, as do the native terminals and the empty clones),
+so summing the rows understates the corpus. The corpus figure of 241 is a count of
+directories, verified directly against the corpus folder, and is not derived from
+the table above. A repository may also be named in more than one section when it
+informs both; those repeats are marked `(listed §N)` or `(see §N)` and were not
+removed, because each one is load-bearing for the section it appears in.
 
 ## Recheck pass (one-by-one re-investigation)
 
@@ -126,7 +136,7 @@ empty/deprecated clones, unrelated apps).
 | node-pty / node-pty-prebuilt | ⚙️ | The PTY engine itself (ConPTY) |
 | go_pty / pywinpty / ruspty / zigpty / creack-pty | ⚙️ | PTY libraries in other languages — pattern reference only |
 | xterm-pty | ⚙️ | JS PTY bridge → xterm.js wiring in terminal.html |
-| pty_basic_* (42 tutorial clones: cli-tunnel, conch, frp, gotty, interactive-terminal, lynk, marchat, mychat, terminal, terminal-web, terminalcontrol, termix, termlib, termly-cli, termora, termote, tty-share, web-terminal, webrepl, webshell, websocat, websocket, websocketd, webterm, webterminal, wetty, ws, wssh, z2term, …) | ⚙️ | One tutorial template reproduced ~45×; the template's features (spawn, attach, resize, bridge) were already core |
+| pty_basic_* — 42 tutorial clones, one directory each: cli-tunnel, conch, frp, gotty, interactive-terminal, lynk, marchat, mcp-interactive-terminal, mychat, node-pty, node-pty-prebuilt, pywinpty, restty, ruspty, smart-terminal-mcp, terminal, terminal-mcp, terminal-web, terminalcontrol, termix, termlib, termly-cli, termora, termote, termpair, tty-share, ttyd, web-terminal, webrepl, webshell, websocat, websocket, websocketd, webssh, webterm, webterminal, wetty, ws, wssh, xterm-pty, z2term, zigpty | ⚙️ | One tutorial template reproduced 42×; its features (spawn, attach, resize, bridge) were already core, and several members repeat projects that have their own rows above |
 | pty_clsh / pty_minimux | ⚙️ | Same template family |
 
 ## 3. Session persistence, multiplexing & roaming
@@ -157,7 +167,6 @@ empty/deprecated clones, unrelated apps).
 | cli-tunnel | ✅ | Same, per-service tunnels |
 | cloudflared | ⚙️ | Tunnel concept; harness uses outbound relay instead of cloud dependency |
 | tailscale | ⚙️ | Recommended transport for off-LAN access |
-| tailscale | ⚙️ | Recommended transport for off-LAN access |
 | netbird | ⚙️ | Mesh VPN alternative (device revocation 🗺️) |
 | hermes-relay | ✅ | Reverse-connect relay with channels → `relay_*` (host + connect) |
 | relay (sshx/tty2web family) | ✅ | E2E-blind relay hosting → `relay_host` |
@@ -176,7 +185,6 @@ empty/deprecated clones, unrelated apps).
 | cockpit | ⚙️ | Server dashboard cards → `stats` + monitor |
 | code-server / ghostty-web / waveterm / whipdesk | ⚙️ | Browser workspaces → browser test client |
 | openvide / live | ➖ | Video/IPTV projects — no harness overlap |
-| tailscale … (already listed) | — | — |
 
 ## 5. Android app & Kotlin libraries
 
@@ -261,7 +269,9 @@ empty/deprecated clones, unrelated apps).
 
 ## Verification
 
-- Repo count: **241** directories in the corpus, **241** rows above (each repo appears exactly once; cross-references marked "listed §" are navigational, not double-counted).
+- Repo count: **241** directories in the corpus, counted directly from the corpus folder (247 entries, of which six are files: `MANIFEST.md` and five `done-*.log` logs). The status tables above hold **166 rows**, covering **226 distinct repository labels**. The row count is lower than the repository count because several rows stand for a group; the label count is lower still only because of the repeats listed next. The corpus figure is not derived from the tables.
+- Five labels appear in two rows each. All five are deliberate: `chuchu` (§4 Android SSH client patterns, §6 channel list), `connectbot` (§4 Android SSH clients, §5 host-key TOFU and multi-server book), `sshwifty` (§2 web-terminal group, §4 web SSH client), `tty2web` (§2 web-terminal group, §2 ttyd clone), `whipdesk` (§1 agent-client list, §4 browser-workspaces group). Each appears where it informs that section, and no row was double-counted into the figures above.
+- The `pty_basic_*` row names 42 members, and some of them — `ttyd`, `gotty`, `tty-share`, `wetty`, `webssh`, `node-pty`, `xterm-pty` — are also the subjects of their own rows, because the corpus holds both the project and a tutorial clone of it. Those clone directories are what the row's "one template reproduced 42×" means.
 - After this pass the module-surface leftovers (VNC, SSH-bastion, advanced-SSH, multi-protocol client) are **wired** — 🧩 count is 0; remaining roadmap items are the 🗺️ list.
 - Remaining 🗺️ items are explicitly planned features (mosh-UDP roam, E2EE shares, ZMODEM, biometric app lock, asciicast player, foreground service, worktree isolation, device revocation, mkcert CA, TOTP/OIDC).
-- `npm.cmd test` (22 files, 202 checks) and `assembleDebug` both pass after absorption.
+- `npm.cmd test` (28 files, 304 checks) and `assembleDebug` both pass after absorption.

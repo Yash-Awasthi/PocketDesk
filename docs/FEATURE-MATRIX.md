@@ -1,6 +1,6 @@
 # Feature Matrix — inspiration corpus vs PocketDesk
 
-One-by-one coverage of every distinct feature found in the 220-repo inspiration
+One-by-one coverage of every distinct feature found in the 241-repo inspiration
 corpus (`/inspiration/PocketDesk`), mapped to what PocketDesk ships.
 
 Status legend:
@@ -19,7 +19,7 @@ Status legend:
 
 | Feature | Source repos | Status |
 |---|---|---|
-| PTY create/attach/detach/input/resize/kill over WS | node-pty family (the ~50 `pty_basic_*` clones are one tutorial template) | ⚙️ |
+| PTY create/attach/detach/input/resize/kill over WS | node-pty family (the 42 `pty_basic_*` clones are one tutorial template) | ⚙️ |
 | Scrollback replay on attach | gotty, ttyd | ⚙️ |
 | Monotonic seq numbers on output + missed-output backfill (`attach {since}`) | cc-pocket, ccpocket, codeman, gotty reconnect | ✅ `seq` on `out`, incremental `replay` |
 | Read-only spectator mode (server-enforced input drop) | ttyd, gotty, tty2web, termpair, tmate ro-keys | ✅ `share_create`/`share_join` |

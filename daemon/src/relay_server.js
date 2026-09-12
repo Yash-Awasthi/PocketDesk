@@ -9,6 +9,8 @@ import net from "node:net";
 import crypto from "node:crypto";
 import { EventEmitter } from "node:events";
 
+const MAX_FRAME_BYTES = 1 << 20;
+
 export class RelayServer extends EventEmitter {
     constructor(port = 8790) {
         super();
@@ -49,13 +51,21 @@ export class RelayServer extends EventEmitter {
             conn.buf = conn.buf.slice(nl + 1);
             if (line) this.handleMessage(connId, line);
         }
-        // Tolerant fallback: a client that writes one JSON frame without a
-        // trailing newline (old protocol) still gets parsed.
-        if (conn.buf.trim()) {
+        // Tolerant fallback: a client writing one frame without a trailing
+        // newline still parses. Bytes that are not yet a complete frame stay
+        // buffered, because discarding them would lose a frame split across
+        // TCP segments.
+        const rest = conn.buf.trim();
+        if (rest) {
             try {
-                this.handleMessage(connId, conn.buf.trim());
+                JSON.parse(rest);
                 conn.buf = '';
-            } catch {}
+                this.handleMessage(connId, rest);
+            } catch {
+                // A peer that never completes a frame must not grow the
+                // buffer without bound.
+                if (conn.buf.length > MAX_FRAME_BYTES) conn.socket.destroy();
+            }
         }
     }
 
