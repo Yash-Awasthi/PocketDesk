@@ -5,6 +5,7 @@
 // Fully in-memory — deterministic, no external processes, no real listeners
 // beyond the ephemeral VNC TCP port (port 0) started and stopped in-test.
 import { check, connectRaw, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
+import { createHash } from "node:crypto";
 
 const tmp = makeTmp("rh-t-");
 
@@ -90,6 +91,31 @@ async function main() {
   c.send({ type: "sshserver_session_create", username: "bob", clientIp: "192.168.1.7", method: "token" });
   const ss = await c.next((m) => m.type === "sshserver_session_created");
   check("sshserver session created", ss.ok === true && !!ss.session.id);
+
+  // A user WITH a credential must present it. The old authenticate() ended in
+  // `return true`, so claiming an unconfigured method walked straight past a
+  // configured password hash — and nothing called authenticate() at all.
+  const pwHash = createHash("sha256").update("hunter2").digest("hex");
+  c.send({ type: "sshserver_user_add", username: "carol", passwordHash: pwHash, allowedCommands: ["ls"] });
+  await c.next((m) => m.type === "sshserver_user_added");
+
+  c.send({ type: "sshserver_session_create", username: "carol", method: "publickey" });
+  const bypass = await c.next((m) => m.type === "sshserver_session_created");
+  check("credentialed user cannot be bypassed by claiming another method", bypass.ok === false);
+
+  c.send({ type: "sshserver_session_create", username: "carol", method: "password", credential: "wrong" });
+  const badPw = await c.next((m) => m.type === "sshserver_session_created");
+  check("wrong password rejected", badPw.ok === false);
+
+  c.send({ type: "sshserver_session_create", username: "carol", method: "password", credential: "hunter2" });
+  const goodPw = await c.next((m) => m.type === "sshserver_session_created");
+  check("correct password accepted", goodPw.ok === true && !!goodPw.session.id);
+  c.send({ type: "sshserver_session_end", sessionId: goodPw.session.id });
+  await c.next((m) => m.type === "sshserver_session_ended");
+
+  c.send({ type: "sshserver_user_list" });
+  const users = await c.next((m) => m.type === "sshserver_user_list");
+  check("user list never leaks passwordHash", users.items.every((u) => !("passwordHash" in u)));
 
   c.send({ type: "sshserver_exec", sessionId: ss.session.id, command: "git status" });
   const okExec = await c.next((m) => m.type === "sshserver_exec_ok");

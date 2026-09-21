@@ -133,12 +133,20 @@ export class FileTransferServer {
               files[id] = { ...info, received: 0 };
               totalBytes += info.size || 0;
             }
+            // The trust list was collected and never consulted. Empty means
+            // "accept anyone", as before; non-empty now actually gates.
+            const senderFingerprint = data.info?.sender?.fingerprint;
+            if (this.trustedFingerprints.size > 0 && !this.trustedFingerprints.has(senderFingerprint)) {
+              res.writeHead(403, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'sender fingerprint not trusted' }));
+              return;
+            }
             this.sessions.set(sessionId, {
               files,
               totalBytes,
               receivedBytes: 0,
               status: 'waiting',
-              senderFingerprint: data.info?.sender?.fingerprint,
+              senderFingerprint,
             });
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ sessionId, files: Object.keys(files) }));
@@ -163,7 +171,10 @@ export class FileTransferServer {
         }
 
         const fileInfo = session.files[fileId];
-        const filePath = join(this.downloadDir, fileInfo.filename || `file-${fileId}`);
+        // basename: the filename is sender-supplied over an unauthenticated
+        // LAN listener, so "../../.ssh/authorized_keys" was an arbitrary write.
+        const safeName = basename(String(fileInfo.filename || "")).replace(/^\.+$/, "");
+        const filePath = join(this.downloadDir, safeName || `file-${fileId}`);
         const writeStream = createWriteStream(filePath);
         let received = 0;
 

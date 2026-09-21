@@ -8,8 +8,14 @@
  * `sshserver_*` messages; a real SSH wire listener can be layered on top
  * (see ssh_bastion.js for the jump-host variant).
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
+
+function constantTimeEquals(a, b) {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && timingSafeEqual(x, y);
+}
 
 export class AdvancedSSHServerManager extends EventEmitter {
   constructor(config = {}) {
@@ -46,23 +52,25 @@ export class AdvancedSSHServerManager extends EventEmitter {
   }
 
   /**
-   * Authenticate a user (password hash or public key; no credential set
-   * falls back to permissive for compatibility with the pattern source).
+   * Authenticate a user. A user registered with no credential at all is open
+   * by construction; one with a credential must present THAT credential. The
+   * old trailing `return true` let `method: "publickey"` walk straight past a
+   * configured password hash.
    */
   authenticate(username, method, credential) {
     const user = this.users.get(username);
     if (!user) return false;
+    if (!user.passwordHash && !user.publicKey) return true;
 
     if (method === "password" && user.passwordHash) {
-      const hash = createHash("sha256").update(credential).digest("hex");
-      return hash === user.passwordHash;
+      return constantTimeEquals(createHash("sha256").update(String(credential ?? "")).digest("hex"), user.passwordHash);
     }
 
     if (method === "publickey" && user.publicKey) {
-      return credential === user.publicKey;
+      return constantTimeEquals(String(credential ?? ""), user.publicKey);
     }
 
-    return true;
+    return false;
   }
 
   /**

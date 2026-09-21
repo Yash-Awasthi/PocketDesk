@@ -47,6 +47,7 @@ export function loadConfig() {
 }
 
 export function saveConfig(cfg) {
+  // 0600: this file holds the pairing token.
   fs.writeFileSync(
     file,
     JSON.stringify({
@@ -55,7 +56,9 @@ export function saveConfig(cfg) {
       tls: { enabled: cfg.tls.enabled, cert: cfg.tls.cert, key: cfg.tls.key },
       relay: { url: cfg.relay?.url || "", channel: cfg.relay?.channel || "", hostPort: cfg.relay?.hostPort || 0 },
     }, null, 2),
+    { mode: 0o600 },
   );
+  try { fs.chmodSync(file, 0o600); } catch { /* Windows ACLs: best effort */ }
 }
 
 export const configDir = dir;

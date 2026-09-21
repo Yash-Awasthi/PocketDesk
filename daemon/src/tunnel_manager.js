@@ -13,7 +13,12 @@ class TunnelManager extends EventEmitter {
         this.port = options.port || 8780;
     }
 
-    createTunnel(localPort, remotePort) {
+    /**
+     * `bindAll` opens the forwarded port to every interface. Default is
+     * loopback: the listener carries no auth of its own, so binding 0.0.0.0
+     * handed the whole LAN whatever PC-local service was being forwarded.
+     */
+    createTunnel(localPort, remotePort, { bindAll = false } = {}) {
         const tunnelId = crypto.randomUUID().slice(0, 8);
         const server = net.createServer((socket) => {
             const local = net.connect(localPort, 'localhost', () => {
@@ -24,9 +29,10 @@ class TunnelManager extends EventEmitter {
             socket.on('error', () => local.destroy());
         });
 
-        server.listen(remotePort, () => {
-            this.tunnels.set(tunnelId, { localPort, remotePort, server, created: Date.now() });
-            this.emit('tunnel:created', { tunnelId, localPort, remotePort });
+        const host = bindAll ? '0.0.0.0' : '127.0.0.1';
+        server.listen(remotePort, host, () => {
+            this.tunnels.set(tunnelId, { localPort, remotePort, host, server, created: Date.now() });
+            this.emit('tunnel:created', { tunnelId, localPort, remotePort, host });
         });
 
         server.on('error', (err) => {
@@ -47,7 +53,7 @@ class TunnelManager extends EventEmitter {
 
     listTunnels() {
         return Array.from(this.tunnels.entries()).map(([id, t]) => ({
-            id, localPort: t.localPort, remotePort: t.remotePort, created: t.created,
+            id, localPort: t.localPort, remotePort: t.remotePort, host: t.host, created: t.created,
         }));
     }
 

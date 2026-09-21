@@ -93,6 +93,35 @@ async function main() {
   spect.send({ type: "in", id: created.id, data: Buffer.from("echo bad").toString("base64") });
   const denied = await spect.next((m) => m.type === "error");
   check("readonly spectator input blocked", /read-only/.test(denied.message));
+  // The gate is an allowlist, so write verbs outside the terminal are refused
+  // too — a spectator used to be able to write files and open tunnels.
+  spect.send({ type: "fwrite", path: "spectator-should-not-write.txt", data: "" });
+  const deniedWrite = await spect.next((m) => m.type === "error");
+  check("readonly spectator cannot write files", /read-only/.test(deniedWrite.message));
+  spect.send({ type: "tunnel_create", localPort: PORT, remotePort: 18999 });
+  const deniedTunnel = await spect.next((m) => m.type === "error");
+  check("readonly spectator cannot open tunnels", /read-only/.test(deniedTunnel.message));
+
+  // maxViewers was stored and never enforced.
+  c2.send({ type: "share_create", id: created.id, mode: "readonly", ttlMinutes: 10, maxViewers: 1 });
+  const capped = await c2.next((m) => m.type === "share_created");
+  const v1 = connect(PORT);
+  await new Promise((res) => v1.ws.on("open", res));
+  v1.send({ type: "hello", token: TOKEN });
+  await v1.next((m) => m.type === "welcome");
+  v1.send({ type: "share_join", token: capped.token });
+  await v1.next((m) => m.type === "share_joined");
+  const v2 = connect(PORT);
+  await new Promise((res) => v2.ws.on("open", res));
+  v2.send({ type: "hello", token: TOKEN });
+  await v2.next((m) => m.type === "welcome");
+  v2.send({ type: "share_join", token: capped.token });
+  const full = await v2.next((m) => m.type === "error");
+  check("maxViewers enforced", /full/.test(full.message));
+  await v1.close();
+  await v2.close();
+  c2.send({ type: "share_revoke", token: capped.token });
+  await c2.next((m) => m.type === "share_revoked");
   c2.send({ type: "in", id: created.id, data: Buffer.from("echo ok\r").toString("base64") });
   check("owner input still works", true);
   c2.send({ type: "share_list" });
@@ -145,7 +174,11 @@ async function main() {
   c2.send({ type: "record_start", id: created.id });
   await c2.next((m) => m.type === "recording" && m.active === true);
   c2.send({ type: "in", id: created.id, data: Buffer.from("echo recorded\r").toString("base64") });
-  await sleep(700);
+  // Wait for the echo itself: a fixed sleep raced the PTY and flaked.
+  await Promise.race([
+    c2.next((m) => m.type === "out" && m.id === created.id && Buffer.from(m.data, "base64").toString().includes("recorded"), 5000),
+    sleep(3000),
+  ]).catch(() => {});
   c2.send({ type: "record_stop", id: created.id });
   await c2.next((m) => m.type === "recording" && m.active === false);
   c2.send({ type: "record_get", id: created.id });
