@@ -68,6 +68,12 @@ import * as planMode from "./plan_mode.js";
 
 const HELLO_TIMEOUT = 10_000;
 const MAX_AUTH_ATTEMPTS = 5;
+// A read-only spectator may only do these. Allowlist, not per-case guards:
+// the handler switch has ~230 cases and every new one defaulted to writable,
+// so a "read-only" share could still write files, install, or open tunnels.
+const SPECTATOR_TYPES = new Set([
+  "attach", "detach", "sessions", "sessions_get", "chat_text", "share_join",
+]);
 const authAttempts = new Map();
 const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
 
@@ -175,12 +181,17 @@ export function start({ port, token, tls, relay: relayCfg }) {
   });
 
   wss.on("connection", (ws, req) => {
+    // Read off `req`: the ws instance exposes the socket as `_socket`, so the
+    // old `ws.socket?.remoteAddress` was always undefined and every client
+    // shared one counter — five bad tokens locked out the whole LAN.
+    const clientIp = (req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
     ws._subs = new Set();
     ws._authed = false;
     plugins.callHook("onConnect", ws);
     const timer = setTimeout(() => ws.close(4001, "auth timeout"), HELLO_TIMEOUT);
     ws.on("close", () => {
       clearTimeout(timer);
+      if (ws._shareToken) shares.leave(ws._shareToken);
       sessions.detach(ws);
       chat.detach(ws);
       plugins.callHook("onDisconnect", ws);
@@ -198,7 +209,6 @@ export function start({ port, token, tls, relay: relayCfg }) {
         if (!ws._authed) {
           // Rate limit auth attempts (10-minute decay window so a few typos
           // never lock an IP out forever).
-          const clientIp = ws.socket?.remoteAddress || 'unknown';
           const rec = authAttempts.get(clientIp);
           const attempts = rec && Date.now() - rec.at < 10 * 60_000 ? rec.n : 0;
           if (attempts >= MAX_AUTH_ATTEMPTS) {
@@ -244,10 +254,16 @@ export function start({ port, token, tls, relay: relayCfg }) {
     for (const ws of wss.clients) if (ws._authed) send(ws, obj);
     // Mirror broadcasts to relay peers as `rhpush` so remote (off-LAN) clients
     // see live output (sessions, out, chatdelta, manifests, relay_state, …).
-    if (relayShims.size > 0) relayPublish({ rh: true, type: "rhpush", data: obj });
+    // Addressed per peer, never published to the channel: the relay has no
+    // auth of its own, so anyone who guessed the channel name would otherwise
+    // read every session's output without ever presenting the token.
+    relayPushAuthed({ rh: true, type: "rhpush", data: obj });
   }
 
   async function handle(ws, msg) {
+    if (ws._shareMode === "readonly" && !SPECTATOR_TYPES.has(msg.type)) {
+      return send(ws, { type: "error", message: `read-only (spectator): ${msg.type}` });
+    }
     switch (msg.type) {
       case "detect":
         await registry.scanAll(broadcast);
@@ -571,10 +587,16 @@ export function start({ port, token, tls, relay: relayCfg }) {
         break;
       }
       case "share_join": {
-        const share = shares.resolve(msg.token);
-        if (!share) return send(ws, { type: "error", message: "share not found or expired" });
+        const joined = shares.join(msg.token);
+        if (!joined.ok) return send(ws, { type: "error", message: joined.error });
+        const share = joined.share;
         const attached = chat.attach(share.sessionId, ws) || sessions.attach(share.sessionId, ws);
-        if (!attached) return send(ws, { type: "error", message: `shared session no longer live: ${share.sessionId}` });
+        if (!attached) {
+          shares.leave(share.token);
+          return send(ws, { type: "error", message: `shared session no longer live: ${share.sessionId}` });
+        }
+        if (ws._shareToken) shares.leave(ws._shareToken);
+        ws._shareToken = share.token;
         ws._shareMode = share.mode;
         send(ws, { type: "share_joined", sessionId: share.sessionId, mode: share.mode });
         break;
@@ -627,7 +649,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
       }
       // ── Tunnels (frp/bore-lite: reach PC-local services from the phone) ──
       case "tunnel_create": {
-        const id = tunnels.createTunnel(Number(msg.localPort), Number(msg.remotePort));
+        const id = tunnels.createTunnel(Number(msg.localPort), Number(msg.remotePort), { bindAll: Boolean(msg.bindAll) });
         send(ws, { type: "tunnel_created", id, localPort: msg.localPort, remotePort: msg.remotePort });
         break;
       }
@@ -851,7 +873,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
         break;
       // ── VNC bridge (noVNC/guacamole: TCP frame server + frame feed) ──────
       case "vnc_start": {
-        const r = await vnc.start(Number(msg.port) || 0);
+        const r = await vnc.start(Number(msg.port) || 0, { bindAll: Boolean(msg.bindAll) });
         send(ws, { type: "vnc_started", ...r });
         break;
       }
@@ -1589,13 +1611,33 @@ export function start({ port, token, tls, relay: relayCfg }) {
 
   const CHUNK = 256 * 1024;
 
+  /**
+   * Deepest existing ancestor resolved through symlinks, with the not-yet-
+   * existing tail re-appended. A plain path.resolve leaves a link under $HOME
+   * pointing anywhere on disk, which defeats the containment check below.
+   */
+  function realResolve(p) {
+    let cur = p;
+    const tail = [];
+    for (;;) {
+      try {
+        return path.join(fs.realpathSync(cur), ...tail);
+      } catch {
+        const parent = path.dirname(cur);
+        if (parent === cur) return p;
+        tail.unshift(path.basename(cur));
+        cur = parent;
+      }
+    }
+  }
+
   function resolvePath(p) {
-    const resolved = p && String(p).trim() ? path.resolve(String(p).replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir();
+    const resolved = realResolve(p && String(p).trim() ? path.resolve(String(p).replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir());
     // Security: block path traversal outside home, with an escape hatch for
     // the OS temp dir (tests and file-transfer staging legitimately live
     // there, and on Linux /tmp is NOT under home). ponytail: per-user tmp
     // roots if this ever runs multi-tenant.
-    const home = os.homedir();
+    const home = realResolve(os.homedir());
     const tmpRoot = fs.realpathSync(os.tmpdir());
     const allowed = resolved === home || resolved.startsWith(home + path.sep) ||
       resolved.startsWith(tmpRoot + path.sep) || path.dirname(resolved) === tmpRoot;
@@ -1782,7 +1824,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
         }
         // null when nothing is being answered: stream output driven by a
         // session or chat rather than by a request.
-        relayPublish({ rh: true, type: "rhresp", reqId: relayReqCtx.getStore() ?? null, data });
+        relaySendTo(from, { rh: true, type: "rhresp", reqId: relayReqCtx.getStore() ?? null, data });
       },
     };
     // Bounded: a peer that auths then silently dies leaves its shim behind
@@ -1814,8 +1856,30 @@ export function start({ port, token, tls, relay: relayCfg }) {
     relayShims.clear();
   }
 
-  function relayPublish(obj) {
-    if (relay.status().connected) relay.publish(obj);
+  function relaySendTo(to, obj) {
+    if (relay.status().connected) relay.sendTo(to, obj);
+  }
+
+  function relayPushAuthed(obj) {
+    if (!relay.status().connected) return;
+    for (const [from, shim] of relayShims) if (shim._authed) relay.sendTo(from, obj);
+  }
+
+  /**
+   * A failed relay hello answers late, and later the more the channel has
+   * failed recently. The per-peer lockout below keys on the relay-assigned
+   * connId, which an attacker resets just by reconnecting; this throttle has
+   * no such handle. It only ever delays a rejection, so it cannot lock anyone
+   * out the way a shared counter would.
+   */
+  let relayFailStreak = { n: 0, at: 0 };
+  function relayRejectDelay() {
+    const now = Date.now();
+    if (now - relayFailStreak.at > RELAY_AUTH_FAIL_WINDOW) relayFailStreak = { n: 0, at: now };
+    relayFailStreak = { n: relayFailStreak.n + 1, at: now };
+    // The first couple of rejections answer immediately — a typo should not
+    // feel broken. Only a streak pays.
+    return Math.min(Math.max(0, relayFailStreak.n - 2) * 250, 3000);
   }
 
   function onRelayEvent(evt) {
@@ -1840,7 +1904,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
         // again. Per peer, so one attacker cannot lock out the channel.
         const fails = relayAuthFailsFor(evt.from, now);
         if (fails && fails.n >= RELAY_AUTH_FAIL_MAX) {
-          relayPublish({ rh: true, type: "rherr", reqId, error: "too many failed auth attempts" });
+          relaySendTo(evt.from, { rh: true, type: "rherr", reqId, error: "too many failed auth attempts" });
           return;
         }
         if (!shim._authed) {
@@ -1848,13 +1912,13 @@ export function start({ port, token, tls, relay: relayCfg }) {
           const ok = inner.type === "hello" && t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token));
           if (!ok) {
             relayAuthFails.set(evt.from, { n: (fails?.n ?? 0) + 1, at: fails?.at ?? now });
-            relayPublish({ rh: true, type: "rherr", reqId, error: "bad token" });
+            setTimeout(() => relaySendTo(evt.from, { rh: true, type: "rherr", reqId, error: "bad token" }), relayRejectDelay()).unref?.();
             relayShims.delete(evt.from);
             return;
           }
           shim._authed = true;
           relayAuthFails.delete(evt.from); // an honest hello clears its own count
-          relayPublish({ rh: true, type: "rhresp", reqId, data: { type: "welcome", version: 1, clientId: shim._clientId, sessions: allSessions(), manifests: registry.list() } });
+          relaySendTo(evt.from, { rh: true, type: "rhresp", reqId, data: { type: "welcome", version: 1, clientId: shim._clientId, sessions: allSessions(), manifests: registry.list() } });
           return;
         }
         relayReqCtx.run(reqId, () => handle(shim, inner)).catch((e) => {

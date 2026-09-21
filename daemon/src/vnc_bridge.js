@@ -27,7 +27,7 @@ export class VNCBridge extends EventEmitter {
    * Start the TCP frame server. `port` may be 0 to bind an ephemeral port
    * (reported back in the resolved value). Resolves `{ ok, port }`.
    */
-  async start(port) {
+  async start(port, { bindAll = false } = {}) {
     if (this.running) {
       return { ok: false, reason: "already_running", port: this.server?.address()?.port ?? this.port };
     }
@@ -38,7 +38,8 @@ export class VNCBridge extends EventEmitter {
       const onListening = () => { this.server.off("error", onError); resolve(); };
       this.server.once("error", onError);
       this.server.once("listening", onListening);
-      this.server.listen(listenPort);
+      // Loopback unless asked otherwise: the frame feed is unauthenticated.
+      this.server.listen(listenPort, bindAll ? "0.0.0.0" : "127.0.0.1");
     });
     this.running = true;
     this.port = this.server.address().port;

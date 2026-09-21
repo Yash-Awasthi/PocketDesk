@@ -143,6 +143,8 @@ async function handleRpc(body) {
   }
 }
 
+const MAX_BODY_BYTES = 1 << 20;
+
 export function start(listenPort = 4680) {
   if (server) return port;
   port = Number(listenPort) || 4680;
@@ -153,8 +155,13 @@ export function start(listenPort = 4680) {
       return;
     }
     let raw = "";
-    req.on("data", (d) => (raw += d));
+    // A body with no end would grow this string until the daemon dies.
+    req.on("data", (d) => {
+      raw += d;
+      if (raw.length > MAX_BODY_BYTES) { raw = ""; res.writeHead(413).end(); req.destroy(); }
+    });
     req.on("end", async () => {
+      if (res.headersSent) return;
       let body;
       try {
         body = JSON.parse(raw);

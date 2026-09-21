@@ -7,7 +7,7 @@
 [![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-orange.svg)](#protocol-v1)
 [![Android](https://img.shields.io/badge/Android-Kotlin-purple.svg)](https://developer.android.com)
 [![Plugins](https://img.shields.io/badge/Plugins-4-blueviolet.svg)](#plugin-system)
-[![Tests](https://img.shields.io/badge/Tests-8+-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-29%20suites-brightgreen.svg)](#testing)
 
 **No cloud. No accounts. Your machine, your data, your agents.**
 
@@ -444,7 +444,7 @@ JSON frames; binary payloads are base64.
 `share_create` · `share_join` · `share_list` · `share_revoke` — read-only spectator links ·
 `stats` — host CPU/mem/uptime · `git_status` · `git_diff` · `git_log` · `git_branches` — read-only repo inspection ·
 `record_start` · `record_stop` · `record_list` · `record_get` — session recording/export ·
-`tunnel_create` · `tunnel_close` · `tunnel_list` — TCP tunnels to PC-local services ·
+`tunnel_create` · `tunnel_close` · `tunnel_list` — TCP tunnels to PC-local services (loopback by default; pass `bindAll: true` to expose one on the LAN) ·
 `power_set` · `power_status` — keep-awake · `activity_list` — per-session activity states ·
 `resurrect_list` · `resume` — restore chats after a daemon restart
 </details>

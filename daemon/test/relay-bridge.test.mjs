@@ -95,6 +95,7 @@ async function run() {
   let peer = null;
   let attacker = null;
   let innocent = null;
+  let eavesdropper = null;
   try {
     // Wait for the daemon HTTP + relay to come up.
     let up = false;
@@ -143,6 +144,21 @@ async function run() {
     await sleep(2500);
     const push = events.find((m) => m?.data?.type === "rhpush" && m?.data?.data?.type === "manifests");
     check("manifests broadcast mirrored to relay peer", Boolean(push));
+
+    // 6b: a peer that only guessed the channel name — the relay itself has no
+    // auth — must see nothing. Broadcasts used to be published channel-wide.
+    eavesdropper = relayClient(RELAY_PORT, () => {});
+    const eavesEvents = [];
+    eavesdropper.onMessage((m) => { eavesdropper.grabId(m); eavesEvents.push(m); });
+    await sleep(300);
+    eavesdropper.sub(CHANNEL);
+    await sleep(300);
+    peer.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "q4", msg: { type: "detect" } });
+    await sleep(2500);
+    check("unauthenticated channel member sees no rhpush",
+      !eavesEvents.some((m) => m?.data?.type === "rhpush"));
+    check("unauthenticated channel member sees no rhresp",
+      !eavesEvents.some((m) => m?.data?.type === "rhresp"));
 
     // Also verify the LAN path still works alongside the relay.
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
@@ -195,6 +211,7 @@ async function run() {
     peer?.close();
     attacker?.close();
     innocent?.close();
+    eavesdropper?.close();
     daemon.kill("SIGTERM");
     await sleep(500);
     daemon.kill("SIGKILL");

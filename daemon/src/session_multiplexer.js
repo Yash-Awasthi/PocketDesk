@@ -6,7 +6,7 @@
  * and waiting-state monitoring. Pure functions — no DB, no async.
  */
 
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 // --- Constants ---
 
@@ -53,9 +53,11 @@ export function validateName(name, allowSpaces = false) {
 
 // --- Tmux Commands ---
 
+// Argv, never a shell string: `cwd` and `group` arrive straight from the
+// client and only `name` is pattern-validated.
 function tmux(args) {
   try {
-    const result = execSync(`tmux ${args}`, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    const result = execFileSync('tmux', args, { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
     return { success: true, stdout: result.trim(), stderr: '' };
   } catch (error) {
     return { success: false, stdout: '', stderr: error.stderr || error.message };
@@ -66,13 +68,13 @@ function tmux(args) {
 
 export function hasSession(name) {
   validateName(name);
-  const result = tmux(`has-session -t =${name}`);
+  const result = tmux(['has-session', '-t', `=${name}`]);
   return result.success;
 }
 
 export function listSessions() {
   // Real TAB separator (\t) — tmux formats do not expand backslash escapes.
-  const result = tmux('list-sessions -F "#{session_name}\t#{session_created}\t#{session_attached}\t#{@agentpeek_group}\t#{@agentpeek_cwd}\t#{window_activity}"');
+  const result = tmux(['list-sessions', '-F', '#{session_name}\t#{session_created}\t#{session_attached}\t#{@agentpeek_group}\t#{@agentpeek_cwd}\t#{window_activity}']);
 
   if (!result.success) {
     // No tmux server = no sessions
@@ -83,7 +85,7 @@ export function listSessions() {
   }
 
   // Get pane info for activity detection
-  const paneResult = tmux('list-panes -a -F "#{session_name}\t#{pane_active}\t#{pane_current_command}\t#{pane_current_path}"');
+  const paneResult = tmux(['list-panes', '-a', '-F', '#{session_name}\t#{pane_active}\t#{pane_current_command}\t#{pane_current_path}']);
 
   const foreground = {};
   const liveCwd = {};
@@ -126,7 +128,7 @@ export function listSessions() {
 
 export function paneWaiting(name) {
   validateName(name);
-  const result = tmux(`capture-pane -p -t =${name}:`);
+  const result = tmux(['capture-pane', '-p', '-t', `=${name}:`]);
   if (!result.success) return false;
   return WAITING_MARKERS.some(m => result.stdout.includes(m));
 }
@@ -149,24 +151,24 @@ export function createSession(name, options = {}) {
   const { cwd = process.cwd(), group = 'General' } = options;
 
   // Create session with initial window
-  const result = tmux(
-    `new-session -d -s "${name}" -c "${cwd}" ` +
-    `-x ${options.cols || 120} -y ${options.rows || 40}`
-  );
+  const result = tmux([
+    'new-session', '-d', '-s', name, '-c', String(cwd),
+    '-x', String(Number(options.cols) || 120), '-y', String(Number(options.rows) || 40),
+  ]);
 
   if (!result.success) {
     throw new MuxError(`Failed to create session: ${result.stderr}`);
   }
 
   // Set group as user option
-  tmux(`set-option -t "${name}" -g agentpeek_group "${group}"`);
+  tmux(['set-option', '-t', name, '-g', 'agentpeek_group', String(group)]);
 
   return { name, created: Date.now(), group, cwd };
 }
 
 export function killSession(name) {
   validateName(name);
-  const result = tmux(`kill-session -t ="${name}"`);
+  const result = tmux(['kill-session', '-t', `=${name}`]);
   return result.success;
 }
 

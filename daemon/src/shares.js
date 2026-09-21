@@ -32,6 +32,7 @@ export function createShareManager({ defaultTtlMinutes = 60 } = {}) {
       maxViewers: Math.max(1, Number(maxViewers) || 8),
       createdAt: Date.now(),
       expiresAt: Date.now() + ttl,
+      viewers: 0,
     };
     shares.set(token, share);
     return share;
@@ -40,6 +41,20 @@ export function createShareManager({ defaultTtlMinutes = 60 } = {}) {
   function resolve(token) {
     sweep();
     return shares.get(String(token || "")) || null;
+  }
+
+  /** Admit a spectator, enforcing maxViewers. Pair every ok with leave(). */
+  function join(token) {
+    const share = resolve(token);
+    if (!share) return { ok: false, error: "share not found or expired" };
+    if (share.viewers >= share.maxViewers) return { ok: false, error: "share is full" };
+    share.viewers++;
+    return { ok: true, share };
+  }
+
+  function leave(token) {
+    const share = shares.get(String(token || ""));
+    if (share && share.viewers > 0) share.viewers--;
   }
 
   function revoke(token) {
@@ -58,5 +73,5 @@ export function createShareManager({ defaultTtlMinutes = 60 } = {}) {
     }));
   }
 
-  return { create, resolve, revoke, revokeSession, list };
+  return { create, resolve, join, leave, revoke, revokeSession, list };
 }

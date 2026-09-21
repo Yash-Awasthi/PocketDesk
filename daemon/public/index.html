@@ -1076,7 +1076,9 @@ function pickDir(m) {
 // ── Helpers ──
 function b64ToBytes(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
 function bytesToB64(u8) { let s = ""; for (const b of u8) s += String.fromCharCode(b); return btoa(s); }
-function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+// Quotes too: esc() output lands inside single-quoted onclick="..." attributes,
+// where a bare ' in a client-supplied id would break out into script.
+function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
 
 // ── Proposals ──
 function renderProposals() {
