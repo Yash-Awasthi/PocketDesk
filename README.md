@@ -148,6 +148,11 @@ When the app's status bar shows **Connected**, you're paired.
 Install agents from the phone too: any tool card marked "not installed" has an
 **Install** button (one-tap npm/pip install with live progress).
 
+**First terminal session in a new folder:** Claude Code opens with a workspace
+trust prompt whose default option is *No, exit* — pressing Enter straight away
+quits it. Use the **↓** key in the terminal key row to select *Yes, I trust this
+folder*, then Enter. After that the REPL appears and typing works normally.
+
 ### 🦾 Controlling Freebuff itself from the phone
 
 The Freebuff tab (browser) / Freebuff screen (app) gives full control of the

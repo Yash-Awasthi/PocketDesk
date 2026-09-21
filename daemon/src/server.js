@@ -950,10 +950,20 @@ export function start({ port, token, tls, relay: relayCfg }) {
         break;
       }
       case "sshserver_user_list":
-        send(ws, { type: "sshserver_user_list", items: Array.from(sshSrv.users.values()) });
+        // passwordHash never leaves the daemon: it is an unsalted sha256 and
+        // handing it out is handing out the password.
+        send(ws, { type: "sshserver_user_list", items: Array.from(sshSrv.users.values()).map(({ passwordHash, ...u }) => u) });
         break;
       case "sshserver_session_create": {
-        const session = sshSrv.createSession(String(msg.username ?? ""), String(msg.clientIp ?? "phone"), String(msg.method ?? "token"));
+        // The auth surface existed but nothing called it — a registered
+        // username alone opened a session.
+        const username = String(msg.username ?? "");
+        const method = String(msg.method ?? "token");
+        if (!sshSrv.authenticate(username, method, msg.credential)) {
+          send(ws, { type: "sshserver_session_created", ok: false, session: null, error: "authentication failed" });
+          break;
+        }
+        const session = sshSrv.createSession(username, String(msg.clientIp ?? "phone"), method);
         send(ws, { type: "sshserver_session_created", ok: !!session, session: session ?? null });
         break;
       }

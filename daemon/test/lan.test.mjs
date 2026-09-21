@@ -45,6 +45,22 @@ async function main() {
   check("receiver got identical bytes", received === "lan-content-42\n");
   check("receiver session marked done", [...receiver.sessions.values()].some((s) => s.status === "done"));
 
+  // A malicious sender names a file outside downloadDir. LocalSend has no
+  // auth, so this was an arbitrary write for anyone on the LAN.
+  const escapeName = "../../../rh-traversal-probe.txt";
+  const prep = await fetch("http://127.0.0.1:8899/api/localsend/v2/prepare-upload", {
+    method: "POST",
+    body: JSON.stringify({ info: { files: { f1: { id: "f1", fileName: escapeName, filename: escapeName, size: 5 } } } }),
+  }).then((r) => r.json());
+  await fetch(`http://127.0.0.1:8899/api/localsend/v2/upload?sessionId=${prep.sessionId}&fileId=f1`, {
+    method: "POST",
+    body: "pwned",
+  });
+  await sleep(300);
+  const escaped = path.resolve(downloads, escapeName);
+  check("upload filename cannot escape downloadDir", !fs.existsSync(escaped));
+  check("upload lands inside downloadDir", fs.existsSync(path.join(downloads, "rh-traversal-probe.txt")));
+
   // Dead peer → graceful failure.
   c.send({ type: "lan_send", ip: "127.0.0.1", port: 9, path: sendFile });
   const dead = await c.next((m) => m.type === "lan_sent");

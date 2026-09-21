@@ -6,7 +6,7 @@
  * conditions), session recording and invite tokens. Exposed over the daemon
  * protocol via the `bastion_*` messages.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 
 export class SSHBastion extends EventEmitter {
@@ -169,8 +169,9 @@ export class SSHBastion extends EventEmitter {
    * Generate a user invite token (stored so acceptInvite can validate it).
    */
   generateInviteToken(email, accessLevel = "limited") {
-    const payload = `${email}:${accessLevel}:${Date.now()}`;
-    const token = createHash("sha256").update(payload).digest("hex").slice(0, 32);
+    // Random, not a hash of email+timestamp: that was guessable by anyone who
+    // knew the invitee's address and roughly when the invite was sent.
+    const token = randomBytes(16).toString("hex");
     this.invites.set(token, { email, accessLevel, createdAt: new Date(), used: false });
     return token;
   }
