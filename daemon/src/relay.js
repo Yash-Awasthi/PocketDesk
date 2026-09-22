@@ -231,7 +231,7 @@ export function createRelayLink({ onEvent = () => {}, reconnect = {} } = {}) {
   function host(port) {
     hostStop();
     hostServer = new RelayServer(port);
-    hostServer.on("error", () => {});
+    hostServer.on("error", (e) => emit({ type: "relay_host", state: "error", error: e.message }));
     hostServer.start();
     emit({ type: "relay_host", state: "hosting", port });
   }

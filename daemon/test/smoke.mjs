@@ -56,6 +56,10 @@ async function run() {
   });
   pump();
 
+  ws.send("null");
+  await new Promise((res) => setTimeout(res, 300));
+  check("pre-auth JSON null does not crash the daemon", daemon.exitCode === null);
+
   send({ type: "hello", token: "wrong" });
   const badEnd = await new Promise((res) => ws.once("close", (c) => res(c)));
   check(`bad token rejected (close ${badEnd})`, badEnd === 4003);

@@ -22,7 +22,7 @@ function ensureHistoryDir() {
 function saveHistory(c) {
   try {
     ensureHistoryDir();
-    const file = path.join(HISTORY_DIR, `${c.id}.json`);
+    const file = path.join(HISTORY_DIR, `${c.created}-${c.id}.json`);
     fs.writeFileSync(file, JSON.stringify({ id: c.id, harnessId: c.harnessId, cwd: c.cwd, transcript: c.transcript, created: c.created }, null, 2));
   } catch {}
 }
@@ -163,7 +163,7 @@ export function sendUserMessage(c, rawText) {
     text = ex.text;
     mentionReport = ex.mentions;
   } catch {}
-  if (!text.trim()) return false;
+  if (!text.trim() || (c.proc && c.state === "running")) return false;
   c.transcript.push({ role: "user", text });
   push(c, { type: "chatuser", id: c.id, text });
   if (mentionReport?.length) push(c, { type: "chatmentions", id: c.id, mentions: mentionReport });
@@ -225,6 +225,7 @@ function runTurn(c, prompt) {
   proc.stdout.on("data", onChunk);
   proc.stderr.on("data", onChunk);
   proc.on("error", (e) => {
+    if (c.proc !== proc) return;
     c.state = "error";
     appendSystem(c, e.message);
     push(c, { type: "chatdelta", id: c.id, text: "\n[spawn failed] " + e.message });
@@ -235,7 +236,10 @@ function runTurn(c, prompt) {
     if (outBuf.trim()) handleLine(c, outBuf, emitText);
     outBuf = "";
     decoder.end();
+    // A finished turn lets the next one start before this process exits; it must not clobber that turn.
+    if (c.proc !== proc) return;
     c.proc = null;
+    if (c.state === "idle" && code === 0) return;
     if (c.state !== "error") {
       c.state = code === 0 ? "idle" : "error";
       if (code !== 0) {

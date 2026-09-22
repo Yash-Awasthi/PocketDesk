@@ -158,6 +158,12 @@ export function subscribe(id, ws) {
   return true;
 }
 
+export function unsubscribe(ws) {
+  for (const key of ws._subs ?? []) {
+    if (key.startsWith("sdk:")) sessions.get(key.slice(4))?.subs.delete(ws);
+  }
+}
+
 function pushState(s) {
   push(s, { type: "sdk_state", id: s.id, state: s.state });
 }
