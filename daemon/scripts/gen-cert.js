@@ -3,6 +3,9 @@ import path from "node:path";
 import { loadConfig, saveConfig, configDir } from "../src/config.js";
 import { generateSelfSignedCert } from "../src/tls-gen.js";
 
+// `npm run setup-tls` always writes a fresh cert — same call loadConfig()
+// makes on an auto-generating first run, run again here deliberately so
+// rotating an existing cert works too.
 const cfg = loadConfig();
 
 if (!generateSelfSignedCert(cfg.tls, configDir)) {
