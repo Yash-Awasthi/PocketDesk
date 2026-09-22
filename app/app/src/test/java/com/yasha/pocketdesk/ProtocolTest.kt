@@ -69,9 +69,36 @@ class ProtocolTest {
     }
 
     @Test
-    fun `gui_open names the harness and nothing else`() {
-        val o = Json.parseToJsonElement(Proto.guiOpen("vscode")).jsonObject
+    fun `gui_open names the harness and the project folder`() {
+        val o = Json.parseToJsonElement(Proto.guiOpen("vscode", "C:/work/api")).jsonObject
         assertEquals("gui_open", o["type"]?.jsonPrimitive?.content)
         assertEquals("vscode", o["harness"]?.jsonPrimitive?.content)
+        assertEquals("C:/work/api", o["cwd"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `a discovered app is launched by path, not by harness id`() {
+        val gui = Json.parseToJsonElement(Proto.guiOpenPath("C:/apps/Zed.lnk", "")).jsonObject
+        assertEquals("gui_open", gui["type"]?.jsonPrimitive?.content)
+        assertEquals("C:/apps/Zed.lnk", gui["path"]?.jsonPrimitive?.content)
+        assertNull(gui["harness"])
+
+        val cli = Json.parseToJsonElement(Proto.createPath("C:/bin/claude.exe", "C:/work")).jsonObject
+        assertEquals("create", cli["type"]?.jsonPrimitive?.content)
+        assertEquals("C:/bin/claude.exe", cli["path"]?.jsonPrimitive?.content)
+        assertEquals("C:/work", cli["cwd"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun `apps parse into name, path and kind`() {
+        val apps = Proto.parseApps(
+            Json.parseToJsonElement(
+                """{"items":[{"name":"Zed","path":"C:/apps/Zed.lnk","kind":"gui"},{"name":"claude","path":"C:/bin/claude.exe","kind":"cli"},{"name":"broken"}]}""",
+            ),
+        )
+        assertEquals(2, apps.size)
+        assertTrue(apps[0].isGui)
+        assertFalse(apps[1].isGui)
+        assertEquals("C:/bin/claude.exe", apps[1].path)
     }
 }

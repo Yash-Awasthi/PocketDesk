@@ -9,6 +9,7 @@ import { execSync as _execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import * as registry from "./registry.js";
+import * as appDiscovery from "./app_discovery.js";
 import * as sessions from "./sessions.js";
 import * as chat from "./chat.js";
 import { createPluginManager } from "./plugins.js";
@@ -272,9 +273,17 @@ export function start({ port, token, tls, relay: relayCfg }) {
         registry.install(msg.id, broadcast).catch((e) => send(ws, { type: "error", message: `install failed: ${e?.message || e}` }));
         break;
       case "create": {
-        const m = registry.get(msg.harness);
+        // A discovered CLI tool has no manifest, so the phone sends its path
+        // instead of a harness id; the PTY does not care which it was.
+        // The path reaches the PTY's `cmd /c`, so only a discovered tool is
+        // accepted — an arbitrary string would be a command injection.
+        const tool = msg.path ? appDiscovery.find(String(msg.path)) : null;
+        if (msg.path && !tool) return send(ws, { type: "error", message: `not a discovered tool: ${msg.path}` });
+        const m = tool
+          ? { id: tool.name, name: tool.name, bin: tool.path, adapter: "terminal" }
+          : registry.get(msg.harness);
         if (!m || m.adapter !== "terminal") return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
-        if (!registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
+        if (!msg.path && !registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
         auditLog.log("session_create", { harness: m.id, cwd: msg.cwd });
         const s = sessions.create({ harnessId: m.id, bin: m.bin, cwd: msg.cwd, args: msg.args }, broadcast);
         sessionStore.upsert(s.id, { name: m.name, project: msg.cwd || "", type: "terminal", status: "working" });
@@ -1048,12 +1057,23 @@ export function start({ port, token, tls, relay: relayCfg }) {
       // GUI apps have no PTY to stream, so this only starts the process. The
       // phone then watches and drives it through the desktop frame stream.
       case "gui_open": {
-        const r = registry.launchGui(msg.harness);
-        if (!r.ok) return send(ws, { type: "gui_opened", ok: false, reason: r.reason });
-        auditLog.log("gui_open", { harness: msg.harness, path: r.path });
-        send(ws, { type: "gui_opened", ok: true, harness: msg.harness });
+        // `path` is a discovered application with no manifest behind it.
+        const label = String(msg.harness || msg.path || "");
+        const known = msg.path ? appDiscovery.find(String(msg.path)) : null;
+        if (msg.path && !known) return send(ws, { type: "gui_opened", ok: false, harness: label, reason: "not a discovered app" });
+        const r = known
+          ? registry.launchApp({ path: known.path, folder: msg.cwd })
+          : registry.launchGui(msg.harness, msg.cwd);
+        if (!r.ok) return send(ws, { type: "gui_opened", ok: false, harness: label, reason: r.reason });
+        auditLog.log("gui_open", { harness: label, path: r.path, cwd: msg.cwd });
+        send(ws, { type: "gui_opened", ok: true, harness: label, path: r.path });
         break;
       }
+      // Everything installed on this machine, not only what ships a manifest.
+      case "apps_discover":
+        if (msg.refresh) appDiscovery.discover({ refresh: true });
+        send(ws, { type: "apps", items: appDiscovery.search(msg.q ?? "") });
+        break;
       // ── Real desktop control (AnyDesk-style: watch + full input) ─────────
       case "desktop_start": {
         const r = await desktop.startFrameStream(ws._clientId || "anon", msg.quality);

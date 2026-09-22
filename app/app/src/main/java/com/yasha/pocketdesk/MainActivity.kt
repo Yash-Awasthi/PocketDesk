@@ -157,7 +157,11 @@ class MainActivity : ComponentActivity() {
                 }
                 when (val s = screen) {
                     Screen.Connect -> ConnectScreen(client) { screen = Screen.Sessions }
-                    Screen.Tools -> ToolsScreen(client)
+                    Screen.Tools -> ToolsScreen(
+                        client,
+                        openDesktop = { screen = Screen.Desktop },
+                        openTerminal = { screen = Screen.Terminal(it) },
+                    )
                     Screen.Sessions -> SessionsScreen(client, openTerminal = { screen = Screen.Terminal(it) })
                     Screen.Chats -> ChatScreen(client)
                     Screen.Freebuff -> FreebuffScreen(client)

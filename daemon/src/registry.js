@@ -92,34 +92,51 @@ async function detect(id) {
 }
 
 /**
- * Start a GUI application detached from the daemon. The process outlives the
+ * Start an application detached from the daemon. The process outlives the
  * request and is not a child session: there is no PTY and nothing to stream,
  * so the phone watches it through the desktop frame stream instead.
+ *
+ * `folder` is the project to open. Every IDE here takes a directory as its
+ * last positional argument, and it also becomes the process's own cwd for the
+ * ones that do not.
  */
-export function launchGui(id) {
-  const m = registry.get(id);
-  if (!m) return { ok: false, reason: "unknown app" };
-  if (m.adapter !== "gui") return { ok: false, reason: "not a gui app" };
-  const p = guiPath(m);
+export function launchApp({ path: p, args = [], folder }) {
   if (!p || !fs.existsSync(p)) return { ok: false, reason: "not installed" };
+  let dir;
+  if (folder && folder.trim()) {
+    const resolved = path.resolve(folder.replace(/^~(?=$|[/\\])/, process.env.USERPROFILE || process.env.HOME || ""));
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) return { ok: false, reason: "no such folder" };
+    dir = resolved;
+  }
+  const tail = dir ? [dir] : [];
   try {
-    // A macOS .app bundle is a directory, not an executable; `open -a` is how
-    // it is started. Everything else is spawned directly.
-    const [bin, args] = p.endsWith(".app")
-      ? ["open", ["-a", p, ...(m.openArgs || [])]]
-      : [p, m.openArgs || []];
-    const child = spawn(bin, args, { detached: true, stdio: "ignore" });
+    // A macOS .app bundle is a directory, not an executable, and a Windows
+    // .lnk is resolved by the shell: both need a launcher in front of them.
+    // Everything else is spawned directly.
+    const [bin, argv] = p.endsWith(".app")
+      ? ["open", ["-a", p, ...args, ...tail]]
+      : p.toLowerCase().endsWith(".lnk")
+        ? ["cmd.exe", ["/c", "start", "", p, ...args, ...tail]]
+        : [p, [...args, ...tail]];
+    const child = spawn(bin, argv, { detached: true, stdio: "ignore", cwd: dir, windowsHide: true });
     // Node reports a failed spawn asynchronously on platforms where the call
     // itself does not throw, and there is no caller left by then: an unhandled
     // 'error' event would take the daemon down.
     child.on("error", (e) => {
-      console.error(`[registry] launching ${id} failed: ${e.message}`);
+      console.error(`[registry] launching ${p} failed: ${e.message}`);
     });
     child.unref();
   } catch (e) {
     return { ok: false, reason: e?.message || String(e) };
   }
   return { ok: true, path: p };
+}
+
+export function launchGui(id, folder) {
+  const m = registry.get(id);
+  if (!m) return { ok: false, reason: "unknown app" };
+  if (m.adapter !== "gui") return { ok: false, reason: "not a gui app" };
+  return launchApp({ path: guiPath(m), args: m.openArgs || [], folder });
 }
 
 export async function scanAll(broadcast) {

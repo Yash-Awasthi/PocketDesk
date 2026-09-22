@@ -125,6 +125,45 @@ async function main() {
   }
   check("launchGui starts the app detached", fs.existsSync(marker));
 
+  // A project folder must reach the IDE: as its last argument (how every IDE
+  // here is told which directory to open) and as the process's own cwd.
+  const argvMarker = path.join(fakeDir, "argv.txt");
+  writeManifest("folder-ide.json", {
+    id: "folder-ide",
+    name: "Folder IDE",
+    adapter: "gui",
+    paths: { [process.platform]: process.execPath },
+    openArgs: [
+      "-e",
+      `require("fs").writeFileSync(${JSON.stringify(argvMarker)}, process.argv.slice(1).join("|") + "||" + process.cwd())`,
+    ],
+  });
+  await scanAll(() => {});
+  const projectDir = fs.mkdtempSync(path.join(tmp, "project-"));
+  check("launchGui accepts a project folder", launchGui("folder-ide", projectDir).ok === true);
+  const argvDeadline = Date.now() + 10000;
+  while (!fs.existsSync(argvMarker) && Date.now() < argvDeadline) {
+    await new Promise((res) => setTimeout(res, 100));
+  }
+  const [argv, cwdSeen] = fs.readFileSync(argvMarker, "utf8").split("||");
+  check("the project folder is the app's last argument", argv.split("|").pop() === projectDir);
+  check("the project folder is the app's working directory", fs.realpathSync(cwdSeen) === fs.realpathSync(projectDir));
+  check(
+    "launchGui refuses a folder that does not exist",
+    launchGui("folder-ide", path.join(tmp, "no-such-project")).reason === "no such folder",
+  );
+
+  // Discovery is the allowlist for launching by path: the string reaches a
+  // shell (`cmd /c start`, the PTY's `cmd /c`), so it cannot be free-form.
+  const { discover, find, search } = await import("../src/app_discovery.js");
+  const found = discover();
+  check("discovery finds applications on this machine", found.length > 0);
+  check("every discovered app names a path and a kind", found.every((a) => a.path && (a.kind === "gui" || a.kind === "cli")));
+  check("find round-trips a discovered path", find(found[0].path)?.path === found[0].path);
+  check("find rejects a path discovery never reported", find(path.join(tmp, "not-an-app.exe")) === null);
+  check("search filters by name", search(found[0].name).some((a) => a.path === found[0].path));
+  check("search caps its result", search("", 5).length <= 5);
+
   // The phone must be told the outcome: the window opens where it cannot see.
   const port = 8831;
   const daemon = startDaemon(port, port + 1, { manifests: tmp });
@@ -136,6 +175,17 @@ async function main() {
   c.send({ type: "gui_open", harness: "absent-ide" });
   const refused = await c.next((m) => m.type === "gui_opened");
   check("gui_open reports a refusal", refused.ok === false && refused.reason === "not installed");
+
+  const bogus = path.join(tmp, "not-an-app.exe");
+  c.send({ type: "gui_open", path: bogus });
+  const rejected = await c.next((m) => m.type === "gui_opened");
+  check("gui_open refuses a path discovery never reported", rejected.ok === false && rejected.reason === "not a discovered app");
+  c.send({ type: "apps_discover", q: found[0].name });
+  const apps = await c.next((m) => m.type === "apps");
+  check("apps_discover answers with matching applications", apps.items.some((a) => a.path === found[0].path));
+  c.send({ type: "create", path: bogus });
+  const createErr = await c.next((m) => m.type === "error");
+  check("create refuses a path discovery never reported", createErr.message.startsWith("not a discovered tool"));
   await c.close();
   await teardown(tmp);
 
