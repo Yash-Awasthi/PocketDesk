@@ -140,7 +140,15 @@ fun TerminalScreen(ws: WsClient, sessionId: String, onClose: () -> Unit) {
             AndroidView(
                 modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
+                    if (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+                        WebView.setWebContentsDebuggingEnabled(true)
+                    }
                     WebView(ctx).apply {
+                        // Without explicit params the page's layout viewport is 0px tall and xterm fits one row.
+                        layoutParams = android.view.ViewGroup.LayoutParams(
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                            android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        )
                         settings.javaScriptEnabled = true
                         addJavascriptInterface(
                             TermBridge(

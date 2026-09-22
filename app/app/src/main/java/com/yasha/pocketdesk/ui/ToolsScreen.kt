@@ -19,6 +19,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -32,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yasha.pocketdesk.AppEntry
+import com.yasha.pocketdesk.AppLock
 import com.yasha.pocketdesk.LINE_BREAK
 import com.yasha.pocketdesk.RhEvent
 import com.yasha.pocketdesk.ToolInfo
@@ -39,7 +41,7 @@ import com.yasha.pocketdesk.WsClient
 import kotlinx.coroutines.delay
 
 @Composable
-fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit, openSsh: () -> Unit) {
+fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit, openSsh: () -> Unit, lock: AppLock) {
     // One project folder for everything started from this screen: an IDE opens
     // it, a CLI tool runs in it.
     var cwd by remember { mutableStateOf("") }
@@ -115,6 +117,13 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
         }
         item { GitSection(ws, cwd) }
         item { DoctorSection(ws) }
+        if (lock.available) item {
+            var on by remember { mutableStateOf(lock.enabled) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Lock app with fingerprint or PIN", modifier = Modifier.weight(1f))
+                Switch(checked = on, onCheckedChange = { on = it; lock.enabled = it })
+            }
+        }
     }
 
     if (browsing) {
