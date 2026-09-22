@@ -147,6 +147,7 @@
       <div class="tab" data-tab="freebuff" onclick="switchTab('freebuff'); send({type:'fb_status'}); send({type:'fb_skill_list'}); send({type:'fb_config_list'});">🦾 Freebuff</div>
       <div class="tab" data-tab="desktop" onclick="switchTab('desktop'); desktopOnShow();">🖨️ Desktop</div>
       <div class="tab" data-tab="tools" onclick="switchTab('tools'); toolsOnShow();">🧰 Tools</div>
+      <div class="tab" data-tab="ssh" onclick="switchTab('ssh'); sshOnShow();">🔐 SSH</div>
     </div>
     <div class="tab-content">
       <div class="tab-pane active" id="pane-terminal">
@@ -299,6 +300,60 @@
               <button class="btn" onclick="appsSearch(true)">Rescan</button>
             </div>
             <table class="client-table" id="appTable"><thead><tr><th>Name</th><th>Path</th><th></th></tr></thead><tbody></tbody></table>
+          </div>
+        </div>
+      </div>
+      <div class="tab-pane" id="pane-ssh">
+        <div class="dashboard">
+          <div id="sshBanner" style="display:none;padding:10px;border-radius:8px;margin-bottom:10px;font-size:12px"></div>
+          <div class="dash-section">
+            <h3>🖧 Connection profiles <span id="sshStatus" style="font-size:12px;color:#8b949e;font-weight:normal"></span></h3>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px;margin-bottom:8px">
+              <input id="pfName" placeholder="name" style="width:120px" />
+              <input id="pfHost" placeholder="host" style="width:150px" />
+              <input id="pfPort" placeholder="22" value="22" style="width:60px" />
+              <input id="pfUser" placeholder="username" style="width:120px" />
+              <select id="pfKey" title="key auth uses a generated key; leave on password to be asked at connect"><option value="">password auth</option></select>
+              <button class="btn" onclick="profileCreate()">Add profile</button>
+            </div>
+            <table class="client-table" id="pfTable"><thead><tr><th>Name</th><th>Host</th><th>User</th><th>Auth</th><th>Connect</th><th></th></tr></thead><tbody></tbody></table>
+            <div id="pfOut" style="font-size:12px;color:#8b949e;margin-top:6px"></div>
+          </div>
+          <div class="dash-section">
+            <h3>🔑 Keys</h3>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px;margin-bottom:8px">
+              <select id="kyAlgo"><option value="ed25519">ed25519</option><option value="ecdsa">ecdsa</option><option value="rsa">rsa 3072</option></select>
+              <input id="kyName" placeholder="key name" style="width:140px" />
+              <input id="kyPass" type="password" placeholder="passphrase (optional)" style="width:180px" />
+              <button class="btn" onclick="keyGenerate()">Generate</button>
+            </div>
+            <table class="client-table" id="kyTable"><thead><tr><th>Name</th><th>Type</th><th>Fingerprint</th><th></th></tr></thead><tbody></tbody></table>
+            <textarea id="kyPub" readonly placeholder="generated public key appears here — paste it into the host's authorized_keys"
+                      style="width:100%;height:60px;margin-top:8px;background:#0d1117;color:#c9d1d9;border:1px solid #30363d;border-radius:8px;font-size:11px;padding:8px"></textarea>
+          </div>
+          <div class="dash-section">
+            <h3>📌 Known host keys <button class="btn" onclick="send({type:'hostkey_list'})" style="margin-left:8px">Refresh</button></h3>
+            <table class="client-table" id="hkTable"><thead><tr><th>Host</th><th>Type</th><th>Fingerprint</th><th>First seen</th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="dash-section">
+            <h3>🛡️ SSH servers on this PC</h3>
+            <div style="font-size:12px;color:#8b949e;margin-bottom:8px">Binding beyond loopback exposes these to the LAN. Leave the host at 127.0.0.1 unless you mean it.</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px;margin-bottom:8px;align-items:center">
+              <b style="width:70px">Bastion</b>
+              <input id="bsPort" placeholder="2223" value="2223" style="width:70px" />
+              <input id="bsHost" placeholder="127.0.0.1" value="127.0.0.1" style="width:110px" />
+              <button class="btn" onclick="send({type:'bastion_start', port:Number(document.getElementById('bsPort').value)||2223, host:document.getElementById('bsHost').value.trim()||'127.0.0.1'})">Start</button>
+              <button class="btn danger" onclick="send({type:'bastion_stop'})">Stop</button>
+              <span id="bsStat" style="color:#8b949e"></span>
+            </div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;font-size:12px;align-items:center">
+              <b style="width:70px">SSH server</b>
+              <input id="ssPort" placeholder="2222" value="2222" style="width:70px" />
+              <input id="ssHost" placeholder="127.0.0.1" value="127.0.0.1" style="width:110px" />
+              <button class="btn" onclick="send({type:'sshserver_start', port:Number(document.getElementById('ssPort').value)||2222, host:document.getElementById('ssHost').value.trim()||'127.0.0.1'})">Start</button>
+              <button class="btn danger" onclick="send({type:'sshserver_stop'})">Stop</button>
+              <span id="ssStat" style="color:#8b949e"></span>
+            </div>
           </div>
         </div>
       </div>
@@ -691,6 +746,46 @@ function handle(m) {
     case "gui_opened":
       if (!m.ok) dashEvent(`${m.harness || "app"}: ${m.reason || "could not open the app"}`, "red");
       break;
+    case "profile_list": renderProfiles(m.items || []); break;
+    case "profile_created":
+    case "profile_updated":
+    case "profile_deleted":
+      if (m.ok === false) sshOut(m.error || "profile change refused", true);
+      send({ type: "profile_list" });
+      send({ type: "mproto_status" });
+      break;
+    case "profile_connected":
+      sshOut(m.ok ? `connected — ${m.session.protocol} session ${m.session.id.slice(0, 8)} (host key ${m.session.hostKey?.status || "?"})` : `connect failed: ${m.error}`, !m.ok);
+      send({ type: "hostkey_list" });
+      send({ type: "mproto_status" });
+      break;
+    case "profile_disconnected": sshOut(m.ok ? "disconnected" : "no such session"); send({ type: "mproto_status" }); break;
+    case "sshkey_list": renderKeys(m.items || []); break;
+    case "sshkey_generated":
+      if (m.ok) document.getElementById("kyPub").value = m.key.publicKey;
+      else sshOut(`key generation failed: ${m.error}`, true);
+      send({ type: "sshkey_list" });
+      break;
+    case "sshkey_deleted": send({ type: "sshkey_list" }); break;
+    case "hostkey_list": renderHostKeys(m.items || []); break;
+    case "mproto_status":
+      document.getElementById("sshStatus").textContent =
+        `${m.profiles} profiles · ${m.sshKeys} keys · ${m.hostKeys} known hosts · sessions ssh ${m.sshSessions} / sftp ${m.sftpSessions} / vnc ${m.vncSessions}`;
+      break;
+    case "mproto_event":
+      if (m.mprotoEvent === "new") sshBanner(`New host key trusted for ${m.host}:${m.port} — ${m.fingerprint}. Confirm it out of band before you trust this host.`, "warn");
+      if (m.mprotoEvent === "changed") sshBanner(`HOST KEY CHANGED for ${m.host}:${m.port}. Was ${m.oldFingerprint}, now ${m.newFingerprint}. The connection was refused.`, "bad");
+      break;
+    case "bastion_started": case "bastion_stopped": case "bastion_stats":
+      if (m.ok === false && m.error) sshOut(`bastion: ${m.error}`, true);
+      if (m.type !== "bastion_stats") send({ type: "bastion_stats" });
+      else document.getElementById("bsStat").textContent = m.running ? `running on ${m.port} · ${m.activeSessions}/${m.totalSessions} sessions · ${m.totalUsers} users · ${m.totalHosts} hosts` : "stopped";
+      break;
+    case "sshserver_started": case "sshserver_stopped": case "sshserver_stats":
+      if (m.ok === false && m.error) sshOut(`ssh server: ${m.error}`, true);
+      if (m.type !== "sshserver_stats") send({ type: "sshserver_stats" });
+      else document.getElementById("ssStat").textContent = m.running ? `running on ${m.port} · ${m.activeSessions}/${m.totalSessions} sessions · ${m.totalUsers} users` : "stopped";
+      break;
     case "error": console.error("ERROR:", m.message); break;
   }
 }
@@ -700,6 +795,124 @@ function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + tab));
   if (tab === 'terminal' && fitAddon) requestAnimationFrame(() => fitAddon.fit());
+}
+
+// ── SSH: profiles, keys, known hosts, local SSH servers ──
+let sshLoaded = false;
+let sshKeyCache = [];
+
+function sshOnShow() {
+  if (sshLoaded) return;
+  sshLoaded = true;
+  for (const t of ["profile_list", "sshkey_list", "hostkey_list", "mproto_status", "bastion_stats", "sshserver_stats"]) send({ type: t });
+}
+
+function sshOut(text, bad) {
+  const el = document.getElementById("pfOut");
+  el.textContent = text || "";
+  el.style.color = bad ? "#f85149" : "#8b949e";
+}
+
+function sshBanner(text, kind) {
+  const el = document.getElementById("sshBanner");
+  el.textContent = text;
+  el.style.display = "";
+  el.style.background = kind === "bad" ? "#3d1418" : "#3d2f14";
+  el.style.color = kind === "bad" ? "#f85149" : "#d29922";
+}
+
+function profileCreate() {
+  const host = document.getElementById("pfHost").value.trim();
+  const username = document.getElementById("pfUser").value.trim();
+  if (!host || !username) return sshOut("host and username are required", true);
+  const keyId = document.getElementById("pfKey").value;
+  send({
+    type: "profile_create",
+    name: document.getElementById("pfName").value.trim() || host,
+    host,
+    port: Number(document.getElementById("pfPort").value) || 22,
+    username,
+    protocols: ["ssh", "sftp", "vnc"],
+    authMethod: keyId ? "key" : "password",
+    keyId: keyId || undefined,
+  });
+  document.getElementById("pfName").value = "";
+  document.getElementById("pfHost").value = "";
+  document.getElementById("pfUser").value = "";
+}
+
+function profileConnect(p, protocol) {
+  const msg = { type: "profile_connect", id: p.id, protocol };
+  if (protocol !== "vnc") {
+    // Credentials are asked for per connect — the daemon never stores them on the profile.
+    const secret = window.prompt(p.keyId ? `Passphrase for the key on "${p.name}" (blank if none)` : `Password for ${p.username}@${p.host}`);
+    if (secret === null) return;
+    if (p.keyId) { if (secret) msg.passphrase = secret; } else msg.password = secret;
+  }
+  sshOut(`connecting ${protocol} to ${p.host}:${p.port}…`);
+  send(msg);
+}
+
+function renderProfiles(items) {
+  const tb = document.querySelector("#pfTable tbody");
+  tb.innerHTML = "";
+  if (!items.length) { tb.innerHTML = `<tr><td colspan="6" style="color:#8b949e">no profiles yet</td></tr>`; return; }
+  for (const p of items) {
+    const key = sshKeyCache.find((k) => k.id === p.keyId);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(p.name)}</td><td>${esc(p.host)}:${p.port}</td><td>${esc(p.username)}</td>`
+      + `<td>${p.keyId ? esc(key ? key.name : "key (missing)") : "password"}</td><td></td><td></td>`;
+    const conn = tr.children[4];
+    for (const proto of ["ssh", "sftp", "vnc"]) {
+      const b = document.createElement("button");
+      b.className = "btn"; b.textContent = proto; b.style.marginRight = "4px";
+      b.onclick = () => profileConnect(p, proto);
+      conn.appendChild(b);
+    }
+    const del = document.createElement("button");
+    del.className = "btn danger"; del.textContent = "Delete";
+    del.onclick = () => send({ type: "profile_delete", id: p.id });
+    tr.children[5].appendChild(del);
+    tb.appendChild(tr);
+  }
+}
+
+function keyGenerate() {
+  send({
+    type: "sshkey_generate",
+    algo: document.getElementById("kyAlgo").value,
+    name: document.getElementById("kyName").value.trim(),
+    passphrase: document.getElementById("kyPass").value || undefined,
+  });
+  document.getElementById("kyPass").value = "";
+}
+
+function renderKeys(items) {
+  sshKeyCache = items;
+  const sel = document.getElementById("pfKey");
+  const keep = sel.value;
+  sel.innerHTML = `<option value="">password auth</option>`
+    + items.map((k) => `<option value="${esc(k.id)}">${esc(k.name)} (${esc(k.type)})</option>`).join("");
+  sel.value = keep;
+  const tb = document.querySelector("#kyTable tbody");
+  tb.innerHTML = "";
+  if (!items.length) { tb.innerHTML = `<tr><td colspan="4" style="color:#8b949e">no keys</td></tr>`; return; }
+  for (const k of items) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(k.name)}</td><td>${esc(k.type)}</td><td style="font-size:11px;color:#8b949e">${esc(k.fingerprint)}</td><td></td>`;
+    const del = document.createElement("button");
+    del.className = "btn danger"; del.textContent = "Delete";
+    del.onclick = () => inlineConfirm(`Delete key "${k.name}"? Any profile using it stops connecting.`, () => send({ type: "sshkey_delete", id: k.id }));
+    tr.children[3].appendChild(del);
+    tb.appendChild(tr);
+  }
+}
+
+function renderHostKeys(items) {
+  const tb = document.querySelector("#hkTable tbody");
+  tb.innerHTML = items.map((h) =>
+    `<tr><td>${esc(h.keyId)}</td><td>${esc(h.type)}</td><td style="font-size:11px;color:#8b949e">${esc(h.fingerprint)}</td><td>${new Date(h.firstSeen).toLocaleString()}</td></tr>`
+  ).join("") || `<tr><td colspan="4" style="color:#8b949e">no hosts seen yet</td></tr>`;
 }
 
 // ── Tools: git panel, doctor, installed apps ──

@@ -28,7 +28,7 @@ Status legend:
 | Origin check on WS upgrade | ttyd, gotty | ✅ 403 at HTTP upgrade |
 | Idle-session reaper | persistent-terminal-api | ✅ `RH_IDLE_KILL_MINUTES` |
 | Session recording with timestamps + export | asciinema, termpair, terminal-mcp, gateone | ✅ `record_*` (SessionRecorder wired) |
-| tmux-backed detach (process survives daemon restart) | terminal-web, webtmux, multimux | ✅ `tmux_*` (list/create/kill/resize/keys/capture, `available` flag, graceful without tmux) |
+| tmux-backed detach (process survives daemon restart) | terminal-web, webtmux, multimux | ➖ removed 2026-09-22 — the tmux manager had no caller and no screen; PTY sessions survive a reconnect, not a daemon restart |
 | ZMODEM/trzsz in-band file transfer | ttyd, tabby | 🗺️ |
 | Read-only/plain-text digest render (token savings) | mcp-interactive-terminal | ✅ `render_digest` → `digest_render` (ANSI-stripped plain rows, trailing blank trimmed; `terminal_renderer.js` ported CJS→ESM) + ✅ `digest_attach` live digest mode (diffed row updates streamed to cheap subscribers) |
 | Per-user ACLs / TOTP / OIDC | warpgate, gateone | 🗺️ (single-user threat model today) |
@@ -48,7 +48,7 @@ Status legend:
 | mosh-style UDP roam (auth datagrams, state diff, predictive echo) | mosh, zmosh, zmx | 🗺️ (WS+TCP for now; Tailscale covers roaming) |
 | Boot persistence (service/launchd start) | pm2, muxterm | ⚙️ install-service.ps1 + tray |
 | remain-on-exit + respawn | tmux | ✅ tmux respawn-config on session create; `remain_on_exit` |
-| Windows/panes/layouts | tmux, zellij, muxterm | ✅ `mux_status`/`mux_list`/`mux_create`/`mux_kill`/`mux_summary`/`mux_waiting` — named tmux sessions with activity + waiting-state detection; graceful gate on tmux-less hosts |
+| Windows/panes/layouts | tmux, zellij, muxterm | ➖ removed 2026-09-22 with the tmux manager |
 | Git-worktree-per-agent | vmux, orca, ccpocket | ✅ `wt_create`/`wt_list`/`wt_remove` (worktrees.js) |
 | Asciicast export with player | asciinema | ✅ asciicast v2 export (`record_asciicast`) + JSON export (`record_get`) |
 | Read-only vs read-write share split | tmate, termpair | ✅ |
@@ -69,12 +69,12 @@ Status legend:
 | Live todo/task list of running session | c9watch, claude-threads, codeman | ✅ `todos_set`/`todos_get`/`todos_status` + live `todos_updated`; board also auto-derived from markdown checkboxes in the finished turn's last assistant message |
 | Activity-state classifier (working/asking/done) driving alerts | control-room, codeman, agent-tmux-web | ✅ `activity_*` + `activity` broadcasts |
 | Busy→quiet detection with push | webmux, purplemux | ✅ (quiet → `session_quiet` notification) |
-| Fleet dashboard across sessions | c9watch, quil, codeman, control-room | ✅ `agent_*` (orchestrator-backed fleet) + ✅ `fleet_*` (grid dashboard: add/remove/focus/resize, status→chips, stats, live `fleet_event` broadcasts); agent state changes project into the grid automatically |
+| Fleet dashboard across sessions | c9watch, quil, codeman, control-room | ➖ removed 2026-09-22 — orchestrator and grid had no UI on either client |
 | Attention-first session list (stuck agents surface to top) | c9watch | ✅ `sessions` ordering: waiting → running → error → rest |
 | Chat forking (sub-chat from any message) | 1code | ✅ `chat_fork` — clones transcript up to message N, optional cwd/env overrides |
 | BYOK env profiles per chat | 1code, Claude-websocket | ✅ `env_profile_set/attach/detach/list/remove` — named API-key/model env sets persisted to env-profiles.json |
 | Plan mode (structured plan preview + approval) | 1code | ✅ `plan_get`/`plan_approve` — extracts newest markdown checklist from assistant output |
-| Zero-touch session discovery (scan running agents) | c9watch, nexting | ✅ `agent_list` filters + `sessions_scan` OS process scan |
+| Zero-touch session discovery (scan running agents) | c9watch, nexting | ✅ `sessions_scan` OS process scan |
 | Auto-continue loops / scheduled runs / cron | codeman, codex-bee, claude-threads, kagora | ✅ `schedule_create`/`schedule_list`/`schedule_pause`/`schedule_resume`/`schedule_cancel` — interval/once/count jobs, persisted to schedules.json, fire prompts into chats (or `chatId: "newest"`) |
 | Session fork/rename/search/export | 1code, oc-remote, flue | ✅ `chat_fork` + `chat_search` + rename + history export |
 | Diff review + git actions from phone | cc-pocket, vibego, orca | ✅ read-only `git_status/git_diff/git_log/git_branches`; staging/commit via agent |
@@ -92,7 +92,7 @@ Status legend:
 | TCP forwarding (phone → PC-local services) | frp, bore, cli-tunnel | ✅ `tunnel_*` (TunnelManager wired) |
 | Port forwarding (daemon-side, local listener → remote host) | ssh, frp | ⚙️ `forward_*` |
 | LAN file transfer w/ UDP discovery (LocalSend protocol) | lanlink, syncthing | ✅ `lan_peers` (UDP discovery, lazy start) + `lan_send` (LocalSend v2 push, byte-verified e2e) |
-| Watch-folder file sync w/ ignore patterns + conflict copies | syncthing | ✅ `sync_devices`/`sync_folders`/`sync_files` CRUD + `sync_file_add`/`sync_file_synced` + `sync_conflict`/`sync_conflict_resolve` + `sync_stats`/`sync_events`, live `sync_event` broadcasts |
+| Watch-folder file sync w/ ignore patterns + conflict copies | syncthing | ➖ removed 2026-09-22 — the engine tracked state for files nothing ever fed it; `lan_send` covers phone↔PC transfer |
 | Self-hosted relay fallback / hole punching | netbird, rustdesk, frp XTCP, tty-share proxy | 🗺️ |
 | mkcert-style local CA install (no cert warnings) | mkcert, selfsigned | 🗺️ (pinning covers it today) |
 | Remote desktop / screen streaming | rustdesk, ws-scrcpy, novnc, guacamole | ✅ `rd_*` (session lifecycle w/ async connect, frame buffering, input forwarding, quality presets, stats) — TS→ESM port; full WebRTC video remains roadmap (frame relay transport is simulated) |
@@ -102,7 +102,7 @@ Status legend:
 | SSH server auth + per-user command allowlists | bifroest, sshwifty | ✅ `sshserver_*` — user registry, session lifecycle, allowlisted commands w/ recording, idle reaping (`sshserver_user_add/session_create/exec/session_end/sessions/stats`) |
 | Wake-on-LAN | rustdesk | ✅ `wake` — magic-packet UDP broadcast (multi-MAC, custom port/address) |
 | Device list + revocation | openchamber, netbird | ✅ `device_list`/`device_revoke`/`device_allow` — persisted registry keyed on hello clientId |
-| Expiring access tickets / OTP | warpgate | ✅ `qr_create`/`qr_stop`/`qr_list` — OTP-style token tickets on a dedicated relay port; phone connects directly with `?token=`, gets live output + can type back; wrong token rejected; TTL expiry built in |
+| Expiring access tickets / OTP | warpgate | ➖ removed 2026-09-22 — share tokens (`share_create`) cover timed access, with a UI |
 | mDNS/LAN auto-discovery of the daemon | claude-remote-terminal, ccpocket | 🗺️ (LAN transfer discovery exists to build on) |
 
 ## 5. Mobile client  *(connectbot, termux, kmp-terminal-emulator, client-kt, stream-chat-android, remodex-android, hermes-android, …)*
@@ -150,7 +150,7 @@ Status legend:
 |---|---|---|
 | One-liner installers (bash + PowerShell) | — | ⚙️ |
 | Windows service + tray | node-windows | ⚙️ |
-| Watchdog crash recovery | node-windows, pm2 | ⚙️ (service restart) + ✅ in-daemon `monitor_list`/`monitor_stats`/`monitor_history` + live `monitor_event` broadcasts (discovery/termination of node/claude/python processes); ported CJS→ESM |
+| Watchdog crash recovery | node-windows, pm2 | ⚙️ (service restart); the in-daemon process monitor was removed 2026-09-22, unused |
 | Keep-PC-awake while agents run (per-process assertion) | orca, LinkShell | ✅ `power_*` (`RH_AWAKE` auto/on/off) — rewritten to SetThreadExecutionState/caffeinate, **no global powercfg/pmset mutation** |
 | Host stats cards (CPU/mem/uptime) | webmux, vmux, multimux | ✅ `stats` |
 | Self auto-update | tailscale, rustdesk | 🗺️ |
@@ -167,10 +167,7 @@ New client → server: `share_create` · `share_join` · `share_list` · `share_
 `tunnel_list` · `power_set` · `power_status` · `activity_list` · `resurrect_list` ·
 `resume` (+ `attach` now accepts `since`) · `relay_connect` · `relay_disconnect` ·
 `relay_status` · `relay_publish` · `relay_send` · `relay_host` · `relay_host_stop` ·
-`tmux_list` · `tmux_create` · `tmux_kill` · `tmux_resize` · `tmux_keys` ·
-`tmux_capture` · `render_digest` · `agent_list` · `agent_create` · `agent_start` ·
-`agent_pause` · `agent_resume` · `agent_complete` · `agent_error` · `agent_stats` ·
-`agent_say` · `agent_broadcast` · `lan_peers` · `lan_send` · `vnc_start` · `vnc_stop` · `vnc_status` · `vnc_frame` ·
+`render_digest` · `lan_peers` · `lan_send` · `vnc_start` · `vnc_stop` · `vnc_status` · `vnc_frame` ·
 `bastion_user_add` · `bastion_host_add` · `bastion_rule_add` · `bastion_access` ·
 `bastion_session_start` · `bastion_session_end` · `bastion_sessions` · `bastion_stats` ·
 `bastion_invite` · `bastion_invite_accept` · `sshserver_user_add` ·
@@ -186,10 +183,8 @@ New server → client: `share_created` · `share_joined` · `share_list` · `sha
 `power_status` · `activity` · `activity_list` · `resurrect_list` · `created {resumed}` —
 plus `seq` on every `out` and `incremental` on `replay` · `relay_state` ·
 `relay_message` (channel pub/sub + direct, `from` = relay peer id) · `relay_published` ·
-`relay_sent` · `relay_host` · `tmux_list` · `tmux_created` · `tmux_killed` ·
-`tmux_resized` · `tmux_keys_sent` · `tmux_capture` · `digest_render` ·
-`agent_state` (live broadcasts on every fleet transition) · `agent_created` ·
-`agent_error` · `agent_said` · `agent_broadcast_sent` · `lan_peers` · `lan_sent` · `vnc_started` · `vnc_stopped` · `vnc_status` · `vnc_frame_ok` ·
+`relay_sent` · `relay_host` · `digest_render` ·
+`lan_peers` · `lan_sent` · `vnc_started` · `vnc_stopped` · `vnc_status` · `vnc_frame_ok` ·
 `vnc_event` · `bastion_user_added` · `bastion_user_list` · `bastion_host_added` ·
 `bastion_host_list` · `bastion_rule_added` · `bastion_access` ·
 `bastion_session_started` · `bastion_session_ended` · `bastion_sessions` ·

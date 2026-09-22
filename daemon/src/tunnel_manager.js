@@ -18,6 +18,8 @@ class TunnelManager extends EventEmitter {
      * loopback: the listener carries no auth of its own, so binding 0.0.0.0
      * handed the whole LAN whatever PC-local service was being forwarded.
      */
+    // Resolves only once the listener is bound: callers answer the phone with
+    // an id it can connect to immediately, and a bind failure is a rejection.
     createTunnel(localPort, remotePort, { bindAll = false } = {}) {
         const tunnelId = crypto.randomUUID().slice(0, 8);
         const server = net.createServer((socket) => {
@@ -30,16 +32,18 @@ class TunnelManager extends EventEmitter {
         });
 
         const host = bindAll ? '0.0.0.0' : '127.0.0.1';
-        server.listen(remotePort, host, () => {
-            this.tunnels.set(tunnelId, { localPort, remotePort, host, server, created: Date.now() });
-            this.emit('tunnel:created', { tunnelId, localPort, remotePort, host });
+        return new Promise((resolve, reject) => {
+            server.once('error', (err) => {
+                this.emit('tunnel:error', { tunnelId, error: err.message });
+                reject(err);
+            });
+            server.listen(remotePort, host, () => {
+                this.tunnels.set(tunnelId, { localPort, remotePort, host, server, created: Date.now() });
+                this.emit('tunnel:created', { tunnelId, localPort, remotePort, host });
+                server.on('error', (err) => this.emit('tunnel:error', { tunnelId, error: err.message }));
+                resolve(tunnelId);
+            });
         });
-
-        server.on('error', (err) => {
-            this.emit('tunnel:error', { tunnelId, error: err.message });
-        });
-
-        return tunnelId;
     }
 
     closeTunnel(tunnelId) {

@@ -9,6 +9,7 @@ out of scope.
 
 Per-repo status legend:
 
+
 | Mark | Meaning |
 |---|---|
 | ✅ | **Absorbed** — concrete feature(s) of this repo are wired in PocketDesk (protocol message / module / app behavior cited) |
@@ -27,6 +28,15 @@ directories, verified directly against the corpus folder, and is not derived fro
 the table above. A repository may also be named in more than one section when it
 informs both; those repeats are marked `(listed §N)` or `(see §N)` and were not
 removed, because each one is load-bearing for the section it appears in.
+
+## Removed 2026-09-22
+
+The `sync_*`, `fleet_*`, `agent_*`, `mux_*`/`tmux_*`, `qr_*` and `monitor_*` surfaces
+were deleted along with their modules and tests. Each had a green test file and no
+caller: no screen on the browser client, none on the phone, and nothing inside the
+daemon used them. Rows below that point at those verbs describe code that is no
+longer present; the repositories they came from stay listed for provenance.
+
 
 ## Recheck pass (one-by-one re-investigation)
 

@@ -32,17 +32,10 @@ import { gitStatus, gitDiff, gitLog, gitBranches } from "./gitpanel.js";
 import { startTelegramControl } from "./telegram_control.js";
 import * as resurrect from "./resurrect.js";
 import { createRelayLink } from "./relay.js";
-import * as tmux from "./tmux_session_manager.js";
 import { TerminalRenderer } from "./terminal_renderer.js";
-import { AgentOrchestrator } from "./agent_orchestrator.js";
 import { PeerDiscovery, sendFiles, getLocalIPs } from "./lan_file_transfer.js";
-import { FileSyncEngineManager } from "./file_sync_engine.js";
 import { StreamJsonParser } from "./stream_json_parser.js";
-import { QRSessionSharing, generateQRUrl } from "./qr_session_sharing.js";
-import { SessionMonitor } from "./session_monitor.js";
 import { ShooterNotifications } from "./shooter_notifications.js";
-import { FleetViewManager } from "./fleet_view.js";
-import * as mux from "./session_multiplexer.js";
 import { RemoteDesktopBridgeManager } from "./remote_desktop_bridge.js";
 import { WhatsAppBridgeManager } from "./whatsapp_bridge.js";
 import { VNCBridge } from "./vnc_bridge.js";
@@ -650,16 +643,14 @@ export function start({ port, token, tls, relay: relayCfg }) {
       case "record_get":
         send(ws, { type: "record_get", id: msg.id, events: recorder.getEvents(msg.id), export: recorder.exportSession(msg.id, msg.format || "json") });
         break;
-      // ── tmux respawn (codeman: respawn cycling, tmux remain-on-exit) ──
-      case "tmux_respawn": {
-        const ok = await tmux.respawnPane(String(msg.name ?? ""), msg.cmd ? String(msg.cmd) : undefined);
-        send(ws, { type: "tmux_respawned", ok, name: msg.name });
-        break;
-      }
       // ── Tunnels (frp/bore-lite: reach PC-local services from the phone) ──
       case "tunnel_create": {
-        const id = tunnels.createTunnel(Number(msg.localPort), Number(msg.remotePort), { bindAll: Boolean(msg.bindAll) });
-        send(ws, { type: "tunnel_created", id, localPort: msg.localPort, remotePort: msg.remotePort });
+        try {
+          const id = await tunnels.createTunnel(Number(msg.localPort), Number(msg.remotePort), { bindAll: Boolean(msg.bindAll) });
+          send(ws, { type: "tunnel_created", id, localPort: msg.localPort, remotePort: msg.remotePort });
+        } catch (e) {
+          send(ws, { type: "tunnel_created", ok: false, error: e.message, localPort: msg.localPort, remotePort: msg.remotePort });
+        }
         break;
       }
       case "tunnel_close":
@@ -704,29 +695,6 @@ export function start({ port, token, tls, relay: relayCfg }) {
         relay.hostStop();
         send(ws, { type: "relay_host", state: "stopped" });
         break;
-      // ── Tmux session manager (webmux: sessions survive daemon restarts) ──
-      case "tmux_list":
-        send(ws, { type: "tmux_list", available: await tmux.isAvailable(), items: await tmux.listSessions() });
-        break;
-      case "tmux_create":
-        send(ws, { type: "tmux_created", ...(await tmux.createSession(msg.name)) });
-        break;
-      case "tmux_kill":
-        send(ws, { type: "tmux_killed", ...(await tmux.killSession(msg.name)) });
-        break;
-      case "tmux_resize": {
-        const ok = await tmux.resizePane(msg.name, msg.cols, msg.rows);
-        send(ws, { type: "tmux_resized", ok });
-        break;
-      }
-      case "tmux_keys": {
-        const ok = await tmux.sendKeys(msg.name, msg.keys);
-        send(ws, { type: "tmux_keys_sent", ok });
-        break;
-      }
-      case "tmux_capture":
-        send(ws, { type: "tmux_capture", name: msg.name, text: await tmux.capturePane(msg.name, msg.lines) });
-        break;
       // ── Digest render (restty: plain-text read-only render, token savings) ──
       case "render_digest": {
         const renderer = new TerminalRenderer({ cols: msg.cols || 80, rows: msg.rows || 24 });
@@ -735,58 +703,6 @@ export function start({ port, token, tls, relay: relayCfg }) {
         // Trailing all-blank rows carry no information — trim them for the wire.
         while (screen.length > 0 && screen[screen.length - 1]?.trim() === "") screen.pop();
         send(ws, { type: "digest_render", rows: screen, width: renderer.cols });
-        break;
-      }
-      // ── Agent orchestrator (1code: multi-agent fleet + zero-touch view) ──
-      case "agent_list":
-        send(ws, { type: "agent_list", items: agents.listSessions({ status: msg.status, agentType: msg.agentType }) });
-        break;
-      case "agent_create": {
-        const session = await agents.createSession({
-          agentType: msg.agentType,
-          worktreePath: msg.worktreePath,
-          systemPrompt: msg.systemPrompt,
-          model: msg.model,
-          metadata: msg.metadata,
-        });
-        send(ws, { type: "agent_created", session: session.toJSON() });
-        break;
-      }
-      case "agent_start":
-      case "agent_pause":
-      case "agent_resume":
-      case "agent_complete": {
-        const action = msg.type.slice("agent_".length);
-        try {
-          const session = await agents[`${action}Session`](msg.id);
-          send(ws, { type: "agent_state", event: action, session: session.toJSON() });
-        } catch (e) {
-          send(ws, { type: "agent_error", message: e.message });
-        }
-        break;
-      }
-      case "agent_error": {
-        try {
-          const session = await agents.errorSession(msg.id, msg.error);
-          send(ws, { type: "agent_state", event: "error", session: session.toJSON() });
-        } catch (e) {
-          send(ws, { type: "agent_error", message: e.message });
-        }
-        break;
-      }
-      case "agent_stats":
-        send(ws, { type: "agent_stats", ...agents.getStats() });
-        break;
-      case "agent_say": {
-        const session = agents.getSession(msg.id);
-        if (!session) return send(ws, { type: "agent_error", message: `Session ${msg.id} not found` });
-        session.addMessage(msg.role || "user", String(msg.content ?? ""));
-        send(ws, { type: "agent_said", id: msg.id, messageCount: session.messages.length });
-        break;
-      }
-      case "agent_broadcast": {
-        await agents.broadcast(String(msg.message ?? ""));
-        send(ws, { type: "agent_broadcast_sent" });
         break;
       }
       // ── LAN file transfer (lanlink: LocalSend v2 + UDP discovery) ─────────
@@ -1027,7 +943,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
         break;
       // ── Multi-protocol client (haven-ssh-client: profiles + host-key TOFU) ──
       case "profile_create": {
-        const profile = mpc.createProfile({ name: msg.name, host: String(msg.host ?? ""), port: Number(msg.port) || 22, username: String(msg.username ?? ""), protocols: Array.isArray(msg.protocols) ? msg.protocols.map(String) : ["ssh"], authMethod: String(msg.authMethod ?? "password"), tags: Array.isArray(msg.tags) ? msg.tags.map(String) : [] });
+        const profile = mpc.createProfile({ name: msg.name, host: String(msg.host ?? ""), port: Number(msg.port) || 22, username: String(msg.username ?? ""), protocols: Array.isArray(msg.protocols) ? msg.protocols.map(String) : ["ssh"], authMethod: String(msg.authMethod ?? "password"), keyId: msg.keyId ? String(msg.keyId) : undefined, tags: Array.isArray(msg.tags) ? msg.tags.map(String) : [] });
         send(ws, { type: "profile_created", ok: true, profile });
         break;
       }
@@ -1239,92 +1155,6 @@ export function start({ port, token, tls, relay: relayCfg }) {
       case "fb_app_quit":
         send(ws, { type: "fb_app_quit", ...fbCtrl.appQuit() });
         break;
-      // ── Session multiplexer (agentpeek: named tmux sessions + waiting detection) ──
-      case "mux_status": {
-        const available = await tmux.isAvailable();
-        send(ws, { type: "mux_status", available });
-        break;
-      }
-      case "mux_list": {
-        const available = await tmux.isAvailable();
-        if (!available) { send(ws, { type: "mux_list", available: false, items: [] }); break; }
-        try {
-          send(ws, { type: "mux_list", available: true, items: mux.listSessions() });
-        } catch (e) {
-          send(ws, { type: "error", message: e.message });
-        }
-        break;
-      }
-      case "mux_create": {
-        try {
-          const s = mux.createSession(String(msg.name ?? ""), { cwd: msg.cwd, group: msg.group, cols: msg.cols, rows: msg.rows });
-          send(ws, { type: "mux_created", ok: true, ...s });
-        } catch (e) {
-          send(ws, { type: "mux_created", ok: false, error: e.message, errorKind: e.name });
-        }
-        break;
-      }
-      case "mux_kill": {
-        try {
-          const ok = mux.killSession(String(msg.name ?? ""));
-          send(ws, { type: "mux_killed", ok, name: msg.name });
-        } catch (e) {
-          send(ws, { type: "mux_killed", ok: false, error: e.message, errorKind: e.name });
-        }
-        break;
-      }
-      case "mux_summary": {
-        const available = await tmux.isAvailable();
-        if (!available) { send(ws, { type: "mux_summary", available: false, summary: null }); break; }
-        try {
-          send(ws, { type: "mux_summary", available: true, summary: mux.getActivitySummary() });
-        } catch (e) {
-          send(ws, { type: "error", message: e.message });
-        }
-        break;
-      }
-      case "mux_waiting": {
-        try {
-          send(ws, { type: "mux_waiting", ok: true, name: msg.name, waiting: mux.paneWaiting(String(msg.name ?? "")) });
-        } catch (e) {
-          send(ws, { type: "mux_waiting", ok: false, error: e.message, errorKind: e.name });
-        }
-        break;
-      }
-      // ── Fleet view (terminalcontrol: grid dashboard across sessions) ─────
-      case "fleet_add": {
-        const t = fleet.addTerminal(String(msg.name ?? "terminal"), String(msg.sessionId ?? ""));
-        send(ws, { type: "fleet_terminal", terminal: t });
-        break;
-      }
-      case "fleet_remove": {
-        const ok = fleet.removeTerminal(String(msg.terminalId ?? ""));
-        send(ws, { type: "fleet_removed", ok, terminalId: msg.terminalId });
-        break;
-      }
-      case "fleet_status": {
-        fleet.updateStatus(String(msg.terminalId ?? ""), String(msg.status ?? "idle"), String(msg.message ?? ""));
-        send(ws, { type: "fleet_status_ok", ok: true });
-        break;
-      }
-      case "fleet_focus": {
-        const ok = fleet.focusTerminal(String(msg.terminalId ?? ""));
-        send(ws, { type: "fleet_focused", ok, terminalId: msg.terminalId });
-        break;
-      }
-      case "fleet_chips":
-        send(ws, { type: "fleet_chips", items: fleet.getPendingChips() });
-        break;
-      case "fleet_view":
-        send(ws, { type: "fleet_view", terminals: fleet.getTerminals(), focused: fleet.getFocusedTerminal() ?? null, grid: fleet.grid });
-        break;
-      case "fleet_stats":
-        send(ws, { type: "fleet_stats", ...fleet.getStats() });
-        break;
-      case "fleet_resize":
-        fleet.resizeGrid(Math.max(1, Number(msg.rows) || 2), Math.max(1, Number(msg.cols) || 2));
-        send(ws, { type: "fleet_grid", grid: fleet.grid });
-        break;
       // ── Smart notifications (shooter: coalescing/dedupe + telemetry) ──────
       case "notify_send": {
         const result = shooter.sendNotification({
@@ -1367,39 +1197,6 @@ export function start({ port, token, tls, relay: relayCfg }) {
       case "notify_bursts":
         send(ws, { type: "notify_bursts", items: shooter.detectBursts(Number(msg.windowMs) || 60000) });
         break;
-      // ── Session monitor (c9watch: watchdog process discovery + crash history) ──
-      case "monitor_list":
-        send(ws, { type: "monitor_list", items: monitor.getActiveSessions() });
-        break;
-      case "monitor_stats":
-        send(ws, { type: "monitor_stats", ...monitor.getSessionStats() });
-        break;
-      case "monitor_history":
-        send(ws, { type: "monitor_history", items: monitor.getHistory(Number(msg.limit) || 50) });
-        break;
-      // ── QR session sharing (warpgate/muxile: expiring mobile-access tickets) ──
-      case "qr_create": {
-        const sid = String(msg.sessionId ?? "");
-        if (!sessions.get(sid) || sessions.get(sid).exitCode !== null) {
-          send(ws, { type: "qr_created", ok: false, error: `no live session: ${sid}` });
-          break;
-        }
-        const share = qrSharing.createSession((text) => sessions.write(sid, text));
-        qrShares.set(sid, share.token);
-        send(ws, { type: "qr_created", ok: true, ...share, qrImage: generateQRUrl(share.url.split("?")[0], share.token) });
-        break;
-      }
-      case "qr_stop": {
-        qrSharing.stopSession(String(msg.token ?? ""));
-        for (const [sid, tok] of qrShares) if (tok === msg.token) qrShares.delete(sid);
-        send(ws, { type: "qr_stopped", ok: true, token: msg.token });
-        break;
-      }
-      case "qr_list": {
-        const items = [...qrShares.entries()].map(([sid, token]) => ({ sessionId: sid, token, url: `${qrSharing.publicUrl || `http://localhost:${qrPort}`}/?token=${token}` }));
-        send(ws, { type: "qr_list", items });
-        break;
-      }
       // ── Stream JSON parser (format-claude-stream: agent JSONL → cards) ────
       case "stream_parse": {
         const parsed = streamParser.parseLines(String(msg.lines ?? ""));
@@ -1412,60 +1209,6 @@ export function start({ port, token, tls, relay: relayCfg }) {
       case "stream_reset":
         streamParser.reset();
         send(ws, { type: "stream_reset", ok: true });
-        break;
-      // ── File sync engine (syncthing: watch-folder state machine) ──────────
-      case "sync_stats":
-        send(ws, { type: "sync_stats", ...syncEngine.getStats() });
-        break;
-      case "sync_devices":
-        send(ws, { type: "sync_devices", items: syncEngine.getDevices() });
-        break;
-      case "sync_device_add":
-        syncEngine.registerDevice(String(msg.name), String(msg.hostname ?? ""), Array.isArray(msg.addresses) ? msg.addresses : []);
-        send(ws, { type: "sync_devices", items: syncEngine.getDevices() });
-        break;
-      case "sync_folders":
-        send(ws, { type: "sync_folders", items: syncEngine.getFolders() });
-        break;
-      case "sync_folder_add":
-        syncEngine.createFolder(String(msg.label), String(msg.path ?? ""), Array.isArray(msg.devices) ? msg.devices : []);
-        send(ws, { type: "sync_folders", items: syncEngine.getFolders() });
-        break;
-      case "sync_files": {
-        const items = syncEngine.getFiles(String(msg.folderId ?? ""));
-        const folder = syncEngine.getFolders().find((f) => f.id === msg.folderId);
-        send(ws, { type: "sync_files", folderId: msg.folderId, label: folder?.label, items });
-        break;
-      }
-      case "sync_file_add": {
-        const file = syncEngine.addFile(String(msg.folderId), {
-          path: String(msg.path),
-          hash: String(msg.hash ?? ""),
-          size: Number(msg.size ?? 0),
-          modifiedAt: msg.modifiedAt ? new Date(msg.modifiedAt) : new Date(),
-          version: Number(msg.version ?? 0),
-          deviceId: String(msg.deviceId ?? ""),
-        });
-        send(ws, { type: "sync_file_added", folderId: msg.folderId, path: file.path, status: file.status });
-        break;
-      }
-      case "sync_file_synced": {
-        const ok = syncEngine.syncFile(String(msg.folderId), String(msg.path), String(msg.deviceId ?? ""));
-        send(ws, { type: "sync_file_synced", ok, folderId: msg.folderId, path: msg.path });
-        break;
-      }
-      case "sync_conflict": {
-        const file = syncEngine.detectConflict(String(msg.folderId), String(msg.path), String(msg.deviceId1 ?? ""), String(msg.deviceId2 ?? ""));
-        send(ws, { type: "sync_conflict", ok: !!file, folderId: msg.folderId, path: msg.path });
-        break;
-      }
-      case "sync_conflict_resolve": {
-        const ok = syncEngine.resolveConflict(String(msg.folderId), String(msg.path), String(msg.keepDeviceId ?? ""));
-        send(ws, { type: "sync_conflict_resolved", ok, folderId: msg.folderId, path: msg.path });
-        break;
-      }
-      case "sync_events":
-        send(ws, { type: "sync_events", items: syncEngine.getEvents(Number(msg.limit) || 100) });
         break;
       // ── Power manager (orca/LinkShell: keep the PC awake while agents run) ──
       case "power_set":
@@ -2025,21 +1768,8 @@ export function start({ port, token, tls, relay: relayCfg }) {
     if (!relayCfg.url) relay.connect(`relay://127.0.0.1:${relayCfg.hostPort}`, relayCfg.channel || undefined);
   }
 
-  // ── Agent orchestrator (1code: multi-agent fleet state, zero-touch view) ──
-  const agents = new AgentOrchestrator({ maxConcurrent: Number(process.env.RH_MAX_AGENTS) || 5 });
-  for (const evt of ["session:created", "session:started", "session:paused", "session:resumed", "session:completed", "session:error"]) {
-    agents.on(evt, (session) => broadcast({ type: "agent_state", event: evt.split(":")[1], session }));
-  }
-  agents.on("session:broadcast", ({ sessionId, message }) => broadcast({ type: "agent_broadcast", sessionId, message }));
-
   // ── Stream JSON parser (format-claude-stream: agent JSONL → structured) ──
   const streamParser = new StreamJsonParser();
-
-  // ── QR session sharing (warpgate/muxile: expiring access tickets) ────────
-  const qrSharing = new QRSessionSharing({ publicUrl: process.env.RH_QR_PUBLIC_URL || "" });
-  const qrShares = new Map(); // sessionId → token
-  let qrPort = 0;
-  qrSharing.start().then(({ port }) => { qrPort = port; }).catch((e) => console.error("[qr] sharing disabled:", e.message));
 
   // ── WhatsApp bridge (channel surface; real baileys transport is roadmap) ──
   const wa = new WhatsAppBridgeManager();
@@ -2101,26 +1831,6 @@ export function start({ port, token, tls, relay: relayCfg }) {
     mpc.on(evt, (payload) => broadcast({ type: "mproto_event", mprotoEvent: evt.split(":")[1], ...payload }));
   }
 
-  // ── Session monitor (c9watch: watchdog discovery + crash history) ─────────
-  const monitor = new SessionMonitor();
-  monitor.start();
-  monitor.on("session:discovered", (s) => broadcast({ type: "monitor_event", event: "discovered", session: s }));
-  monitor.on("session:terminated", (s) => broadcast({ type: "monitor_event", event: "terminated", session: s }));
-
-  // ── Fleet view (grid dashboard; agent orchestration feeds statuses) ──────
-  const fleet = new FleetViewManager();
-  for (const evt of ["terminal:added", "terminal:removed", "status:updated", "terminal:focused", "chip:created", "chip:dismissed", "grid:resized"]) {
-    fleet.on(evt, (payload) => broadcast({ type: "fleet_event", event: evt.split(":")[1], ...(payload ?? {}) }));
-  }
-  // Agent state changes project into the fleet grid (waiting → high chip).
-  // Terminals are keyed by sessionId for lookup (terminal.id is a random hex).
-  const fleetTerminalFor = (sessionId) => fleet.getTerminals().find((t) => t.sessionId === sessionId);
-  agents.on("session:started", (a) => { const t = fleetTerminalFor(a.id) || fleet.addTerminal(a.agentType || a.id, a.id); fleet.updateStatus(t.id, "running"); });
-  agents.on("session:paused", (a) => { const t = fleetTerminalFor(a.id); if (t) fleet.updateStatus(t.id, "waiting", "paused"); });
-  agents.on("session:resumed", (a) => { const t = fleetTerminalFor(a.id); if (t) fleet.updateStatus(t.id, "running"); });
-  agents.on("session:completed", (a) => { const t = fleetTerminalFor(a.id); if (t) fleet.updateStatus(t.id, "done", "completed"); });
-  agents.on("session:error", (a) => { const t = fleetTerminalFor(a.id); if (t) fleet.updateStatus(t.id, "error", a.error || "error"); });
-
   // ── Smart notifications (shooter: decision-first + coalescing/dedupe) ─────
   // The brain decides; the existing channel registry (notifications.js) delivers.
   const shooter = new ShooterNotifications({ channels: ["web"] });
@@ -2128,12 +1838,6 @@ export function start({ port, token, tls, relay: relayCfg }) {
     notifications.send("shooter:" + event.type, { projectId: event.projectId, text: event.text });
     broadcast({ type: "notify_event", event });
   });
-
-  // ── File sync engine (syncthing: devices/folders/files/conflicts) ────────
-  const syncEngine = new FileSyncEngineManager();
-  for (const evt of ["device:registered", "folder:created", "file:synced", "file:conflict", "conflict:resolved", "device:connected", "device:disconnected"]) {
-    syncEngine.on(evt, (payload) => broadcast({ type: "sync_event", event: evt.split(":")[1], ...payload }));
-  }
 
   // ── Run scheduler (codeman/codex-bee/kagora: auto-continue loops) ────────
   scheduler.init(async ({ job }) => {
@@ -2166,10 +1870,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
     tunnels.closeAll();
     activity.stop();
     relay.dispose();
-    agents.destroy();
     if (lanDiscoveryStarted) { try { lanDiscovery.stop(); } catch {} }
-    qrSharing.stop();
-    monitor.stop();
     scheduler.stop();
     liveDigest.stop();
     mcpServer.stop();
@@ -2184,8 +1885,6 @@ export function start({ port, token, tls, relay: relayCfg }) {
   sessions.sessionEvents.on("output", ({ id, text }) => {
     activity.feed(id, text);
     try { recorder.recordOutput(id, text); } catch {}
-    const token = qrShares.get(id);
-    if (token) qrSharing.sendOutput(token, text);
     liveDigest.feed(id, text);
   });
   sessions.sessionEvents.on("exit", ({ id }) => activity.markChat(id, "idle")); // terminal exit = done

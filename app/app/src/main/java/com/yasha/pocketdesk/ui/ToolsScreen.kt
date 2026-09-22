@@ -32,13 +32,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yasha.pocketdesk.AppEntry
+import com.yasha.pocketdesk.LINE_BREAK
 import com.yasha.pocketdesk.RhEvent
 import com.yasha.pocketdesk.ToolInfo
 import com.yasha.pocketdesk.WsClient
 import kotlinx.coroutines.delay
 
 @Composable
-fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit) {
+fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit, openSsh: () -> Unit) {
     // One project folder for everything started from this screen: an IDE opens
     // it, a CLI tool runs in it.
     var cwd by remember { mutableStateOf("") }
@@ -53,6 +54,7 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
         delay(250)
         ws.discoverApps(query.trim())
     }
+    LaunchedEffect(Unit) { ws.runDoctor() }
     LaunchedEffect(Unit) {
         ws.events.collect { ev ->
             when (ev) {
@@ -71,6 +73,7 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Coding tools", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                TextButton(onClick = openSsh) { Text("SSH") }
                 IconButton(onClick = {
                     ws.rescan()
                     ws.discoverApps(query.trim(), refresh = true)
@@ -110,6 +113,8 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
         items(ws.apps, key = { it.path }) { app ->
             AppCard(app, ws, cwd)
         }
+        item { GitSection(ws, cwd) }
+        item { DoctorSection(ws) }
     }
 
     if (browsing) {
@@ -195,6 +200,78 @@ private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String) {
                     maxLines = 4,
                     overflow = TextOverflow.Ellipsis,
                 )
+            }
+        }
+    }
+}
+
+@Composable
+private fun GitSection(ws: WsClient, cwd: String) {
+    // The git panel works on the project folder chosen at the top of the screen.
+    val status = ws.gitStatus
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Git", style = MaterialTheme.typography.titleLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(onClick = { ws.gitLoad(cwd.trim()) }, enabled = cwd.isNotBlank()) { Text("Load") }
+            OutlinedButton(onClick = { ws.gitLog(cwd.trim()) }, enabled = status?.ok == true) { Text("Log") }
+            OutlinedButton(onClick = { ws.gitDiff(cwd.trim()) }, enabled = status?.ok == true) { Text("Diff") }
+        }
+        when {
+            status == null -> Text(
+                "pick a project folder above, then Load",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            !status.ok -> Text(
+                status.error ?: "not a git repository",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            else -> {
+                Text(
+                    listOfNotNull(status.branch, status.upstream?.let { "↔ " + it }).joinToString(" "),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (status.files.isEmpty()) {
+                    Text("working tree clean", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    for (f in status.files.take(30)) {
+                        Text(
+                            f.state.ifBlank { "·" } + "  " + f.path,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+        if (ws.gitOutput.isNotBlank()) {
+            Text(
+                ws.gitOutput.lines().take(40).joinToString(LINE_BREAK),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun DoctorSection(ws: WsClient) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Doctor", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = { ws.runDoctor() }) { Text("Run checks") }
+        }
+        for (c in ws.doctorChecks) {
+            Text(
+                (if (c.ok) "✅" else "❌") + " " + c.name + " — " + c.detail,
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            c.hint?.takeIf { !c.ok }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

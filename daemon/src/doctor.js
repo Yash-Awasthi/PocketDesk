@@ -66,15 +66,6 @@ export async function diagnose({ tls, manifests } = {}) {
     checks.push({ name: "pty", ok: false, detail: String(e.message).split("\n")[0], hint: "npm install (node-pty needs a native build)" });
   }
 
-  // tmux (optional)
-  const tmux = tryExec("tmux -V");
-  checks.push({
-    name: "tmux",
-    ok: true,
-    detail: tmux.ok ? tmux.out : "not installed (tmux_* features degraded)",
-    hint: tmux.ok ? undefined : "optional: sessions survive daemon restarts with tmux",
-  });
-
   // Manifests / agents on PATH
   let manifestList = [];
   try {

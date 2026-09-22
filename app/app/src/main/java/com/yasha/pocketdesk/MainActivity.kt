@@ -36,6 +36,7 @@ import com.yasha.pocketdesk.ui.DesktopScreen
 import com.yasha.pocketdesk.ui.ConnectScreen
 import com.yasha.pocketdesk.ui.FreebuffScreen
 import com.yasha.pocketdesk.ui.SessionsScreen
+import com.yasha.pocketdesk.ui.SshScreen
 import com.yasha.pocketdesk.ui.TerminalScreen
 import com.yasha.pocketdesk.SessionRecorder
 import com.yasha.pocketdesk.TunnelManager
@@ -48,6 +49,7 @@ sealed interface Screen {
     data object Chats : Screen
     data object Freebuff : Screen
     data object Desktop : Screen
+    data object Ssh : Screen
     data class Terminal(val sessionId: String) : Screen
 }
 
@@ -161,11 +163,13 @@ class MainActivity : ComponentActivity() {
                         client,
                         openDesktop = { screen = Screen.Desktop },
                         openTerminal = { screen = Screen.Terminal(it) },
+                        openSsh = { screen = Screen.Ssh },
                     )
                     Screen.Sessions -> SessionsScreen(client, openTerminal = { screen = Screen.Terminal(it) })
                     Screen.Chats -> ChatScreen(client)
                     Screen.Freebuff -> FreebuffScreen(client)
                     Screen.Desktop -> DesktopScreen(client, onClose = { screen = Screen.Sessions })
+                    Screen.Ssh -> SshScreen(client, onClose = { screen = Screen.Tools })
                     is Screen.Terminal -> TerminalScreen(client, s.sessionId, onClose = { screen = Screen.Sessions })
                 }
             }
