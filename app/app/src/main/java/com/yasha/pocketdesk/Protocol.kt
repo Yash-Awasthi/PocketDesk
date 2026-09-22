@@ -75,6 +75,35 @@ data class DesktopFrame(val base64: String, val width: Int, val height: Int)
 
 data class FsListing(val path: String, val parent: String?, val items: List<FsEntry>)
 
+
+/** The daemon's own SSH listeners, addressed by protocol prefix. */
+val SSH_SERVERS = listOf("bastion", "sshserver")
+
+const val LINE_BREAK = "\n"
+
+/** One saved SSH/SFTP/VNC target. `keyId` selects key auth; absent means password. */
+data class SshProfile(
+    val id: String,
+    val name: String,
+    val host: String,
+    val port: Int,
+    val username: String,
+    val keyId: String?,
+)
+
+data class SshKey(val id: String, val name: String, val type: String, val fingerprint: String)
+
+data class KnownHost(val keyId: String, val type: String, val fingerprint: String)
+
+/** Start/stop state of one of the daemon's own SSH listeners. */
+data class ServerStat(val running: Boolean, val port: Int?, val activeSessions: Int, val totalUsers: Int)
+
+data class DoctorCheck(val name: String, val ok: Boolean, val detail: String, val hint: String?)
+
+data class GitFile(val state: String, val path: String)
+
+data class GitStatus(val ok: Boolean, val branch: String, val upstream: String?, val files: List<GitFile>, val error: String?)
+
 sealed interface RhEvent {
     data class Created(val id: String) : RhEvent
     data class Exit(val id: String, val harnessId: String, val code: Int) : RhEvent
@@ -83,6 +112,12 @@ sealed interface RhEvent {
 
     /** A GUI app started on the PC; the phone follows it on the desktop view. */
     data class GuiOpened(val name: String) : RhEvent
+
+    /** A host key seen for the first time, or one that no longer matches. */
+    data class HostKeySeen(val host: String, val fingerprint: String, val changed: Boolean) : RhEvent
+
+    /** Result of a profile_connect attempt — the SSH screen reports both ways. */
+    data class SshConnect(val ok: Boolean, val detail: String) : RhEvent
 }
 
 object Proto {
@@ -192,6 +227,40 @@ object Proto {
         put("type", "fwrite"); put("path", path); put("data", chunkB64); put("append", append)
     }
 
+
+    // ── SSH: profiles, keys, known hosts, the daemon's own listeners ──
+    fun profileList() = obj { put("type", "profile_list") }
+    fun profileCreate(name: String, host: String, port: Int, username: String, keyId: String?) = obj {
+        put("type", "profile_create"); put("name", name); put("host", host); put("port", port)
+        put("username", username); put("authMethod", if (keyId != null) "key" else "password")
+        put("protocols", JsonArray(listOf(JsonPrimitive("ssh"), JsonPrimitive("sftp"), JsonPrimitive("vnc"))))
+        if (keyId != null) put("keyId", keyId)
+    }
+    fun profileDelete(id: String) = obj { put("type", "profile_delete"); put("id", id) }
+    fun profileConnect(id: String, protocol: String, secret: String?, usesKey: Boolean) = obj {
+        put("type", "profile_connect"); put("id", id); put("protocol", protocol)
+        if (!secret.isNullOrEmpty()) put(if (usesKey) "passphrase" else "password", secret)
+    }
+    fun sshKeyList() = obj { put("type", "sshkey_list") }
+    fun sshKeyGenerate(algo: String, name: String, passphrase: String?) = obj {
+        put("type", "sshkey_generate"); put("algo", algo); put("name", name)
+        if (!passphrase.isNullOrEmpty()) put("passphrase", passphrase)
+    }
+    fun sshKeyDelete(id: String) = obj { put("type", "sshkey_delete"); put("id", id) }
+    fun hostKeyList() = obj { put("type", "hostkey_list") }
+    fun mprotoStatus() = obj { put("type", "mproto_status") }
+    fun serverStart(kind: String, port: Int, host: String) = obj {
+        put("type", kind + "_start"); put("port", port); put("host", host)
+    }
+    fun serverStop(kind: String) = obj { put("type", kind + "_stop") }
+    fun serverStats(kind: String) = obj { put("type", kind + "_stats") }
+
+    // ── Tools: doctor + git ──
+    fun doctor() = obj { put("type", "doctor") }
+    fun gitStatus(cwd: String) = obj { put("type", "git_status"); put("cwd", cwd) }
+    fun gitLog(cwd: String, limit: Int) = obj { put("type", "git_log"); put("cwd", cwd); put("limit", limit) }
+    fun gitDiff(cwd: String) = obj { put("type", "git_diff"); put("cwd", cwd) }
+
     fun parseTools(el: JsonElement?): List<ToolInfo> {
         // welcome sends `manifests`; rescan broadcasts send `items`.
         val o = el as? JsonObject ?: return emptyList()
@@ -291,6 +360,65 @@ object Proto {
             ?: return null
         return FsListing(path = str(o, "path") ?: "", parent = str(o, "parent"), items = items)
     }
+
+
+    private fun items(el: JsonElement?): List<JsonObject> =
+        ((el as? JsonObject)?.get("items") as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
+
+    fun parseProfiles(el: JsonElement?): List<SshProfile> = items(el).mapNotNull {
+        SshProfile(
+            id = str(it, "id") ?: return@mapNotNull null,
+            name = str(it, "name") ?: "",
+            host = str(it, "host") ?: "",
+            port = (it["port"] as? JsonPrimitive)?.intOrNull ?: 22,
+            username = str(it, "username") ?: "",
+            keyId = str(it, "keyId"),
+        )
+    }
+
+    fun parseSshKeys(el: JsonElement?): List<SshKey> = items(el).mapNotNull {
+        SshKey(
+            id = str(it, "id") ?: return@mapNotNull null,
+            name = str(it, "name") ?: "",
+            type = str(it, "type") ?: "",
+            fingerprint = str(it, "fingerprint") ?: "",
+        )
+    }
+
+    fun parseHostKeys(el: JsonElement?): List<KnownHost> = items(el).mapNotNull {
+        KnownHost(
+            keyId = str(it, "keyId") ?: return@mapNotNull null,
+            type = str(it, "type") ?: "",
+            fingerprint = str(it, "fingerprint") ?: "",
+        )
+    }
+
+    fun parseServerStat(m: JsonObject) = ServerStat(
+        running = bool(m, "running") ?: false,
+        port = (m["port"] as? JsonPrimitive)?.intOrNull,
+        activeSessions = (m["activeSessions"] as? JsonPrimitive)?.intOrNull ?: 0,
+        totalUsers = (m["totalUsers"] as? JsonPrimitive)?.intOrNull ?: 0,
+    )
+
+    fun parseDoctor(m: JsonObject): List<DoctorCheck> =
+        (m["checks"] as? JsonArray)?.filterIsInstance<JsonObject>()?.mapNotNull {
+            DoctorCheck(
+                name = str(it, "name") ?: return@mapNotNull null,
+                ok = bool(it, "ok") ?: false,
+                detail = str(it, "detail") ?: "",
+                hint = str(it, "hint"),
+            )
+        } ?: emptyList()
+
+    fun parseGitStatus(m: JsonObject) = GitStatus(
+        ok = bool(m, "ok") ?: false,
+        branch = str(m, "branch") ?: "",
+        upstream = str(m, "upstream"),
+        files = (m["files"] as? JsonArray)?.filterIsInstance<JsonObject>()?.map {
+            GitFile(state = str(it, "x") ?: "", path = str(it, "path") ?: "")
+        } ?: emptyList(),
+        error = str(m, "error"),
+    )
 
     fun exitCode(m: JsonObject): Int = (m["code"] as? JsonPrimitive)?.intOrNull ?: 0
 }

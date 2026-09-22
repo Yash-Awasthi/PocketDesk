@@ -7,21 +7,11 @@
 [![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-orange.svg)](#protocol-v1)
 [![Android](https://img.shields.io/badge/Android-Kotlin-purple.svg)](https://developer.android.com)
 [![Plugins](https://img.shields.io/badge/Plugins-4-blueviolet.svg)](#plugin-system)
-[![Tests](https://img.shields.io/badge/Tests-30%20suites-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-24%20suites-brightgreen.svg)](#testing)
 
 **No cloud. No accounts. Your machine, your data, your agents.**
 
 PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your Android phone. Install AI coding agents (Claude Code, Codex, Gemini CLI, OpenCode, Qwen Code, or any CLI) on your PC, and drive them from a sleek mobile app over WebSocket — with live terminal streaming, file transfer, AI chat, and a **proposal/approval system** for agent safety.
-
----
-
-## 📸 Screenshots
-
-> _Add your own screenshots here — terminal streaming, chat interface, plugin dashboard_
-
-| Terminal | Chat | Dashboard |
-|----------|------|-----------|
-| Live PTY streaming | AI conversations with streaming | Real-time stats & activity |
 
 ---
 
@@ -51,6 +41,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 🛡️ **SSH Bastion** | A real jump host: log in as `user@host` with your registered key, the access rule is checked, and the channel is proxied to the target with byte accounting (`bastion_*`) |
 | 🔒 **SSH Server Control** | A real SSH listener on the PC: per-user password/public-key auth, command allowlists enforced before a command runs, PTY shells, session recording (`sshserver_*`) |
 | 📇 **Connection Profiles** | Real SSH, SFTP and VNC connections from saved profiles, host-key trust-on-first-use, OpenSSH key generation kept out of the protocol (`profile_*`/`hostkey_*`/`sshkey_*`) |
+| 🔐 **SSH Screen** | Profiles, key generation, known host keys and start/stop for both PC-side listeners — on the browser client's SSH tab and on the phone, reached from the Tools screen |
 | ⚡ **Keep-Awake** | PC stays awake while agents run (per-process, never touches your power settings) |
 | 🤖 **Telegram Control** | Prompt sessions and approve proposals from a Telegram chat |
 | 💚 **WhatsApp Control** | Link the daemon as a WhatsApp companion device (real pairing QR), then drive sessions with prefixed messages from allowlisted numbers (`wa_*`) |
@@ -478,10 +469,21 @@ Every `out` frame carries a monotonic `seq`; on reconnect send `attach {id, sinc
 
 ```bash
 cd daemon
-npm.cmd test                    # full suite (30 files)
+npm.cmd test                    # full suite (24 files)
 node test/smoke.mjs             # session smoke tests
 node test/features.test.mjs     # absorbed-features suite (shares, backfill, recording, tunnels, resurrection…)
 ```
+
+The suite never leaves loopback. To exercise the SSH, SFTP and VNC transports
+against a machine you actually own:
+
+```bash
+node scripts/hw-probe.mjs --host 192.168.1.20 --user dev --key ~/.ssh/id_ed25519
+node scripts/hw-probe.mjs --vnc-host 192.168.1.30 --vnc-password secret
+```
+
+It connects, runs one command, uploads and downloads a file and compares it byte
+for byte, then reports the VNC framebuffer geometry the server announced.
 
 ---
 

@@ -1,6 +1,6 @@
 # PocketDesk — Session Context
 
-Date: 2026-09-08 (state section refreshed; original notes 2026-08-24). Repo:
+Date: 2026-09-22 (state section refreshed; original notes 2026-08-24). Repo:
 `C:\Users\yasha\PROJECTS\PROJECTS\PocketDesk`.
 
 ## What the project is
@@ -48,46 +48,40 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
 
 ## State at save (IMPORTANT — current)
 
-0. 2026-09-10 absorption sweep (this workstream's current head): every one of the 241
-   corpus repos is processed, then **rechecked one-by-one** (README + feature lists
-   re-investigated per repo; repos renamed back from `done_<repo>` as they cleared).
-   The recheck added chat forking, BYOK env profiles, plan mode, attention-first
-   session ordering, Mattermost push, and fixed a latent `_execSync` crash in the
-   mux_* protocol surface. All repos are accounted for in `docs/ABSORPTION-LEDGER.md` (per-repo
-   rows: absorbed ✅ / already-covered ⚙️ / module-present 🧩 / reference-only ➖).
-   New daemon modules wired this pass: prompt_queue (queued follow-ups, auto-drain),
-   agent_todos (todo boards, markdown-derived), scheduler (interval/once/count jobs,
-   persisted), mentions (@file expansion in prompts), doctor (self-diagnosis),
-   wake_on_lan, approval_guard (run-level auto-deny, RH_APPROVAL_TIMEOUT_MS),
-   mcp_server (embedded MCP endpoint, RH_MCP_PORT), live_digest (digest_attach row
-   diffs), stats_usage (usage_list/usage_get from stream usage fields).
-   App side: ReconnectPolicy (exp backoff + jitter) + WsClient auto-reconnect and
-   since-reattach — the last 🧩 row is now ✅. `npm.cmd test` = 22 files / 202 checks
-   ALL PASS (absorb.test.mjs added; features.test.mjs quiet test made deterministic
-   via RH_QUIET_MS=3000 and its broken imports/summary fixed). `assembleDebug` builds
-   clean (fixed pre-existing Chat-icon + TunnelManager errors too). Corpus repos are
-   being renamed done_<repo> after processing.
+0. 2026-09-22 pass (current head of this workstream):
+   - **Six unused clusters deleted.** `sync_*`, `fleet_*`, `agent_*`, `mux_*`/`tmux_*`,
+     `qr_*` and `monitor_*` are gone: seven modules (file_sync_engine, fleet_view,
+     agent_orchestrator, session_multiplexer, tmux_session_manager, qr_session_sharing,
+     session_monitor), their server cases and wiring, and ten test files. Each had a
+     green test and no caller — no browser screen, no phone screen, nothing inside the
+     daemon. `docs/FEATURE-MATRIX.md` and `docs/ABSORPTION-LEDGER.md` record the removal.
+   - **Tunnel bind race fixed.** `tunnel_create` answered before the listener was bound,
+     so a client could connect to a port that did not exist yet. `createTunnel` now
+     resolves on `listening` and rejects on a bind error, and the handler awaits it.
+     Deleting the startup work above made the race reproducible on every run.
+   - **SSH front end.** Browser client has an SSH tab (profiles with per-connect
+     credentials, key generation with the public half shown, known host keys, host-key
+     new/changed banner, bastion and sshserver start/stop bound to loopback by default).
+     `profile_create` now carries `keyId`, without which key auth was unreachable from
+     the wire. `test/ssh-ui.test.mjs` covers exactly the messages the panel sends.
+   - **Android catch-up.** New `ui/SshScreen.kt` mirrors the browser SSH tab, reached
+     from the Tools screen; the Tools screen gained the Git and Doctor sections it was
+     missing. `assembleDebug`, `testDebugUnitTest` and `bundleRelease` are all clean;
+     the release AAB is signed (certificate valid to 2054).
+   - **Hardware probe.** `daemon/scripts/hw-probe.mjs` drives the real transports
+     against a machine you own: SSH connect + key auth, one remote command, an SFTP
+     upload/download byte-compared, and an RFB handshake reporting the announced
+     geometry. Still unrun against real hardware — that needs a host only the user has.
+   - `npm.cmd test` = **24 files, all pass**.
 1. The inspiration-corpus absorption pass (tracked in `docs/FEATURE-MATRIX.md`) is the
-   active workstream. 2026-09-08 slices (all wired, tested, matrix-updated): relay link,
-   tmux session manager (graceful gate), terminal digest render, agent orchestrator
-   (`agent_*`), LAN file transfer (LocalSend v2, byte-verified e2e), file sync engine
-   (TS→ESM), stream JSON parser (TS→ESM), QR session sharing (phone connects directly
-   to a relay port with `?token=`), session monitor (real process discovery + crash
-   history), shooter notifications (coalescing/dedupe/telemetry — two latent bugs
-   fixed), fleet view (TS→ESM, agent states project into the grid), session
-   multiplexer (tmux gate), remote desktop bridge (TS→ESM), WhatsApp channel surface
-   (TS→ESM + fixed unreachable `ready` state; e2e drives a real REPL from an
-   allowlisted number).2. **`npm.cmd test` is ALL PASS ×3** (now 22 test files incl. absorb.test.mjs) — the
-   whole uncommitted batch is green, uncommitted on master for review. Modules ported from CJS/TS-in-.js to
-   working ESM this pass: relay_server, terminal_renderer, file_sync_engine,
-   stream_json_parser, session_monitor, shooter_notifications, fleet_view,
-   remote_desktop_bridge, whatsapp_bridge.
-3. TODO next (matrix): all 🧩 rows are ✅ now. The rd_*/vnc_*/profile_*/bastion_*/
-   sshserver_*/wa_* surfaces carry real traffic as of 2026-09-22 (ssh2 for SSH and
-   SFTP, an RFB handshake for VNC, Baileys for WhatsApp, the desktop capture
-   controller for frames). Remaining 🗺️ surfaces: full WebRTC screen transport
-   (frames are JPEG over the protocol at ~3 fps), mosh-style UDP roam, E2EE shares,
-   Android foreground service + biometric lock.
+   workstream this grew out of; the ledger stays as the provenance record.
+2. Open gaps, honestly: no on-device Android run has ever happened (compile-verified
+   only); the WhatsApp pairing QR has never been scanned by a phone; the RFB client has
+   never met a real VNC server; SSH and SFTP have never left loopback. `hw-probe.mjs`
+   closes the last three the moment someone runs it against real hosts.
+3. Remaining 🗺️ surfaces: full WebRTC screen transport (frames are JPEG over the
+   protocol at ~3 fps), mosh-style UDP roam, E2EE shares, Android foreground service
+   and biometric lock.
 
 ## Environment facts
 

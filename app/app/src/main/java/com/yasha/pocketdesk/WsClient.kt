@@ -99,6 +99,28 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     var chatCurrentModel by mutableStateOf<Map<String, String?>>(emptyMap())
         private set
 
+
+    // ── SSH screen state (profiles, keys, known hosts, local listeners) ──
+    var sshProfiles by mutableStateOf<List<SshProfile>>(emptyList())
+        private set
+    var sshKeys by mutableStateOf<List<SshKey>>(emptyList())
+        private set
+    var knownHosts by mutableStateOf<List<KnownHost>>(emptyList())
+        private set
+    var sshServerStats by mutableStateOf<Map<String, ServerStat>>(emptyMap())
+        private set
+    /** Public half of the last generated key — shown so it can be copied out. */
+    var lastGeneratedKey by mutableStateOf<String?>(null)
+        private set
+
+    // ── Tools screen state (doctor + git) ──
+    var doctorChecks by mutableStateOf<List<DoctorCheck>>(emptyList())
+        private set
+    var gitStatus by mutableStateOf<GitStatus?>(null)
+        private set
+    var gitOutput by mutableStateOf("")
+        private set
+
     val events = MutableSharedFlow<RhEvent>(extraBufferCapacity = 256)
 
     /** Terminal output router: (sessionId, base64 chunk). Set by the terminal screen. */
@@ -246,6 +268,31 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     }
 
     fun rescan(): Boolean = send(Proto.detect())
+
+    // ── SSH ──
+    fun sshRefresh() {
+        send(Proto.profileList()); send(Proto.sshKeyList()); send(Proto.hostKeyList())
+        send(Proto.mprotoStatus())
+        for (kind in SSH_SERVERS) send(Proto.serverStats(kind))
+    }
+    fun profileCreate(name: String, host: String, port: Int, username: String, keyId: String?) =
+        send(Proto.profileCreate(name, host, port, username, keyId))
+    fun profileDelete(id: String) = send(Proto.profileDelete(id))
+    fun profileConnect(id: String, protocol: String, secret: String?, usesKey: Boolean) =
+        send(Proto.profileConnect(id, protocol, secret, usesKey))
+    fun sshKeyGenerate(algo: String, name: String, passphrase: String?) =
+        send(Proto.sshKeyGenerate(algo, name, passphrase))
+    fun sshKeyDelete(id: String) = send(Proto.sshKeyDelete(id))
+    fun serverStart(kind: String, port: Int, host: String) = send(Proto.serverStart(kind, port, host))
+    fun serverStop(kind: String) = send(Proto.serverStop(kind))
+
+    // ── Tools ──
+    fun runDoctor() = send(Proto.doctor())
+    fun gitLoad(cwd: String) = send(Proto.gitStatus(cwd))
+    fun gitLog(cwd: String) = send(Proto.gitLog(cwd, 20))
+    fun gitDiff(cwd: String) = send(Proto.gitDiff(cwd))
+
+
 
     // ── Freebuff control methods ──
     fun fbStatus() = send(Proto.fbStatus())
@@ -445,6 +492,68 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
                 reattachAll()
             }
             "manifests" -> tools = Proto.parseTools(m)
+            "profile_list" -> sshProfiles = Proto.parseProfiles(m)
+            "profile_created", "profile_updated", "profile_deleted" -> {
+                if (bool(m, "ok") == false) lastError = str(m, "error")
+                send(Proto.profileList()); send(Proto.mprotoStatus())
+            }
+            "profile_connected" -> {
+                val ok = bool(m, "ok") == true
+                val session = m["session"] as? JsonObject
+                val proto = session?.let { str(it, "protocol") } ?: "ssh"
+                val detail = if (ok) proto + " connected" else str(m, "error") ?: "connect failed"
+                events.tryEmit(RhEvent.SshConnect(ok, detail))
+                send(Proto.hostKeyList()); send(Proto.mprotoStatus())
+            }
+            "profile_disconnected" -> send(Proto.mprotoStatus())
+            "sshkey_list" -> sshKeys = Proto.parseSshKeys(m)
+            "sshkey_generated" -> {
+                if (bool(m, "ok") == true) {
+                    lastGeneratedKey = (m["key"] as? JsonObject)?.let { str(it, "publicKey") }
+                } else {
+                    lastError = str(m, "error")
+                }
+                send(Proto.sshKeyList())
+            }
+            "sshkey_deleted" -> send(Proto.sshKeyList())
+            "hostkey_list" -> knownHosts = Proto.parseHostKeys(m)
+            "mproto_event" -> {
+                val kind = str(m, "mprotoEvent")
+                if (kind == "new" || kind == "changed") {
+                    events.tryEmit(
+                        RhEvent.HostKeySeen(
+                            host = (str(m, "host") ?: "?") + ":" + (str(m, "port") ?: "22"),
+                            fingerprint = str(m, "newFingerprint") ?: str(m, "fingerprint") ?: "",
+                            changed = kind == "changed",
+                        ),
+                    )
+                    send(Proto.hostKeyList())
+                }
+            }
+            "bastion_started", "bastion_stopped" -> {
+                if (bool(m, "ok") == false) lastError = str(m, "error")
+                send(Proto.serverStats("bastion"))
+            }
+            "sshserver_started", "sshserver_stopped" -> {
+                if (bool(m, "ok") == false) lastError = str(m, "error")
+                send(Proto.serverStats("sshserver"))
+            }
+            "bastion_stats" -> sshServerStats = sshServerStats + ("bastion" to Proto.parseServerStat(m))
+            "sshserver_stats" -> sshServerStats = sshServerStats + ("sshserver" to Proto.parseServerStat(m))
+            "doctor_report" -> doctorChecks = Proto.parseDoctor(m)
+            "git_status" -> gitStatus = Proto.parseGitStatus(m)
+            "git_log" -> {
+                val commits = (m["commits"] as? kotlinx.serialization.json.JsonArray)
+                    ?.filterIsInstance<JsonObject>()
+                    .orEmpty()
+                gitOutput = commits.joinToString(LINE_BREAK) { c ->
+                    val hash = str(c, "hash")?.take(8) ?: ""
+                    val subject = str(c, "subject") ?: ""
+                    hash + "  " + subject
+                }
+            }
+            "git_diff" -> gitOutput = str(m, "out") ?: ""
+
             "sessions" -> {
                 sessions = Proto.parseSessions(m)
                 chats = Proto.parseChats(m)
