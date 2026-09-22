@@ -8,7 +8,7 @@ keystore.properties
 .cxx/
 
 # Test/runtime artifacts
-.pocketdesk-test/
+.pocketdesk-*/
 .pocketdesk/
 
 # Local-only files
