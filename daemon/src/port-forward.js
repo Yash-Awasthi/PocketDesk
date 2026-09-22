@@ -3,6 +3,7 @@ import net from "node:net";
 const forwards = new Map();
 
 export function start({ id, localPort, remoteHost, remotePort }) {
+  stop(id);
   const server = net.createServer((clientSock) => {
     const remote = net.createConnection({ host: remoteHost, port: remotePort });
     clientSock.pipe(remote);

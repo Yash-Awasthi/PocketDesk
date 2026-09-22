@@ -139,7 +139,7 @@ export function attach(id, ws, { since } = {}) {
   // says "I have everything up to seq N" and the ring still covers N, send only
   // the chunks after N instead of a full scrollback replay.
   const oldest = s.chunks.length ? s.chunks[0].seq : s.seq + 1;
-  if (Number.isFinite(since) && since >= 0 && since >= oldest - 1) {
+  if (Number.isFinite(since) && since >= 0 && since >= oldest - 1 && since <= s.seq) {
     for (const c of s.chunks) {
       if (c.seq > since) send(ws, { type: "out", id, seq: c.seq, data: b64(c.text) });
     }

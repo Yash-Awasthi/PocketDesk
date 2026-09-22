@@ -50,7 +50,11 @@ export class PeerDiscovery {
       });
 
       this.socket.on('listening', () => {
-        this.socket.addMembership(MULTICAST_ADDR);
+        try {
+          this.socket.addMembership(MULTICAST_ADDR);
+        } catch (e) {
+          return reject(e);
+        }
         this._startAnnouncing();
         resolve();
       });

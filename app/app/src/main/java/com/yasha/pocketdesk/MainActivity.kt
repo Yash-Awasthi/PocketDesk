@@ -24,7 +24,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,8 +37,6 @@ import com.yasha.pocketdesk.ui.FreebuffScreen
 import com.yasha.pocketdesk.ui.SessionsScreen
 import com.yasha.pocketdesk.ui.SshScreen
 import com.yasha.pocketdesk.ui.TerminalScreen
-import com.yasha.pocketdesk.SessionRecorder
-import com.yasha.pocketdesk.TunnelManager
 import com.yasha.pocketdesk.ui.ToolsScreen
 
 sealed interface Screen {
@@ -55,9 +52,13 @@ sealed interface Screen {
 
 class MainActivity : ComponentActivity() {
 
+    private var locked by mutableStateOf(false)
+    private lateinit var lock: AppLock
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Notifier.ensureChannel(this)
+        lock = AppLock(this) { locked = false }
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Root()
@@ -68,21 +69,32 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         foreground = true
+        if (lock.shouldLock()) {
+            locked = true
+            lock.prompt()
+        }
     }
 
     override fun onStop() {
         super.onStop()
         foreground = false
+        lock.onStop()
     }
 
     @Composable
     private fun Root() {
-        val client = remember { WsClient() }
-        val sessionRecorder = remember { SessionRecorder() }
-        val tunnelManager = remember { TunnelManager() }
-        DisposableEffect(Unit) { onDispose { client.close(); kotlinx.coroutines.runBlocking { tunnelManager.closeAll() } } }
+        val client = Link.client
+        LaunchedEffect(client.status) {
+            LinkService.sync(applicationContext, client.status != Status.Disconnected)
+        }
+        if (locked) {
+            Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                androidx.compose.material3.Button(onClick = { lock.prompt() }) { Text("Unlock") }
+            }
+            return
+        }
 
-        var screen by remember { mutableStateOf<Screen>(Screen.Connect) }
+        var screen by remember { mutableStateOf<Screen>(if (client.status == Status.Connected) Screen.Sessions else Screen.Connect) }
 
         LaunchedEffect(Unit) {
             client.events.collect { ev ->
@@ -164,6 +176,7 @@ class MainActivity : ComponentActivity() {
                         openDesktop = { screen = Screen.Desktop },
                         openTerminal = { screen = Screen.Terminal(it) },
                         openSsh = { screen = Screen.Ssh },
+                        lock = lock,
                     )
                     Screen.Sessions -> SessionsScreen(client, openTerminal = { screen = Screen.Terminal(it) })
                     Screen.Chats -> ChatScreen(client)

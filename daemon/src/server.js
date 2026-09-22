@@ -188,6 +188,8 @@ export function start({ port, token, tls, relay: relayCfg }) {
       if (ws._shareToken) shares.leave(ws._shareToken);
       sessions.detach(ws);
       chat.detach(ws);
+      liveDigest.detach(ws);
+      sdkAdapter.unsubscribe(ws);
       plugins.callHook("onDisconnect", ws);
     });
     ws.on("message", (raw) => {
@@ -197,6 +199,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
       } catch {
         return;
       }
+      if (!msg || typeof msg !== "object") return;
       // Plugin hook: onMessage (may block or modify)
       plugins.callHook("onMessage", ws, msg).then(({ blocked }) => {
         if (blocked) return;
@@ -240,7 +243,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
             send(ws, { type: "error", message: `handler error: ${e?.message || e}` });
           } catch {}
         });
-      });
+      }).catch(() => {});
     });
   });
 
@@ -712,7 +715,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
         break;
       case "lan_send": {
         try {
-          const result = await sendFiles(String(msg.ip), Number(msg.port), [String(msg.path)]);
+          const result = await sendFiles(String(msg.ip), Number(msg.port), [resolvePath(msg.path)]);
           send(ws, { type: "lan_sent", ok: true, ...result, peer: msg.ip });
         } catch (e) {
           send(ws, { type: "lan_sent", ok: false, peer: msg.ip, error: e.message });
@@ -1042,9 +1045,10 @@ export function start({ port, token, tls, relay: relayCfg }) {
           // mapped from frame px to real desktop px with the same factor.
           desktopQuality = r.quality;
           // Auto-stop when the watcher disconnects.
-          ws.once("close", () => {
+          ws.once?.("close", () => {
             desktopWatchers.delete(ws);
-            desktop.stopFrameStream(ws._clientId || "anon");
+            // A reconnect under the same clientId may already own the stream.
+            if (![...desktopWatchers].some((w) => w._clientId === ws._clientId)) desktop.stopFrameStream(ws._clientId || "anon");
           });
         }
         send(ws, { type: "desktop_started", ...r });

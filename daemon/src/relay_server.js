@@ -22,6 +22,7 @@ export class RelayServer extends EventEmitter {
 
     start() {
         this.server = net.createServer((socket) => this.handleConnection(socket));
+        this.server.on('error', (e) => this.emit('error', e));
         this.server.listen(this.port, () => console.log(`Relay on port ${this.port}`));
     }
 
@@ -34,7 +35,7 @@ export class RelayServer extends EventEmitter {
             if (conn) { for (const ch of conn.channels) this.leaveChannel(id, ch); }
             this.connections.delete(id);
         });
-        socket.on('error', () => this.connections.delete(id));
+        socket.on('error', () => {});
         // Newline-terminated framing: a full frame can arrive split across
         // several TCP segments, or several frames can arrive in one chunk.
         socket.write(JSON.stringify({ type: 'connected', id }) + '\n');
