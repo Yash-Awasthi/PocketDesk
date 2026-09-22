@@ -324,10 +324,21 @@ export class DesktopController extends EventEmitter {
   async getFrame() {
     if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
     if (!this.lastFrame) {
-      await this.captureOnce();
+      // captureOnce is a no-op while the stream loop has one in flight, so
+      // wait for that frame rather than reporting a failure that never was.
+      if (this.capturing) await this._nextFrame(15000);
+      else await this.captureOnce();
       if (!this.lastFrame) return { ok: false, reason: "capture_failed" };
     }
     return { ok: true, ...this.lastFrame };
+  }
+
+  _nextFrame(timeoutMs) {
+    return new Promise((resolve) => {
+      const done = () => { clearTimeout(timer); this.off("frame", done); resolve(); };
+      const timer = setTimeout(done, timeoutMs);
+      this.once("frame", done);
+    });
   }
 
   _ensureLoop() {

@@ -805,13 +805,19 @@ export function start({ port, token, tls, relay: relayCfg }) {
       }
       // ── WhatsApp bridge (whatsapp-claude-plugin: channel surface) ─────────
       case "wa_create": {
-        const ch = wa.createChannel(String(msg.sessionId ?? ""), { allowedNumbers: Array.isArray(msg.allowedNumbers) ? msg.allowedNumbers.map(String) : [], commandPrefix: msg.commandPrefix ? String(msg.commandPrefix) : undefined });
+        const ch = wa.createChannel(String(msg.sessionId ?? ""), { allowedNumbers: Array.isArray(msg.allowedNumbers) ? msg.allowedNumbers.map(String) : [], commandPrefix: msg.commandPrefix ? String(msg.commandPrefix) : undefined, transport: msg.transport });
         send(ws, { type: "wa_channel", channel: ch });
         break;
       }
       case "wa_auth_start": {
-        const qr = wa.startAuthentication(String(msg.channelId ?? ""));
-        send(ws, qr ? { type: "wa_qr", ok: true, channelId: msg.channelId, qr } : { type: "wa_qr", ok: false, channelId: msg.channelId });
+        // A WhatsApp channel's QR arrives asynchronously on wa_event/qr; the
+        // ack here only says the socket booted.
+        try {
+          const qr = await wa.startAuthentication(String(msg.channelId ?? ""));
+          send(ws, { type: "wa_qr", ok: qr !== null, channelId: msg.channelId, qr: qr ?? undefined });
+        } catch (e) {
+          send(ws, { type: "wa_qr", ok: false, channelId: msg.channelId, error: e.message });
+        }
         break;
       }
       case "wa_auth_complete": {
@@ -850,18 +856,18 @@ export function start({ port, token, tls, relay: relayCfg }) {
       }
       // ── Remote desktop bridge (rustdesk/remodex: sessions + input + transfers) ──
       case "rd_create": {
-        const s = rd.createSession(String(msg.hostName ?? "pc"), String(msg.hostIp ?? "local"), msg.quality);  // eslint-disable-line no-use-before-define
+        const s = await rd.createSession(String(msg.hostName ?? "pc"), String(msg.hostIp ?? "local"), msg.quality);  // eslint-disable-line no-use-before-define
         send(ws, { type: "rd_session", session: { ...s, connectedAt: s.connectedAt.toISOString(), lastActivity: s.lastActivity.toISOString() } });
         break;
       }
       case "rd_frame": {
-        rd.processFrame(String(msg.sessionId ?? ""), { sessionId: msg.sessionId, data: msg.data, width: Number(msg.width) || 0, height: Number(msg.height) || 0, timestamp: Date.now(), frameNumber: Number(msg.frameNumber) || 0 });
-        send(ws, { type: "rd_frame_ok", ok: true });
+        const f = await rd.getFrame(String(msg.sessionId ?? ""));
+        send(ws, f.ok ? { type: "rd_frame", sessionId: msg.sessionId, ...f } : { type: "rd_frame_error", sessionId: msg.sessionId, reason: f.reason });
         break;
       }
       case "rd_input": {
-        const ok = rd.sendInput(String(msg.sessionId ?? ""), { type: String(msg.inputType ?? "mouse_move"), x: msg.x, y: msg.y, button: msg.button, key: msg.key, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
-        send(ws, { type: "rd_input_ok", ok });
+        const r = await rd.sendInput(String(msg.sessionId ?? ""), { type: String(msg.inputType ?? "mouse_move"), x: msg.x, y: msg.y, button: msg.button, wheel: msg.wheel, key: msg.key, text: msg.text, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
+        send(ws, { type: "rd_input_ok", ok: !!r.ok, reason: r.reason, error: r.error });
         break;
       }
       case "rd_quality": {
@@ -909,10 +915,23 @@ export function start({ port, token, tls, relay: relayCfg }) {
         send(ws, { type: "bastion_user_list", items: bastion.listUsers() });
         break;
       case "bastion_host_add": {
-        const host = bastion.registerHost(String(msg.name ?? ""), String(msg.hostname ?? ""), Number(msg.port) || 22, String(msg.username ?? ""), msg.group ? String(msg.group) : undefined);
-        send(ws, { type: "bastion_host_added", ok: true, host });
+        const host = bastion.registerHost(String(msg.name ?? ""), String(msg.hostname ?? ""), Number(msg.port) || 22, String(msg.username ?? ""), msg.group ? String(msg.group) : undefined, { password: msg.password, privateKeyPath: msg.privateKeyPath });
+        const { credentials, ...safe } = host;
+        send(ws, { type: "bastion_host_added", ok: true, host: safe });
         break;
       }
+      case "bastion_start": {
+        try {
+          const r = await bastion.start({ port: msg.port, host: msg.host });
+          send(ws, { type: "bastion_started", ...r });
+        } catch (e) {
+          send(ws, { type: "bastion_started", ok: false, error: e.message });
+        }
+        break;
+      }
+      case "bastion_stop":
+        send(ws, { type: "bastion_stopped", ...(await bastion.stop()) });
+        break;
       case "bastion_host_list":
         send(ws, { type: "bastion_host_list", items: bastion.listHosts() });
         break;
@@ -926,7 +945,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
         break;
       case "bastion_session_start": {
         const session = bastion.startSession(String(msg.userId ?? ""), String(msg.hostId ?? ""), String(msg.clientIp ?? "phone"));
-        send(ws, { type: "bastion_session_started", ok: !!session, session: session ?? null });
+        send(ws, { type: "bastion_session_started", ok: !!session, session: session ? (({ client, ...x }) => x)(session) : null });
         break;
       }
       case "bastion_session_end": {
@@ -936,7 +955,8 @@ export function start({ port, token, tls, relay: relayCfg }) {
       }
       case "bastion_sessions": {
         const items = msg.userId ? bastion.getActiveSessions(String(msg.userId)) : Array.from(bastion.sessions.values()).filter((s) => s.isActive);
-        send(ws, { type: "bastion_sessions", items });
+        // The live ssh2 client on a proxied session stays off the wire.
+        send(ws, { type: "bastion_sessions", items: items.map(({ client, ...x }) => x) });
         break;
       }
       case "bastion_stats":
@@ -973,7 +993,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
           break;
         }
         const session = sshSrv.createSession(username, String(msg.clientIp ?? "phone"), method);
-        send(ws, { type: "sshserver_session_created", ok: !!session, session: session ?? null });
+        send(ws, { type: "sshserver_session_created", ok: !!session, session: session ? (({ client, pty, ...x }) => x)(session) : null });
         break;
       }
       case "sshserver_exec": {
@@ -986,8 +1006,21 @@ export function start({ port, token, tls, relay: relayCfg }) {
         send(ws, { type: "sshserver_session_ended", ok });
         break;
       }
+      case "sshserver_start": {
+        try {
+          const r = await sshSrv.start({ port: msg.port, host: msg.host });
+          send(ws, { type: "sshserver_started", ...r });
+        } catch (e) {
+          send(ws, { type: "sshserver_started", ok: false, error: e.message });
+        }
+        break;
+      }
+      case "sshserver_stop":
+        send(ws, { type: "sshserver_stopped", ...(await sshSrv.stop()) });
+        break;
       case "sshserver_sessions":
-        send(ws, { type: "sshserver_sessions", items: sshSrv.getActiveSessions() });
+        // Live handles (ssh2 client, PTY) stay off the wire.
+        send(ws, { type: "sshserver_sessions", items: sshSrv.getActiveSessions().map(({ client, pty, ...s }) => s) });
         break;
       case "sshserver_stats":
         send(ws, { type: "sshserver_stats", ...sshSrv.getStats() });
@@ -1017,9 +1050,14 @@ export function start({ port, token, tls, relay: relayCfg }) {
       }
       case "profile_connect": {
         const proto = String(msg.protocol ?? "ssh");
+        const id = String(msg.id ?? "");
+        // Credentials are used for this connect only — never stored on the profile.
+        const opts = { password: msg.password, passphrase: msg.passphrase, port: msg.port, timeoutMs: msg.timeoutMs };
         try {
-          const session = proto === "vnc" ? await mpc.connectVNC(String(msg.id ?? "")) : proto === "sftp" ? await mpc.connectSFTP(String(msg.id ?? "")) : await mpc.connectSSH(String(msg.id ?? ""));
-          send(ws, { type: "profile_connected", ok: true, session });
+          const session = proto === "vnc" ? await mpc.connectVNC(id, opts) : proto === "sftp" ? await mpc.connectSFTP(id, opts) : await mpc.connectSSH(id, opts);
+          // The live handles (ssh2 client, TCP socket, sftp channel) never go on the wire.
+          const { client, socket, sftp, channels, ...safe } = session;
+          send(ws, { type: "profile_connected", ok: true, session: safe });
         } catch (e) {
           send(ws, { type: "profile_connected", ok: false, error: e.message });
         }
@@ -1027,7 +1065,8 @@ export function start({ port, token, tls, relay: relayCfg }) {
       }
       case "profile_disconnect": {
         const proto = String(msg.protocol ?? "ssh");
-        const r = proto === "vnc" ? await mpc.disconnectVNC(String(msg.sessionId ?? "")) : await mpc.disconnectSSH(String(msg.sessionId ?? ""));
+        const sid = String(msg.sessionId ?? "");
+        const r = proto === "vnc" ? await mpc.disconnectVNC(sid) : proto === "sftp" ? await mpc.disconnectSFTP(sid) : await mpc.disconnectSSH(sid);
         send(ws, { type: "profile_disconnected", ok: r.ok === true });
         break;
       }
@@ -1038,8 +1077,12 @@ export function start({ port, token, tls, relay: relayCfg }) {
         send(ws, { type: "hostkey_list", items: mpc.listHostKeys() });
         break;
       case "sshkey_generate": {
-        const key = mpc.generateKey(String(msg.algo ?? "ed25519"), msg.name ? String(msg.name) : "");
-        send(ws, { type: "sshkey_generated", ok: true, key: { id: key.id, name: key.name, type: key.type } });
+        try {
+          const key = mpc.generateKey(String(msg.algo ?? "ed25519"), msg.name ? String(msg.name) : "", { bits: msg.bits, passphrase: msg.passphrase });
+          send(ws, { type: "sshkey_generated", ok: true, key: { id: key.id, name: key.name, type: key.type, publicKey: key.publicKey, fingerprint: key.fingerprint } });
+        } catch (e) {
+          send(ws, { type: "sshkey_generated", ok: false, error: e.message });
+        }
         break;
       }
       case "sshkey_list":
@@ -2009,18 +2052,6 @@ export function start({ port, token, tls, relay: relayCfg }) {
     if (ch) sessions.write(ch.sessionId, command + "\n");
   });
 
-  // ── Remote desktop bridge (rustdesk/remodex: screen/input/file surface) ──
-  const rd = new RemoteDesktopBridgeManager();
-  for (const evt of ["session:connected", "session:disconnected", "frame:received", "input:forwarded", "quality:updated", "transfer:completed", "transfer:progress"]) {
-    rd.on(evt, (payload) => broadcast({ type: "rd_event", rdEvent: evt.split(":")[1], ...payload }));
-  }
-
-  // ── VNC bridge (noVNC/guacamole: TCP frame server fed via vnc_frame) ────
-  const vnc = new VNCBridge();
-  for (const evt of ["bridge:started", "bridge:stopped", "client:connected", "frame:received"]) {
-    vnc.on(evt, (payload) => broadcast({ type: "vnc_event", vncEvent: evt.split(":")[1], ...payload }));
-  }
-
   // ── Real desktop capture + input (the frame SOURCE for rd_/desktop UIs) ──
   // Frames are client-scoped (a watching ws gets them directly — they are
   // ~200-300 KB each, too heavy for the broadcast fan-out) and the capture
@@ -2040,16 +2071,28 @@ export function start({ port, token, tls, relay: relayCfg }) {
     }
   });
 
+  // ── Remote desktop bridge (rustdesk/remodex: session-scoped screen+input) ──
+  const rd = new RemoteDesktopBridgeManager(desktop);
+  for (const evt of ["session:connected", "session:disconnected", "frame:received", "input:forwarded", "quality:updated"]) {
+    rd.on(evt, (payload) => broadcast({ type: "rd_event", rdEvent: evt.split(":")[1], ...payload }));
+  }
+
+  // ── VNC bridge (noVNC/guacamole: TCP frame server fed by real capture) ──
+  const vnc = new VNCBridge(5900, desktop);
+  for (const evt of ["bridge:started", "bridge:stopped", "client:connected", "frame:received"]) {
+    vnc.on(evt, (payload) => broadcast({ type: "vnc_event", vncEvent: evt.split(":")[1], ...payload }));
+  }
+
   // ── SSH bastion (sshportal/bifroest/cardea: jump-host access control) ───
   const bastion = new SSHBastion();
   for (const evt of ["user:registered", "host:registered", "access:created", "session:started", "session:ended"]) {
-    bastion.on(evt, (payload) => broadcast({ type: "bastion_event", bastionEvent: evt.split(":")[1], ...payload }));
+    bastion.on(evt, ({ client, credentials, ...payload }) => broadcast({ type: "bastion_event", bastionEvent: evt.split(":")[1], ...payload }));
   }
 
   // ── Advanced SSH server (bifroest/sshwifty: auth + command control) ─────
   const sshSrv = new AdvancedSSHServerManager();
   for (const evt of ["user:registered", "session:created", "command:executed", "session:ended"]) {
-    sshSrv.on(evt, (payload) => broadcast({ type: "sshserver_event", sshEvent: evt.split(":")[1], ...payload }));
+    sshSrv.on(evt, ({ client, pty, ...payload }) => broadcast({ type: "sshserver_event", sshEvent: evt.split(":")[1], ...payload }));
   }
 
   // ── Multi-protocol client (haven-ssh-client: profiles, host-key TOFU, keys)
@@ -2130,6 +2173,11 @@ export function start({ port, token, tls, relay: relayCfg }) {
     scheduler.stop();
     liveDigest.stop();
     mcpServer.stop();
+    desktop.dispose();
+    mpc.dispose();
+    sshSrv.stop();
+    bastion.stop();
+    for (const ch of wa.getChannels()) wa.disconnect(ch.id);
     devices.persist();
   });
 

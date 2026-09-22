@@ -22,9 +22,16 @@ async function main() {
   const sessionId = created.id;
 
   // Channel with an allowlist.
-  c.send({ type: "wa_create", sessionId, allowedNumbers: ["+15550001"] });
+  // transport "local" drives the routing without booting a real WhatsApp link.
+  c.send({ type: "wa_create", sessionId, allowedNumbers: ["+15550001"], transport: "local" });
   const ch = await c.next((m) => m.type === "wa_channel");
   check("wa_create returns channel", !!ch.channel.id && ch.channel.status === "disconnected");
+  check("local transport honoured", ch.channel.transport === "local");
+
+  // A channel with no transport asked for links to WhatsApp for real.
+  c.send({ type: "wa_create", sessionId });
+  const real = await c.next((m) => m.type === "wa_channel");
+  check("WhatsApp is the default transport", real.channel.transport === "whatsapp");
   const cid = ch.channel.id;
 
   // QR auth lifecycle.
@@ -67,7 +74,8 @@ async function main() {
 
   c.send({ type: "wa_stats" });
   const stats = await c.next((m) => m.type === "wa_stats");
-  check("stats count channels/messages", stats.totalChannels === 1 && stats.activeChannels === 1 && stats.totalMessages >= 1);
+  // Two channels exist: the local one under test and the default-transport one.
+  check("stats count channels/messages", stats.totalChannels === 2 && stats.activeChannels === 1 && stats.totalMessages >= 1);
 
   // Disconnect.
   c.send({ type: "wa_disconnect", channelId: cid });

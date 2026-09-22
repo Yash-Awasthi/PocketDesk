@@ -7,7 +7,7 @@
 [![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-orange.svg)](#protocol-v1)
 [![Android](https://img.shields.io/badge/Android-Kotlin-purple.svg)](https://developer.android.com)
 [![Plugins](https://img.shields.io/badge/Plugins-4-blueviolet.svg)](#plugin-system)
-[![Tests](https://img.shields.io/badge/Tests-29%20suites-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-30%20suites-brightgreen.svg)](#testing)
 
 **No cloud. No accounts. Your machine, your data, your agents.**
 
@@ -45,14 +45,15 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 🎬 **Session Recording** | Record any session and replay/export it later |
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states with busy→quiet push |
 | 🔀 **Tunnels** | Reach any PC-local service from your phone over the harness connection |
-| 🖥️ **VNC Bridge** | Share a screen frame feed over a local TCP port (`vnc_start/stop/status/frame` + `vnc_event`) |
-| 🖨️ **Desktop Control** | Watch the whole PC screen live (~3 fps) and drive it — from the **browser AND the Android app** (tap = click, long-press = right-click, drag = move, scroll, type, keys) (`desktop_*`; Windows, PowerShell-powered) |
+| 🖥️ **VNC Bridge** | Serve the live captured screen over a local TCP port — clients ask for `GET_FRAME` and get real JPEG frames (`vnc_start/stop/status/frame` + `vnc_event`) |
+| 🖨️ **Desktop Control** | Watch the whole PC screen live (~3 fps) and drive it — from the **browser AND the Android app** (tap = click, long-press = right-click, drag = move, scroll, type, keys) (`desktop_*`; Windows, PowerShell-powered). The session-scoped `rd_*` surface serves the same capture and input per viewer. |
 | 🔔 **Push Test** | One click in the browser fires a test push through every configured channel — verify your ntfy/Pushover phone subscription instantly |
-| 🛡️ **SSH Bastion** | Jump-host access control: users, hosts, access rules with expiry, session gating, invite tokens (`bastion_*`) |
-| 🔒 **SSH Server Control** | Per-user auth + command allowlists with session recording (`sshserver_*`) |
-| 📇 **Connection Profiles** | Multi-protocol SSH/VNC/SFTP profiles, host-key TOFU, SSH key management (`profile_*`/`hostkey_*`/`sshkey_*`) |
+| 🛡️ **SSH Bastion** | A real jump host: log in as `user@host` with your registered key, the access rule is checked, and the channel is proxied to the target with byte accounting (`bastion_*`) |
+| 🔒 **SSH Server Control** | A real SSH listener on the PC: per-user password/public-key auth, command allowlists enforced before a command runs, PTY shells, session recording (`sshserver_*`) |
+| 📇 **Connection Profiles** | Real SSH, SFTP and VNC connections from saved profiles, host-key trust-on-first-use, OpenSSH key generation kept out of the protocol (`profile_*`/`hostkey_*`/`sshkey_*`) |
 | ⚡ **Keep-Awake** | PC stays awake while agents run (per-process, never touches your power settings) |
 | 🤖 **Telegram Control** | Prompt sessions and approve proposals from a Telegram chat |
+| 💚 **WhatsApp Control** | Link the daemon as a WhatsApp companion device (real pairing QR), then drive sessions with prefixed messages from allowlisted numbers (`wa_*`) |
 | ♻️ **Chat Resurrection** | Conversations survive daemon restarts — one tap re-opens them via the CLI's own history |
 | 🌿 **Git Panel** | Branch/diff/log/status of any repo on the PC, read-only |
 | ⏭️ **Prompt Queue** | Queue follow-ups while the agent works — they drain automatically when the turn finishes |
@@ -88,6 +89,11 @@ cd PocketDesk/daemon
 npm install
 npm start
 ```
+
+Runtime dependencies are `ws`, `node-pty` and `ssh2` (the SSH server, jump host
+and connection profiles). WhatsApp control additionally needs
+`@whiskeysockets/baileys`, which is an optional dependency: skip it and every
+other feature still runs — only a WhatsApp channel will refuse to link.
 
 ---
 
@@ -132,7 +138,10 @@ auth token (also persisted to `~/.pocketdesk/config.json` —
    token from the banner or `config.json`.
 3. **Browser smoke test** — open `http://localhost:8765` on the PC, paste the
    token, hit **Connect**, then **＋ New Chat** → pick an installed agent →
-   prompt → **Start**.
+   prompt → **Start**. The browser client also carries a **Tools** tab:
+   a read-only Git panel for any repo path on the PC, the `doctor` self-check,
+   and a search over everything installed with **Open** for a GUI app or
+   **Run** for a command-line tool.
 
 When the app's status bar shows **Connected**, you're paired.
 
@@ -446,6 +455,9 @@ JSON frames; binary payloads are base64.
 `usage_list` · `usage_get` — token/cost dashboards ·
 `digest_attach` · `digest_detach` — live plain-text terminal digest ·
 `mcp_start` · `mcp_stop` · `mcp_status` — embedded MCP endpoint control ·
+`sshserver_start` · `sshserver_stop` — bind/release the PC's own SSH listener ·
+`bastion_start` · `bastion_stop` — bind/release the jump host ·
+`profile_connect {id, protocol, password?, passphrase?}` — real SSH/SFTP/VNC connect ·
 
 `share_create` · `share_join` · `share_list` · `share_revoke` — read-only spectator links ·
 `stats` — host CPU/mem/uptime · `git_status` · `git_diff` · `git_log` · `git_branches` — read-only repo inspection ·
@@ -466,7 +478,7 @@ Every `out` frame carries a monotonic `seq`; on reconnect send `attach {id, sinc
 
 ```bash
 cd daemon
-npm.cmd test                    # full suite (8 files, 100+ checks)
+npm.cmd test                    # full suite (30 files)
 node test/smoke.mjs             # session smoke tests
 node test/features.test.mjs     # absorbed-features suite (shares, backfill, recording, tunnels, resurrection…)
 ```

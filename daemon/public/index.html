@@ -146,6 +146,7 @@
       <div class="tab" data-tab="dashboard" onclick="switchTab('dashboard')">📊 Dashboard</div>
       <div class="tab" data-tab="freebuff" onclick="switchTab('freebuff'); send({type:'fb_status'}); send({type:'fb_skill_list'}); send({type:'fb_config_list'});">🦾 Freebuff</div>
       <div class="tab" data-tab="desktop" onclick="switchTab('desktop'); desktopOnShow();">🖨️ Desktop</div>
+      <div class="tab" data-tab="tools" onclick="switchTab('tools'); toolsOnShow();">🧰 Tools</div>
     </div>
     <div class="tab-content">
       <div class="tab-pane active" id="pane-terminal">
@@ -260,6 +261,44 @@
           <div class="dash-section" style="padding:0">
             <canvas id="deskCanvas" width="1280" height="720"
                     style="width:100%;background:#0d1117;border-radius:8px;cursor:crosshair;display:block"></canvas>
+          </div>
+        </div>
+      </div>
+      <div class="tab-pane" id="pane-tools">
+        <div class="dashboard">
+          <div class="dash-section">
+            <h3>🌿 Git</h3>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;margin-bottom:8px">
+              <input id="gitCwd" placeholder="repository folder on the PC" style="flex:1;min-width:220px" />
+              <button class="btn" onclick="gitLoad()">Load</button>
+              <span id="gitHead" style="color:#8b949e"></span>
+            </div>
+            <div id="gitError" style="color:#f85149;font-size:12px"></div>
+            <div id="gitBody" style="display:none">
+              <table class="client-table" id="gitFiles"><thead><tr><th>State</th><th>Path</th></tr></thead><tbody></tbody></table>
+              <div style="display:flex;gap:6px;margin:8px 0">
+                <button class="btn" onclick="send({type:'git_log', cwd: gitCwdValue(), limit: 20})">Log</button>
+                <button class="btn" onclick="send({type:'git_diff', cwd: gitCwdValue()})">Diff</button>
+                <button class="btn" onclick="send({type:'git_branches', cwd: gitCwdValue()})">Branches</button>
+              </div>
+              <pre id="gitOut" style="max-height:320px;overflow:auto;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:10px;font-size:12px;white-space:pre-wrap"></pre>
+            </div>
+          </div>
+          <div class="dash-section">
+            <h3>🩺 Doctor</h3>
+            <button class="btn" onclick="send({type:'doctor'})">Run checks</button>
+            <table class="client-table" id="docTable" style="margin-top:8px"><thead><tr><th></th><th>Check</th><th>Detail</th><th>Hint</th></tr></thead><tbody></tbody></table>
+          </div>
+          <div class="dash-section">
+            <h3>🔎 Installed apps</h3>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;margin-bottom:8px">
+              <input id="appQ" placeholder="search apps and commands" style="flex:1;min-width:200px"
+                     onkeydown="if(event.key==='Enter') appsSearch()" />
+              <input id="appCwd" placeholder="open at folder (optional)" style="flex:1;min-width:180px" />
+              <button class="btn" onclick="appsSearch()">Search</button>
+              <button class="btn" onclick="appsSearch(true)">Rescan</button>
+            </div>
+            <table class="client-table" id="appTable"><thead><tr><th>Name</th><th>Path</th><th></th></tr></thead><tbody></tbody></table>
           </div>
         </div>
       </div>
@@ -436,6 +475,19 @@ function handle(m) {
       renderDashboard();
       break;
     case "manifests": renderTools(m.items || []); break;
+    case "git_status": renderGitStatus(m); break;
+    case "git_log":
+      showGitOut(m.ok ? (m.commits || []).map(c => `${c.hash}  ${c.when.padEnd(16)} ${c.author}  ${c.subject}`).join("\n") : m.error);
+      break;
+    case "git_diff": showGitOut(m.ok ? (m.out || "(no changes against HEAD)") : m.error); break;
+    case "git_branches":
+      showGitOut(m.ok ? (m.branches || []).map(b => `${b.current ? "*" : " "} ${b.name}`).join("\n") : m.error);
+      break;
+    case "doctor_report": renderDoctor(m); break;
+    case "apps": renderApps(m.items || []); break;
+    case "gui_opened":
+      dashEvent(m.ok ? `opened ${m.harness || m.path || ""}` : `open failed: ${m.reason || ""}`, m.ok ? 'green' : 'red');
+      break;
     case "sessions":
       renderSessions((m.items || []).filter(s => s.kind !== "chat"));
       renderChats((m.items || []).filter(s => s.kind === "chat"));
@@ -648,6 +700,75 @@ function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + tab));
   if (tab === 'terminal' && fitAddon) requestAnimationFrame(() => fitAddon.fit());
+}
+
+// ── Tools: git panel, doctor, installed apps ──
+let toolsLoaded = false;
+function toolsOnShow() {
+  if (toolsLoaded) return;
+  toolsLoaded = true;
+  send({ type: "doctor" });
+  appsSearch();
+}
+
+function gitCwdValue() { return document.getElementById("gitCwd").value.trim(); }
+
+function gitLoad() {
+  document.getElementById("gitError").textContent = "";
+  send({ type: "git_status", cwd: gitCwdValue() });
+}
+
+function showGitOut(text) { document.getElementById("gitOut").textContent = text || ""; }
+
+function renderGitStatus(m) {
+  const body = document.getElementById("gitBody");
+  const err = document.getElementById("gitError");
+  if (!m.ok) {
+    body.style.display = "none";
+    err.textContent = m.error || "not a git repository";
+    document.getElementById("gitHead").textContent = "";
+    return;
+  }
+  err.textContent = "";
+  body.style.display = "";
+  const track = [m.upstream && `↔ ${m.upstream}`, m.ahead && `↑${m.ahead}`, m.behind && `↓${m.behind}`].filter(Boolean).join(" ");
+  document.getElementById("gitHead").textContent = `${m.branch || "?"} ${track}`;
+  const tb = document.querySelector("#gitFiles tbody");
+  tb.innerHTML = (m.files || []).map(f => `<tr><td>${esc(f.x || "·")}</td><td>${esc(f.path)}</td></tr>`).join("")
+    || `<tr><td colspan="2" style="color:#8b949e">working tree clean</td></tr>`;
+  showGitOut("");
+}
+
+function renderDoctor(m) {
+  const tb = document.querySelector("#docTable tbody");
+  tb.innerHTML = (m.checks || []).map(c =>
+    `<tr><td>${c.ok ? "✅" : "❌"}</td><td>${esc(c.name)}</td><td>${esc(c.detail || "")}</td><td style="color:#8b949e">${esc(c.hint || "")}</td></tr>`
+  ).join("");
+}
+
+function appsSearch(refresh) {
+  send({ type: "apps_discover", q: document.getElementById("appQ").value.trim(), refresh: !!refresh });
+}
+
+function renderApps(items) {
+  const cwd = () => document.getElementById("appCwd").value.trim();
+  const tb = document.querySelector("#appTable tbody");
+  tb.innerHTML = "";
+  for (const app of items) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(app.name)}</td><td style="color:#8b949e">${esc(app.path)}</td><td></td>`;
+    const btn = document.createElement("button");
+    btn.className = "btn";
+    btn.textContent = app.kind === "gui" ? "Open" : "Run";
+    // A GUI app opens on the PC; a CLI tool gets a PTY the Terminal tab shows.
+    btn.onclick = () => {
+      if (app.kind === "gui") send({ type: "gui_open", path: app.path, cwd: cwd() });
+      else { send({ type: "create", path: app.path, cwd: cwd() }); switchTab("terminal"); }
+    };
+    tr.lastElementChild.appendChild(btn);
+    tb.appendChild(tr);
+  }
+  if (!items.length) tb.innerHTML = `<tr><td colspan="3" style="color:#8b949e">nothing matched</td></tr>`;
 }
 
 // ── Desktop control (AnyDesk-style: canvas viewer + input) ──

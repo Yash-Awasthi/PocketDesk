@@ -4,7 +4,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { generateSelfSignedCert } from "./tls-gen.js";
 
-const dir = path.join(os.homedir(), ".pocketdesk");
+// RH_HOME relocates every piece of daemon state (config, TLS, SSH keys) —
+// tests set it so a run never touches the real profile.
+const dir = process.env.RH_HOME || path.join(os.homedir(), ".pocketdesk");
 const file = path.join(dir, "config.json");
 
 export function loadConfig() {

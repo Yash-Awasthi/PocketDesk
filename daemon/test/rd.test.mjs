@@ -1,9 +1,10 @@
-// Remote desktop bridge absorption test — exercises the rd_* protocol surface
-// (rustdesk/remodex inspiration): session lifecycle with async connect,
-// frame buffering, input forwarding gated on connected state, quality
-// presets, stats. Fully in-memory — deterministic, no external processes.
-import { check, connectRaw, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
+// Remote desktop bridge test — the rd_* protocol surface over the real
+// desktop capture/input controller. On Windows a session serves real JPEG
+// frames and injects real input; elsewhere the same calls degrade with
+// unsupported_platform while session bookkeeping still works.
+import { check, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
 
+const IS_WIN = process.platform === "win32";
 const tmp = makeTmp("rh-t-");
 
 const PORT = 8814;
@@ -15,43 +16,51 @@ async function main() {
   await d.ready;
   const c = await openAndHello(PORT, TOKEN);
 
-  // Create session (connect is async — 500ms).
   c.send({ type: "rd_create", hostName: "workstation", hostIp: "192.168.1.10", quality: "high" });
-  const s = await c.next((m) => m.type === "rd_session");
+  const s = await c.next((m) => m.type === "rd_session", 20000);
   check("rd_create returns session", !!s.session.id && s.session.quality === "high");
+  check("session reports platform support", s.session.supported === IS_WIN);
   const sid = s.session.id;
 
-  // Async connect completes and broadcasts.
   const connected = await c.next((m) => m.type === "rd_event" && m.rdEvent === "connected" && m.id === sid, 10000);
-  check("session connects asynchronously", !!connected);
+  check("session connect broadcasts", !!connected);
 
-  // Input forwarding works once connected.
-  c.send({ type: "rd_input", sessionId: sid, inputType: "mouse_click", x: 100, y: 200, button: 0 });
-  const inp = await c.next((m) => m.type === "rd_input_ok");
-  check("input forwarded when connected", inp.ok === true);
+  // Frame pull: a real JPEG on Windows (SOI marker 0xFFD8), clean refusal elsewhere.
+  c.send({ type: "rd_frame", sessionId: sid });
+  const fr = await c.next((m) => m.type === "rd_frame" || m.type === "rd_frame_error", 20000);
+  if (IS_WIN) {
+    const head = Buffer.from(fr.base64 || "", "base64").subarray(0, 2);
+    check("rd_frame returns a real JPEG", fr.type === "rd_frame" && head[0] === 0xff && head[1] === 0xd8);
+    check("frame carries real screen size", fr.width > 100 && fr.height > 100);
+  } else {
+    check("rd_frame degrades cleanly", fr.type === "rd_frame_error" && fr.reason === "unsupported_platform");
+    check("no frame dimensions off-platform", fr.width === undefined);
+  }
+
+  // Input forwarding reaches the real desktop (a move to a harmless corner).
+  c.send({ type: "rd_input", sessionId: sid, inputType: "mouse_move", x: 10, y: 10 });
+  const inp = await c.next((m) => m.type === "rd_input_ok", 15000);
+  check("input result reflects the platform", inp.ok === IS_WIN);
   const inpEvt = await c.next((m) => m.type === "rd_event" && m.rdEvent === "forwarded");
-  check("input event broadcast", inpEvt.event && inpEvt.event.x === 100);
+  check("input event broadcast", inpEvt.event && inpEvt.event.x === 10);
 
-  // Frames buffer (no crash) + broadcast.
-  c.send({ type: "rd_frame", sessionId: sid, frameNumber: 1, width: 1920, height: 1080, data: "ZmFrZQ==" });
-  await c.next((m) => m.type === "rd_frame_ok");
-  const frameEvt = await c.next((m) => m.type === "rd_event" && m.rdEvent === "received");
-  check("frame processed + broadcast", frameEvt.frameNumber === 1);
+  // Unknown input types are refused before they reach the helper.
+  c.send({ type: "rd_input", sessionId: sid, inputType: "teleport", x: 1, y: 1 });
+  const badType = await c.next((m) => m.type === "rd_input_ok");
+  check("unknown input type rejected", badType.ok === false && badType.reason === "bad_input_type");
 
-  // Quality presets adjust fps/resolution.
+  // Quality presets apply.
   c.send({ type: "rd_quality", sessionId: sid, quality: "ultra" });
   await c.next((m) => m.type === "rd_quality_ok");
   c.send({ type: "rd_list" });
   const lst = await c.next((m) => m.type === "rd_list");
-  const ultra = lst.items.find((x) => x.id === sid);
-  check("quality preset applies (ultra → 120fps)", ultra.fps === 120 && ultra.resolution.width === 2560);
+  check("quality preset applies", lst.items.find((x) => x.id === sid).quality === "ultra");
 
   // Unknown session input rejected.
-  c.send({ type: "rd_input", sessionId: "nope", inputType: "key_press", key: "a" });
+  c.send({ type: "rd_input", sessionId: "nope", inputType: "mouse_move", x: 1, y: 1 });
   const bad = await c.next((m) => m.type === "rd_input_ok");
-  check("input to unknown session rejected", bad.ok === false);
+  check("input to unknown session rejected", bad.ok === false && bad.reason === "no_session");
 
-  // Stats + disconnect.
   c.send({ type: "rd_stats" });
   const stats = await c.next((m) => m.type === "rd_stats");
   check("stats count active sessions", stats.activeSessions === 1 && stats.totalSessions === 1);
@@ -64,7 +73,7 @@ async function main() {
   check("active drops after disconnect", stats2.activeSessions === 0);
 
   await c.close();
-await teardown(tmp);
+  await teardown(tmp);
 
   finish();
 }

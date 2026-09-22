@@ -82,9 +82,11 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
    working ESM this pass: relay_server, terminal_renderer, file_sync_engine,
    stream_json_parser, session_monitor, shooter_notifications, fleet_view,
    remote_desktop_bridge, whatsapp_bridge.
-3. TODO next (matrix): all 🧩 rows are ✅ now; remaining 🗺️ surfaces: full WebRTC
-   screen transport (rd_* currently simulates frames), real baileys WhatsApp transport
-   (wa_* is the daemon-side channel surface), mosh-style UDP roam, E2EE shares,
+3. TODO next (matrix): all 🧩 rows are ✅ now. The rd_*/vnc_*/profile_*/bastion_*/
+   sshserver_*/wa_* surfaces carry real traffic as of 2026-09-22 (ssh2 for SSH and
+   SFTP, an RFB handshake for VNC, Baileys for WhatsApp, the desktop capture
+   controller for frames). Remaining 🗺️ surfaces: full WebRTC screen transport
+   (frames are JPEG over the protocol at ~3 fps), mosh-style UDP roam, E2EE shares,
    Android foreground service + biometric lock.
 
 ## Environment facts

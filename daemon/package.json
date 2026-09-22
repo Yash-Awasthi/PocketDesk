@@ -16,9 +16,13 @@
   },
   "dependencies": {
     "node-pty": "^1.0.0",
+    "ssh2": "^1.17.0",
     "ws": "^8.18.0"
   },
   "allowScripts": {
     "node-pty@1.1.0": true
+  },
+  "optionalDependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc14"
   }
 }
