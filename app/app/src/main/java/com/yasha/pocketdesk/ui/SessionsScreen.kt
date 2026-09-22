@@ -165,7 +165,7 @@ private fun humanBytes(n: Long?): String = when {
 }
 
 @Composable
-private fun DirPickerDialog(ws: WsClient, onSelect: (String) -> Unit, onDismiss: () -> Unit) {
+internal fun DirPickerDialog(ws: WsClient, onSelect: (String) -> Unit, onDismiss: () -> Unit) {
     val listing = ws.dirListing
     val ctx = LocalContext.current
     var transfer by remember { mutableStateOf<String?>(null) }

@@ -35,6 +35,9 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
         private set
     var progress by mutableStateOf<Map<String, String>>(emptyMap())
         private set
+    /** Applications found on the PC that ship no manifest. */
+    var apps by mutableStateOf<List<AppEntry>>(emptyList())
+        private set
     var dirListing by mutableStateOf<FsListing?>(null)
         private set
     var lastError by mutableStateOf<String?>(null)
@@ -271,8 +274,13 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     fun install(id: String): Boolean = send(Proto.install(id))
 
     /** Start a GUI application on the PC. It has no terminal to attach to. */
-    fun guiOpen(id: String): Boolean = send(Proto.guiOpen(id))
+    fun guiOpen(id: String, cwd: String = ""): Boolean = send(Proto.guiOpen(id, cwd))
+
+    /** Start a discovered application, by the path the daemon reported for it. */
+    fun guiOpenPath(path: String, cwd: String = ""): Boolean = send(Proto.guiOpenPath(path, cwd))
     fun createSession(harness: String, cwd: String): Boolean = send(Proto.create(harness, cwd))
+    fun createSessionAt(path: String, cwd: String): Boolean = send(Proto.createPath(path, cwd))
+    fun discoverApps(q: String, refresh: Boolean = false): Boolean = send(Proto.appsDiscover(q, refresh))
     fun attach(id: String): Boolean {
         attachedSessions.add(id)
         val since = lastSeq[id]
@@ -455,16 +463,19 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
                 events.tryEmit(RhEvent.Exit(id, harnessId, Proto.exitCode(m)))
             }
             "gui_opened" -> {
-                // The window opens on the PC, so only a refusal is worth
-                // reporting back here.
+                // The window opens on the PC, out of sight: success moves the
+                // phone to the desktop view, a refusal only reports itself.
+                val app = str(m, "harness") ?: ""
                 if (m["ok"]?.jsonPrimitive?.booleanOrNull == false) {
                     val reason = str(m, "reason") ?: "could not open the app"
-                    val app = str(m, "harness") ?: ""
                     val msg = if (app.isEmpty()) reason else "$app: $reason"
                     lastError = msg
                     events.tryEmit(RhEvent.Failure(msg))
+                } else {
+                    events.tryEmit(RhEvent.GuiOpened(app))
                 }
             }
+            "apps" -> apps = Proto.parseApps(m)
             "progress" -> {
                 val id = str(m, "id") ?: return
                 val line = str(m, "line") ?: return

@@ -8,13 +8,26 @@
  * `sshserver_*` messages; a real SSH wire listener can be layered on top
  * (see ssh_bastion.js for the jump-host variant).
  */
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
 
 function constantTimeEquals(a, b) {
   const x = Buffer.from(String(a));
   const y = Buffer.from(String(b));
   return x.length === y.length && timingSafeEqual(x, y);
+}
+
+function hashPassword(password) {
+  const salt = randomBytes(16).toString("hex");
+  const hash = scryptSync(String(password), salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  const [salt, hash] = String(stored ?? "").split(":");
+  if (!salt || !hash) return false;
+  const candidate = scryptSync(String(password ?? ""), salt, 64).toString("hex");
+  return constantTimeEquals(candidate, hash);
 }
 
 export class AdvancedSSHServerManager extends EventEmitter {
@@ -40,7 +53,7 @@ export class AdvancedSSHServerManager extends EventEmitter {
   registerUser(username, options = {}) {
     const user = {
       username,
-      passwordHash: options.passwordHash,
+      passwordHash: options.password ? hashPassword(options.password) : undefined,
       publicKey: options.publicKey,
       allowedCommands: options.allowedCommands || [],
       maxSessions: options.maxSessions || 3,
@@ -63,7 +76,7 @@ export class AdvancedSSHServerManager extends EventEmitter {
     if (!user.passwordHash && !user.publicKey) return true;
 
     if (method === "password" && user.passwordHash) {
-      return constantTimeEquals(createHash("sha256").update(String(credential ?? "")).digest("hex"), user.passwordHash);
+      return verifyPassword(credential, user.passwordHash);
     }
 
     if (method === "publickey" && user.publicKey) {

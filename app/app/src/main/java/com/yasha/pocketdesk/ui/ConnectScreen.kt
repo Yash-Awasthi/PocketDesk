@@ -80,13 +80,16 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
     trustFp?.let { fp ->
         AlertDialog(
             onDismissRequest = { },
-            title = { Text("Unknown certificate") },
+            title = { Text("⚠ Unverified certificate") },
             text = {
                 Text(
-                    "The daemon's TLS certificate is not pinned yet.\n\n" +
+                    "This address was typed by hand, so the connection is not pinned. " +
+                        "Any device on the network could be presenting this certificate instead of your daemon — " +
+                        "trusting it blindly opens you to a man-in-the-middle.\n\n" +
                         "SHA-256 fingerprint:\n" +
                         fp.chunked(2).joinToString(" ") + "\n\n" +
-                        "Compare it with the value printed by the daemon, then trust.",
+                        "Only trust it if this matches the fingerprint printed by the daemon on your PC. " +
+                        "For a verified connection instead, pair with the QR code.",
                 )
             },
             confirmButton = {

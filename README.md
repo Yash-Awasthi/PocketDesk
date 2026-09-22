@@ -35,7 +35,8 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📁 **File Browser** | Browse, upload, and download files on your PC from your phone |
 | 🔐 **TLS + Pinning** | Self-signed cert support with SHA-256 fingerprint pinning |
 | 📦 **Auto-Install** | One-tap npm/pip install with live progress output |
-| 🪟 **IDE Launch** | Open any installed desktop IDE or GUI app on the PC from the phone (VS Code, Zed, Antigravity, OpenCode Desktop, Freebuff Desktop) — the window opens on the PC, then the Desktop screen drives it (`gui_open`) |
+| 🪟 **IDE Launch** | Open any installed desktop IDE or GUI app on the PC from the phone, at the project folder you picked — the window opens on the PC, then the Desktop screen drives it (`gui_open`) |
+| 🔎 **App discovery** | Everything installed, not only what ships a manifest: Start Menu shortcuts, `/Applications` bundles and `.desktop` entries for GUI apps, PATH for command-line tools. Search on the Tools screen, **Open** for a GUI app, **Run** for a CLI tool in a PTY (`apps_discover`) |
 | 🔌 **Plugin System** | Drop a JS file to extend the daemon — no core changes needed |
 | 📝 **Proposals** | Agent actions require human approval — safety by default |
 | 📱 **Multi-PC** | Connect to multiple PCs, each with pinned certificates |
@@ -433,7 +434,7 @@ Proposals auto-expire after 5 minutes.
 JSON frames; binary payloads are base64.
 
 **Client → Server:**
-`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `propose` · `approve` · `reject` · `proposal_list` · `chat_history` · `pin`/`unpin` · `forward_*` · `sdk_*` · `transcribe` · `gui_open` — open a desktop IDE on the PC · `audit_log`
+`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `propose` · `approve` · `reject` · `proposal_list` · `chat_history` · `pin`/`unpin` · `forward_*` · `sdk_*` · `transcribe` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed · `audit_log`
 <details>
 <summary>Absorbed-feature messages</summary>
 
@@ -455,7 +456,7 @@ JSON frames; binary payloads are base64.
 </details>
 
 **Server → Client:**
-`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `chatreplay` · `chatuser` · `chatdelta` · `chartool` · `chatstate` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `activity` · `gui_opened` · `error`
+`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `chatreplay` · `chatuser` · `chatdelta` · `chartool` · `chatstate` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `activity` · `gui_opened` · `apps` · `error`
 
 Every `out` frame carries a monotonic `seq`; on reconnect send `attach {id, since: <last seq>}` and the daemon replays only what you missed.
 

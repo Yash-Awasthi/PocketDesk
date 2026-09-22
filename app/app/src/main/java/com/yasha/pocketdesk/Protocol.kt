@@ -41,6 +41,14 @@ data class ToolInfo(
 
 data class SessionSummary(val id: String, val harnessId: String, val cwd: String)
 
+/**
+ * An application found on the PC that ships no manifest. `path` is what the
+ * daemon launches; it only accepts paths it discovered itself.
+ */
+data class AppEntry(val name: String, val path: String, val kind: String) {
+    val isGui: Boolean get() = kind == "gui"
+}
+
 sealed interface ChatItem {
     data class User(val text: String) : ChatItem
     data class Assistant(val text: String) : ChatItem
@@ -72,6 +80,9 @@ sealed interface RhEvent {
     data class Exit(val id: String, val harnessId: String, val code: Int) : RhEvent
     data class Failure(val message: String) : RhEvent
     data class TrustNeeded(val fingerprint: String) : RhEvent
+
+    /** A GUI app started on the PC; the phone follows it on the desktop view. */
+    data class GuiOpened(val name: String) : RhEvent
 }
 
 object Proto {
@@ -84,9 +95,24 @@ object Proto {
     fun hello(token: String) = obj { put("type", "hello"); put("token", token) }
     fun detect() = obj { put("type", "detect") }
     fun install(id: String) = obj { put("type", "install"); put("id", id) }
-    fun guiOpen(id: String) = obj { put("type", "gui_open"); put("harness", id) }
+    fun guiOpen(id: String, cwd: String) = obj {
+        put("type", "gui_open"); put("harness", id); put("cwd", cwd)
+    }
+
+    fun guiOpenPath(path: String, cwd: String) = obj {
+        put("type", "gui_open"); put("path", path); put("cwd", cwd)
+    }
+
     fun create(harness: String, cwd: String) = obj {
         put("type", "create"); put("harness", harness); put("cwd", cwd)
+    }
+
+    fun createPath(path: String, cwd: String) = obj {
+        put("type", "create"); put("path", path); put("cwd", cwd)
+    }
+
+    fun appsDiscover(q: String, refresh: Boolean) = obj {
+        put("type", "apps_discover"); put("q", q); put("refresh", refresh)
     }
 
     fun attach(id: String) = obj { put("type", "attach"); put("id", id) }
@@ -187,6 +213,18 @@ object Proto {
                 installed = bool(o, "installed"),
                 version = str(o, "version"),
                 installing = bool(o, "installing") ?: false,
+            )
+        }
+    }
+
+    fun parseApps(el: JsonElement?): List<AppEntry> {
+        val arr = (el as? JsonObject)?.get("items") as? JsonArray ?: return emptyList()
+        return arr.mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            AppEntry(
+                name = str(o, "name") ?: return@mapNotNull null,
+                path = str(o, "path") ?: return@mapNotNull null,
+                kind = str(o, "kind") ?: "cli",
             )
         }
     }
