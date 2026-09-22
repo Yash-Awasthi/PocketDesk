@@ -51,6 +51,8 @@ export function startDaemon(port, cliPort, opts = {}) {
     RH_MANIFESTS: opts.manifests,
     RH_CLI_PORT: String(cliPort),
     POCKETDESK_DATA: opts.dataDir || ".pocketdesk-test",
+    // Keep generated state (config, TLS, SSH host/user keys) out of the real profile.
+    RH_HOME: opts.home || path.join(os.tmpdir(), "rh-home-" + port),
     ...(opts.env || {}),
   };
   const d = spawn(process.execPath, ["src/index.js"], {

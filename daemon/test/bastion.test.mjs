@@ -5,7 +5,9 @@
 // Fully in-memory — deterministic, no external processes, no real listeners
 // beyond the ephemeral VNC TCP port (port 0) started and stopped in-test.
 import { check, connectRaw, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
+import ssh2 from "ssh2";
 
+const IS_WIN = process.platform === "win32";
 const tmp = makeTmp("rh-t-");
 
 const PORT = 8826;
@@ -25,6 +27,14 @@ async function main() {
   c.send({ type: "vnc_status" });
   const st = await c.next((m) => m.type === "vnc_status");
   check("vnc_status reports running", st.running === true && st.port === started.port);
+
+  // Frames come from the real capture controller, with no client pushing any.
+  if (IS_WIN) {
+    const live = await c.next((m) => m.type === "vnc_event" && m.vncEvent === "received", 25000);
+    check("vnc serves real captured frames", live.width > 100 && live.height > 100 && live.bytes > 1000);
+  } else {
+    check("vnc reports no capture off-platform", started.capturing === true && st.frameBytes === 0);
+  }
 
   c.send({ type: "vnc_frame", data: Buffer.from("fakeframe").toString("base64"), width: 1280, height: 720 });
   await c.next((m) => m.type === "vnc_frame_ok");
@@ -133,17 +143,42 @@ async function main() {
   const se = await c.next((m) => m.type === "sshserver_session_ended");
   check("sshserver session ends", se.ok === true);
 
-  // ── Multi-protocol client (haven-ssh-client: profiles + host-key TOFU) ───
-  c.send({ type: "profile_create", name: "home", host: "192.168.1.10", port: 22, username: "yasha", protocols: ["ssh", "sftp"] });
+  // ── Real SSH round trip: the daemon's own listener, dialled by its own client ─
+  c.send({ type: "sshserver_start", port: 0, host: "127.0.0.1" });
+  const srv = await c.next((m) => m.type === "sshserver_started", 20000);
+  check("sshserver binds a real port", srv.ok === true && srv.port > 0);
+
+  c.send({ type: "sshserver_user_add", username: "tester", password: "s3cret", allowedCommands: ["echo"] });
+  await c.next((m) => m.type === "sshserver_user_added");
+
+  c.send({ type: "profile_create", name: "loopback", host: "127.0.0.1", port: srv.port, username: "tester", protocols: ["ssh", "sftp"] });
   const pc = await c.next((m) => m.type === "profile_created");
-  check("profile created", pc.ok === true && pc.profile.host === "192.168.1.10");
+  check("profile created", pc.ok === true && pc.profile.host === "127.0.0.1");
   const profileId = pc.profile.id;
 
-  c.send({ type: "profile_connect", id: profileId, protocol: "ssh" });
-  const conn = await c.next((m) => m.type === "profile_connected");
-  check("profile connects (ssh)", conn.ok === true && conn.session.protocol === "ssh");
+  c.send({ type: "profile_connect", id: profileId, protocol: "ssh", password: "s3cret" });
+  const conn = await c.next((m) => m.type === "profile_connected", 25000);
+  check("profile connects over real SSH", conn.ok === true && conn.session.protocol === "ssh");
+  check("host key recorded on first use", conn.session.hostKey?.status === "accepted" && conn.session.hostKey.isNew === true);
+  check("no live handles on the wire", !("client" in conn.session) && !("channels" in conn.session));
   const connEvt = await c.next((m) => m.type === "mproto_event" && m.mprotoEvent === "connected");
   check("connect event broadcast", connEvt.profileId === profileId);
+
+  c.send({ type: "sshserver_sessions" });
+  const live = await c.next((m) => m.type === "sshserver_sessions");
+  check("listener sees the authenticated session", live.items.some((x) => x.username === "tester"));
+
+  c.send({ type: "profile_disconnect", sessionId: conn.session.id, protocol: "ssh" });
+  const dc = await c.next((m) => m.type === "profile_disconnected");
+  check("ssh disconnect acks", dc.ok === true);
+
+  c.send({ type: "profile_connect", id: profileId, protocol: "ssh", password: "wrong" });
+  const badPwConn = await c.next((m) => m.type === "profile_connected", 25000);
+  check("wrong password refused by the real server", badPwConn.ok === false);
+
+  c.send({ type: "sshserver_stop" });
+  const srvStop = await c.next((m) => m.type === "sshserver_stopped");
+  check("sshserver stops", srvStop.ok === true);
 
   c.send({ type: "profile_connect", id: "nope", protocol: "ssh" });
   const badConn = await c.next((m) => m.type === "profile_connected");
@@ -171,7 +206,8 @@ async function main() {
 
   c.send({ type: "mproto_status" });
   const ms = await c.next((m) => m.type === "mproto_status");
-  check("mproto_status counts", ms.profiles === 1 && ms.hostKeys === 1 && ms.sshKeys === 1);
+  // Two host keys: the real loopback connect plus the hostkey_verify above.
+  check("mproto_status counts", ms.profiles === 1 && ms.hostKeys === 2 && ms.sshKeys === 1);
 
   c.send({ type: "profile_list" });
   const pl = await c.next((m) => m.type === "profile_list");
@@ -180,6 +216,60 @@ async function main() {
   c.send({ type: "sshkey_delete", id: kg.key.id });
   const kd = await c.next((m) => m.type === "sshkey_deleted");
   check("sshkey_delete acks", kd.ok === true);
+
+  // ── Real jump host: client → bastion → target SSH server ───────────────
+  c.send({ type: "sshserver_start", port: 0, host: "127.0.0.1" });
+  const target = await c.next((m) => m.type === "sshserver_started", 20000);
+  check("target SSH server binds", target.ok === true && target.port > 0);
+
+  c.send({ type: "sshserver_user_add", username: "jumped", password: "tpw" });
+  await c.next((m) => m.type === "sshserver_user_added");
+
+  const pair = ssh2.utils.generateKeyPairSync("ed25519");
+  c.send({ type: "bastion_user_add", username: "alice2", publicKey: pair.public, accessLevel: "admin" });
+  const ju = await c.next((m) => m.type === "bastion_user_added");
+
+  c.send({ type: "bastion_host_add", name: "target", hostname: "127.0.0.1", port: target.port, username: "jumped", password: "tpw" });
+  const jh = await c.next((m) => m.type === "bastion_host_added");
+  check("host credentials never returned", !("credentials" in jh.host));
+
+  c.send({ type: "bastion_rule_add", userId: ju.user.id, hostId: jh.host.id, accessLevel: "admin", allowed: true });
+  await c.next((m) => m.type === "bastion_rule_added");
+
+  c.send({ type: "bastion_start", port: 0, host: "127.0.0.1" });
+  const bsrv = await c.next((m) => m.type === "bastion_started", 20000);
+  check("bastion binds a real port", bsrv.ok === true && bsrv.port > 0);
+
+  // `alice2@target` is the sshportal login convention: bastion user @ host name.
+  const jumpOut = await new Promise((resolve, reject) => {
+    const cl = new ssh2.Client();
+    const timer = setTimeout(() => { cl.end(); reject(new Error("jump timeout")); }, 30000);
+    cl.on("ready", () => {
+      cl.exec("echo hi", (err, stream) => {
+        if (err) { clearTimeout(timer); cl.end(); return reject(err); }
+        let out = "";
+        stream.on("data", (d) => { out += d; });
+        stream.on("close", () => { clearTimeout(timer); cl.end(); resolve(out); });
+      });
+    });
+    cl.on("error", (err) => { clearTimeout(timer); reject(err); });
+    cl.connect({ host: "127.0.0.1", port: bsrv.port, username: "alice2@target", privateKey: pair.private });
+  });
+  check("command runs on the target through the bastion", /hi/.test(jumpOut));
+
+  c.send({ type: "bastion_sessions" });
+  const jsess = await c.next((m) => m.type === "bastion_sessions");
+  const proxied = jsess.items.find((x) => x.hostId === jh.host.id) || jsess.items[0];
+  check("proxied traffic is accounted", !!proxied && proxied.outputBytes > 0 && proxied.commandCount === 1);
+
+  c.send({ type: "bastion_start", port: 0 });
+  const twice = await c.next((m) => m.type === "bastion_started");
+  check("bastion refuses a second listener", twice.ok === false && twice.reason === "already_running");
+
+  c.send({ type: "bastion_stop" });
+  check("bastion stops", (await c.next((m) => m.type === "bastion_stopped")).ok === true);
+  c.send({ type: "sshserver_stop" });
+  await c.next((m) => m.type === "sshserver_stopped");
 
   await c.close();
   await teardown(tmp);

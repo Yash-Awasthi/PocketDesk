@@ -1,15 +1,35 @@
 /**
- * Advanced SSH Server — drop-in SSH-server manager with pluggable auth,
- * per-user command allowlists, session recording and idle reaping.
+ * Advanced SSH Server — drop-in SSH server with pluggable auth, per-user
+ * command allowlists, session recording and idle reaping.
  *
- * Inspired by bifroest and sshwifty (and sshportal).
- * This is the in-memory control surface: user/session bookkeeping, auth
- * checks and command recording. Exposed over the daemon protocol via the
- * `sshserver_*` messages; a real SSH wire listener can be layered on top
- * (see ssh_bastion.js for the jump-host variant).
+ * Inspired by bifroest and sshwifty (and sshportal). `start()` puts a real
+ * ssh2 listener in front of the user/session bookkeeping: clients connect
+ * with a password or public key, exec requests are gated by the per-user
+ * allowlist before they run, and shell requests get a PTY. The host key is
+ * generated once and kept in the config directory, so a client's
+ * trust-on-first-use record survives daemon restarts.
  */
 import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import ssh2 from "ssh2";
+import pty from "node-pty";
+import { configDir } from "./config.js";
+
+const { Server, utils } = ssh2;
+const IS_WIN = process.platform === "win32";
+
+/** Host key for the listener, generated on first use and reused after. */
+function hostKey() {
+  const file = path.join(configDir, "ssh_host_ed25519");
+  if (!fs.existsSync(file)) {
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(file, utils.generateKeyPairSync("ed25519").private, { mode: 0o600 });
+  }
+  return fs.readFileSync(file);
+}
 
 function constantTimeEquals(a, b) {
   const x = Buffer.from(String(a));
@@ -45,6 +65,7 @@ export class AdvancedSSHServerManager extends EventEmitter {
     this.sessions = new Map();
     this.users = new Map();
     this.recordings = new Map();
+    this.server = null;
   }
 
   /**
@@ -80,6 +101,11 @@ export class AdvancedSSHServerManager extends EventEmitter {
     }
 
     if (method === "publickey" && user.publicKey) {
+      // Compare the wire blob, not the text: the stored key may be an
+      // authorized_keys line while the client offers the raw key data.
+      const stored = utils.parseKey(user.publicKey);
+      const offered = stored instanceof Error ? null : stored.getPublicSSH();
+      if (offered) return constantTimeEquals(offered.toString("base64"), String(credential ?? ""));
       return constantTimeEquals(String(credential ?? ""), user.publicKey);
     }
 
@@ -182,10 +208,94 @@ export class AdvancedSSHServerManager extends EventEmitter {
     return Array.from(this.sessions.values()).filter((s) => s.isActive);
   }
 
+  // ─── Real SSH listener ─────────────────────────────────────────────
+
+  /** Bind the SSH listener. Port 0 picks an ephemeral port, reported back. */
+  async start({ port, host } = {}) {
+    if (this.server) return { ok: false, reason: "already_running", port: this.config.port };
+    const listenPort = port ?? this.config.port;
+    const listenHost = host ?? this.config.host;
+
+    this.server = new Server({ hostKeys: [hostKey()] }, (client, info) => this._onClient(client, info));
+    await new Promise((resolve, reject) => {
+      this.server.once("error", reject);
+      this.server.listen(listenPort, listenHost, () => resolve());
+    }).catch((err) => { this.server = null; throw err; });
+
+    this.config.port = this.server.address().port;
+    this.config.host = listenHost;
+    this.emit("server:started", { port: this.config.port, host: listenHost });
+    return { ok: true, port: this.config.port, host: listenHost };
+  }
+
+  async stop() {
+    if (!this.server) return { ok: false, reason: "not_running" };
+    for (const s of this.sessions.values()) if (s.client) s.client.end();
+    await new Promise((resolve) => this.server.close(() => resolve()));
+    this.server = null;
+    this.emit("server:stopped", { port: this.config.port });
+    return { ok: true };
+  }
+
+  _onClient(client, info) {
+    let session = null;
+    const clientIp = info?.ip || "unknown";
+
+    client.on("authentication", (ctx) => {
+      const credential = ctx.method === "password" ? ctx.password
+        : ctx.method === "publickey" ? ctx.key?.data?.toString("base64")
+        : undefined;
+      if (!this.authenticate(ctx.username, ctx.method, credential)) return ctx.reject(["password", "publickey"]);
+      // A publickey probe carries no signature yet: accept it so the client
+      // proceeds to the signed attempt, but do not open a session for it.
+      if (ctx.method === "publickey" && !ctx.signature) return ctx.accept();
+      session = this.createSession(ctx.username, clientIp, ctx.method);
+      if (!session) return ctx.reject();
+      session.client = client;
+      ctx.accept();
+    });
+
+    client.on("ready", () => {
+      client.on("session", (accept) => {
+        const chan = accept();
+        chan.on("exec", (acc, rej, execInfo) => {
+          if (!this.executeCommand(session.id, execInfo.command)) return rej();
+          const stream = acc();
+          const command = this.config.forceCommand || execInfo.command;
+          const proc = spawn(command, { shell: true, cwd: process.env.HOME || process.cwd() });
+          proc.stdout.on("data", (d) => stream.write(d));
+          proc.stderr.on("data", (d) => stream.stderr.write(d));
+          proc.on("close", (code) => { stream.exit(code ?? 0); stream.end(); });
+          proc.on("error", (err) => { stream.stderr.write(String(err.message)); stream.exit(127); stream.end(); });
+        });
+        chan.on("shell", (acc) => {
+          const stream = acc();
+          const shell = IS_WIN ? "powershell.exe" : process.env.SHELL || "bash";
+          const term = pty.spawn(shell, [], { name: "xterm-256color", cols: 100, rows: 30, cwd: process.env.HOME || process.cwd(), env: process.env });
+          session.pty = term;
+          term.onData((d) => { try { stream.write(d); } catch { /* channel closed */ } });
+          term.onExit(({ exitCode }) => { try { stream.exit(exitCode); stream.end(); } catch { /* already closed */ } });
+          stream.on("data", (d) => term.write(d.toString()));
+          stream.on("close", () => term.kill());
+        });
+        chan.on("pty", (acc) => acc?.());
+        chan.on("window-change", (acc, rej, dims) => {
+          session?.pty?.resize(dims.cols, dims.rows);
+          acc?.();
+        });
+      });
+    });
+
+    client.on("close", () => { if (session) this.endSession(session.id); });
+    client.on("error", () => { /* client vanished; close handles cleanup */ });
+  }
+
   getStats() {
     const sessions = Array.from(this.sessions.values());
     const totalCommands = sessions.reduce((sum, s) => sum + s.commands.length, 0);
     return {
+      running: !!this.server,
+      port: this.server ? this.config.port : null,
       totalSessions: sessions.length,
       activeSessions: sessions.filter((s) => s.isActive).length,
       totalUsers: this.users.size,

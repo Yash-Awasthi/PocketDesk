@@ -2,19 +2,23 @@
  * VNC bridge (noVNC / guacamole-server inspiration) — remote desktop access.
  *
  * Exposes a local TCP port that serves a screen-frame feed: a client sends
- * `GET_FRAME` and receives a JSON frame reply; every `updateFrame()` push is
- * broadcast to all connected clients as `frame_update`. The daemon feeds
- * frames via the `vnc_frame` protocol message (frame transport is simulated,
- * like the rd_* remote-desktop bridge). Provides the server side of the
- * noVNC/guacamole pattern without pulling in a full RFB proxy.
+ * `GET_FRAME` and receives a JSON frame reply; every new capture is broadcast
+ * to all connected clients as `frame_update`. Frames come from the real
+ * desktop capture controller, which is asked for a stream only while the
+ * bridge is running, so an idle bridge costs nothing. `vnc_frame` still
+ * accepts a pushed frame, for feeding a screen the daemon cannot capture
+ * itself. Provides the server side of the noVNC/guacamole pattern without
+ * pulling in a full RFB proxy.
  */
 import net from "node:net";
 import { EventEmitter } from "node:events";
 
 export class VNCBridge extends EventEmitter {
-  constructor(port = 5900) {
+  constructor(port = 5900, controller = null) {
     super();
     this.port = port;
+    this.controller = controller;
+    this.onFrame = (frame) => this.updateFrame(Buffer.from(frame.base64, "base64"), { width: frame.width, height: frame.height });
     this.server = null;
     this.connections = new Map();
     this.frameBuffer = Buffer.alloc(0);
@@ -43,8 +47,12 @@ export class VNCBridge extends EventEmitter {
     });
     this.running = true;
     this.port = this.server.address().port;
+    if (this.controller) {
+      this.controller.on("frame", this.onFrame);
+      await this.controller.startFrameStream("vnc-bridge");
+    }
     this.emit("bridge:started", { port: this.port });
-    return { ok: true, port: this.port };
+    return { ok: true, port: this.port, capturing: !!this.controller };
   }
 
   handleConnection(socket) {
@@ -104,6 +112,10 @@ export class VNCBridge extends EventEmitter {
   }
 
   async stop() {
+    if (this.controller) {
+      this.controller.off("frame", this.onFrame);
+      this.controller.stopFrameStream("vnc-bridge");
+    }
     for (const [, conn] of this.connections) conn.socket.destroy();
     this.connections.clear();
     this.running = false;

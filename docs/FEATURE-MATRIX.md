@@ -283,3 +283,52 @@ was tightened — `wmic` is gone on Windows 11 24H2, and the `tasklist /v` fallb
 error payload that the old assertion could not tell from an empty result. Tests:
 gui-manifests.test.mjs (19 checks incl. a real detached launch and the `gui_open` round
 trip) + ProtocolTest.kt (6); full daemon suite 326 PASS, Gradle 20 tests / 0 failures.
+
+Transports made real (2026-09-22): the six surfaces that were in-memory
+bookkeeping now carry real traffic, and each one's test asserts the real
+behaviour rather than the simulation.
+
+- `rd_*` is a session-scoped view of the DesktopController — `rd_frame` pulls a
+  real JPEG, `rd_input` injects through SendInput, quality presets retune the
+  capture helper, and coordinates are scaled back from the downscaled frame.
+  The client-pushed frame path is gone; the only frame source is the capture
+  loop. A latent race surfaced here and was fixed in `desktop_capture.getFrame`:
+  `captureOnce` is a no-op while the stream loop has a capture in flight, so an
+  on-demand frame requested right after `startFrameStream` reported
+  `capture_failed`; it now waits for the loop's frame instead.
+- `vnc_*` serves that same capture over its TCP port — the bridge subscribes to
+  the controller on `start()` and unsubscribes on `stop()`, so an idle bridge
+  costs nothing. `vnc_frame` still accepts a pushed frame for a screen the
+  daemon cannot capture itself.
+- `sshserver_*` gained a real ssh2 listener (`sshserver_start`/`sshserver_stop`).
+  Auth reuses the existing password/public-key checks, exec requests pass the
+  per-user allowlist before they run, shells get a node-pty PTY, and the host
+  key is generated once into the config directory. Public-key comparison
+  normalises to the wire blob, so an authorized_keys line matches the key a
+  client actually offers.
+- `bastion_*` is a real jump host (`bastion_start`/`bastion_stop`): login
+  `user@host` (sshportal convention), public-key auth against the registered
+  user, the access rule checked before a session exists, then the channel
+  proxied to the target with byte and command accounting. Host credentials are
+  stored per host and never returned by `bastion_host_list`.
+- `profile_*`/`hostkey_*`/`sshkey_*` connect for real over ssh2 (SSH, SFTP) and
+  over the RFB handshake (VNC: version negotiation, VNC authentication, then
+  ServerInit for the true framebuffer geometry). Host keys are TOFU and a
+  changed key aborts the connect. `sshkey_generate` writes an OpenSSH keypair to
+  `~/.pocketdesk/sshkeys` at mode 0600 and the private half never crosses the
+  protocol. Live ssh2/socket handles are stripped from every payload.
+- `wa_*` links WhatsApp as a companion device through Baileys, with credentials
+  under `~/.pocketdesk/whatsapp/<channel>` so a restart does not need a
+  relink. Allowlist and command-prefix routing are unchanged. Baileys is an
+  optional dependency imported lazily; `transport: "local"` keeps the injectable
+  path used by tests and other bridges.
+
+Test isolation: `RH_HOME` relocates the whole config directory, and the test
+helper points it at a per-port temp directory — generated SSH host keys, user
+keys and WhatsApp credentials never touch the real profile.
+
+Browser client: a **Tools** tab now covers three daemon surfaces that had no UI
+anywhere — the read-only Git panel (`git_status`/`git_log`/`git_diff`/
+`git_branches`), the `doctor` self-check, and `apps_discover` with **Open** for
+a GUI app and **Run** for a CLI tool. `test/tools-ui.test.mjs` drives exactly
+the messages that tab sends. Full suite: 30 files, all pass.

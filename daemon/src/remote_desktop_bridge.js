@@ -1,36 +1,62 @@
 /**
- * Remote Desktop Bridge — Control desktop applications from mobile devices.
+ * Remote desktop bridge — session-scoped view and control of this PC's screen.
  *
- * Inspired by remodex-android and rustdesk.
- * Provides screen streaming, input forwarding, and file transfer
- * for remote desktop control.
+ * Frames and input are real: every session is backed by the DesktopController
+ * (screen capture + SendInput injection). The manager owns the per-session
+ * bookkeeping the protocol exposes — quality presets, frame buffers, activity
+ * timestamps — and translates client coordinates back to desktop pixels,
+ * because frames are downscaled by the quality preset before they go out.
  *
- * NOTE: ported from TS-syntax-in-.js to plain ESM (it could not be imported
- * under the package's "type": "module" before).
+ * Without a controller, or on a platform the controller does not support,
+ * sessions still exist but frames and input report unsupported_platform.
  */
 
 import { randomBytes } from "node:crypto";
 import { EventEmitter } from "node:events";
 
-/**
- * Remote-desktop session manager: session lifecycle, frame buffering,
- * input forwarding, and file-transfer simulation.
- */
+/** Quality preset → capture quality, frame rate and downscale factor. */
+const PRESETS = {
+  low: { capture: 30, fps: 3, scale: 0.5 },
+  medium: { capture: 60, fps: 3, scale: 0.75 },
+  high: { capture: 80, fps: 3, scale: 1 },
+  ultra: { capture: 95, fps: 3, scale: 1 },
+};
+
 export class RemoteDesktopBridgeManager extends EventEmitter {
-  constructor() {
+  /** @param {{ startFrameStream:Function, stopFrameStream:Function, getFrame:Function, setQuality:Function, inputMouse:Function, inputKey:Function, inputType:Function, on:Function, constructor:any }|null} controller */
+  constructor(controller = null) {
     super();
     /** @type {Map<string, object>} */
     this.sessions = new Map();
     /** @type {Map<string, object[]>} */
     this.frameBuffers = new Map();
-    /** @type {Map<string, object>} */
-    this.fileTransfers = new Map();
+    this.controller = controller;
+    this.stats = { framesServed: 0, inputsForwarded: 0 };
+
+    controller?.on?.("frame", (frame) => this._fanout(frame));
   }
 
-  /**
-   * Create a new desktop session (connects asynchronously).
-   */
-  createSession(hostName, hostIp, quality = "medium") {
+  get supported() {
+    return !!this.controller && this.controller.constructor.supported !== false;
+  }
+
+  _fanout(frame) {
+    for (const session of this.sessions.values()) {
+      if (session.status !== "connected") continue;
+      session.lastActivity = new Date();
+      session.resolution = { width: frame.width, height: frame.height };
+      const buffer = this.frameBuffers.get(session.id) || [];
+      buffer.push({ seq: frame.seq, timestamp: frame.ts, width: frame.width, height: frame.height });
+      while (buffer.length > 30) buffer.shift();
+      this.frameBuffers.set(session.id, buffer);
+      this.stats.framesServed++;
+      this.emit("frame:received", { sessionId: session.id, frameNumber: frame.seq, timestamp: frame.ts, width: frame.width, height: frame.height });
+    }
+  }
+
+  /** Create a session and start the capture loop that feeds it. */
+  async createSession(hostName, hostIp, quality = "medium") {
+    const preset = PRESETS[quality] || PRESETS.medium;
     const session = {
       id: randomBytes(16).toString("hex"),
       hostName,
@@ -38,165 +64,107 @@ export class RemoteDesktopBridgeManager extends EventEmitter {
       status: "connecting",
       connectedAt: new Date(),
       lastActivity: new Date(),
-      resolution: { width: 1920, height: 1080 },
-      fps: 30,
+      resolution: { width: 0, height: 0 },
+      fps: preset.fps,
       bandwidth: 0,
       isEncrypted: true,
       quality,
+      supported: this.supported,
     };
-
     this.sessions.set(session.id, session);
     this.frameBuffers.set(session.id, []);
 
-    // Simulate connection
-    setTimeout(() => {
-      session.status = "connected";
-      this.emit("session:connected", session);
-    }, 500);
-
+    const started = this.controller ? await this.controller.startFrameStream(session.id, preset.capture) : { ok: false, reason: "no_controller" };
+    session.status = "connected";
+    if (!started.ok) session.reason = started.reason;
+    this.emit("session:connected", session);
     return session;
   }
 
-  /**
-   * Process a screen frame (buffers the last 30 per session).
-   */
-  processFrame(sessionId, frame) {
+  /** Latest captured frame for a session (captures one if the loop has none). */
+  async getFrame(sessionId) {
     const session = this.sessions.get(sessionId);
-    if (!session || session.status !== "connected") return;
+    if (!session || session.status !== "connected") return { ok: false, reason: "no_session" };
+    if (!this.controller) return { ok: false, reason: "no_controller" };
+    const frame = await this.controller.getFrame();
+    if (!frame.ok) return frame;
+    session.lastActivity = new Date();
+    session.resolution = { width: frame.width, height: frame.height };
+    return frame;
+  }
+
+  /**
+   * Forward an input event to the real desktop. Client coordinates are in
+   * downscaled frame space, so they are divided back by the preset scale.
+   */
+  async sendInput(sessionId, event) {
+    const session = this.sessions.get(sessionId);
+    if (!session || session.status !== "connected") return { ok: false, reason: "no_session" };
+    if (!this.controller) return { ok: false, reason: "no_controller" };
 
     session.lastActivity = new Date();
+    const scale = (PRESETS[session.quality] || PRESETS.medium).scale;
+    const x = Math.round(Number(event.x || 0) / scale);
+    const y = Math.round(Number(event.y || 0) / scale);
 
-    const buffer = this.frameBuffers.get(sessionId) || [];
-    buffer.push(frame);
-
-    while (buffer.length > 30) {
-      buffer.shift();
+    let result;
+    switch (event.type) {
+      case "mouse_move":
+        result = await this.controller.inputMouse({ x, y });
+        break;
+      case "mouse_click":
+        result = await this.controller.inputMouse({ x, y, click: true, button: Number(event.button) || 0 });
+        break;
+      case "mouse_wheel":
+        result = await this.controller.inputMouse({ x, y, wheel: Number(event.wheel) || 0 });
+        break;
+      case "key_press":
+        result = await this.controller.inputKey({ key: event.key, modifiers: event.modifiers || [] });
+        break;
+      case "text":
+        result = await this.controller.inputType(String(event.text ?? ""));
+        break;
+      default:
+        return { ok: false, reason: "bad_input_type" };
     }
-    this.frameBuffers.set(sessionId, buffer);
-
-    this.emit("frame:received", {
-      sessionId,
-      frameNumber: frame.frameNumber,
-      timestamp: frame.timestamp,
-    });
+    if (result.ok) this.stats.inputsForwarded++;
+    this.emit("input:forwarded", { sessionId, event, ok: !!result.ok, timestamp: Date.now() });
+    return result;
   }
 
-  /**
-   * Send an input event to the remote desktop.
-   */
-  sendInput(sessionId, event) {
-    const session = this.sessions.get(sessionId);
-    if (!session || session.status !== "connected") return false;
-
-    session.lastActivity = new Date();
-
-    this.emit("input:forwarded", {
-      sessionId,
-      event,
-      timestamp: Date.now(),
-    });
-    return true;
-  }
-
-  /**
-   * Start a file transfer (simulated progress).
-   */
-  startFileTransfer(sessionId, filename, size, direction) {
-    const transfer = {
-      id: randomBytes(8).toString("hex"),
-      sessionId,
-      filename,
-      size,
-      direction,
-      progress: 0,
-      status: "pending",
-    };
-
-    this.fileTransfers.set(transfer.id, transfer);
-
-    transfer.status = "transferring";
-    const interval = setInterval(() => {
-      transfer.progress += 10;
-      if (transfer.progress >= 100) {
-        transfer.progress = 100;
-        transfer.status = "completed";
-        clearInterval(interval);
-        this.emit("transfer:completed", transfer);
-      }
-      this.emit("transfer:progress", { transferId: transfer.id, progress: transfer.progress });
-    }, 100);
-
-    return transfer;
-  }
-
-  /**
-   * Update session quality (adjusts fps/resolution presets).
-   */
+  /** Apply a quality preset (also retunes the capture helper). */
   updateQuality(sessionId, quality) {
     const session = this.sessions.get(sessionId);
-    if (!session) return false;
-
+    const preset = PRESETS[quality];
+    if (!session || !preset) return false;
     session.quality = quality;
-
-    switch (quality) {
-      case "low":
-        session.fps = 15;
-        session.resolution = { width: 640, height: 480 };
-        break;
-      case "medium":
-        session.fps = 30;
-        session.resolution = { width: 1280, height: 720 };
-        break;
-      case "high":
-        session.fps = 60;
-        session.resolution = { width: 1920, height: 1080 };
-        break;
-      case "ultra":
-        session.fps = 120;
-        session.resolution = { width: 2560, height: 1440 };
-        break;
-    }
-
+    session.fps = preset.fps;
+    this.controller?.setQuality(preset.capture);
     this.emit("quality:updated", { sessionId, quality });
     return true;
   }
 
-  /**
-   * Disconnect a session and drop its frame buffer.
-   */
+  /** Disconnect a session and release its share of the capture loop. */
   disconnect(sessionId) {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
-
     session.status = "disconnected";
     this.frameBuffers.delete(sessionId);
+    this.controller?.stopFrameStream(sessionId);
     this.emit("session:disconnected", session);
     return true;
   }
 
-  /**
-   * Get all connected sessions.
-   */
   getActiveSessions() {
     return Array.from(this.sessions.values()).filter((s) => s.status === "connected");
   }
 
-  /**
-   * Get file transfers for a session.
-   */
-  getSessionTransfers(sessionId) {
-    return Array.from(this.fileTransfers.values()).filter((t) => t.sessionId === sessionId);
-  }
-
-  /**
-   * Get statistics.
-   */
   getStats() {
     return {
+      supported: this.supported,
       totalSessions: this.sessions.size,
-      activeSessions: Array.from(this.sessions.values()).filter((s) => s.status === "connected").length,
-      totalTransfers: this.fileTransfers.size,
-      activeTransfers: Array.from(this.fileTransfers.values()).filter((t) => t.status === "transferring").length,
+      activeSessions: this.getActiveSessions().length,
+      ...this.stats,
     };
   }
 }
