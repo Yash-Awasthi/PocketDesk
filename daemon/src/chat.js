@@ -1,7 +1,7 @@
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { spawn, execSync } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 
 const IS_WIN = process.platform === "win32";
 import { StringDecoder } from "node:string_decoder";
@@ -426,15 +426,11 @@ export function setModel(id, model) {
 
 export function cancel(c) {
   if (c.proc) {
-    try {
-      const pid = c.proc.pid;
-      if (IS_WIN && pid) {
-        // cmd.exe /c wrapper: kill the whole process tree so the agent child
-        // doesn't keep running orphaned.
-        try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: "ignore", timeout: 5000 }); } catch {}
-      }
-      c.proc.kill();
-    } catch {}
+    const proc = c.proc;
+    const killProc = () => { try { proc.kill(); } catch {} };
+    // cmd.exe /c wrapper: kill the whole tree so the agent child doesn't keep running orphaned.
+    if (IS_WIN && proc.pid) execFile("taskkill", ["/PID", String(proc.pid), "/T", "/F"], { timeout: 5000, windowsHide: true }, killProc);
+    else killProc();
     c.proc = null;
   }
   if (c.state === "running") {

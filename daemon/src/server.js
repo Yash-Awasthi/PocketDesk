@@ -5,7 +5,8 @@ import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { execSync as _execSync } from "node:child_process";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
 import * as registry from "./registry.js";
@@ -68,6 +69,8 @@ const MAX_AUTH_ATTEMPTS = 5;
 const SPECTATOR_TYPES = new Set([
   "attach", "detach", "sessions", "sessions_get", "chat_text", "share_join",
 ]);
+const SHARE_READ_TYPES = new Set(["attach", "detach", "chat_text"]);
+const SHARE_WRITE_TYPES = new Set(["in", "resize", "chatmsg"]);
 const authAttempts = new Map();
 const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
 
@@ -79,7 +82,7 @@ const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugi
   return all.sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9));
 }
 
-export function start({ port, token, tls, relay: relayCfg }) {
+export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } = {}) {
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
   const page = fs.readFileSync(path.join(publicDir, "index.html"));
   const pairTemplate = fs.readFileSync(path.join(publicDir, "pair.html"), "utf8");
@@ -214,8 +217,25 @@ export function start({ port, token, tls, relay: relayCfg }) {
           }
           authAttempts.set(clientIp, { n: attempts + 1, at: Date.now() });
           
-          const tokenOk = msg.type === "hello" && typeof msg.token === "string" && msg.token.length === token.length && crypto.timingSafeEqual(Buffer.from(msg.token), Buffer.from(token));
-          if (tokenOk) {
+          if (msg.type === "hello" && typeof msg.share === "string") {
+            const joined = shares.join(msg.share);
+            const sid = joined.ok && joined.share.sessionId;
+            if (!joined.ok || !(chat.attach(sid, ws) || sessions.attach(sid, ws))) {
+              if (joined.ok) shares.leave(msg.share);
+              ws.close(4003, "bad share");
+              return;
+            }
+            ws._authed = true;
+            authAttempts.delete(clientIp);
+            clearTimeout(timer);
+            ws._shareToken = msg.share;
+            ws._shareMode = joined.share.mode;
+            ws._shareSession = sid;
+            send(ws, { type: "share_joined", sessionId: sid, mode: joined.share.mode });
+            return;
+          }
+          const auth = authenticate(msg);
+          if (auth) {
             ws._authed = true;
             authAttempts.delete(clientIp);
             clearTimeout(timer);
@@ -223,14 +243,10 @@ export function start({ port, token, tls, relay: relayCfg }) {
             _decayAuthAttempts();
             // Device registry (openchamber/netbird): stable per-client id with
             // revocation check at hello.
-            const clientDeviceId = msg.clientId || devices.fingerprint(token, msg.name, msg.platform);
-            if (devices.isRevoked(clientDeviceId)) {
-              ws.close(4003, "device revoked");
-              return;
-            }
-            ws._clientId = clientDeviceId;
-            devices.register(clientDeviceId, { name: msg.name, platform: msg.platform, ip: clientIp });
-            send(ws, { type: "welcome", version: 1, clientId: clientDeviceId, sessions: allSessions(), manifests: registry.list() });
+            ws._clientId = auth.id;
+            devices.register(auth.id, { name: msg.name, platform: msg.platform, ip: clientIp });
+            const deviceToken = auth.pairing ? devices.issueToken(auth.id) : undefined;
+            send(ws, { type: "welcome", version: 1, clientId: auth.id, deviceToken, sessions: allSessions(), manifests: registry.list() });
           } else {
             ws.close(4003, "bad token");
           }
@@ -257,7 +273,33 @@ export function start({ port, token, tls, relay: relayCfg }) {
     relayPushAuthed({ rh: true, type: "rhpush", data: obj });
   }
 
+  // Master token pairs a new device and gets it its own token; a device token
+  // identifies that device. The id is never taken from a client claim alone.
+  function authenticate(msg) {
+    if (msg.type !== "hello" || typeof msg.token !== "string") return null;
+    const t = msg.token;
+    if (t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token))) {
+      const id = String(msg.clientId || crypto.randomUUID());
+      if (devices.isRevoked(id)) return null;
+      return { id, pairing: true };
+    }
+    const d = devices.byToken(t);
+    return d ? { id: d.id } : null;
+  }
+
+  function rotateToken() {
+    token = crypto.randomBytes(24).toString("hex");
+    pluginCtx.config.token = token;
+    onTokenRotated?.(token);
+  }
+
   async function handle(ws, msg) {
+    if (ws._shareSession) {
+      const rw = ws._shareMode === "readwrite" && SHARE_WRITE_TYPES.has(msg.type);
+      if (!(SHARE_READ_TYPES.has(msg.type) || rw) || String(msg.id) !== ws._shareSession) {
+        return send(ws, { type: "error", message: `not allowed for a shared session: ${msg.type}` });
+      }
+    }
     if (ws._shareMode === "readonly" && !SPECTATOR_TYPES.has(msg.type)) {
       return send(ws, { type: "error", message: `read-only (spectator): ${msg.type}` });
     }
@@ -422,7 +464,7 @@ export function start({ port, token, tls, relay: relayCfg }) {
           // the normal path there. It must not use `/v`: window titles take it
           // from ~0.35s to ~21s, past the timeout, and only image names are
           // matched here anyway.
-          const out = _execSync("wmic process get processid,commandline /format:csv 2>nul || tasklist /fo csv /nh", { encoding: "utf-8", timeout: 8000, stdio: "pipe", windowsHide: true });
+          const { stdout: out } = await promisify(exec)("wmic process get processid,commandline /format:csv 2>nul || tasklist /fo csv /nh", { encoding: "utf-8", timeout: 8000, windowsHide: true });
           const lines = String(out).split(/\r?\n/).filter(Boolean);
           // GUI manifests have no `bin`: they are detected by path, not by a
           // process name, so they cannot be matched against a command line.
@@ -1409,8 +1451,13 @@ export function start({ port, token, tls, relay: relayCfg }) {
         break;
       case "device_revoke": {
         const r = devices.revoke(String(msg.clientId ?? ""));
-        if (r.ok) for (const client of wss.clients) if (client._clientId === msg.clientId) client.close(4003, "device revoked");
-        send(ws, { type: "device_revoked", ...r });
+        if (r.ok) {
+          for (const client of wss.clients) if (client._clientId === msg.clientId) client.close(4003, "device revoked");
+          for (const [from, shim] of relayShims) if (shim._clientId === msg.clientId) relayShims.delete(from);
+          // The revoked device knew the pairing token too, so it must change.
+          rotateToken();
+        }
+        send(ws, { type: "device_revoked", ...r, pairingToken: r.ok ? token : undefined });
         break;
       }
       case "device_allow": {
@@ -1728,17 +1775,19 @@ export function start({ port, token, tls, relay: relayCfg }) {
           return;
         }
         if (!shim._authed) {
-          const t = typeof inner.token === "string" ? inner.token : "";
-          const ok = inner.type === "hello" && t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token));
-          if (!ok) {
+          const auth = authenticate(inner);
+          if (!auth) {
             relayAuthFails.set(evt.from, { n: (fails?.n ?? 0) + 1, at: fails?.at ?? now });
             setTimeout(() => relaySendTo(evt.from, { rh: true, type: "rherr", reqId, error: "bad token" }), relayRejectDelay()).unref?.();
             relayShims.delete(evt.from);
             return;
           }
           shim._authed = true;
+          shim._clientId = auth.id;
           relayAuthFails.delete(evt.from); // an honest hello clears its own count
-          relaySendTo(evt.from, { rh: true, type: "rhresp", reqId, data: { type: "welcome", version: 1, clientId: shim._clientId, sessions: allSessions(), manifests: registry.list() } });
+          devices.register(auth.id, { name: inner.name, platform: inner.platform });
+          const deviceToken = auth.pairing ? devices.issueToken(auth.id) : undefined;
+          relaySendTo(evt.from, { rh: true, type: "rhresp", reqId, data: { type: "welcome", version: 1, clientId: auth.id, deviceToken, sessions: allSessions(), manifests: registry.list() } });
           return;
         }
         relayReqCtx.run(reqId, () => handle(shim, inner)).catch((e) => {
