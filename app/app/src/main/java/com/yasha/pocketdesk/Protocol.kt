@@ -127,7 +127,10 @@ object Proto {
     private fun obj(build: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit) =
         buildJsonObject(build).toString()
 
-    fun hello(token: String) = obj { put("type", "hello"); put("token", token) }
+    fun hello(token: String) = obj {
+        put("type", "hello"); put("token", token)
+        put("name", android.os.Build.MODEL); put("platform", "android")
+    }
     fun detect() = obj { put("type", "detect") }
     fun install(id: String) = obj { put("type", "install"); put("id", id) }
     fun guiOpen(id: String, cwd: String) = obj {

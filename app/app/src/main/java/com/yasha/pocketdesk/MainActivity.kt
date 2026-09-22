@@ -28,6 +28,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import com.yasha.pocketdesk.ui.ChatScreen
@@ -49,6 +51,15 @@ sealed interface Screen {
     data object Ssh : Screen
     data class Terminal(val sessionId: String) : Screen
 }
+
+private val ScreenSaver = Saver<Screen, String>(
+    save = { if (it is Screen.Terminal) "terminal:" + it.sessionId else it.toString() },
+    restore = { s ->
+        if (s.startsWith("terminal:")) Screen.Terminal(s.removePrefix("terminal:"))
+        else listOf(Screen.Connect, Screen.Tools, Screen.Sessions, Screen.Chats, Screen.Freebuff, Screen.Desktop, Screen.Ssh)
+            .firstOrNull { it.toString() == s } ?: Screen.Connect
+    },
+)
 
 class MainActivity : ComponentActivity() {
 
@@ -87,6 +98,11 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(client.status) {
             LinkService.sync(applicationContext, client.status != Status.Disconnected)
         }
+        LaunchedEffect(client.issuedToken) {
+            val (url, token) = client.issuedToken ?: return@LaunchedEffect
+            val book = ServerBook(applicationContext)
+            book.save(book.load().map { if (it.url == url) it.copy(token = token) else it })
+        }
         if (locked) {
             Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
                 androidx.compose.material3.Button(onClick = { lock.prompt() }) { Text("Unlock") }
@@ -94,7 +110,7 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        var screen by remember { mutableStateOf<Screen>(if (client.status == Status.Connected) Screen.Sessions else Screen.Connect) }
+        var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Connect) }
 
         LaunchedEffect(Unit) {
             client.events.collect { ev ->
@@ -169,7 +185,7 @@ class MainActivity : ComponentActivity() {
                     )
                     else -> {}
                 }
-                when (val s = screen) {
+                when (val s = if (client.status == Status.Disconnected) Screen.Connect else screen) {
                     Screen.Connect -> ConnectScreen(client) { screen = Screen.Sessions }
                     Screen.Tools -> ToolsScreen(
                         client,

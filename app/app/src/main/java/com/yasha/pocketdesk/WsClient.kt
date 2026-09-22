@@ -44,6 +44,9 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
         private set
     var activeUrl: String? = null
         private set
+    /** (url, token) the daemon issued this device on pairing; saved in place of the master token. */
+    var issuedToken by mutableStateOf<Pair<String, String>?>(null)
+        private set
 
     // ── Auto-reconnect (client-kt/krossbow backoff + cc-pocket since-reattach) ──
     private var lastToken: String? = null
@@ -484,6 +487,11 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
         }.getOrNull() ?: return
         when (val type = m["type"]?.jsonPrimitive?.contentOrNull) {
             "welcome" -> {
+                str(m, "deviceToken")?.let { t ->
+                    lastToken = t
+                    hello = Proto.hello(t)
+                    activeUrl?.let { issuedToken = it to t }
+                }
                 tools = Proto.parseTools(m)
                 sessions = Proto.parseSessions(m)
                 chats = Proto.parseChats(m)

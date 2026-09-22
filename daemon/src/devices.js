@@ -63,6 +63,28 @@ export function register(clientId, { name, platform, ip }) {
   return devices.get(id);
 }
 
+const hash = (t) => crypto.createHash("sha256").update(String(t)).digest("hex");
+
+/** Issue this device its own credential; only the hash is stored. */
+export function issueToken(clientId) {
+  const d = devices.get(String(clientId));
+  if (!d) return null;
+  const t = crypto.randomBytes(24).toString("base64url");
+  d.tokenHash = hash(t);
+  save();
+  return t;
+}
+
+/** The live, unrevoked device a device token belongs to, or null. */
+export function byToken(t) {
+  if (typeof t !== "string" || !t) return null;
+  const h = Buffer.from(hash(t));
+  for (const d of devices.values()) {
+    if (!d.revoked && d.tokenHash && crypto.timingSafeEqual(Buffer.from(d.tokenHash), h)) return d;
+  }
+  return null;
+}
+
 export function isRevoked(clientId) {
   const d = devices.get(String(clientId));
   return Boolean(d?.revoked);
@@ -72,6 +94,7 @@ export function revoke(clientId) {
   const d = devices.get(String(clientId));
   if (!d) return { ok: false, error: `unknown device: ${clientId}` };
   d.revoked = true;
+  delete d.tokenHash;
   save();
   return { ok: true, device: d };
 }
@@ -86,7 +109,7 @@ export function allow(clientId) {
 
 export function list() {
   const now = Date.now();
-  return [...devices.values()].map((d) => ({ ...d, online: now - d.lastSeen < 5 * 60_000 }));
+  return [...devices.values()].map(({ tokenHash, ...d }) => ({ ...d, online: now - d.lastSeen < 5 * 60_000 }));
 }
 
 export function touch(clientId) {

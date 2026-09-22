@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { execSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { EventEmitter } from "node:events";
 import pty from "node-pty";
@@ -186,13 +186,13 @@ export function resize(id, cols, rows) {
 export function kill(id) {
   const s = sessions.get(id);
   if (!s || s.exitCode !== null) return false;
-  try {
-    if (IS_WIN && s.pty.pid) {
-      // Tree-kill the wrapper + children so agents don't keep running orphaned.
-      try { execSync(`taskkill /PID ${s.pty.pid} /T /F`, { stdio: "ignore", timeout: 5000 }); } catch {}
-    }
-    s.pty.kill();
-  } catch {}
+  const killPty = () => { try { s.pty.kill(); } catch {} };
+  if (IS_WIN && s.pty.pid) {
+    // Tree-kill the wrapper + children so agents don't keep running orphaned; the wrapper must outlive the walk.
+    execFile("taskkill", ["/PID", String(s.pty.pid), "/T", "/F"], { timeout: 5000, windowsHide: true }, killPty);
+  } else {
+    killPty();
+  }
   s.endedAt = Date.now();
   return true;
 }

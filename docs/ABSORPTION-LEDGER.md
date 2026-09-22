@@ -1,6 +1,8 @@
 # Absorption Ledger — per-repo coverage of the inspiration corpus
 
 Corpus: `C:\Users\yasha\PROJECTS\inspiration\PocketDesk` (241 directories).
+The local clones were deleted on 2026-09-23 once every directory was covered here;
+[INSPIRATION-SOURCES.md](INSPIRATION-SOURCES.md) lists each upstream URL for re-cloning.
 Every directory was processed individually: its features were checked against
 PocketDesk, missing high-value features were implemented (see
 [FEATURE-MATRIX.md](FEATURE-MATRIX.md) for the feature-by-feature view), and the

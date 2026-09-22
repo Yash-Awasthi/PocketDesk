@@ -1,4 +1,4 @@
-import { loadConfig } from "./config.js";
+import { loadConfig, saveConfig } from "./config.js";
 import { start } from "./server.js";
 import { killAll, liveIds, stopReaper } from "./sessions.js";
 
@@ -32,4 +32,10 @@ function gracefulShutdown(signal) {
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 
-start(loadConfig());
+const cfg = loadConfig();
+start(cfg, {
+  onTokenRotated(token) {
+    cfg.token = token;
+    if (!("RH_TOKEN" in process.env)) saveConfig(cfg);
+  },
+});
