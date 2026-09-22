@@ -5,7 +5,6 @@
 // Fully in-memory — deterministic, no external processes, no real listeners
 // beyond the ephemeral VNC TCP port (port 0) started and stopped in-test.
 import { check, connectRaw, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
-import { createHash } from "node:crypto";
 
 const tmp = makeTmp("rh-t-");
 
@@ -95,8 +94,7 @@ async function main() {
   // A user WITH a credential must present it. The old authenticate() ended in
   // `return true`, so claiming an unconfigured method walked straight past a
   // configured password hash — and nothing called authenticate() at all.
-  const pwHash = createHash("sha256").update("hunter2").digest("hex");
-  c.send({ type: "sshserver_user_add", username: "carol", passwordHash: pwHash, allowedCommands: ["ls"] });
+  c.send({ type: "sshserver_user_add", username: "carol", password: "hunter2", allowedCommands: ["ls"] });
   await c.next((m) => m.type === "sshserver_user_added");
 
   c.send({ type: "sshserver_session_create", username: "carol", method: "publickey" });

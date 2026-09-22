@@ -954,13 +954,13 @@ export function start({ port, token, tls, relay: relayCfg }) {
       }
       // ── Advanced SSH server (bifroest/sshwifty: auth + command control) ──
       case "sshserver_user_add": {
-        const user = sshSrv.registerUser(String(msg.username ?? ""), { passwordHash: msg.passwordHash ? String(msg.passwordHash) : undefined, publicKey: msg.publicKey ? String(msg.publicKey) : undefined, allowedCommands: Array.isArray(msg.allowedCommands) ? msg.allowedCommands.map(String) : [], maxSessions: Number(msg.maxSessions) || 3, isAdmin: !!msg.isAdmin });
+        const user = sshSrv.registerUser(String(msg.username ?? ""), { password: msg.password ? String(msg.password) : undefined, publicKey: msg.publicKey ? String(msg.publicKey) : undefined, allowedCommands: Array.isArray(msg.allowedCommands) ? msg.allowedCommands.map(String) : [], maxSessions: Number(msg.maxSessions) || 3, isAdmin: !!msg.isAdmin });
         send(ws, { type: "sshserver_user_added", ok: true, user });
         break;
       }
       case "sshserver_user_list":
-        // passwordHash never leaves the daemon: it is an unsalted sha256 and
-        // handing it out is handing out the password.
+        // passwordHash never leaves the daemon: it is a scrypt hash, but
+        // still no reason to expose it.
         send(ws, { type: "sshserver_user_list", items: Array.from(sshSrv.users.values()).map(({ passwordHash, ...u }) => u) });
         break;
       case "sshserver_session_create": {
