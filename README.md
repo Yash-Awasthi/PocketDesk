@@ -92,7 +92,7 @@ other feature still runs — only a WhatsApp channel will refuse to link.
 
 The Android app is the primary remote: chats, live terminals, the agent fleet,
 the Freebuff control plane, files, models and **full desktop control** — every
-daemon feature is reachable from it.
+daemon feature is reachable from it. It requires Android 11 (API 30) or newer.
 
 ### Step 1 — Get the app on your phone
 
@@ -511,13 +511,13 @@ for byte, then reports the VNC framebuffer geometry the server announced.
 PocketDesk/
 ├── daemon/                       # Node.js daemon
 │   ├── src/
-│   │   ├── server.js             # HTTP + WebSocket server
+│   │   ├── server.js             # HTTP + WebSocket server, auth, dispatch
+│   │   ├── handlers/             # Message handlers grouped by area
 │   │   ├── sessions.js           # PTY session manager
 │   │   ├── chat.js               # AI chat engine (streaming)
 │   │   ├── registry.js           # Tool discovery + install
 │   │   ├── plugins.js            # Plugin loader + lifecycle
 │   │   ├── proposals.js          # Proposal/approval manager
-│   │   ├── heartbeat.js          # Session health monitoring
 │   │   └── plugins/              # Built-in plugins
 │   │       ├── logger-plugin.js
 │   │       ├── metrics-plugin.js

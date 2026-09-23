@@ -2,7 +2,6 @@ package com.yasha.pocketdesk.ui
 
 import android.content.Context
 import android.net.Uri
-import android.os.Build
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -45,6 +44,7 @@ import com.yasha.pocketdesk.FsEntry
 import com.yasha.pocketdesk.RhEvent
 import com.yasha.pocketdesk.ToolInfo
 import com.yasha.pocketdesk.WsClient
+import com.yasha.pocketdesk.childPath
 
 @Composable
 fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit) {
@@ -171,7 +171,6 @@ internal fun DirPickerDialog(ws: WsClient, onSelect: (String) -> Unit, onDismiss
     var transfer by remember { mutableStateOf<String?>(null) }
     var pendingDownload by remember { mutableStateOf<FsEntry?>(null) }
 
-    fun childPath(dir: String, name: String) = dir.trimEnd('\\', '/') + "\\" + name
 
     val uploadLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.GetContent(),
@@ -279,39 +278,26 @@ private fun queryDisplayName(ctx: Context, uri: Uri): String {
 
 /** Opens a sink in the public Downloads collection and hands back a finish() that closes it. */
 private inline fun saveToDownloads(ctx: Context, fileName: String, crossinline use: (java.io.OutputStream, (String?) -> Unit) -> Unit) {
-    if (Build.VERSION.SDK_INT >= 29) {
-        val values = android.content.ContentValues().apply {
-            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
-            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+    val values = android.content.ContentValues().apply {
+        put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+        put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+    }
+    val uri = ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+    if (uri == null) {
+        use(NullOutputStream()) { "could not create download entry" }
+        return
+    }
+    val out = ctx.contentResolver.openOutputStream(uri)
+    if (out == null) {
+        use(NullOutputStream()) { "could not open output stream" }
+        return
+    }
+    use(out) { err ->
+        try {
+            out.close()
+        } catch (_: java.io.IOException) {
         }
-        val uri = ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-        if (uri == null) {
-            use(NullOutputStream()) { "could not create download entry" }
-            return
-        }
-        val out = ctx.contentResolver.openOutputStream(uri)
-        if (out == null) {
-            use(NullOutputStream()) { "could not open output stream" }
-            return
-        }
-        use(out) { err ->
-            try {
-                out.close()
-            } catch (_: java.io.IOException) {
-            }
-            if (err != null) ctx.contentResolver.delete(uri, null, null)
-        }
-    } else {
-        val dir = ctx.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: ctx.filesDir
-        val f = java.io.File(dir, fileName)
-        val out = java.io.FileOutputStream(f)
-        use(out) { err ->
-            try {
-                out.close()
-            } catch (_: java.io.IOException) {
-            }
-            if (err != null) f.delete()
-        }
+        if (err != null) ctx.contentResolver.delete(uri, null, null)
     }
 }
 

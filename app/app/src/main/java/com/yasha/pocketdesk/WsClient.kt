@@ -23,7 +23,10 @@ import okhttp3.WebSocketListener
 
 enum class Status { Disconnected, Connecting, AwaitingTrust, Connected, Reconnecting }
 
-class WsClient(private val base: OkHttpClient = OkHttpClient()) {
+// Pings surface a half-open socket (Wi-Fi to cellular handover) as a failure.
+class WsClient(
+    private val base: OkHttpClient = OkHttpClient.Builder().pingInterval(20, java.util.concurrent.TimeUnit.SECONDS).build(),
+) {
 
     var status by mutableStateOf(Status.Disconnected)
         private set
@@ -146,28 +149,37 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
         lastToken = token
         lastFingerprint = pinnedFingerprint
         hello = Proto.hello(token)
-        collectingTm = null
+        open(url)
+    }
 
+    /** Opens the transport for [url] with the current token and pin; retries reuse it without resetting backoff. */
+    private fun open(url: String) {
+        collectingTm = null
         // relay:// URLs bypass OkHttp entirely: the phone dials OUT to the
         // relay server (works from any network, no inbound port on the PC)
         // and the daemon bridges rhreq envelopes to its protocol handler.
         if (url.startsWith("relay://")) {
             val (host, port, channel) = RelayLink.parse(url)
                 ?: run { lastError = "bad relay url"; status = Status.Disconnected; return }
-            val link = RelayLink(host, port, channel,
-                onFrame = { frame -> handleRelayFrame(frame) },
+            lateinit var link: RelayLink
+            link = RelayLink(host, port, channel,
+                onFrame = { frame -> if (relayLink.get() === link) handleRelayFrame(frame) },
                 onClosed = {
-                    status = Status.Disconnected
-                    if (!userClosed) scheduleReconnect()
+                    if (relayLink.compareAndSet(link, null)) {
+                        status = Status.Disconnected
+                        failTransfers("connection lost")
+                        if (!userClosed) scheduleReconnect()
+                    }
                 })
             relayLink.set(link)
             link.start()
             return
         }
 
+        val fp = lastFingerprint
         val client: OkHttpClient = when {
             !url.startsWith("wss") -> base
-            pinnedFingerprint != null -> Tls.pinnedClient(base, pinnedFingerprint)
+            fp != null -> Tls.pinnedClient(base, fp)
             else -> Tls.collectingClient(base).also { collectingTm = it.second }.first
         }
 
@@ -176,12 +188,16 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
 
     /** Called by the UI after the user accepted (or rejected) a self-signed certificate. */
     fun resolveTrust(accepted: Boolean) {
+        val fp = collectingTm?.seen
         collectingTm = null
-        if (accepted) {
-            hello?.let { socket.get()?.send(it) }
+        val url = activeUrl
+        val token = lastToken
+        // Reopen pinned rather than reuse the probe socket: the daemon drops a
+        // socket that sent no hello within 10 s, and a retry must not re-prompt.
+        if (accepted && fp != null && url != null && token != null) {
+            connect(url, token, fp)
         } else {
-            socket.getAndSet(null)?.close(4000, "cert rejected")
-            status = Status.Disconnected
+            close()
             lastError = "certificate rejected"
         }
     }
@@ -192,10 +208,21 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
         relayLink.getAndSet(null)?.close()
         status = Status.Disconnected
         collectingTm = null
+        failTransfers("disconnected")
+    }
+
+    private fun failTransfers(reason: String) {
+        val pending = transfers.values.toList()
+        transfers.clear()
+        for (t in pending) when (t) {
+            is Transfer.Download -> t.onDone(reason)
+            is Transfer.Upload -> t.finish(reason)
+        }
     }
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (webSocket !== socket.get()) return
             val tm = collectingTm
             if (tm != null) {
                 val fp = tm.seen
@@ -213,20 +240,28 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            if (!socket.compareAndSet(webSocket, null)) return
             status = Status.Disconnected
             lastError = t.message ?: "connection failed"
+            failTransfers("connection lost")
             scheduleReconnect()
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            if (!socket.compareAndSet(webSocket, null)) return
             status = Status.Disconnected
-            // Server-initiated close (bad token, killed) — still retry with
-            // backoff unless the user explicitly disconnected.
+            failTransfers("connection lost")
+            // 4xxx are the daemon's auth refusals (bad token, revoked, timeout,
+            // rate limit): retrying spends the IP's 5-attempt budget and locks it out.
+            if (code >= 4000) {
+                lastError = reason.ifEmpty { "refused by server ($code)" }
+                return
+            }
             if (!userClosed) scheduleReconnect()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            handle(text)
+            if (webSocket === socket.get()) handle(text)
         }
     }
 
@@ -252,6 +287,7 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
             "connected" -> {
                 val link = relayLink.get() ?: return
                 link.subscribe()
+                hello?.let { send(it) }
             }
             "message", "direct" -> {
                 val data = env["data"] as? JsonObject ?: return
@@ -314,6 +350,7 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
     fun desktopStop() { desktopStreaming = false; send(Proto.desktopStop()) }
     fun desktopSnapshot() = send(Proto.desktopFrame())
     fun desktopTap(x: Int, y: Int) = send(Proto.desktopMouse(x, y, "left", null))
+    fun desktopMove(x: Int, y: Int) = send(Proto.desktopMouse(x, y, null, null))
     fun desktopLongTap(x: Int, y: Int) = send(Proto.desktopMouse(x, y, "right", null))
     fun desktopScroll(down: Boolean) = send(Proto.desktopMouse(0, 0, null, if (down) 120 else -120))
     fun desktopKey(vk: Int, modifiers: List<String> = emptyList()) = send(Proto.desktopKey(vk, modifiers))
@@ -436,6 +473,7 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
             val onDone: (String?) -> Unit,
         ) : Transfer() {
             var offset: Long = 0
+            private var createdEmpty = false
 
             /** Returns false when the stream is fully sent. */
             fun sendNext(ws: WsClient): Boolean {
@@ -446,6 +484,12 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
                     onDone(e.message ?: "read failed")
                     close()
                     return false
+                }
+                // An empty file still has to exist on the PC.
+                if (n <= 0 && offset == 0L && !createdEmpty) {
+                    createdEmpty = true
+                    ws.writeFileChunk(path, "", append = false)
+                    return true
                 }
                 if (n <= 0) {
                     onDone(null)
@@ -781,20 +825,7 @@ class WsClient(private val base: OkHttpClient = OkHttpClient()) {
             if (userClosed) return@launch
             status = Status.Connecting
             hello = Proto.hello(token)
-            collectingTm = null
-            if (url.startsWith("relay://")) {
-                connect(url, token, lastFingerprint)
-                return@launch
-            }
-            val client: OkHttpClient = when {
-                !url.startsWith("wss") -> base
-                else -> {
-                    val fp = lastFingerprint
-                    if (fp != null) Tls.pinnedClient(base, fp)
-                    else Tls.collectingClient(base).also { collectingTm = it.second }.first
-                }
-            }
-            socket.set(client.newWebSocket(Request.Builder().url(url).build(), listener))
+            open(url)
         }
     }
 }

@@ -33,6 +33,9 @@ class RelayLink(
     private val socket = AtomicReference<Socket?>(null)
     @Volatile private var writer: PrintWriter? = null
     @Volatile private var intentClosed = false
+    // Callers are UI taps on the main thread, where socket writes throw
+    // NetworkOnMainThreadException; one writer thread also keeps frame order.
+    private val writes = java.util.concurrent.Executors.newSingleThreadExecutor { r -> Thread(r, "relay-write").apply { isDaemon = true } }
 
     fun start() {
         val thread = Thread({
@@ -55,6 +58,7 @@ class RelayLink(
             } catch (_: Exception) {
                 // connect/read failure — fall through to onClosed
             } finally {
+                writes.shutdown()
                 closeQuietly()
                 if (!intentClosed) onClosed()
             }
@@ -64,13 +68,9 @@ class RelayLink(
     }
 
     fun send(text: String): Boolean {
-        val w = writer ?: return false
-        return try {
-            w.println(text) // newline-terminated is fine: JSON parse ignores trailing whitespace
-            true
-        } catch (_: Exception) {
-            false
-        }
+        if (writer == null || intentClosed) return false
+        writes.execute { writer?.println(text) }
+        return true
     }
 
     fun subscribe() {
@@ -83,6 +83,7 @@ class RelayLink(
 
     fun close() {
         intentClosed = true
+        writes.shutdown()
         closeQuietly()
     }
 
@@ -96,7 +97,7 @@ class RelayLink(
         writer = null
     }
 
-    private fun jsonString(s: String): String {
+    internal fun jsonString(s: String): String {
         val sb = StringBuilder("\"")
         for (ch in s) {
             when (ch) {

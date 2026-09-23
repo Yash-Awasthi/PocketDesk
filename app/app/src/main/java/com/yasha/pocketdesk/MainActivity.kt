@@ -103,13 +103,7 @@ class MainActivity : ComponentActivity() {
             val book = ServerBook(applicationContext)
             book.save(book.load().map { if (it.url == url) it.copy(token = token) else it })
         }
-        if (locked) {
-            Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                androidx.compose.material3.Button(onClick = { lock.prompt() }) { Text("Unlock") }
-            }
-            return
-        }
-
+        // Declared before the lock gate so a re-lock keeps navigation and notifications.
         var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Connect) }
 
         LaunchedEffect(Unit) {
@@ -118,6 +112,13 @@ class MainActivity : ComponentActivity() {
                     Notifier.sessionEnded(applicationContext, ev.harnessId, ev.code)
                 }
             }
+        }
+
+        if (locked) {
+            Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                androidx.compose.material3.Button(onClick = { lock.prompt() }) { Text("Unlock") }
+            }
+            return
         }
 
         val connected = client.status == Status.Connected

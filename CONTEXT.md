@@ -48,7 +48,23 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
 
 ## State at save (IMPORTANT — current)
 
-0. 2026-09-22 pass (current head of this workstream):
+0. 2026-09-23 pass:
+   - `server.js` split: message handlers live in `src/handlers/{agents,files,remote,ssh,system}.js`
+     (a lookup table guarded by `Object.hasOwn`), relay bridging in `relay_bridge.js`, file
+     browse/read/write in `fs_ops.js`. server.js keeps HTTP, WS auth, broadcast and wiring.
+   - Fixed: share-token sockets received every broadcast; a revoked relay device stayed
+     subscribed to sessions; desktop input used a stale scale after `desktop_quality`.
+   - Android is 11+ only (minSdk 30). Fixed relay transport (no hello, main-thread writes,
+     unbounded retries, relay URL could not be saved), cert-accept loop, retry on 4xxx auth
+     refusals, stale-socket callbacks, no ping, hung transfers on disconnect, POSIX paths,
+     empty uploads, lock bypass on rotation, desktop stream left running, drag = click spam.
+   - Still open: the relay hello is published channel-wide (token visible to channel members);
+     `LinkService` and exit notifications depend on the activity; the app has no QR/deep-link
+     pairing even though the daemon emits `pocketdesk://pair#…`.
+   - `test/protocol-contract.test.mjs` checks every type the app sends has a handler and every
+     type it handles is emitted. CI runs daemon tests on Windows and Ubuntu, plus Android lint,
+     unit tests and a debug build.
+1. 2026-09-22 pass:
    - **Six unused clusters deleted.** `sync_*`, `fleet_*`, `agent_*`, `mux_*`/`tmux_*`,
      `qr_*` and `monitor_*` are gone: seven modules (file_sync_engine, fleet_view,
      agent_orchestrator, session_multiplexer, tmux_session_manager, qr_session_sharing,
@@ -73,13 +89,13 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
      upload/download byte-compared, and an RFB handshake reporting the announced
      geometry. Still unrun against real hardware — that needs a host only the user has.
    - `npm.cmd test` = **24 files, all pass**.
-1. The inspiration-corpus absorption pass (tracked in `docs/FEATURE-MATRIX.md`) is the
+2. The inspiration-corpus absorption pass (tracked in `docs/FEATURE-MATRIX.md`) is the
    workstream this grew out of; the ledger stays as the provenance record.
-2. Open gaps, honestly: no on-device Android run has ever happened (compile-verified
+3. Open gaps, honestly: no on-device Android run has ever happened (compile-verified
    only); the WhatsApp pairing QR has never been scanned by a phone; the RFB client has
    never met a real VNC server; SSH and SFTP have never left loopback. `hw-probe.mjs`
    closes the last three the moment someone runs it against real hosts.
-3. Remaining 🗺️ surfaces: full WebRTC screen transport (frames are JPEG over the
+4. Remaining 🗺️ surfaces: full WebRTC screen transport (frames are JPEG over the
    protocol at ~3 fps), mosh-style UDP roam, E2EE shares, Android foreground service
    and biometric lock.
 

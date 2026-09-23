@@ -425,3 +425,9 @@ object Proto {
 
     fun exitCode(m: JsonObject): Int = (m["code"] as? JsonPrimitive)?.intOrNull ?: 0
 }
+
+/** Joins a remote child path using the separator the daemon's own listing uses (Windows or POSIX host). */
+fun childPath(dir: String, name: String): String {
+    val sep = if (dir.contains('\\')) '\\' else '/'
+    return dir.trimEnd('\\', '/') + sep + name
+}
