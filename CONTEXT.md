@@ -58,9 +58,16 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
      unbounded retries, relay URL could not be saved), cert-accept loop, retry on 4xxx auth
      refusals, stale-socket callbacks, no ping, hung transfers on disconnect, POSIX paths,
      empty uploads, lock bypass on rotation, desktop stream left running, drag = click spam.
-   - Still open: the relay hello is published channel-wide (token visible to channel members);
-     `LinkService` and exit notifications depend on the activity; the app has no QR/deep-link
-     pairing even though the daemon emits `pocketdesk://pair#…`.
+   - Relay auth: the phone publishes only a token-free `rhchallenge`; the daemon answers direct
+     with a nonce, and the hello carries HMAC(sha256hex(token), "nonce:connId") instead of the
+     token. All `rhreq` traffic is direct, so channel members see neither token nor requests.
+   - Pairing: the app handles `pocketdesk://pair#…` (camera QR scan or pasted into the add
+     dialog) behind a confirm dialog, saving a pinned LAN entry plus a relay entry when the
+     payload names one. The pair page is rebuilt on token rotation.
+   - `RhApp` starts `Link`, which drives `LinkService` and exit notifications from a process
+     scope; reconnects go Connected -> Reconnecting without a Disconnected flash.
+   - GitGuardian flags fake passwords in `daemon/test/bastion.test.mjs` from older commits;
+     mark them as test credentials in its dashboard.
    - `test/protocol-contract.test.mjs` checks every type the app sends has a handler and every
      type it handles is emitted. CI runs daemon tests on Windows and Ubuntu, plus Android lint,
      unit tests and a debug build.

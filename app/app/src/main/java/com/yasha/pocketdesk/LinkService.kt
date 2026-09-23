@@ -10,11 +10,42 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
-/** Process-lived connection: survives rotation and the activity being closed. */
+/**
+ * Process-lived connection: survives rotation and the activity being closed.
+ * The service and exit notifications are driven from here, not from the UI.
+ */
 object Link {
     val client = WsClient()
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
+
+    /** A pairing link opened from outside the app, waiting for the user to confirm it. */
+    var pendingPair by androidx.compose.runtime.mutableStateOf<List<ServerEntry>>(emptyList())
+
+    fun start(app: Context) {
+        Notifier.ensureChannel(app)
+        scope.launch {
+            client.statusFlow.map { it != Status.Disconnected }.distinctUntilChanged().collect { LinkService.sync(app, it) }
+        }
+        scope.launch {
+            client.events.collect { ev ->
+                if (ev is RhEvent.Exit && !MainActivity.foreground) Notifier.sessionEnded(app, ev.harnessId, ev.code)
+            }
+        }
+    }
+}
+
+class RhApp : android.app.Application() {
+    override fun onCreate() {
+        super.onCreate()
+        Link.start(this)
+    }
 }
 
 /**
@@ -68,7 +99,15 @@ class LinkService : Service() {
 
         fun sync(ctx: Context, connected: Boolean) {
             val i = Intent(ctx, LinkService::class.java)
-            if (connected) ctx.startForegroundService(i) else ctx.stopService(i)
+            if (!connected) {
+                ctx.stopService(i)
+                return
+            }
+            // Android 12+ refuses a start from the background; the link itself keeps running.
+            try {
+                ctx.startForegroundService(i)
+            } catch (_: IllegalStateException) {
+            }
         }
     }
 }

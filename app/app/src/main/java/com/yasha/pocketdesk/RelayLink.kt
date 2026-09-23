@@ -18,8 +18,8 @@ import java.util.concurrent.atomic.AtomicReference
  *
  * Used by [WsClient] when the server URL is `relay://host:port/channel` —
  * the off-LAN transport: the phone dials OUT to the relay (no inbound port on
- * the PC, no VPN), and the daemon bridges `rhreq` envelopes to its protocol
- * handler and pushes responses/broadcasts back as `rhresp`/`rhpush`.
+ * the PC, no VPN). Only a token-free `rhchallenge` is published; the hello
+ * proof and every `rhreq` go direct to the daemon, which answers direct too.
  */
 class RelayLink(
     private val host: String,
@@ -81,6 +81,9 @@ class RelayLink(
         send("""{"type":"publish","channel":${jsonString(channel)},"data":$data}""")
     }
 
+    fun direct(to: String, data: String): Boolean =
+        send("""{"type":"direct","to":${jsonString(to)},"data":$data}""")
+
     fun close() {
         intentClosed = true
         writes.shutdown()
@@ -113,6 +116,16 @@ class RelayLink(
     }
 
     companion object {
+        /** HMAC-SHA256 keyed by hex sha256(token) over "nonce:connId"; the daemon stores only that hash. */
+        fun proof(token: String, nonce: String, connId: String): String {
+            val key = java.security.MessageDigest.getInstance("SHA-256").digest(token.toByteArray()).toHex()
+            val mac = javax.crypto.Mac.getInstance("HmacSHA256")
+            mac.init(javax.crypto.spec.SecretKeySpec(key.toByteArray(), "HmacSHA256"))
+            return mac.doFinal("$nonce:$connId".toByteArray()).toHex()
+        }
+
+        private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
+
         /** Parse `relay://host:port[/channel]` → (host, port, channel). */
         fun parse(url: String): Triple<String, Int, String>? {
             if (!url.startsWith("relay://")) return null

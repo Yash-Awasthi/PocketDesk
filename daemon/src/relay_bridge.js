@@ -1,15 +1,17 @@
+import crypto from "node:crypto";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createRelayLink } from "./relay.js";
 
-// Remote peers publish protocol commands wrapped in an `rh` envelope on the
-// daemon's channel; the daemon validates the token (same timing-safe check
-// as the /ws hello), replays the inner message through the normal handle()
-// path via a shim ws object, and pushes every response/broadcast back over
-// the channel. No inbound port on the PC — the daemon dials OUT to the
-// relay, so this works from any network, VPN-free.
+// A peer publishes `rhchallenge` on the channel; the daemon answers it direct
+// with a nonce, and the peer's hello proves the token bound to that nonce and
+// its own connId. Every later request goes direct, replayed through handle()
+// via a shim ws object, so neither the token nor traffic is channel-visible.
+// The daemon dials OUT to the relay, so no inbound port is needed on the PC.
 const RELAY_SHIM_MAX = 64;
 const RELAY_AUTH_FAIL_WINDOW = 10 * 60_000;
 const RELAY_AUTH_FAIL_MAX = 20;
+const CHALLENGE_TTL = 60_000;
+const CHALLENGE_MAX = 256;
 
 export function createRelayBridge({ authenticate, welcome, handle, detachClient, broadcast }) {
   const relayShims = new Map(); // relay peer connId -> shim ws-like object
@@ -20,6 +22,13 @@ export function createRelayBridge({ authenticate, welcome, handle, detachClient,
   // rather than on the shim, because one shim serves concurrent requests and by
   // the time a handler replies the shim may have seen a later request.
   const relayReqCtx = new AsyncLocalStorage();
+  const challenges = new Map(); // relay peer connId -> { nonce, at }
+
+  function takeChallenge(from, now) {
+    const c = challenges.get(from);
+    challenges.delete(from);
+    return c && now - c.at < CHALLENGE_TTL ? c.nonce : null;
+  }
 
   function relayAuthFailsFor(from, now) {
     const rec = relayAuthFails.get(from);
@@ -108,7 +117,14 @@ export function createRelayBridge({ authenticate, welcome, handle, detachClient,
           data = null;
         }
       }
-      if (data && data.rh === true && data.type === "rhreq") {
+      if (data && data.rh === true && data.type === "rhchallenge" && !evt.direct) {
+        if (challenges.size >= CHALLENGE_MAX) challenges.delete(challenges.keys().next().value);
+        const nonce = crypto.randomBytes(16).toString("hex");
+        challenges.set(evt.from, { nonce, at: Date.now() });
+        relaySendTo(evt.from, { rh: true, type: "rhchallenge", nonce });
+        return;
+      }
+      if (data && data.rh === true && data.type === "rhreq" && evt.direct) {
         const shim = relayShimFor(evt.from);
         const reqId = data.reqId ?? null;
         const inner = data.msg || {};
@@ -121,7 +137,7 @@ export function createRelayBridge({ authenticate, welcome, handle, detachClient,
           return;
         }
         if (!shim._authed) {
-          const auth = authenticate(inner);
+          const auth = authenticate(inner, takeChallenge(evt.from, now), evt.from);
           if (!auth) {
             relayAuthFails.set(evt.from, { n: (fails?.n ?? 0) + 1, at: fails?.at ?? now });
             setTimeout(() => relaySendTo(evt.from, { rh: true, type: "rherr", reqId, error: "bad token" }), relayRejectDelay()).unref?.();

@@ -34,6 +34,12 @@ class TransportTest {
     }
 
     @Test
+    fun `relay proof matches the daemon's hmac`() {
+        // Same vector as node: createHmac("sha256", sha256hex("tok")).update("abc:peer1").
+        assertEquals("1ea71ca095b26b74a3fe596d78d4012fc340c05f4c6aff0c7a385dd0522a46d0", RelayLink.proof("tok", "abc", "peer1"))
+    }
+
+    @Test
     fun `child paths use the separator of the daemon host`() {
         assertEquals("C:\\Users\\me\\a.txt", childPath("C:\\Users\\me", "a.txt"))
         assertEquals("C:\\a.txt", childPath("C:\\", "a.txt"))

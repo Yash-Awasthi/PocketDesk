@@ -84,10 +84,16 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
   }
 
   let pairPage = "";
-  function buildPairPage(useTls, fingerprint) {
+  let pairFp = "";
+  // Rebuilt on token rotation, so the QR never shows a dead token.
+  function buildPairPage(useTls, fingerprint = pairFp) {
+    pairFp = fingerprint;
     const url = `${useTls ? "wss" : "ws"}://${lanAddress()}:${port}/ws`;
+    // A hosting-only daemon is reachable at its own relay port; the phone needs
+    // the concrete channel, not an empty "use the default".
+    const relayUrl = relayCfg?.url || (relayCfg?.hostPort ? `relay://${lanAddress()}:${relayCfg.hostPort}` : "");
     const payload = Buffer.from(
-      JSON.stringify({ u: url, t: token, f: fingerprint || "", r: relayCfg?.url || undefined, c: relayCfg?.channel || undefined }),
+      JSON.stringify({ u: url, t: token, f: fingerprint || "", r: relayUrl || undefined, c: relayUrl ? relayCfg?.channel || relay.defaultChannel() : undefined }),
       "utf8",
     ).toString("base64url");
     pairPage = pairTemplate
@@ -283,10 +289,21 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
     return d ? { id: d.id } : null;
   }
 
+  function authenticateRelay(msg, nonce, from) {
+    if (msg.type !== "hello" || !nonce) return null;
+    if (devices.proofMatches(msg.proof, devices.hashToken(token), nonce, from)) {
+      const id = String(msg.clientId || crypto.randomUUID());
+      return devices.isRevoked(id) ? null : { id, pairing: true };
+    }
+    const d = devices.byRelayProof(msg.proof, nonce, from);
+    return d ? { id: d.id } : null;
+  }
+
   function rotateToken() {
     token = crypto.randomBytes(24).toString("hex");
     pluginCtx.config.token = token;
     onTokenRotated?.(token);
+    buildPairPage(useTls);
     return token;
   }
 
@@ -346,7 +363,7 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
   activity.start();
   power.refresh();
 
-  const bridge = createRelayBridge({ authenticate, welcome, handle, detachClient, broadcast });
+  const bridge = createRelayBridge({ authenticate: authenticateRelay, welcome, handle, detachClient, broadcast });
   const relay = bridge.relay;
   if (relayCfg?.url) {
     relay.connect(relayCfg.url, relayCfg.channel || undefined);
