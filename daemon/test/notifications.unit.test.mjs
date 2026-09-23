@@ -1,8 +1,8 @@
 import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
-import { createNotificationManager, NotificationEvents } from "../notifications.js";
-import { TelegramChannel } from "../channels/telegram.js";
-import { DiscordChannel } from "../channels/discord.js";
+import { createNotificationManager, NotificationEvents } from "../src/notifications.js";
+import { TelegramChannel } from "../src/channels/telegram.js";
+import { DiscordChannel } from "../src/channels/discord.js";
 
 describe("createNotificationManager", () => {
   it("creates with no channels when env is empty", () => {

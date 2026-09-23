@@ -57,6 +57,14 @@ async function main() {
   check("spectator cannot attach another session", /not allowed/.test((await viewer.c.next((m) => m.type === "error")).message));
   viewer.c.send({ type: "fs", path: "." });
   check("spectator cannot browse files", /not allowed/.test((await viewer.c.next((m) => m.type === "error")).message));
+  const seen = [];
+  viewer.c.ws.on("message", (d) => seen.push(JSON.parse(d.toString())));
+  admin.send({ type: "create", harness: "node", cwd: tmp });
+  await admin.next((m) => m.type === "created" && m.id !== s.id && m.id !== other.id);
+  await new Promise((r) => setTimeout(r, 500));
+  check("spectator does not receive the session list broadcast", !seen.some((m) => m.type === "sessions"));
+  admin.send({ type: "constructor" });
+  check("prototype names are not handler types", /unknown type/.test((await admin.next((m) => m.type === "error")).message));
   const bad = await hello({ share: "nope" });
   check("unknown share token is refused", bad.first === 4003);
 
