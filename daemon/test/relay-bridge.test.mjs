@@ -205,6 +205,32 @@ async function run() {
     await sleep(800);
     check("a second peer is unaffected by the first peer's lockout",
       innocentEvents.some((m) => m?.data?.data?.type === "welcome"));
+
+    // 8: revoking a relay device must cut it off, not just forget it. The shim
+    // used to stay subscribed and keep answering requests.
+    const innocentId = innocentEvents.find((m) => m?.data?.data?.type === "welcome").data.data.clientId;
+    const admin = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    const adminMsgs = [];
+    admin.on("message", (d) => adminMsgs.push(JSON.parse(d.toString())));
+    await new Promise((res, rej) => { admin.on("open", res); admin.on("error", rej); });
+    admin.send(JSON.stringify({ type: "hello", token: TOKEN }));
+    await sleep(300);
+    admin.send(JSON.stringify({ type: "create", harness: "node", cwd: tmpMan }));
+    await sleep(1500);
+    const term = adminMsgs.find((m) => m.type === "created");
+    innocent.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "attach", msg: { type: "attach", id: term?.id } });
+    await sleep(800);
+    admin.send(JSON.stringify({ type: "device_revoke", clientId: innocentId }));
+    await sleep(500);
+    check("relay device revoke acks", adminMsgs.some((m) => m.type === "device_revoked" && m.ok));
+    innocentEvents.length = 0;
+    innocent.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "after-revoke", msg: { type: "sessions" } });
+    admin.send(JSON.stringify({ type: "detect" }));
+    admin.send(JSON.stringify({ type: "in", id: term?.id, data: Buffer.from("1+1\r").toString("base64") }));
+    await sleep(2500);
+    check("revoked relay peer gets no more replies", !innocentEvents.some((m) => m?.data?.type === "rhresp"));
+    check("revoked relay peer gets no more pushes", !innocentEvents.some((m) => m?.data?.type === "rhpush"));
+    admin.close();
   } catch (e) {
     check(`unexpected: ${e.message}`, false);
   } finally {

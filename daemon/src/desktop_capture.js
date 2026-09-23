@@ -315,6 +315,10 @@ export class DesktopController extends EventEmitter {
     return { ok: true, clients: this.clients.size };
   }
 
+  get scale() {
+    return this.quality >= 70 ? 1 : this.quality >= 40 ? 0.75 : 0.5;
+  }
+
   setQuality(quality) {
     this.quality = Math.min(95, Math.max(10, Number(quality) || 60));
     return { ok: true, quality: this.quality };
@@ -363,8 +367,7 @@ export class DesktopController extends EventEmitter {
       // rd_quality maps to a downscale factor (bandwidth knob): 70+ = full,
       // 40-69 = 75%, below = 50%. In-memory JPEG keeps AMSI calm — the
       // temp-file save/rename pattern is what its heuristics flag.
-      const s = this.quality >= 70 ? 1 : this.quality >= 40 ? 0.75 : 0.5;
-      const r = await this.helperCapture.cmd({ op: "capture", s }, 12000);
+      const r = await this.helperCapture.cmd({ op: "capture", s: this.scale }, 12000);
       if (r?.ok && r.b64) {
         this.stats.lastCaptureMs = Date.now() - t0;
         this.lastFrame = { base64: r.b64, width: r.w, height: r.h, ts: Date.now(), seq: ++this.frameSeq };
