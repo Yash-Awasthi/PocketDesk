@@ -2,10 +2,10 @@
  * Relay bridge — off-LAN access ("kilometers away") without port forwarding.
  *
  * The daemon dials OUT to a relay server (here: its own RH_RELAY_PORT-hosted
- * one, but it can be any host), and remote peers publish `rhreq` envelopes on
- * the daemon's channel. Each envelope carries the daemon token (timing-safe
- * checked, same as the /ws hello) plus one protocol message; responses and
- * broadcasts come back as `rhresp`/`rhpush` envelopes.
+ * one, but it can be any host). A remote peer publishes a token-free
+ * `rhchallenge`, gets a nonce back direct, and sends every `rhreq` direct to
+ * the daemon, the hello carrying an HMAC proof instead of the token; responses
+ * and broadcasts come back direct as `rhresp`/`rhpush` envelopes.
  *
  * Covered here:
  *   1. daemon-hosted relay accepts our outbound link (relay_state connected)
@@ -18,6 +18,7 @@
  *      mirrored to the relay peer as `rhpush`
  *   7. repeated bad hellos lock out that peer, and only that peer
  */
+import crypto from "node:crypto";
 import net from "node:net";
 import { spawn } from "node:child_process";
 import WebSocket from "ws";
@@ -59,6 +60,7 @@ function relayClient(port, onMsg) {
     get id() { return id; },
     sub(channel) { socket.write(JSON.stringify({ type: "subscribe", channel }) + "\n"); },
     publish(channel, data) { socket.write(JSON.stringify({ type: "publish", channel, data }) + "\n"); },
+    direct(to, data) { socket.write(JSON.stringify({ type: "direct", to, data }) + "\n"); },
     close() { socket.destroy(); },
   };
   socket.on("connect", () => {});
@@ -69,6 +71,26 @@ function relayClient(port, onMsg) {
   api.onMessage = (fn) => { onMsg = fn; };
   api.grabId = (m) => { if (m?.type === "connected") id = m.id; };
   return api;
+}
+
+/** Challenge on the channel, then a direct hello carrying a nonce- and connId-bound proof. */
+async function relayHello(c, events, token, reqId) {
+  const before = events.length;
+  c.publish(CHANNEL, { rh: true, type: "rhchallenge" });
+  let m = null;
+  for (let i = 0; i < 80 && !m; i++) {
+    m = events.slice(before).find((e) => e.type === "direct" && e.data?.type === "rhchallenge");
+    if (!m) await sleep(25);
+  }
+  if (!m) return;
+  c.daemon = m.from;
+  const key = crypto.createHash("sha256").update(token).digest("hex");
+  const proof = crypto.createHmac("sha256", key).update(`${m.data.nonce}:${c.id}`).digest("hex");
+  c.direct(c.daemon, { rh: true, type: "rhreq", reqId, msg: { type: "hello", proof } });
+}
+
+function relayReq(c, reqId, msg) {
+  c.direct(c.daemon, { rh: true, type: "rhreq", reqId, msg });
 }
 
 async function run() {
@@ -105,6 +127,10 @@ async function run() {
     }
     check("daemon up with RH_RELAY_PORT", up);
 
+    const pairHtml = await fetch(`http://127.0.0.1:${PORT}/pair`).then((r) => r.text());
+    const pair = JSON.parse(Buffer.from(pairHtml.match(/pocketdesk:\/\/pair#([\w-]+)/)[1], "base64url").toString());
+    check("pairing QR names the hosted relay and its channel", /^relay:\/\/.+:8898$/.test(pair.r ?? "") && pair.c === CHANNEL);
+
     // 1+2: remote peer connects to the relay (TCP) and subscribes.
     const events = [];
     peer = relayClient(RELAY_PORT, () => {});
@@ -117,14 +143,14 @@ async function run() {
     await sleep(300);
 
     // 3: bad token must be rejected.
-    peer.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "q0", msg: { type: "hello", token: "WRONG" } });
+    await relayHello(peer, events, "WRONG", "q0");
     await sleep(600);
     const err = events.find((m) => m?.data?.type === "rherr");
     check("bad token rejected over relay", Boolean(err));
     check("bad-token error mentions token", /token/i.test(err?.data?.error || ""));
 
     // 4: good token → welcome envelope.
-    peer.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "q1", msg: { type: "hello", token: TOKEN } });
+    await relayHello(peer, events, TOKEN, "q1");
     await sleep(600);
     const welcome = events.find((m) => m?.data?.type === "rhresp" && m?.data?.data?.type === "welcome");
     check("hello over relay returns welcome", Boolean(welcome));
@@ -132,7 +158,7 @@ async function run() {
 
     // 5: real protocol command round-trip (fb_status). fbCtrl.status() shells
     // out to tasklist on Windows — allow a generous window for it.
-    peer.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "q2", msg: { type: "fb_status" } });
+    relayReq(peer, "q2", { type: "fb_status" });
     await sleep(4000);
     const fb = events.find((m) => m?.data?.type === "rhresp" && m?.data?.reqId === "q2" && m?.data?.data?.type === "fb_status");
     check("fb_status round-trips over relay", Boolean(fb));
@@ -140,7 +166,7 @@ async function run() {
 
     // 6: daemon broadcasts are mirrored as rhpush — trigger one via `detect`
     // (registry.scanAll broadcasts a manifests message to every client).
-    peer.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "q3", msg: { type: "detect" } });
+    relayReq(peer, "q3", { type: "detect" });
     await sleep(2500);
     const push = events.find((m) => m?.data?.type === "rhpush" && m?.data?.data?.type === "manifests");
     check("manifests broadcast mirrored to relay peer", Boolean(push));
@@ -153,12 +179,39 @@ async function run() {
     await sleep(300);
     eavesdropper.sub(CHANNEL);
     await sleep(300);
-    peer.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "q4", msg: { type: "detect" } });
+    relayReq(peer, "q4", { type: "detect" });
     await sleep(2500);
     check("unauthenticated channel member sees no rhpush",
       !eavesEvents.some((m) => m?.data?.type === "rhpush"));
     check("unauthenticated channel member sees no rhresp",
       !eavesEvents.some((m) => m?.data?.type === "rhresp"));
+
+    // 6c: the eavesdropper watches a full hello and never sees the token or the
+    // requests, and a proof it could capture is bound to someone else's connId.
+    eavesEvents.length = 0;
+    const watched = [];
+    const watcher = relayClient(RELAY_PORT, () => {});
+    watcher.onMessage((m) => { watcher.grabId(m); watched.push(m); });
+    await sleep(300);
+    watcher.sub(CHANNEL);
+    await sleep(300);
+    await relayHello(watcher, watched, TOKEN, "watch-hello");
+    await sleep(600);
+    check("relay hello never puts the token on the channel", !JSON.stringify(eavesEvents).includes(TOKEN));
+    check("relay requests are not channel-visible", !eavesEvents.some((m) => m?.data?.type === "rhreq"));
+    const sent = { nonce: "stale", proof: "" };
+    const nonceMsg = watched.find((m) => m.type === "direct" && m.data?.type === "rhchallenge");
+    sent.nonce = nonceMsg?.data?.nonce;
+    const key = crypto.createHash("sha256").update(TOKEN).digest("hex");
+    sent.proof = crypto.createHmac("sha256", key).update(`${sent.nonce}:${watcher.id}`).digest("hex");
+    eavesEvents.length = 0;
+    eavesdropper.publish(CHANNEL, { rh: true, type: "rhchallenge" });
+    await sleep(300);
+    eavesdropper.direct(watcher.daemon, { rh: true, type: "rhreq", reqId: "replay", msg: { type: "hello", proof: sent.proof } });
+    await sleep(800);
+    check("a proof replayed from another connId is refused",
+      !eavesEvents.some((m) => m?.data?.data?.type === "welcome") && eavesEvents.some((m) => m?.data?.type === "rherr"));
+    watcher.close();
 
     // Also verify the LAN path still works alongside the relay.
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
@@ -178,7 +231,7 @@ async function run() {
     attacker.sub(CHANNEL);
     await sleep(300);
     for (let i = 0; i < 21; i++) {
-      attacker.publish(CHANNEL, { rh: true, type: "rhreq", reqId: `bad${i}`, msg: { type: "hello", token: "WRONG" } });
+      await relayHello(attacker, attackerEvents, "WRONG", `bad${i}`);
       await sleep(20);
     }
     await sleep(1200);
@@ -189,7 +242,7 @@ async function run() {
 
     // The lockout must not be defeatable by finally guessing right.
     attackerEvents.length = 0;
-    attacker.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "bad-then-good", msg: { type: "hello", token: TOKEN } });
+    await relayHello(attacker, attackerEvents, TOKEN, "bad-then-good");
     await sleep(800);
     check("lockout outlives a correct token from the locked-out peer",
       !attackerEvents.some((m) => m?.data?.data?.type === "welcome"));
@@ -201,7 +254,7 @@ async function run() {
     await sleep(300);
     innocent.sub(CHANNEL);
     await sleep(300);
-    innocent.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "good-after", msg: { type: "hello", token: TOKEN } });
+    await relayHello(innocent, innocentEvents, TOKEN, "good-after");
     await sleep(800);
     check("a second peer is unaffected by the first peer's lockout",
       innocentEvents.some((m) => m?.data?.data?.type === "welcome"));
@@ -218,13 +271,13 @@ async function run() {
     admin.send(JSON.stringify({ type: "create", harness: "node", cwd: tmpMan }));
     await sleep(1500);
     const term = adminMsgs.find((m) => m.type === "created");
-    innocent.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "attach", msg: { type: "attach", id: term?.id } });
+    relayReq(innocent, "attach", { type: "attach", id: term?.id });
     await sleep(800);
     admin.send(JSON.stringify({ type: "device_revoke", clientId: innocentId }));
     await sleep(500);
     check("relay device revoke acks", adminMsgs.some((m) => m.type === "device_revoked" && m.ok));
     innocentEvents.length = 0;
-    innocent.publish(CHANNEL, { rh: true, type: "rhreq", reqId: "after-revoke", msg: { type: "sessions" } });
+    relayReq(innocent, "after-revoke", { type: "sessions" });
     admin.send(JSON.stringify({ type: "detect" }));
     admin.send(JSON.stringify({ type: "in", id: term?.id, data: Buffer.from("1+1\r").toString("base64") }));
     await sleep(2500);

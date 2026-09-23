@@ -68,13 +68,23 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Notifier.ensureChannel(this)
         lock = AppLock(this) { locked = false }
+        takePairing(intent)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Root()
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        takePairing(intent)
+    }
+
+    private fun takePairing(intent: android.content.Intent?) {
+        val link = intent?.dataString ?: return
+        Pairing.parse(link).takeIf { it.isNotEmpty() }?.let { Link.pendingPair = it }
     }
 
     override fun onStart() {
@@ -95,24 +105,13 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun Root() {
         val client = Link.client
-        LaunchedEffect(client.status) {
-            LinkService.sync(applicationContext, client.status != Status.Disconnected)
-        }
         LaunchedEffect(client.issuedToken) {
             val (url, token) = client.issuedToken ?: return@LaunchedEffect
             val book = ServerBook(applicationContext)
             book.save(book.load().map { if (it.url == url) it.copy(token = token) else it })
         }
-        // Declared before the lock gate so a re-lock keeps navigation and notifications.
+        // Declared before the lock gate so a re-lock keeps navigation.
         var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Connect) }
-
-        LaunchedEffect(Unit) {
-            client.events.collect { ev ->
-                if (ev is RhEvent.Exit && !foreground) {
-                    Notifier.sessionEnded(applicationContext, ev.harnessId, ev.code)
-                }
-            }
-        }
 
         if (locked) {
             Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {

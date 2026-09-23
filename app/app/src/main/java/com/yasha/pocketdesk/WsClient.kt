@@ -28,8 +28,15 @@ class WsClient(
     private val base: OkHttpClient = OkHttpClient.Builder().pingInterval(20, java.util.concurrent.TimeUnit.SECONDS).build(),
 ) {
 
-    var status by mutableStateOf(Status.Disconnected)
-        private set
+    private val statusState = mutableStateOf(Status.Disconnected)
+    /** Mirrors [status] for collectors outside composition, which see no snapshot notifications. */
+    val statusFlow = kotlinx.coroutines.flow.MutableStateFlow(Status.Disconnected)
+    var status: Status
+        get() = statusState.value
+        private set(v) {
+            statusState.value = v
+            statusFlow.value = v
+        }
     var tools by mutableStateOf<List<ToolInfo>>(emptyList())
         private set
     var sessions by mutableStateOf<List<SessionSummary>>(emptyList())
@@ -166,9 +173,8 @@ class WsClient(
                 onFrame = { frame -> if (relayLink.get() === link) handleRelayFrame(frame) },
                 onClosed = {
                     if (relayLink.compareAndSet(link, null)) {
-                        status = Status.Disconnected
                         failTransfers("connection lost")
-                        if (!userClosed) scheduleReconnect()
+                        scheduleReconnect()
                     }
                 })
             relayLink.set(link)
@@ -241,7 +247,6 @@ class WsClient(
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (!socket.compareAndSet(webSocket, null)) return
-            status = Status.Disconnected
             lastError = t.message ?: "connection failed"
             failTransfers("connection lost")
             scheduleReconnect()
@@ -249,15 +254,15 @@ class WsClient(
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             if (!socket.compareAndSet(webSocket, null)) return
-            status = Status.Disconnected
             failTransfers("connection lost")
             // 4xxx are the daemon's auth refusals (bad token, revoked, timeout,
             // rate limit): retrying spends the IP's 5-attempt budget and locks it out.
             if (code >= 4000) {
                 lastError = reason.ifEmpty { "refused by server ($code)" }
+                status = Status.Disconnected
                 return
             }
-            if (!userClosed) scheduleReconnect()
+            scheduleReconnect()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -267,18 +272,18 @@ class WsClient(
 
     private fun send(line: String): Boolean {
         relayLink.get()?.let { link ->
-            // Relay transport: wrap the protocol message in an rh envelope for
-            // the daemon's relay bridge (same shape the daemon expects).
+            // Relay requests go direct to the daemon's connection, never to the channel.
+            val daemon = relayDaemon ?: return false
             val reqId = relayReqId.getAndIncrement()
-            val inner = line
-            link.publish("""{"rh":true,"type":"rhreq","reqId":$reqId,"msg":$inner}""")
-            return true
+            return link.direct(daemon, """{"rh":true,"type":"rhreq","reqId":$reqId,"msg":$line}""")
         }
         val ws = socket.get() ?: return false
         return ws.send(line)
     }
 
     private val relayReqId = java.util.concurrent.atomic.AtomicLong(0)
+    @Volatile private var relayConnId: String? = null
+    @Volatile private var relayDaemon: String? = null
 
     /** Relay frames: `rhresp` (reply to our rhreq) and `rhpush` (broadcasts). */
     private fun handleRelayFrame(frame: String) {
@@ -286,11 +291,26 @@ class WsClient(
         when (env["type"]?.jsonPrimitive?.contentOrNull) {
             "connected" -> {
                 val link = relayLink.get() ?: return
+                relayConnId = str(env, "id")
+                relayDaemon = null
                 link.subscribe()
-                hello?.let { send(it) }
+                link.publish("""{"rh":true,"type":"rhchallenge"}""")
             }
-            "message", "direct" -> {
+            "direct" -> {
                 val data = env["data"] as? JsonObject ?: return
+                val from = str(env, "from") ?: return
+                if (data["type"]?.jsonPrimitive?.contentOrNull == "rhchallenge") {
+                    // First challenge wins; a channel member answering first learns only
+                    // a proof bound to its own nonce and to our connId, useless elsewhere.
+                    if (relayDaemon != null) return
+                    val nonce = str(data, "nonce") ?: return
+                    val me = relayConnId ?: return
+                    val token = lastToken ?: return
+                    relayDaemon = from
+                    send(Proto.helloProof(RelayLink.proof(token, nonce, me)))
+                    return
+                }
+                if (from != relayDaemon) return
                 when (data["type"]?.jsonPrimitive?.contentOrNull) {
                     "rherr" -> {
                         lastError = "relay: " + (data["error"]?.jsonPrimitive?.contentOrNull ?: "rejected")
@@ -810,13 +830,20 @@ class WsClient(
         }
     }
 
-    /** Exponential backoff + jitter reconnect loop. */
+    /**
+     * Exponential backoff + jitter reconnect loop. Goes straight to Reconnecting
+     * without passing Disconnected, which would stop the foreground service.
+     */
     private fun scheduleReconnect() {
-        if (userClosed) return
-        val url = activeUrl ?: return
-        val token = lastToken ?: return
+        val url = activeUrl
+        val token = lastToken
+        if (userClosed || url == null || token == null) {
+            status = Status.Disconnected
+            return
+        }
         val delay = policy.nextDelayMs() ?: run {
             lastError = "gave up after ${policy.attemptsSoFar} reconnect attempts"
+            status = Status.Disconnected
             return
         }
         status = Status.Reconnecting

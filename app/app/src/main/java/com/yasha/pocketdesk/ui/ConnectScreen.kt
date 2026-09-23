@@ -37,6 +37,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.yasha.pocketdesk.Link
+import com.yasha.pocketdesk.Pairing
 import com.yasha.pocketdesk.RhEvent
 import com.yasha.pocketdesk.ServerBook
 import com.yasha.pocketdesk.ServerEntry
@@ -108,6 +110,31 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
                     trustFp = null
                 }) { Text("Reject") }
             },
+        )
+    }
+
+    // A link can come from any app or web page, so it is shown before anything is saved.
+    val pairing = Link.pendingPair
+    if (pairing.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { Link.pendingPair = emptyList() },
+            title = { Text("Pair with ${pairing.first().name}?") },
+            text = {
+                Text(
+                    pairing.joinToString("\n") { it.url } +
+                        (pairing.first().pinnedFingerprint?.let { "\n\nCertificate:\n" + it.chunked(2).joinToString(" ") } ?: "") +
+                        "\n\nOnly accept a link you just scanned from your own PC.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val urls = pairing.map { it.url }.toSet()
+                    persist(servers.filter { it.url !in urls } + pairing)
+                    Link.pendingPair = emptyList()
+                    startConnect(pairing.first())
+                }) { Text("Pair and connect") }
+            },
+            dismissButton = { TextButton(onClick = { Link.pendingPair = emptyList() }) { Text("Cancel") } },
         )
     }
 
@@ -189,6 +216,14 @@ private fun ServerFormDialog(initial: ServerEntry?, onSave: (ServerEntry) -> Uni
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var url by remember { mutableStateOf(initial?.url ?: "") }
     var token by remember { mutableStateOf(initial?.token ?: "") }
+    // A pasted pairing link goes through the same confirmation as a scanned one.
+    androidx.compose.runtime.LaunchedEffect(url) {
+        val paired = Pairing.parse(url)
+        if (paired.isNotEmpty()) {
+            Link.pendingPair = paired
+            onDismiss()
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "Add server" else "Edit server") },
@@ -199,7 +234,7 @@ private fun ServerFormDialog(initial: ServerEntry?, onSave: (ServerEntry) -> Uni
                     value = url,
                     onValueChange = { url = it },
                     label = { Text("URL") },
-                    placeholder = { Text("ws://192.168.1.10:8765/ws · wss://… · relay://host:8790/channel") },
+                    placeholder = { Text("ws://192.168.1.10:8765/ws · wss://… · relay://host:8790/channel · pocketdesk://pair#…") },
                     singleLine = true,
                 )
                 OutlinedTextField(value = token, onValueChange = { token = it }, label = { Text("Token") }, singleLine = true)
