@@ -170,7 +170,10 @@ export default function agentsHandlers(ctx) {
         // the normal path there. It must not use `/v`: window titles take it
         // from ~0.35s to ~21s, past the timeout, and only image names are
         // matched here anyway.
-        const { stdout: out } = await promisify(exec)("wmic process get processid,commandline /format:csv 2>nul || tasklist /fo csv /nh", { encoding: "utf-8", timeout: 8000, windowsHide: true });
+        const probe = process.platform === "win32"
+          ? "wmic process get processid,commandline /format:csv 2>nul || tasklist /fo csv /nh"
+          : "ps -eo pid=,args=";
+        const { stdout: out } = await promisify(exec)(probe, { encoding: "utf-8", timeout: 8000, windowsHide: true });
         const lines = String(out).split(/\r?\n/).filter(Boolean);
         // GUI manifests have no `bin`: they are detected by path, not by a
         // process name, so they cannot be matched against a command line.

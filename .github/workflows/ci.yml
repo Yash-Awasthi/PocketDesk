@@ -25,6 +25,9 @@ jobs:
         working-directory: daemon
     steps:
       - uses: actions/checkout@v4
+        with:
+          # tools-ui.test.mjs reads recent commits of this repo through git_log.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -48,7 +51,6 @@ jobs:
           distribution: temurin
           java-version: 17
           cache: gradle
-      - uses: android-actions/setup-android@v3
       - name: Lint, unit tests, debug APK
         working-directory: app
         run: chmod +x gradlew && ./gradlew lintDebug testDebugUnitTest assembleDebug --no-daemon
