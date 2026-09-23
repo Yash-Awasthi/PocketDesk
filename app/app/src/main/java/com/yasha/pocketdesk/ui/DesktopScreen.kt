@@ -54,18 +54,18 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit) {
     var keyboardVisible by remember { mutableStateOf(false) }
     val desktopError by ws._desktopError.collectAsState()
 
-    // Start the stream on entry; the daemon stops the loop automatically when
-    // we disconnect (server removes the watcher on socket close).
-    LaunchedEffect(Unit) {
+    // Leaving by any route (bottom bar, system Back) must stop the daemon's capture loop.
+    androidx.compose.runtime.DisposableEffect(Unit) {
         ws.desktopSnapshot()
         ws.desktopStart(55)
+        onDispose { ws.desktopStop() }
     }
 
     Column(Modifier.fillMaxSize()) {
         // Header: back, status, keyboard toggle.
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            IconButton(onClick = { ws.desktopStop(); onClose() }) {
+            IconButton(onClick = onClose) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
             }
             Text(
@@ -104,13 +104,19 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit) {
                             onDoubleTap = { _ -> ws.desktopScroll(false) },
                         )
                     }
-                    .pointerInput(Unit) {
+                    .pointerInput(frame?.width, frame?.height) {
+                        // Drag moves the pointer only; a click per move event fired dozens of clicks.
+                        var lastSent = 0L
                         detectDragGestures(
                             onDragStart = { off ->
-                                toScreen(frame, size.width, size.height, off)?.let { ws.desktopTap(it.first, it.second) }
+                                toScreen(frame, size.width, size.height, off)?.let { ws.desktopMove(it.first, it.second) }
                             },
                             onDrag = { change, _ ->
-                                toScreen(frame, size.width, size.height, change.position)?.let { ws.desktopTap(it.first, it.second) }
+                                val now = System.currentTimeMillis()
+                                if (now - lastSent >= 50) {
+                                    lastSent = now
+                                    toScreen(frame, size.width, size.height, change.position)?.let { ws.desktopMove(it.first, it.second) }
+                                }
                             },
                         )
                     },

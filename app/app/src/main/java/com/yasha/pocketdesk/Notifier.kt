@@ -14,7 +14,6 @@ object Notifier {
     private const val CHANNEL = "sessions"
 
     fun ensureChannel(ctx: Context) {
-        if (Build.VERSION.SDK_INT < 26) return
         val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (mgr.getNotificationChannel(CHANNEL) == null) {
             mgr.createNotificationChannel(

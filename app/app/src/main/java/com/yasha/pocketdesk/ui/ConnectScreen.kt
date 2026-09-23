@@ -207,7 +207,7 @@ private fun ServerFormDialog(initial: ServerEntry?, onSave: (ServerEntry) -> Uni
         },
         confirmButton = {
             TextButton(
-                enabled = name.isNotBlank() && url.startsWith("ws") && token.isNotBlank(),
+                enabled = name.isNotBlank() && (url.startsWith("ws") || url.startsWith("relay://")) && token.isNotBlank(),
                 onClick = { onSave(ServerEntry(name.trim(), url.trim(), token.trim(), initial?.pinnedFingerprint)) },
             ) { Text("Save") }
         },
