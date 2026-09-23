@@ -11,10 +11,10 @@ cd PocketDesk
 npm install
 
 # Run tests
-node --test daemon/src/__tests__/*.test.js
+cd daemon && npm test
 
 # Start daemon
-node daemon/src/server.js
+node daemon/src/index.js
 ```
 
 ## Tech Stack
@@ -32,7 +32,11 @@ node daemon/src/server.js
 ```
 daemon/
 ├── src/
-│   ├── server.js           # Main entry point
+│   ├── index.js            # Entry point
+│   ├── server.js           # HTTP/WebSocket server, auth, message dispatch
+│   ├── handlers/           # Message handlers grouped by area
+│   ├── relay_bridge.js     # Off-LAN access through a relay
+│   ├── fs_ops.js           # Home-scoped file browse/read/write
 │   ├── plugins/            # Plugin system
 │   │   ├── logger.js       # Event logging
 │   │   ├── metrics.js      # Session metrics
@@ -41,8 +45,6 @@ daemon/
 │   │   ├── telegram.js
 │   │   ├── discord.js
 │   │   └── email.js
-│   ├── __tests__/          # Tests
-│   └── utils/              # Shared utilities
 public/
 ├── index.html              # Web UI
 ├── xterm/                  # Terminal frontend
