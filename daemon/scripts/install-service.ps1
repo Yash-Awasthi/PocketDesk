@@ -23,8 +23,8 @@ if ($needBuild) {
 # The tray spawns the daemon from the checkout it was installed from.
 Set-Content -Path (Join-Path $installDir "PocketDeskTray.ini") -Value $repoDaemon
 
-schtasks /Create /F /TN "PocketDesk" /SC LOGON /RL LIMITED /TR "`"$exe`"" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "task registration failed (try an elevated PowerShell)" }
+# The per-user Run key starts the tray at logon without admin rights.
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -Value "`"$exe`""
 
 Start-Process $exe
 Write-Host ""
