@@ -190,25 +190,25 @@ npm start          # first run generates + persists the token
 ```
 
 The banner prints everything: local URL, WebSocket URL, the full auth token
-(dev only), the pairing-QR URL, and (if configured) the relay line. Everything
+(dev only), the pairing-QR URL, and the iroh endpoint ID. Everything
 also persists to `~/.pocketdesk/config.json`:
 
 ```json
 {
   "port": 8765,
   "token": "<your-token>",
-  "relay": { "url": "", "channel": "", "hostPort": 8790 }
+  "iroh": { "enabled": true, "relays": [] }
 }
 ```
 
 Environment overrides (win each over the config file): `RH_PORT`, `RH_TOKEN`,
-`RH_RELAY_URL`, `RH_RELAY_CHANNEL`, `RH_RELAY_PORT`. TLS: `node scripts/gen-cert.js`
+`RH_IROH` (`0` disables iroh), `RH_IROH_RELAYS` (comma-separated relay URLs). TLS: `node scripts/gen-cert.js`
 then set `tls.enabled: true` in the config.
 
-Keep it running after logout with PM2 (`npm i -g pm2 && pm2 start src/index.js --name pocketdesk && pm2 save`)
-or NSSM on Windows.
+On Windows, `powershell -File daemon\scripts\install-service.ps1` installs a tray icon that
+starts the daemon at logon (`uninstall-service.ps1` removes it).
 
-### How access works — three ways to reach your PC
+### How access works
 
 The phone never touches your PC directly unless it's on the same network.
 Authentication is always the same: the app sends the token once at connect
@@ -216,17 +216,17 @@ Authentication is always the same: the app sends the token once at connect
 
 | Mode | Phone URL | When to use | PC needs |
 |---|---|---|---|
-| **Anywhere (iroh)** | `iroh://<ticket>`, added by the pairing QR | Any network, no setup | Outbound internet only |
 | **LAN** | `ws://<pc-ip>:8765/ws` | Phone on same Wi-Fi | Nothing special |
-| **Relay** | `relay://<relay-host>:8790/<channel>` | Any network — kilometers away, mobile data, hotel Wi-Fi | Outbound internet only |
+| **Anywhere (iroh)** | `iroh://<ticket>`, saved by the pairing QR | Any network, no setup | Outbound internet only |
 | **Tailscale/VPN** | `ws://<tailscale-ip>:8765/ws` | You manage a tailnet | Tailscale on both ends |
 | **Port-forward** | `wss://your.domain:8765/ws` (TLS!) | You control the router | Forwarded port + TLS cert |
 
 **LAN (same Wi-Fi) — default.** Start the daemon, scan the QR at
 `http://localhost:8765/pair`, done.
 
-**Anywhere — iroh (recommended off-LAN).** The same QR also adds a
-"(anywhere)" entry. The phone dials the PC by its public key: iroh
+**Anywhere — iroh.** The same QR also stores an iroh ticket with the entry;
+when the LAN address does not answer, the app retries over iroh, so one saved
+PC works at home and away. The phone dials the PC by its public key: iroh
 hole-punches a direct QUIC connection when the two networks allow it (most do)
 and otherwise falls back to an end-to-end encrypted relay. No VPN, no port
 forward, no account. The phone is bound to the key it paired from, so a copied
@@ -235,50 +235,6 @@ per GOP, so a bad link skips ahead instead of falling seconds behind, and the
 quality preset steps down while the link cannot keep up. By default n0's free
 public relays are used; [docs/RELAY.md](docs/RELAY.md) sets up your own.
 Measurements: [docs/TRANSPORT-BENCH.md](docs/TRANSPORT-BENCH.md).
-
-**Kilometers away — the relay (no VPN, no port forwarding).** The daemon dials
-OUT to a relay server and subscribes to a channel; your phone dials the same
-relay and publishes protocol requests on that channel. No inbound port on the
-PC, works through NAT/carrier-grade NAT/firewalls on both ends:
-
-```bash
-# On the PC — host a relay AND link to it in one go:
-RH_RELAY_PORT=8790 npm start
-# banner now shows:  relay  hosting :8790  (phone URL: relay://<this-pc>:8790/rh-<hostname>)
-```
-
-In the app add a server with URL `relay://<pc-public-ip-or-ddns>:8790/rh-<hostname>`
-and the same token.
-
-But wait — if the PC must be reachable on 8790, isn't that port forwarding?
-Only in the hosting case, which is a convenience for LAN peers. The fully
-remote-proof setup needs **no inbound port at all**: run the tiny relay
-*anywhere else* — a $4 VPS, a home NAS, any always-on box — and point **both**
-ends at it:
-
-```bash
-# On the VPS (any Node 18+ box):
-npx pocketdesk-relay --port 8790        # or: git clone … && node daemon/src/relay_server.js
-
-# On the PC — dial OUT to it (persist by putting it in config.json "relay": {"url": ...}):
-RH_RELAY_URL=relay://vps.example.com:8790 RH_RELAY_CHANNEL=rh-my-laptop npm start
-
-# On the phone, any network on earth:
-#   URL:   relay://vps.example.com:8790/rh-my-laptop
-#   Token: same as the PC's
-```
-
-Both ends keep an **outbound** TCP connection to the relay; the relay just
-shuttles framed JSON between members of a channel. The token still guards every
-command (the relay bridge validates it with the same timing-safe check as the
-WebSocket handshake — a wrong token gets nothing), and TLS is available end to
-end (`wss` pair page / pinned cert in the app) if you terminate it on the relay
-host.
-
-What works over the relay: everything the protocol does — sessions, terminal
-streaming, chats with live deltas, Freebuff control, files, models — because the
-bridge feeds relay messages through the daemon's normal command path and pushes
-every broadcast (output chunks, chat deltas, state changes) back to the channel.
 
 **Tailscale** still works if you already run it on both ends:
 `ws://<tailscale-ip>:8765/ws` behaves exactly like LAN. It is not needed any more.
@@ -290,8 +246,8 @@ every broadcast (output chunks, chat deltas, state changes) back to the channel.
 - `/pair` (the QR page) is served **only** to loopback — never exposed.
 - Put TLS on for anything beyond localhost: `node scripts/gen-cert.js`, set
   `tls.enabled: true`, and pin the fingerprint shown in the app.
-- The relay channel is not encryption; the token is the gate. Prefer a relay
-  you control over a public one.
+- iroh relays only ever see end-to-end encrypted traffic; the token still gates
+  every command, and a device is bound to the iroh key it paired from.
 - Revoking a phone = change the token (and update your other devices).
 
 ---
@@ -301,7 +257,7 @@ every broadcast (output chunks, chat deltas, state changes) back to the channel.
 ```
 ┌──────────────┐          WebSocket (JSON)         ┌──────────────────┐
 │              │ ◄────────────────────────────────► │                  │
-│  Android App │          LAN / Tailscale           │  harnessd        │
+│  Android App │          LAN / iroh (QUIC)         │  harnessd        │
 │  (Kotlin)    │                                    │  (Node.js)      │
 │              │                                    │                  │
 │  ┌────────┐  │                                    │  ┌────────────┐  │

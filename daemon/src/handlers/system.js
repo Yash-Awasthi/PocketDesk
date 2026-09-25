@@ -15,7 +15,7 @@ import * as quietHours from "../quiet_hours.js";
 import * as devices from "../devices.js";
 
 export default function systemHandlers(ctx) {
-  const { send, broadcast, allSessions, notifications, plugins, power, shares, recorder, relay, shooter, streamParser, tls, rotateToken, disconnectDevice } = ctx;
+  const { send, broadcast, allSessions, notifications, plugins, power, shares, recorder, shooter, streamParser, tls, rotateToken, disconnectDevice } = ctx;
   return {
     async propose(ws, msg) {
       const p = proposals.create({
@@ -111,40 +111,6 @@ export default function systemHandlers(ctx) {
     },
     async record_get(ws, msg) {
       send(ws, { type: "record_get", id: msg.id, events: recorder.getEvents(msg.id), export: recorder.exportSession(msg.id, msg.format || "json") });
-    },
-    // ── Relay (hermes-relay: outbound link + optional relay hosting) ────
-    async relay_connect(ws, msg) {
-      const url = msg.url || process.env.RH_RELAY_URL;
-      const channel = msg.channel || process.env.RH_RELAY_CHANNEL || relay.defaultChannel();
-      if (!url) {
-        send(ws, { type: "relay_state", state: "error", message: "no relay url (set RH_RELAY_URL or pass msg.url)" });
-        return;
-      }
-      relay.connect(url, channel);
-      send(ws, { type: "relay_state", state: "connecting", url, channel });
-    },
-    async relay_disconnect(ws, msg) {
-      relay.disconnect();
-      send(ws, { type: "relay_state", state: "disconnected" });
-    },
-    async relay_status(ws, msg) {
-      send(ws, { type: "relay_status", ...relay.status() });
-    },
-    async relay_publish(ws, msg) {
-      relay.publish(msg.data);
-      send(ws, { type: "relay_published", channel: relay.status().channel });
-    },
-    async relay_send(ws, msg) {
-      relay.sendTo(msg.to, msg.data);
-      send(ws, { type: "relay_sent", to: msg.to });
-    },
-    async relay_host(ws, msg) {
-      relay.host(Number(msg.port));
-      send(ws, { type: "relay_host", state: "hosting", port: msg.port });
-    },
-    async relay_host_stop(ws, msg) {
-      relay.hostStop();
-      send(ws, { type: "relay_host", state: "stopped" });
     },
     // ── Freebuff control (status/configs/skills/auth from the phone) ───────
     async fb_status(ws, msg) {

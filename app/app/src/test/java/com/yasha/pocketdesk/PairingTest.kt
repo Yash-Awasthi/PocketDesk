@@ -14,10 +14,8 @@ class PairingTest {
         "pocketdesk://pair#" + java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(json.toByteArray())
 
     @Test
-    fun `full payload yields a pinned LAN entry and a relay entry`() {
-        val (lan, relay) = Pairing.parse(full)
-        assertEquals(ServerEntry("192.168.1.5", "wss://192.168.1.5:8765/ws", "tok123", "ab".repeat(32)), lan)
-        assertEquals(ServerEntry("192.168.1.5 (relay)", "relay://192.168.1.5:8790/home", "tok123"), relay)
+    fun `an older payload with relay fields yields just the pinned LAN entry`() {
+        assertEquals(listOf(ServerEntry("192.168.1.5", "wss://192.168.1.5:8765/ws", "tok123", "ab".repeat(32))), Pairing.parse(full))
     }
 
     @Test
@@ -27,12 +25,9 @@ class PairingTest {
     }
 
     @Test
-    fun `an iroh ticket adds an anywhere entry between LAN and relay`() {
+    fun `an iroh ticket becomes the LAN entry's fallback`() {
         val entries = Pairing.parse(link("""{"u":"ws://10.0.0.2:8765/ws","t":"x","f":"","i":"endpointabc"}"""))
-        assertEquals(listOf(
-            ServerEntry("10.0.0.2", "ws://10.0.0.2:8765/ws", "x", null),
-            ServerEntry("10.0.0.2 (anywhere)", "iroh://endpointabc", "x"),
-        ), entries)
+        assertEquals(listOf(ServerEntry("10.0.0.2", "ws://10.0.0.2:8765/ws", "x", null, "iroh://endpointabc")), entries)
     }
 
     @Test

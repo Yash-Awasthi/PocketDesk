@@ -35,7 +35,7 @@ daemon/
 │   ├── index.js            # Entry point
 │   ├── server.js           # HTTP/WebSocket server, auth, message dispatch
 │   ├── handlers/           # Message handlers grouped by area
-│   ├── relay_bridge.js     # Off-LAN access through a relay
+│   ├── iroh_link.js        # Off-LAN access over iroh
 │   ├── fs_ops.js           # Home-scoped file browse/read/write
 │   ├── plugins/            # Plugin system
 │   │   ├── logger.js       # Event logging

@@ -85,30 +85,6 @@ export function byToken(t) {
   return null;
 }
 
-/**
- * Relay hellos carry a proof instead of the token: channel members can read
- * the frame, and binding the relay-assigned connId stops them replaying it.
- */
-export function relayProof(tokenHash, nonce, from) {
-  return crypto.createHmac("sha256", tokenHash).update(`${nonce}:${from}`).digest("hex");
-}
-
-export function proofMatches(proof, tokenHash, nonce, from) {
-  if (typeof proof !== "string") return false;
-  const want = Buffer.from(relayProof(tokenHash, nonce, from));
-  const got = Buffer.from(proof);
-  return got.length === want.length && crypto.timingSafeEqual(got, want);
-}
-
-export function byRelayProof(proof, nonce, from) {
-  for (const d of devices.values()) {
-    if (!d.revoked && d.tokenHash && proofMatches(proof, d.tokenHash, nonce, from)) return d;
-  }
-  return null;
-}
-
-export const hashToken = (t) => hash(t);
-
 export function isRevoked(clientId) {
   const d = devices.get(String(clientId));
   return Boolean(d?.revoked);

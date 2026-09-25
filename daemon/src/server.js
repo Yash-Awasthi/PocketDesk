@@ -42,7 +42,6 @@ import * as liveDigest from "./live_digest.js";
 import * as statsUsage from "./stats_usage.js";
 import * as quietHours from "./quiet_hours.js";
 import * as devices from "./devices.js";
-import { createRelayBridge } from "./relay_bridge.js";
 import agentsHandlers from "./handlers/agents.js";
 import filesHandlers from "./handlers/files.js";
 import remoteHandlers from "./handlers/remote.js";
@@ -72,18 +71,17 @@ const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugi
   return all.sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9));
 }
 
-export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { onTokenRotated } = {}) {
+export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = {}) {
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
   const page = fs.readFileSync(path.join(publicDir, "index.html"));
   const pairTemplate = fs.readFileSync(path.join(publicDir, "pair.html"), "utf8");
 
   function lanAddress() {
-    for (const list of Object.values(os.networkInterfaces())) {
-      for (const ni of list ?? []) {
-        if (ni.family === "IPv4" && !ni.internal) return ni.address;
-      }
-    }
-    return "localhost";
+    const all = Object.values(os.networkInterfaces()).flat()
+      .filter((ni) => ni?.family === "IPv4" && !ni.internal).map((ni) => ni.address);
+    // Home networks use private ranges; 100.64/10 is VPN or carrier NAT (Tailscale lives there).
+    return all.find((a) => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a))
+      ?? all.find((a) => !a.startsWith("169.254.")) ?? "localhost";
   }
 
   let pairPage = "";
@@ -94,11 +92,8 @@ export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { on
   function buildPairPage(useTls, fingerprint = pairFp) {
     pairFp = fingerprint;
     const url = `${useTls ? "wss" : "ws"}://${lanAddress()}:${port}/ws`;
-    // A hosting-only daemon is reachable at its own relay port; the phone needs
-    // the concrete channel, not an empty "use the default".
-    const relayUrl = relayCfg?.url || (relayCfg?.hostPort ? `relay://${lanAddress()}:${relayCfg.hostPort}` : "");
     const payload = Buffer.from(
-      JSON.stringify({ u: url, t: token, f: fingerprint || "", r: relayUrl || undefined, c: relayUrl ? relayCfg?.channel || relay.defaultChannel() : undefined, i: irohTicket || undefined }),
+      JSON.stringify({ u: url, t: token, f: fingerprint || "", i: irohTicket || undefined }),
       "utf8",
     ).toString("base64url");
     pairPage = pairTemplate
@@ -268,7 +263,6 @@ export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { on
     for (const ws of wss.clients) {
       if (ws._authed && (!ws._shareSession || String(obj.id) === ws._shareSession)) send(ws, obj);
     }
-    bridge.pushAuthed({ rh: true, type: "rhpush", data: obj });
   }
 
   function detachClient(ws) {
@@ -287,7 +281,6 @@ export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { on
 
   function disconnectDevice(clientId) {
     for (const client of wss.clients) if (client._clientId === clientId) client.close(4003, "device revoked");
-    bridge.dropDevice(clientId);
   }
 
   // Master token pairs a new device and gets it its own token; a device token
@@ -301,16 +294,6 @@ export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { on
       return { id, pairing: true };
     }
     const d = devices.byToken(t);
-    return d ? { id: d.id } : null;
-  }
-
-  function authenticateRelay(msg, nonce, from) {
-    if (msg.type !== "hello" || !nonce) return null;
-    if (devices.proofMatches(msg.proof, devices.hashToken(token), nonce, from)) {
-      const id = String(msg.clientId || crypto.randomUUID());
-      return devices.isRevoked(id) ? null : { id, pairing: true };
-    }
-    const d = devices.byRelayProof(msg.proof, nonce, from);
     return d ? { id: d.id } : null;
   }
 
@@ -377,19 +360,6 @@ export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { on
   });
   activity.start();
   power.refresh();
-
-  const bridge = createRelayBridge({ authenticate: authenticateRelay, welcome, handle, detachClient, broadcast });
-  const relay = bridge.relay;
-  if (relayCfg?.url) {
-    relay.connect(relayCfg.url, relayCfg.channel || undefined);
-  }
-  if (relayCfg?.hostPort) {
-    relay.host(Number(relayCfg.hostPort));
-    // Hosting alone isn't enough: the bridge needs channel membership on the
-    // hosted relay, so also dial ourselves over loopback. Remote peers then
-    // reach the daemon through our relay with no extra config.
-    if (!relayCfg.url) relay.connect(`relay://127.0.0.1:${relayCfg.hostPort}`, relayCfg.channel || undefined);
-  }
 
   // ── Stream JSON parser (format-claude-stream: agent JSONL → structured) ──
   const streamParser = new StreamJsonParser();
@@ -521,7 +491,6 @@ export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { on
     power.dispose();
     tunnels.closeAll();
     activity.stop();
-    relay.dispose();
     video.stop();
     if (lanDiscoveryStarted) { try { lanDiscovery.stop(); } catch {} }
     scheduler.stop();
@@ -590,7 +559,7 @@ export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { on
   });
 
   const ctx = {
-    send, broadcast, allSessions, notifications, plugins, power, shares, recorder, tunnels, relay, wa, rd, vnc,
+    send, broadcast, allSessions, notifications, plugins, power, shares, recorder, tunnels, wa, rd, vnc,
     desktop, desktopWatchers, video, videoWatchers, bastion, sshSrv, mpc, shooter, streamParser, lanDiscovery, ensureLanDiscovery,
     activity, tls, rotateToken, disconnectDevice,
   };
@@ -619,8 +588,6 @@ export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { on
       console.log(`  tls       enabled, cert fingerprint ${fp}`);
     }
     console.log(`  pairing   http${useTls ? "s" : ""}://localhost:${port}/pair  (open on THIS PC, scan the QR from the app)`);
-    if (relayCfg?.url) console.log(`  relay     out → ${relayCfg.url}  channel ${relayCfg.channel || relay.defaultChannel()}`);
-    if (relayCfg?.hostPort) console.log(`  relay     hosting :${relayCfg.hostPort}  (phone URL: relay://<this-pc>:${relayCfg.hostPort}/${relayCfg.channel || relay.defaultChannel()})`);
     console.log("  config    %USERPROFILE%\\.pocketdesk\\config.json");
     console.log("");
     // iroh sockets join wss.clients so broadcast and revoke reach them like /ws sockets.

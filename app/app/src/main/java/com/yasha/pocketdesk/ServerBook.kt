@@ -16,6 +16,8 @@ data class ServerEntry(
     val url: String,
     val token: String,
     val pinnedFingerprint: String? = null,
+    /** Tried when [url] cannot connect: the iroh ticket that reaches the PC from any network. */
+    val fallback: String? = null,
 )
 
 class ServerBook(context: Context) {
@@ -33,6 +35,7 @@ class ServerBook(context: Context) {
                 url = url,
                 token = s("token") ?: "",
                 pinnedFingerprint = s("fp")?.takeIf { it.isNotBlank() },
+                fallback = s("fallback")?.takeIf { it.isNotBlank() },
             )
         }
     }
@@ -45,6 +48,7 @@ class ServerBook(context: Context) {
                     put("url", e.url)
                     put("token", e.token)
                     put("fp", e.pinnedFingerprint ?: "")
+                    e.fallback?.let { put("fallback", it) }
                 })
             }
         }

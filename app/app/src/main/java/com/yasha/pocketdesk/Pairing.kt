@@ -6,9 +6,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
 /**
- * The daemon's pairing link, `pocketdesk://pair#<base64url JSON {u,t,f,r,c,i}>`:
- * LAN url, master token, TLS fingerprint, optionally a relay url + channel, and
- * optionally an iroh ticket that reaches the PC from any network.
+ * The daemon's pairing link, `pocketdesk://pair#<base64url JSON {u,t,f,i}>`:
+ * LAN url, master token, TLS fingerprint, and optionally an iroh ticket that
+ * reaches the PC from any network (the entry's fallback).
  */
 object Pairing {
     const val SCHEME = "pocketdesk"
@@ -22,12 +22,8 @@ object Pairing {
         val url = s("u")?.takeIf { it.startsWith("ws://") || it.startsWith("wss://") } ?: return emptyList()
         val token = s("t") ?: return emptyList()
         val host = url.substringAfter("://").substringBefore('/').substringBefore(':')
-        val lan = ServerEntry(host, url, token, fingerprint(s("f")))
-        val relay = s("r")?.takeIf { it.startsWith("relay://") }?.let {
-            ServerEntry("$host (relay)", it.trimEnd('/') + "/" + (s("c") ?: "rh-default"), token)
-        }
-        val anywhere = s("i")?.let { ServerEntry("$host (anywhere)", "iroh://$it", token) }
-        return listOfNotNull(lan, anywhere, relay)
+        // The iroh ticket rides along as the fallback, so one entry works at home and away.
+        return listOf(ServerEntry(host, url, token, fingerprint(s("f")), s("i")?.let { "iroh://$it" }))
     }
 
     /** The daemon prints `AB:CD:…`; [Tls.sha256] compares lowercase hex without separators. */

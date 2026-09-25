@@ -108,7 +108,7 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(client.issuedToken) {
             val (url, token) = client.issuedToken ?: return@LaunchedEffect
             val book = ServerBook(applicationContext)
-            book.save(book.load().map { if (it.url == url) it.copy(token = token) else it })
+            book.save(book.load().map { if (it.url == url || it.fallback == url) it.copy(token = token) else it })
         }
         // Declared before the lock gate so a re-lock keeps navigation.
         var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Connect) }
