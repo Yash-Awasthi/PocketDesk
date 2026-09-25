@@ -3,6 +3,12 @@
 One-by-one coverage of every distinct feature found in the 241-repo inspiration
 corpus (`/inspiration/PocketDesk`), mapped to what PocketDesk ships.
 
+> **Removed since this matrix was written:** the WhatsApp and Telegram bridges, push
+> notification channels and quiet hours, the VNC bridge, the session-scoped `rd_*` desktop,
+> session recording, tunnels and port forwards, share links, Wake-on-LAN, LAN peers and file
+> transfer, the MCP endpoint, voice transcription, worktrees, env profiles, the audit log,
+> chat resurrection, SDK sessions and the live digest. Rows marking them ✅ describe the past.
+
 Status legend:
 
 | Mark | Meaning |

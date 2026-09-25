@@ -56,7 +56,7 @@ public static class RHI {
   [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public INPUTUNION u; }
   public const uint MOVE=0x0001, LEFTDOWN=0x0002, LEFTUP=0x0004, RIGHTDOWN=0x0008, RIGHTUP=0x0010,
                     MIDDLEDOWN=0x0020, MIDDLEUP=0x0040, WHEEL=0x0800, VIRTUALDESK=0x4000, ABSOLUTE=0x8000,
-                    KEYDOWN=0x0000, KEYUP=0x0002, UNICODE=0x0004;
+                    KEYDOWN=0x0000, EXTENDED=0x0001, KEYUP=0x0002, UNICODE=0x0004;
   public static uint Mouse(int x, int y, uint flags, int wheel) {
     var i = new INPUT { type = 0 };
     i.u.mi = new MOUSEINPUT { dx = x, dy = y, mouseData = unchecked((uint)wheel), dwFlags = flags };
@@ -66,6 +66,19 @@ public static class RHI {
     var i = new INPUT { type = 1 };
     i.u.ki = new KEYBDINPUT { wVk = vk, wScan = 0, dwFlags = flags };
     return SendInput(1, new INPUT[]{ i }, Marshal.SizeOf(typeof(INPUT)));
+  }
+  [StructLayout(LayoutKind.Sequential)] public struct CURSORINFO { public int cbSize, flags; public IntPtr hCursor; public int x, y; }
+  [DllImport("user32.dll")] public static extern bool GetCursorInfo(ref CURSORINFO ci);
+  [DllImport("user32.dll")] public static extern IntPtr LoadCursor(IntPtr h, int id);
+  static readonly int[] ShapeIds = { 32512, 32513, 32649, 32514, 32650, 32515, 32644, 32645, 32642, 32643, 32646, 32648 };
+  static readonly string[] ShapeNames = { "arrow", "text", "hand", "wait", "progress", "crosshair", "ew-resize", "ns-resize", "nwse-resize", "nesw-resize", "move", "not-allowed" };
+  /** JSON fields for the pointer; app-specific cursors report as arrow. */
+  public static string Cursor(int ox, int oy) {
+    var ci = new CURSORINFO(); ci.cbSize = Marshal.SizeOf(typeof(CURSORINFO));
+    if (!GetCursorInfo(ref ci)) return "\\"visible\\":false";
+    string shape = "arrow";
+    for (int i = 0; i < ShapeIds.Length; i++) if (LoadCursor(IntPtr.Zero, ShapeIds[i]) == ci.hCursor) { shape = ShapeNames[i]; break; }
+    return "\\"x\\":" + (ci.x - ox) + ",\\"y\\":" + (ci.y - oy) + ",\\"shape\\":\\"" + shape + "\\",\\"visible\\":" + ((ci.flags & 1) != 0 ? "true" : "false");
   }
   public static uint KeyScan(ushort scan, uint flags) {
     var i = new INPUT { type = 1 };
@@ -97,23 +110,36 @@ while ($true) {
       if ($cmd.click -eq 'double'){ [RHI]::Mouse(0,0,[RHI]::LEFTDOWN,0) | Out-Null;  [RHI]::Mouse(0,0,[RHI]::LEFTUP,0) | Out-Null }
       if ($cmd.click -eq 'right') { [RHI]::Mouse(0,0,[RHI]::RIGHTDOWN,0) | Out-Null; [RHI]::Mouse(0,0,[RHI]::RIGHTUP,0) | Out-Null }
       if ($cmd.click -eq 'middle'){ [RHI]::Mouse(0,0,[RHI]::MIDDLEDOWN,0) | Out-Null;[RHI]::Mouse(0,0,[RHI]::MIDDLEUP,0) | Out-Null }
-      if ($cmd.press -eq 'down')  { [RHI]::Mouse(0,0,[RHI]::LEFTDOWN,0) | Out-Null }
-      if ($cmd.press -eq 'up')    { [RHI]::Mouse(0,0,[RHI]::LEFTUP,0) | Out-Null }
+      if ($cmd.press) {
+        $b = @{ left = @([RHI]::LEFTDOWN, [RHI]::LEFTUP); right = @([RHI]::RIGHTDOWN, [RHI]::RIGHTUP); middle = @([RHI]::MIDDLEDOWN, [RHI]::MIDDLEUP) }[[string]$cmd.button]
+        if ($null -eq $b) { $b = @([RHI]::LEFTDOWN, [RHI]::LEFTUP) }
+        if ($cmd.press -eq 'down') { [RHI]::Mouse(0,0,$b[0],0) | Out-Null }
+        if ($cmd.press -eq 'up')   { [RHI]::Mouse(0,0,$b[1],0) | Out-Null }
+      }
       if ($cmd.wheel) { [RHI]::Mouse(0,0,[RHI]::WHEEL,[int]$cmd.wheel) | Out-Null }
       [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}')
     } catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
     continue
   }
+  if ($op -eq 'cursor') {
+    $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true,' + [RHI]::Cursor($vs.X, $vs.Y) + '}')
+    continue
+  }
   if ($op -eq 'key') {
     try {
       $vk = [uint16]$cmd.key
+      # Without the extended flag, arrows and the Ins/Del/Home/End block act as numpad keys.
+      $ext = if (@(0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x2D,0x2E,0x5B,0x5C,0x5D,0x6F,0x90,0xA3,0xA5) -contains $vk) { [RHI]::EXTENDED } else { 0 }
+      if ($cmd.press -eq 'down') { [RHI]::Key($vk, [RHI]::KEYDOWN -bor $ext) | Out-Null; [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}'); continue }
+      if ($cmd.press -eq 'up')   { [RHI]::Key($vk, [RHI]::KEYUP -bor $ext) | Out-Null; [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}'); continue }
       $mods = @($cmd.mods)
       if ($mods -contains 'ctrl')  { [RHI]::Key(0x11, [RHI]::KEYDOWN) | Out-Null }
       if ($mods -contains 'alt')   { [RHI]::Key(0x12, [RHI]::KEYDOWN) | Out-Null }
       if ($mods -contains 'shift') { [RHI]::Key(0x10, [RHI]::KEYDOWN) | Out-Null }
       if ($mods -contains 'win')   { [RHI]::Key(0x5B, [RHI]::KEYDOWN) | Out-Null }
-      [RHI]::Key($vk, [RHI]::KEYDOWN) | Out-Null
-      [RHI]::Key($vk, [RHI]::KEYUP) | Out-Null
+      [RHI]::Key($vk, [RHI]::KEYDOWN -bor $ext) | Out-Null
+      [RHI]::Key($vk, [RHI]::KEYUP -bor $ext) | Out-Null
       if ($mods -contains 'win')   { [RHI]::Key(0x5B, [RHI]::KEYUP) | Out-Null }
       if ($mods -contains 'shift') { [RHI]::Key(0x10, [RHI]::KEYUP) | Out-Null }
       if ($mods -contains 'alt')   { [RHI]::Key(0x12, [RHI]::KEYUP) | Out-Null }
@@ -143,8 +169,35 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Collections.Generic;
 public static class RHD {
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  public struct OUTPUT_DESC { [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Name; public int L, T, R, B, Attached, Rotation; public IntPtr Monitor; }
+  // Slots before the first real method are IDXGIObject's, never called.
+  [ComImport, Guid("ae02eedb-c735-4690-8d52-5a8dc20213aa"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  public interface IOutput { void P0(); void P1(); void P2(); void P3(); void GetDesc(out OUTPUT_DESC d); }
+  [ComImport, Guid("2411e7e1-12ac-4ccf-bd14-9798e8534dc0"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  public interface IAdapter { void P0(); void P1(); void P2(); void P3(); [PreserveSig] int EnumOutputs(uint i, out IOutput o); }
+  [ComImport, Guid("7b7166ec-21c7-44ae-b21a-c9ae321ae369"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  public interface IFactory { void P0(); void P1(); void P2(); void P3(); [PreserveSig] int EnumAdapters(uint i, out IAdapter a); }
+  [DllImport("dxgi.dll")] static extern int CreateDXGIFactory(ref Guid riid, out IFactory f);
+  /** Outputs in the adapter/output order ffmpeg's ddagrab uses, as JSON objects. */
+  public static string Monitors() {
+    var g = typeof(IFactory).GUID; IFactory f;
+    if (CreateDXGIFactory(ref g, out f) != 0) return "";
+    var list = new List<string>();
+    IAdapter a;
+    for (uint ai = 0; f.EnumAdapters(ai, out a) == 0; ai++) {
+      IOutput o;
+      for (uint oi = 0; a.EnumOutputs(oi, out o) == 0; oi++) {
+        OUTPUT_DESC d; o.GetDesc(out d);
+        if (d.Attached == 0) continue;
+        list.Add("{\\"adapter\\":" + ai + ",\\"output\\":" + oi + ",\\"name\\":\\"" + d.Name.Replace("\\\\", "\\\\\\\\") + "\\",\\"left\\":" + d.L + ",\\"top\\":" + d.T + ",\\"w\\":" + (d.R - d.L) + ",\\"h\\":" + (d.B - d.T) + "}");
+      }
+    }
+    return string.Join(",", list);
+  }
 }
 '@
 [RHD]::SetProcessDPIAware() | Out-Null
@@ -155,6 +208,11 @@ while ($true) {
   try { $cmd = $line | ConvertFrom-Json } catch { [Console]::Out.WriteLine('{"ok":false,"error":"badjson"}'); continue }
   $op = $cmd.op
   if ($op -eq 'ping') { [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}'); continue }
+  if ($op -eq 'monitors') {
+    try { [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true,"monitors":[' + [RHD]::Monitors() + ']}') }
+    catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
+    continue
+  }
   if ($op -eq 'capture') {
     try {
       $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -245,7 +303,7 @@ class PsHelper {
       this.proc.stderr.on("data", () => { /* diagnostics only */ });
       this.proc.on("close", () => {
         this.proc = null;
-        for (const [, w] of [...this.waiters.values()]) {
+        for (const w of this.waiters.values()) {
           clearTimeout(w.timer);
           w.resolve({ ok: false, error: "helper_died" });
         }
@@ -398,20 +456,21 @@ export class DesktopController extends EventEmitter {
     }
   }
 
-  /** x/y: virtual-screen pixels from its top-left (omit to act at the cursor); click: left|right|middle|double; press: down|up. */
-  async inputMouse({ x, y, click, press, wheel }) {
+  /** x/y: virtual-screen pixels from its top-left (omit to act at the cursor); click: left|right|middle|double; press: down|up of button. */
+  async inputMouse({ x, y, click, press, button, wheel }) {
     if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
     await this.helperInput.ensure();
-    const r = await this.helperInput.cmd({ op: "mouse", x, y, click, press, wheel }, 8000);
+    const r = await this.helperInput.cmd({ op: "mouse", x, y, click, press, button, wheel }, 8000);
     return { ok: !!r?.ok, error: r?.error };
   }
 
-  async inputKey({ key, modifiers = [] }) {
+  /** press: down|up sends only that half, for held keys; without it the key is tapped with modifiers. */
+  async inputKey({ key, modifiers = [], press }) {
     if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
     const vk = Number(key);
     if (!Number.isFinite(vk) || vk <= 0 || vk > 254) return { ok: false, error: "bad_vk" };
     await this.helperInput.ensure();
-    const r = await this.helperInput.cmd({ op: "key", key: vk, mods: Array.isArray(modifiers) ? modifiers : [] }, 8000);
+    const r = await this.helperInput.cmd({ op: "key", key: vk, press, mods: Array.isArray(modifiers) ? modifiers : [] }, 8000);
     return { ok: !!r?.ok, error: r?.error };
   }
 
@@ -420,6 +479,43 @@ export class DesktopController extends EventEmitter {
     await this.helperInput.ensure();
     const r = await this.helperInput.cmd({ op: "type", text: String(text).slice(0, 512) }, 10000);
     return { ok: !!r?.ok, error: r?.error };
+  }
+
+  /**
+   * Attached monitors in ddagrab's adapter/output order. x/y are offsets from the
+   * virtual screen's top-left, the origin input coordinates use.
+   */
+  async monitors() {
+    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
+    await this.helperCapture.ensure();
+    const r = await this.helperCapture.cmd({ op: "monitors" }, 10000);
+    if (!r?.ok) return { ok: false, error: r?.error || "monitors_failed" };
+    const ox = Math.min(...r.monitors.map((m) => m.left));
+    const oy = Math.min(...r.monitors.map((m) => m.top));
+    const monitors = r.monitors.map((m, index) => ({
+      index, adapter: m.adapter, output: m.output, name: m.name,
+      x: m.left - ox, y: m.top - oy, w: m.w, h: m.h, primary: m.left === 0 && m.top === 0,
+    }));
+    return { ok: true, monitors };
+  }
+
+  /** Polls the pointer while anyone watches and emits "cursor" when it moves or changes shape. */
+  watchCursor(on) {
+    if (!on || !IS_WIN) { clearInterval(this.cursorTimer); this.cursorTimer = null; return; }
+    if (this.cursorTimer) return;
+    let busy = false;
+    let last = "";
+    this.cursorTimer = setInterval(async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        await this.helperInput.ensure();
+        const r = await this.helperInput.cmd({ op: "cursor" }, 2000);
+        const c = r?.ok ? { x: r.x, y: r.y, shape: r.shape, visible: r.visible } : null;
+        const key = JSON.stringify(c);
+        if (c && key !== last) { last = key; this.cursor = c; this.emit("cursor", c); }
+      } finally { busy = false; }
+    }, 33);
   }
 
   getStatus() {
@@ -435,6 +531,7 @@ export class DesktopController extends EventEmitter {
   }
 
   dispose() {
+    this.watchCursor(false);
     this._stopLoop();
     this.clients.clear();
     this.helperInput.kill();

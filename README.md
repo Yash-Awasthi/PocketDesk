@@ -31,46 +31,39 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📝 **Proposals** | Agent actions require human approval — safety by default |
 | 📱 **Multi-PC** | Connect to multiple PCs, each with pinned certificates |
 | 🔔 **Background Notify** | Get notified when sessions end while the app is in background |
-| 👥 **Session Sharing** | Read-only spectator links with TTL — phone, browser, second PC watch one session |
-| 🎬 **Session Recording** | Record any session and replay/export it later |
-| 📈 **Activity Monitor** | Per-session working/asking/quiet states with busy→quiet push |
-| 🔀 **Tunnels** | Reach any PC-local service from your phone over the harness connection |
-| 🖥️ **VNC Bridge** | Serve the live captured screen over a local TCP port — clients ask for `GET_FRAME` and get real JPEG frames (`vnc_start/stop/status/frame` + `vnc_event`) |
-| 🖨️ **Desktop Control** | Watch the whole PC screen live (~3 fps) and drive it — from the **browser AND the Android app** (tap = click, long-press = right-click, drag = move, scroll, type, keys) (`desktop_*`; Windows, PowerShell-powered). The session-scoped `rd_*` surface serves the same capture and input per viewer. |
-| 🔔 **Push Test** | One click in the browser fires a test push through every configured channel — verify your ntfy/Pushover phone subscription instantly |
+| 📈 **Activity Monitor** | Per-session working/asking/quiet states |
+| 🖨️ **Desktop Control** | Watch the whole PC screen live (~3 fps) and drive it — from the **browser AND the Android app** (tap = click, long-press = right-click, drag = move, scroll, type, keys) (`desktop_*`; Windows, PowerShell-powered). |
 | 🛡️ **SSH Bastion** | A real jump host: log in as `user@host` with your registered key, the access rule is checked, and the channel is proxied to the target with byte accounting (`bastion_*`) |
 | 🔒 **SSH Server Control** | A real SSH listener on the PC: per-user password/public-key auth, command allowlists enforced before a command runs, PTY shells, session recording (`sshserver_*`) |
 | 📇 **Connection Profiles** | Real SSH, SFTP and VNC connections from saved profiles, host-key trust-on-first-use, OpenSSH key generation kept out of the protocol (`profile_*`/`hostkey_*`/`sshkey_*`) |
 | 🔐 **SSH Screen** | Profiles, key generation, known host keys and start/stop for both PC-side listeners — on the browser client's SSH tab and on the phone, reached from the Tools screen |
 | ⚡ **Keep-Awake** | PC stays awake while agents run (per-process, never touches your power settings) |
-| 🤖 **Telegram Control** | Prompt sessions and approve proposals from a Telegram chat |
-| 💚 **WhatsApp Control** | Link the daemon as a WhatsApp companion device (real pairing QR), then drive sessions with prefixed messages from allowlisted numbers (`wa_*`) |
-| ♻️ **Chat Resurrection** | Conversations survive daemon restarts — one tap re-opens them via the CLI's own history |
 | 🌿 **Git Panel** | Branch/diff/log/status of any repo on the PC, read-only |
 | ⏭️ **Prompt Queue** | Queue follow-ups while the agent works — they drain automatically when the turn finishes |
 | ✅ **Todo Boards** | Live task lists per session — auto-derived from the agent's markdown checkboxes |
 | ⏰ **Scheduler** | Auto-continue loops: fire a prompt on an interval, after a delay, or N times |
 | 📣 **@file Mentions** | Reference PC-side files in prompts — content is inlined before the agent sees it |
 | 🩺 **Doctor** | One message returns a full self-diagnosis of the daemon and its agents |
-| 🌁 **Wake-on-LAN** | Magic-packet wake of a sleeping PC from the phone |
 | ⏱️ **Approval Auto-Deny** | Unattended agents never stall — unanswered approvals are auto-denied on a timer |
 | 💰 **Usage Dashboard** | Per-session token + cost aggregates straight from the agent's stream events |
-| 📉 **Live Digest** | Attach to a terminal as diffed plain-text rows instead of raw bytes |
-| 🔌 **MCP Endpoint** | Any MCP client on the PC can drive the agents (`tools/list`, `tools/call`) |
 | 📶 **Auto-Reconnect** | The app reconnects with exponential backoff + jitter and replays only missed output |
 
 ---
 
 ## ⚡ Quick Install
 
-**macOS / Linux:**
-```bash
-curl -fsSL https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/main/install.sh | bash
+**Windows** (PowerShell, no admin, nothing to install first):
+```powershell
+irm https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.ps1 | iex
 ```
 
-**Windows (PowerShell):**
-```powershell
-irm https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/main/install.ps1 | iex
+It downloads the daemon with its own Node.js and ffmpeg, installs a tray icon that
+starts it at logon, and opens the pairing QR. Scan it with the app and you are done.
+Full guide, updating and uninstalling: [docs/SETUP-PC.md](docs/SETUP-PC.md).
+
+**macOS / Linux:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.sh | bash
 ```
 
 **Manual:**
@@ -81,10 +74,8 @@ npm install
 npm start
 ```
 
-Runtime dependencies are `ws`, `node-pty` and `ssh2` (the SSH server, jump host
-and connection profiles). WhatsApp control additionally needs
-`@whiskeysockets/baileys`, which is an optional dependency: skip it and every
-other feature still runs — only a WhatsApp channel will refuse to link.
+Runtime dependencies are `ws`, `node-pty`, `ssh2` (the SSH server, jump host
+and connection profiles) and `@number0/iroh` (reaching the PC from any network).
 
 ---
 
@@ -205,8 +196,8 @@ Environment overrides (win each over the config file): `RH_PORT`, `RH_TOKEN`,
 `RH_IROH` (`0` disables iroh), `RH_IROH_RELAYS` (comma-separated relay URLs). TLS: `node scripts/gen-cert.js`
 then set `tls.enabled: true` in the config.
 
-On Windows, `powershell -File daemon\scripts\install-service.ps1` installs a tray icon that
-starts the daemon at logon (`uninstall-service.ps1` removes it).
+On Windows the installer sets up a tray icon that starts the daemon at logon; see
+[docs/SETUP-PC.md](docs/SETUP-PC.md).
 
 ### How access works
 
@@ -402,28 +393,22 @@ Proposals auto-expire after 5 minutes.
 JSON frames; binary payloads are base64.
 
 **Client → Server:**
-`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `propose` · `approve` · `reject` · `proposal_list` · `chat_history` · `pin`/`unpin` · `forward_*` · `sdk_*` · `transcribe` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed · `audit_log`
+`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `propose` · `approve` · `reject` · `proposal_list` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
 <details>
 <summary>Absorbed-feature messages</summary>
 
 `prompt_enqueue` · `prompt_queue` · `prompt_remove` — queued follow-ups ·
 `todos_set` · `todos_get` · `todos_status` — live todo boards (+ `todos_updated` broadcasts) ·
 `schedule_create` · `schedule_list` · `schedule_pause` · `schedule_resume` · `schedule_cancel` — auto-continue runs ·
-`doctor` — self-diagnosis report · `wake` — Wake-on-LAN magic packet ·
+`doctor` — self-diagnosis report ·
 `approval_waiting` — chats on the auto-deny countdown ·
 `usage_list` · `usage_get` — token/cost dashboards ·
-`digest_attach` · `digest_detach` — live plain-text terminal digest ·
-`mcp_start` · `mcp_stop` · `mcp_status` — embedded MCP endpoint control ·
 `sshserver_start` · `sshserver_stop` — bind/release the PC's own SSH listener ·
 `bastion_start` · `bastion_stop` — bind/release the jump host ·
 `profile_connect {id, protocol, password?, passphrase?}` — real SSH/SFTP/VNC connect ·
 
-`share_create` · `share_join` · `share_list` · `share_revoke` — read-only spectator links ·
 `stats` — host CPU/mem/uptime · `git_status` · `git_diff` · `git_log` · `git_branches` — read-only repo inspection ·
-`record_start` · `record_stop` · `record_list` · `record_get` — session recording/export ·
-`tunnel_create` · `tunnel_close` · `tunnel_list` — TCP tunnels to PC-local services (loopback by default; pass `bindAll: true` to expose one on the LAN) ·
-`power_set` · `power_status` — keep-awake · `activity_list` — per-session activity states ·
-`resurrect_list` · `resume` — restore chats after a daemon restart
+`activity_list` — per-session activity states
 </details>
 
 **Server → Client:**
@@ -437,9 +422,9 @@ Every `out` frame carries a monotonic `seq`; on reconnect send `attach {id, sinc
 
 ```bash
 cd daemon
-npm.cmd test                    # full suite (24 files)
+npm.cmd test                    # full suite
 node test/smoke.mjs             # session smoke tests
-node test/features.test.mjs     # absorbed-features suite (shares, backfill, recording, tunnels, resurrection…)
+node test/features.test.mjs     # absorbed-features suite (backfill, stats, git, activity, accounts)
 ```
 
 The suite never leaves loopback. To exercise the SSH, SFTP and VNC transports
@@ -462,14 +447,10 @@ for byte, then reports the VNC framebuffer geometry the server announced.
 | `RH_PORT` / `RH_TOKEN` | config file | Listen port and auth token |
 | `RH_AWAKE` | `auto` | Keep PC awake: `off` / `auto` (while sessions run) / `on` |
 | `RH_APPROVAL_TIMEOUT_MS` | `120000` | Auto-deny an agent stuck waiting for approval (0 disables) |
-| `RH_MCP_PORT` | off | Serve the embedded MCP endpoint on localhost |
-| `RH_QUIET_MS` | `20000` | Silence before a session counts as *quiet* (busy→quiet push) |
+| `RH_QUIET_MS` | `20000` | Silence before a session counts as *quiet*  |
 | `RH_IDLE_KILL_MINUTES` | off | Kill live sessions idle longer than N minutes |
 | `RH_CLI_PORT` | `4679` | Local CLI status endpoint (`/sessions /status /query`) |
-| `TELEGRAM_BOT_TOKEN` + `TELEGRAM_ALLOW_CHAT_IDS` | off | Two-way Telegram control (comma-separated chat IDs) |
-| `NTFY_TOPIC` (+ optional `NTFY_SERVER`) | off | Phone push via ntfy.sh — install the ntfy app and subscribe to the same topic (the topic is the credential; use a hard-to-guess one). High priority on approval/error events |
-| `PUSHOVER_TOKEN` + `PUSHOVER_USER` (+ `PUSHOVER_DEVICE`) | off | Phone push via Pushover (app key + user key) |
-| `POCKETDESK_DATA` | `.pocketdesk` | Data dir (chat history, resurrection store) |
+| `POCKETDESK_DATA` | `.pocketdesk` | Data dir (chat history, devices) |
 
 ---
 
@@ -503,8 +484,10 @@ PocketDesk/
 │       ├── WsClient.kt           # WebSocket client
 │       ├── Protocol.kt           # Message protocol
 │       └── MainActivity.kt       # Navigation
+├── docs/SETUP-PC.md              # PC install, tray, update, uninstall
 ├── install.sh                    # One-liner installer (Linux/Mac)
 ├── install.ps1                   # One-liner installer (Windows)
+├── uninstall.ps1                 # Removes the Windows install
 └── README.md
 ```
 
@@ -521,7 +504,6 @@ PocketDesk/
 
 ## 🗺️ Roadmap
 
-- [ ] Web-based terminal viewer with share links (browser access to spectator URLs)
 - [ ] Screen bridge (WebRTC) for GUI-only apps
 - [ ] Provider presets (DeepSeek, Kimi, GLM, OpenRouter)
 - [ ] Cross-platform app (iOS / Desktop)

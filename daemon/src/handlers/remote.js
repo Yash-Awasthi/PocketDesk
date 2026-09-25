@@ -12,6 +12,31 @@ function ps(script, input = "") {
 
 export default function remoteHandlers(ctx) {
   const { send, desktop, desktopWatchers, video, videoWatchers } = ctx;
+  function syncCursor() {
+    const on = videoWatchers.size + desktopWatchers.size > 0;
+    desktop.watchCursor(on);
+    if (on && desktop.cursor) desktop.emit("cursor", desktop.cursor);
+  }
+  let monitorList = null;
+  async function monitorAt(index) {
+    if (!monitorList || !monitorList[index]) monitorList = (await desktop.monitors()).monitors || [];
+    return monitorList[index] || null;
+  }
+  // A viewer that drops mid-press would leave the key or button stuck down on the PC.
+  function hold(ws, id, press) {
+    if (!ws._held) {
+      ws._held = new Set();
+      ws.once?.("close", () => {
+        for (const h of ws._held) {
+          const [kind, v] = h.split(":");
+          if (kind === "k") desktop.inputKey({ key: Number(v), press: "up" });
+          else desktop.inputMouse({ press: "up", button: v });
+        }
+        ws._held.clear();
+      });
+    }
+    if (press === "down") ws._held.add(id); else ws._held.delete(id);
+  }
   return {
     // ── Real desktop control (AnyDesk-style: watch + full input) ─────────
     async desktop_start(ws, msg) {
@@ -20,13 +45,15 @@ export default function remoteHandlers(ctx) {
         videoWatchers.add(ws);
         ws._needKey = true;
         video.setPreset(msg.preset);
+        if (msg.monitor != null) video.monitor = await monitorAt(Number(msg.monitor) || 0);
         const encoder = video.running ? await video.restart() : await video.start();
         if (encoder) {
           if (!ws._videoCloseHooked) {
             ws._videoCloseHooked = true;
-            ws.once?.("close", () => { videoWatchers.delete(ws); if (!videoWatchers.size) video.stop(); });
+            ws.once?.("close", () => { videoWatchers.delete(ws); if (!videoWatchers.size) video.stop(); syncCursor(); });
           }
-          return send(ws, { type: "desktop_started", ok: true, mode: "h264", encoder, preset: video.preset });
+          send(ws, { type: "desktop_started", ok: true, mode: "h264", encoder, preset: video.preset, monitor: video.monitor?.index ?? 0 });
+          return syncCursor();
         }
         videoWatchers.delete(ws);
       }
@@ -38,9 +65,16 @@ export default function remoteHandlers(ctx) {
           desktopWatchers.delete(ws);
           // A reconnect under the same clientId may already own the stream.
           if (![...desktopWatchers].some((w) => w._clientId === ws._clientId)) desktop.stopFrameStream(ws._clientId || "anon");
+          syncCursor();
         });
       }
       send(ws, { type: "desktop_started", ...r });
+      syncCursor();
+    },
+    async desktop_monitors(ws, msg) {
+      const r = await desktop.monitors();
+      if (r.ok) monitorList = r.monitors;
+      send(ws, { type: "desktop_monitors", ...r, current: video.monitor?.index ?? 0 });
     },
     // iroh viewers report GOP progress so the daemon sees delay hidden in QUIC and relay buffers.
     async video_ack(ws, msg) {
@@ -50,6 +84,7 @@ export default function remoteHandlers(ctx) {
       if (videoWatchers.delete(ws) && !videoWatchers.size) video.stop();
       desktopWatchers.delete(ws);
       const r = desktop.stopFrameStream(ws._clientId || "anon");
+      syncCursor();
       send(ws, { type: "desktop_stopped", ...r });
     },
     async desktop_frame(ws, msg) {
@@ -63,14 +98,20 @@ export default function remoteHandlers(ctx) {
       // coords measured on the frame must be divided back out. Wheel-only
       // events carry no meaningful x/y and skip the transform.
       const factor = videoWatchers.has(ws) ? video.scale : desktop.scale;
+      const origin = (videoWatchers.has(ws) && video.monitor) || { x: 0, y: 0 };
       const at = msg.x != null && msg.y != null && msg.wheel == null;
-      const x = at ? Math.round(Number(msg.x) / factor) : undefined;
-      const y = at ? Math.round(Number(msg.y) / factor) : undefined;
-      const r = await desktop.inputMouse({ x, y, click: msg.click, press: msg.press, wheel: msg.wheel });
+      const x = at ? Math.round(Number(msg.x) / factor) + origin.x : undefined;
+      const y = at ? Math.round(Number(msg.y) / factor) + origin.y : undefined;
+      const press = msg.press === "down" || msg.press === "up" ? msg.press : undefined;
+      const button = ["left", "right", "middle"].includes(msg.button) ? msg.button : "left";
+      if (press) hold(ws, "b:" + button, press);
+      const r = await desktop.inputMouse({ x, y, click: msg.click, press, button, wheel: msg.wheel });
       send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
     },
     async desktop_key(ws, msg) {
-      const r = await desktop.inputKey({ key: msg.key, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
+      const press = msg.press === "down" || msg.press === "up" ? msg.press : undefined;
+      if (press) hold(ws, "k:" + Number(msg.key), press);
+      const r = await desktop.inputKey({ key: msg.key, press, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
       send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
     },
     async desktop_type(ws, msg) {

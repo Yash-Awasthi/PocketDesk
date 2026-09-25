@@ -41,10 +41,6 @@ daemon/
 │   │   ├── logger.js       # Event logging
 │   │   ├── metrics.js      # Session metrics
 │   │   └── auth.js         # Token authentication
-│   ├── channels/           # Notification channels
-│   │   ├── telegram.js
-│   │   ├── discord.js
-│   │   └── email.js
 public/
 ├── index.html              # Web UI
 ├── xterm/                  # Terminal frontend

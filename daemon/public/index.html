@@ -238,28 +238,35 @@
         <div class="dashboard">
           <div class="dash-section" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button class="btn primary" id="deskToggle" onclick="desktopToggle()">▶ Start viewing</button>
-            <span style="color:#8b949e">quality</span>
-            <select id="deskQuality" onchange="send({type:'desktop_quality', quality:Number(this.value)})">
+            <select id="deskPreset" title="video quality" onchange="desktopRestart()">
+              <option value="saver">saver</option>
+              <option value="balanced" selected>balanced</option>
+              <option value="quality">quality (60 fps)</option>
+            </select>
+            <select id="deskQuality" title="picture quality" onchange="send({type:'desktop_quality', quality:Number(this.value)})">
               <option value="30">low (50%)</option>
               <option value="50">medium (75%)</option>
               <option value="80" selected>high (100%)</option>
             </select>
+            <select id="deskMonitor" title="monitor" style="display:none" onchange="desk.monitor = Number(this.value); desktopRestart()"></select>
             <span id="deskStatus" style="color:#8b949e"></span>
           </div>
           <div class="dash-section" style="display:flex;gap:6px;flex-wrap:wrap">
-            <input id="deskTypeBox" placeholder="type text into the desktop…" style="width:260px"
+            <input id="deskTypeBox" placeholder="type or paste text into the desktop…" style="width:260px"
                    onkeydown="if(event.key==='Enter'){desktopTypeText();}" />
             <button class="btn" onclick="desktopTypeText()">Type</button>
-            <button class="btn" onclick="send({type:'desktop_key', key:13})">Enter</button>
-            <button class="btn" onclick="send({type:'desktop_key', key:27})">Esc</button>
-            <button class="btn" onclick="send({type:'desktop_key', key:9})">Tab</button>
-            <button class="btn" onclick="send({type:'desktop_key', key:0x11+0x57, modifiers:[]}); send({type:'desktop_key', key:87, modifiers:['ctrl']})">Ctrl+W</button>
-            <button class="btn" onclick="send({type:'desktop_key', key:0x74, modifiers:[]})">F5</button>
-            <button class="btn danger" onclick="if(confirm('Press Ctrl+Alt+Del equivalent? (secure-desktop may block it)')) desktopSAS()">CAD</button>
+            <!-- Shortcuts the browser keeps for itself when pressed on the keyboard. -->
+            <button class="btn" onclick="send({type:'desktop_key', key:87, modifiers:['ctrl']})">Ctrl+W</button>
+            <button class="btn" onclick="send({type:'desktop_key', key:84, modifiers:['ctrl']})">Ctrl+T</button>
+            <button class="btn" onclick="send({type:'desktop_key', key:78, modifiers:['ctrl']})">Ctrl+N</button>
+            <button class="btn" onclick="send({type:'desktop_key', key:9, modifiers:['alt']})">Alt+Tab</button>
+            <button class="btn" onclick="send({type:'desktop_key', key:0x5B})">Win</button>
           </div>
-          <div class="dash-section" style="padding:0">
+          <div class="dash-section" style="padding:0;position:relative">
             <canvas id="deskCanvas" width="1280" height="720"
-                    style="width:100%;background:#0d1117;border-radius:8px;cursor:crosshair;display:block"></canvas>
+                    style="width:100%;height:auto;background:#0d1117;border-radius:8px;display:block;outline:none"></canvas>
+            <canvas id="deskPointer" width="1280" height="720"
+                    style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none"></canvas>
           </div>
         </div>
       </div>
@@ -477,7 +484,8 @@ function connect() {
   ws.onopen = () => { reconnectDelay = 1000; send({ type: "hello", token: document.getElementById("token").value }); };
   ws.onclose = () => { setStatus(false); scheduleReconnect(); };
   ws.onerror = () => { setStatus(false); };
-  ws.onmessage = (ev) => handle(JSON.parse(ev.data));
+  ws.binaryType = "arraybuffer";
+  ws.onmessage = (ev) => typeof ev.data === "string" ? handle(JSON.parse(ev.data)) : desktopPacket(new Uint8Array(ev.data));
 }
 
 function scheduleReconnect() {
@@ -682,25 +690,36 @@ function handle(m) {
       dashEvent(m.ok ? "app quit" : "quit failed", m.ok ? 'blue' : 'red');
       setTimeout(() => send({ type: "fb_status" }), 1500);
       break;
-    case "desktop_frame": {
-      desktopLastFrame = m;
-      desktopDraw();
+    case "desktop_frame":
+      desktopDrawJpeg(m);
       break;
-    }
     case "desktop_frame_error":
       document.getElementById("deskStatus").textContent = m.reason === "unsupported_platform" ? "desktop control is Windows-only" : "capture failed";
       break;
     case "desktop_started":
-      desktopViewing = !!m.ok;
-      document.getElementById("deskToggle").textContent = desktopViewing ? "⏸ Stop viewing" : "▶ Start viewing";
-      document.getElementById("deskStatus").textContent = m.ok ? `streaming (~3 fps, q${m.quality})` : (m.reason || "unavailable");
-      if (m.ok) send({ type: "desktop_frame" });
+      desk.viewing = !!m.ok;
+      desk.mode = m.ok ? (m.mode || "jpeg") : "";
+      document.getElementById("deskToggle").textContent = desk.viewing ? "⏸ Stop viewing" : "▶ Start viewing";
+      document.getElementById("deskPreset").style.display = desk.mode === "jpeg" ? "none" : "";
+      document.getElementById("deskQuality").style.display = desk.mode === "h264" ? "none" : "";
+      document.getElementById("deskStatus").textContent = m.ok ? (desk.mode === "h264" ? `H.264 · ${m.encoder}` : "snapshots (~3 fps)") : (m.reason || "unavailable");
+      if (m.ok && desk.mode === "jpeg") send({ type: "desktop_frame" });
       break;
     case "desktop_stopped":
-      desktopViewing = false;
-      document.getElementById("deskToggle").textContent = "▶ Start viewing";
-      document.getElementById("deskStatus").textContent = "stopped";
+      desktopStopped();
       break;
+    case "desktop_cursor":
+      desk.cursor = m;
+      desktopPointer();
+      break;
+    case "desktop_monitors": {
+      const sel = document.getElementById("deskMonitor");
+      if (!m.ok) break;
+      sel.innerHTML = m.monitors.map((x) => `<option value="${x.index}">Monitor ${x.index + 1} · ${x.w}×${x.h}${x.primary ? " (main)" : ""}</option>`).join("");
+      sel.value = String(desk.monitor);
+      sel.style.display = m.monitors.length > 1 && desk.mode !== "jpeg" ? "" : "none";
+      break;
+    }
     case "desktop_input_ok":
       if (!m.ok) dashEvent(`desktop input failed: ${m.error || "?"}`, 'red');
       break;
@@ -948,55 +967,132 @@ function renderApps(items) {
   if (!items.length) tb.innerHTML = `<tr><td colspan="3" style="color:#8b949e">nothing matched</td></tr>`;
 }
 
-// ── Desktop control (AnyDesk-style: canvas viewer + input) ──
-let desktopViewing = false;
-let desktopLastFrame = null;
+// ── Desktop control: H.264 through WebCodecs where the page may use it, JPEG snapshots otherwise ──
+// WebCodecs exists only in secure contexts (https or localhost), so plain http over the LAN gets snapshots.
+const desk = { viewing: false, mode: "", decoder: null, config: null, needKey: true, ts: 0, frames: 0, cursor: null, hover: false, held: new Set(), monitor: 0 };
 function desktopOnShow() {
   // A single on-demand frame even when not streaming — instant preview.
-  if (!desktopViewing) send({ type: "desktop_frame" });
+  if (!desk.viewing) send({ type: "desktop_frame" });
+}
+function desktopStart() {
+  if (typeof VideoDecoder === "function") send({ type: "desktop_start", video: true, preset: document.getElementById("deskPreset").value, monitor: desk.monitor });
+  else send({ type: "desktop_start", quality: Number(document.getElementById("deskQuality").value) });
+  send({ type: "desktop_monitors" });
 }
 function desktopToggle() {
-  if (desktopViewing) send({ type: "desktop_stop" });
-  else send({ type: "desktop_start", quality: Number(document.getElementById("deskQuality").value) });
+  if (desk.viewing) send({ type: "desktop_stop" });
+  else desktopStart();
 }
-function desktopDraw() {
-  const f = desktopLastFrame;
-  if (!f || !f.base64) return;
-  const cv = document.getElementById("deskCanvas");
-  const ctx = cv.getContext("2d");
+function desktopRestart() { if (desk.viewing) desktopStart(); }
+function desktopStopped() {
+  desktopReleaseAll();
+  desk.viewing = false;
+  desk.mode = "";
+  try { desk.decoder?.close(); } catch {}
+  desk.decoder = null;
+  document.getElementById("deskToggle").textContent = "▶ Start viewing";
+  document.getElementById("deskStatus").textContent = "stopped";
+  desktopPointer();
+}
+function desktopCanvasSize(w, h) {
+  for (const id of ["deskCanvas", "deskPointer"]) {
+    const c = document.getElementById(id);
+    if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  }
+}
+function desktopDrawJpeg(f) {
+  if (!f || !f.base64 || desk.mode === "h264") return;
   const img = new Image();
   img.onload = () => {
-    const scale = Math.min(cv.width / img.width, cv.height / img.height);
-    const w = img.width * scale, h = img.height * scale;
-    ctx.fillStyle = "#0d1117"; ctx.fillRect(0, 0, cv.width, cv.height);
-    ctx.drawImage(img, (cv.width - w) / 2, (cv.height - h) / 2, w, h);
+    desktopCanvasSize(img.width, img.height);
+    document.getElementById("deskCanvas").getContext("2d").drawImage(img, 0, 0);
+    desktopPointer();
   };
   img.src = "data:image/jpeg;base64," + f.base64;
 }
-function desktopToScreen(ev) {
-  // Map a canvas click to full virtual-screen pixel coords, accounting for
-  // the letterbox fit and the frame's own scale (frame w/h are post-scale).
-  const f = desktopLastFrame;
-  if (!f) return null;
+/** Binary message: [kind, ...Annex B]; kind 0 = SPS/PPS, 1 = keyframe, 2 = delta. */
+function desktopPacket(buf) {
+  const kind = buf[0], data = buf.subarray(1);
+  if (kind === 0) { desk.config = data; desktopConfigure(data); return; }
+  const d = desk.decoder;
+  if (!d || d.state !== "configured" || (kind === 2 && desk.needKey)) return;
+  // Keyframes carry SPS/PPS in front because no out-of-band description is given.
+  let payload = data;
+  if (kind === 1) { payload = new Uint8Array(desk.config.length + data.length); payload.set(desk.config); payload.set(data, desk.config.length); }
+  desk.needKey = false;
+  try { d.decode(new EncodedVideoChunk({ type: kind === 1 ? "key" : "delta", timestamp: (desk.ts += 16667), data: payload })); }
+  catch { desk.needKey = true; }
+}
+function desktopConfigure(cfg) {
+  // The SPS follows the first 4-byte start code; profile, constraints and level name the codec.
+  const codec = "avc1." + [cfg[5], cfg[6], cfg[7]].map((b) => b.toString(16).padStart(2, "0")).join("");
+  try { desk.decoder?.close(); } catch {}
+  desk.needKey = true;
+  desk.decoder = new VideoDecoder({
+    output: (frame) => {
+      desktopCanvasSize(frame.displayWidth, frame.displayHeight);
+      document.getElementById("deskCanvas").getContext("2d").drawImage(frame, 0, 0);
+      frame.close();
+      desk.frames++;
+    },
+    error: () => { desk.decoder = null; setTimeout(desktopRestart, 500); },
+  });
+  desk.decoder.configure({ codec, optimizeForLatency: true });
+}
+setInterval(() => {
+  if (desk.mode !== "h264" || !desk.viewing) return;
+  const st = document.getElementById("deskStatus");
+  st.textContent = st.textContent.replace(/ · \d+ fps$/, "") + ` · ${desk.frames} fps`;
+  desk.frames = 0;
+}, 1000);
+const DESK_CURSOR_CSS = { arrow: "default", hand: "pointer" };
+/** The browser shows the PC's pointer shape locally; the drawn pointer is for when the PC side moves it. */
+function desktopPointer() {
+  const c = desk.cursor;
   const cv = document.getElementById("deskCanvas");
-  const rect = cv.getBoundingClientRect();
-  const cx = (ev.clientX - rect.left) * (cv.width / rect.width);
-  const cy = (ev.clientY - rect.top) * (cv.height / rect.height);
-  const scale = Math.min(cv.width / f.width, cv.height / f.height);
-  const w = f.width * scale, h = f.height * scale;
-  const ox = (cv.width - w) / 2, oy = (cv.height - h) / 2;
-  const fx = (cx - ox) / (w / f.width);
-  const fy = (cy - oy) / (h / f.height);
-  if (fx < 0 || fy < 0 || fx > f.width || fy > f.height) return null;
-  // frame pixels → real desktop pixels (frame may be downscaled by quality)
-  const ratio = Math.max(1, Math.round((f.width / window.screen.width) * 4) / 4);
-  return { x: Math.round(fx * ratio), y: Math.round(fy * ratio) };
+  cv.style.cursor = c ? (DESK_CURSOR_CSS[c.shape] || c.shape) : "default";
+  const pc = document.getElementById("deskPointer");
+  const g = pc.getContext("2d");
+  g.clearRect(0, 0, pc.width, pc.height);
+  if (!c || !c.visible || desk.hover || !desk.viewing) return;
+  const u = pc.width / Math.max(1, pc.getBoundingClientRect().width);
+  g.save(); g.translate(c.x, c.y); g.scale(u, u);
+  g.beginPath(); g.moveTo(0, 0); g.lineTo(0, 17); g.lineTo(4.5, 13); g.lineTo(7.5, 19.5); g.lineTo(10, 18.5); g.lineTo(7, 12); g.lineTo(12.5, 12); g.closePath();
+  g.fillStyle = "#fff"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#000"; g.stroke(); g.restore();
+}
+/** Canvas event to picture pixels; the canvas keeps the picture's aspect, so no letterbox math. */
+function desktopToScreen(ev) {
+  const cv = document.getElementById("deskCanvas");
+  const r = cv.getBoundingClientRect();
+  const x = Math.round((ev.clientX - r.left) * cv.width / r.width);
+  const y = Math.round((ev.clientY - r.top) * cv.height / r.height);
+  return x < 0 || y < 0 || x >= cv.width || y >= cv.height ? null : { x, y };
 }
 function desktopTypeText() {
   const el = document.getElementById("deskTypeBox");
   if (el.value) { send({ type: "desktop_type", text: el.value }); el.value = ""; el.focus(); }
 }
-function desktopSAS() { send({ type: "desktop_key", key: 0x1d, modifiers: [] }); }
+/** Physical key (KeyboardEvent.code) to Windows virtual key; the PC's own layout decides the character. */
+const DESK_VK = (() => {
+  const m = { Backspace: 8, Tab: 9, Enter: 13, NumpadEnter: 13, ShiftLeft: 0xA0, ShiftRight: 0xA1, ControlLeft: 0xA2, ControlRight: 0xA3,
+    AltLeft: 0xA4, AltRight: 0xA5, Pause: 0x13, CapsLock: 0x14, Escape: 27, Space: 32, PageUp: 33, PageDown: 34, End: 35, Home: 36,
+    ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, PrintScreen: 0x2C, Insert: 45, Delete: 46, MetaLeft: 0x5B, MetaRight: 0x5C,
+    ContextMenu: 0x5D, NumpadMultiply: 0x6A, NumpadAdd: 0x6B, NumpadSubtract: 0x6D, NumpadDecimal: 0x6E, NumpadDivide: 0x6F,
+    NumLock: 0x90, ScrollLock: 0x91, Semicolon: 0xBA, Equal: 0xBB, Comma: 0xBC, Minus: 0xBD, Period: 0xBE, Slash: 0xBF,
+    Backquote: 0xC0, BracketLeft: 0xDB, Backslash: 0xDC, BracketRight: 0xDD, Quote: 0xDE, IntlBackslash: 0xE2 };
+  for (let i = 0; i < 26; i++) m["Key" + String.fromCharCode(65 + i)] = 65 + i;
+  for (let i = 0; i < 10; i++) { m["Digit" + i] = 48 + i; m["Numpad" + i] = 0x60 + i; }
+  for (let i = 1; i <= 12; i++) m["F" + i] = 0x6F + i;
+  return m;
+})();
+function desktopReleaseAll() {
+  for (const h of desk.held) {
+    const [kind, v] = h.split(":");
+    if (kind === "k") send({ type: "desktop_key", key: Number(v), press: "up" });
+    else send({ type: "desktop_mouse", press: "up", button: v });
+  }
+  desk.held.clear();
+}
 
 // ── Tools (full rebuild is fine — rare event) ──
 function renderTools(items) {
@@ -1541,47 +1637,51 @@ function promptRemove(pid) { if (activeChatId) send({ type: "prompt_remove", id:
 // Keep the scheduler "Next" column honest between events.
 setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" }); }, 15000);
 
-// ── Desktop canvas input (mousemove throttled; click/right-click/wheel direct) ──
+// ── Desktop canvas input: buttons and keys go down and up as they do here ──
 (() => {
   const cv = document.getElementById("deskCanvas");
   if (!cv) return;
+  const BUTTONS = ["left", "middle", "right"];
   let lastMove = 0;
+  cv.tabIndex = 0;
+  cv.addEventListener("mouseenter", () => { desk.hover = true; desktopPointer(); });
+  cv.addEventListener("mouseleave", () => { desk.hover = false; desktopPointer(); });
   cv.addEventListener("mousemove", (ev) => {
-    const now = Date.now();
-    if (now - lastMove < 80) return; // ~12 moves/sec is plenty
-    lastMove = now;
+    if (!desk.viewing || ev.timeStamp - lastMove < 16) return;
+    lastMove = ev.timeStamp;
     const p = desktopToScreen(ev);
     if (p) send({ type: "desktop_mouse", x: p.x, y: p.y });
   });
-  cv.addEventListener("click", (ev) => {
-    const p = desktopToScreen(ev);
-    if (p) send({ type: "desktop_mouse", x: p.x, y: p.y, click: "left" });
-  });
-  cv.addEventListener("contextmenu", (ev) => {
-    ev.preventDefault();
-    const p = desktopToScreen(ev);
-    if (p) send({ type: "desktop_mouse", x: p.x, y: p.y, click: "right" });
-  });
+  for (const [evt, press] of [["mousedown", "down"], ["mouseup", "up"]]) {
+    cv.addEventListener(evt, (ev) => {
+      if (!desk.viewing) return;
+      const button = BUTTONS[ev.button];
+      const p = desktopToScreen(ev);
+      if (!button || !p) return;
+      if (press === "down") { cv.focus(); desk.held.add("b:" + button); } else desk.held.delete("b:" + button);
+      send({ type: "desktop_mouse", x: p.x, y: p.y, press, button });
+      ev.preventDefault();
+    });
+  }
+  cv.addEventListener("contextmenu", (ev) => ev.preventDefault());
   cv.addEventListener("wheel", (ev) => {
+    if (!desk.viewing) return;
     ev.preventDefault();
-    send({ type: "desktop_mouse", wheel: ev.deltaY > 0 ? -120 : 120 });
+    const px = ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY;
+    const wheel = Math.max(-1200, Math.min(1200, Math.round(-px * 1.2)));
+    if (wheel) send({ type: "desktop_mouse", wheel });
   }, { passive: false });
-  // Keyboard goes to the desktop while the canvas has focus.
-  cv.tabIndex = 0;
-  cv.addEventListener("keydown", (ev) => {
-    if (!desktopViewing) return;
-    const vkMap = { Enter: 13, Escape: 27, Tab: 9, Backspace: 8, Delete: 46, ArrowUp: 38, ArrowDown: 40, ArrowLeft: 37, ArrowRight: 39 };
-    if (ev.key.length === 1) {
-      send({ type: "desktop_type", text: ev.key });
-    } else if (vkMap[ev.key]) {
-      const mods = [];
-      if (ev.ctrlKey) mods.push("ctrl");
-      if (ev.altKey) mods.push("alt");
-      if (ev.shiftKey) mods.push("shift");
-      send({ type: "desktop_key", key: vkMap[ev.key], modifiers: mods });
-    } else return;
-    ev.preventDefault();
-  });
+  for (const [evt, press] of [["keydown", "down"], ["keyup", "up"]]) {
+    cv.addEventListener(evt, (ev) => {
+      const vk = DESK_VK[ev.code];
+      if (!desk.viewing || !vk) return;
+      if (press === "down") desk.held.add("k:" + vk); else desk.held.delete("k:" + vk);
+      send({ type: "desktop_key", key: vk, press });
+      ev.preventDefault();
+    });
+  }
+  // Keys still down when focus leaves would stay down on the PC.
+  cv.addEventListener("blur", desktopReleaseAll);
 })();
 
 // Hook into existing message handler for dashboard events

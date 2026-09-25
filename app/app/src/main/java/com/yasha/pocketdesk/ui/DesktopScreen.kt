@@ -67,9 +67,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
@@ -140,8 +153,27 @@ fun DesktopScreen(
         if (cursor == null && dims != null) cursor = Offset(dims.width / 2f, dims.height / 2f)
     }
     val here = { cursor?.let { Pair(it.x.toInt(), it.y.toInt()) } }
+    // The PC pointer wins unless this phone moved it a moment ago, so local drags do not jitter back.
+    var lastLocal by remember { mutableStateOf(0L) }
+    LaunchedEffect(ws.desktopCursor) {
+        val c = ws.desktopCursor ?: return@LaunchedEffect
+        if (android.os.SystemClock.uptimeMillis() - lastLocal > 300) cursor = Offset(c.x.toFloat(), c.y.toFloat())
+    }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFF0D1117))) {
+    // A keyboard attached to the phone types straight into the PC, with keys held as long as they are held here.
+    val keyFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { keyFocus.requestFocus() }
+    Column(Modifier.fillMaxSize().background(Color(0xFF0D1117)).focusRequester(keyFocus).focusable().onKeyEvent { e ->
+        val native = e.nativeKeyEvent
+        if (native.device?.isVirtual != false) return@onKeyEvent false
+        val vk = androidKeyToVk(native.keyCode) ?: return@onKeyEvent false
+        when (e.type) {
+            KeyEventType.KeyDown -> ws.desktopKeyPress(vk, true)
+            KeyEventType.KeyUp -> ws.desktopKeyPress(vk, false)
+            else -> return@onKeyEvent false
+        }
+        true
+    }) {
         if (!fullscreen) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
@@ -158,6 +190,10 @@ fun DesktopScreen(
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                 }
+                if (video && ws.desktopMonitors.size > 1) TextButton(onClick = {
+                    ws.desktopMonitor = (ws.desktopMonitor + 1) % ws.desktopMonitors.size
+                    ws.desktopStartVideo()
+                }) { Text("🖥 " + ws.desktopMonitors.getOrElse(ws.desktopMonitor) { "1" }.substringBefore(" ")) }
                 if (video) TextButton(onClick = {
                     ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
                     ws.desktopStartVideo()
@@ -190,10 +226,44 @@ fun DesktopScreen(
             Canvas(
                 Modifier
                     .fillMaxSize()
+                    .pointerInput(dims) {
+                        // A mouse on the phone drives the PC pointer directly: hover moves, buttons, wheel.
+                        val f = dims ?: return@pointerInput
+                        val held = BooleanArray(3)
+                        var lastMove = 0L
+                        awaitPointerEventScope {
+                            while (true) {
+                                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                val ch = ev.changes.firstOrNull() ?: continue
+                                if (ch.type != PointerType.Mouse) continue
+                                if (ev.type == PointerEventType.Scroll) {
+                                    ws.desktopWheel((-ch.scrollDelta.y * 120).toInt())
+                                } else {
+                                    val p = Viewport(f, size.width.toFloat(), size.height.toFloat(), zoom, pan).toFrame(ch.position)
+                                    if (p != null) {
+                                        cursor = p
+                                        val now = booleanArrayOf(ev.buttons.isPrimaryPressed, ev.buttons.isSecondaryPressed, ev.buttons.isTertiaryPressed)
+                                        val changed = now.indices.filter { now[it] != held[it] }
+                                        lastLocal = ch.uptimeMillis
+                                        if (changed.isEmpty() && ch.uptimeMillis - lastMove >= 16) {
+                                            lastMove = ch.uptimeMillis
+                                            ws.desktopMove(p.x.toInt(), p.y.toInt())
+                                        }
+                                        for (i in changed) {
+                                            held[i] = now[i]
+                                            ws.desktopButton(p.x.toInt(), p.y.toInt(), MOUSE_BUTTONS[i], now[i])
+                                        }
+                                    }
+                                }
+                                ev.changes.forEach { it.consume() }
+                            }
+                        }
+                    }
                     .pointerInput(dims, touchpad) {
                         val f = dims ?: return@pointerInput
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
+                            if (down.type == PointerType.Mouse) return@awaitEachGesture
                             val v = Viewport(f, size.width.toFloat(), size.height.toFloat(), zoom, pan)
                             if (!touchpad) v.toFrame(down.position)?.let { cursor = it }
                             var moved = 0f
@@ -218,6 +288,7 @@ fun DesktopScreen(
                                     else vp.toFrame(ch.position)
                                     if (next != null && moved > 8f) {
                                         cursor = next
+                                        lastLocal = ch.uptimeMillis
                                         if (touchpad) pan = vp.follow(next)
                                         if (ch.uptimeMillis - lastSent >= 40) {
                                             lastSent = ch.uptimeMillis
@@ -247,8 +318,20 @@ fun DesktopScreen(
                 }
                 cursor?.let { cur ->
                     val p = Offset(v.left + cur.x * v.scale, v.top + cur.y * v.scale)
-                    drawCircle(Color.White, radius = 11f, center = p, style = Stroke(width = 4f))
-                    drawCircle(Color(0xFFE53935), radius = 5f, center = p)
+                    if (ws.desktopCursor?.shape == "text") {
+                        val h = 12.dp.toPx()
+                        drawLine(Color.Black, p.copy(y = p.y - h), p.copy(y = p.y + h), strokeWidth = 5f)
+                        drawLine(Color.White, p.copy(y = p.y - h), p.copy(y = p.y + h), strokeWidth = 2.5f)
+                    } else {
+                        val u = 1.dp.toPx()
+                        val arrow = Path().apply {
+                            moveTo(p.x, p.y); lineTo(p.x, p.y + 17 * u); lineTo(p.x + 4.5f * u, p.y + 13 * u)
+                            lineTo(p.x + 7.5f * u, p.y + 19.5f * u); lineTo(p.x + 10 * u, p.y + 18.5f * u)
+                            lineTo(p.x + 7 * u, p.y + 12 * u); lineTo(p.x + 12.5f * u, p.y + 12 * u); close()
+                        }
+                        drawPath(arrow, Color.White)
+                        drawPath(arrow, Color.Black, style = Stroke(width = 1.5f * u))
+                    }
                 }
             }
             if (fullscreen) {
@@ -310,6 +393,8 @@ private fun videoView(ctx: android.content.Context, ws: WsClient, onSize: (IntSi
         override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
     }
 }
+
+private val MOUSE_BUTTONS = arrayOf("left", "right", "middle")
 
 /** Letterboxed, zoomable placement of the frame inside the view. */
 private class Viewport(val f: IntSize, val viewW: Float, val viewH: Float, val zoom: Float, val pan: Offset) {
