@@ -1,5 +1,7 @@
 package com.yasha.pocketdesk.ui
 
+import com.yasha.pocketdesk.Wake
+import kotlinx.coroutines.launch
 import android.Manifest
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -71,8 +73,13 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
     }
 
     androidx.compose.runtime.LaunchedEffect(ws.status) {
-        if (ws.status == Status.Connected) onConnected()
+        if (ws.status == Status.Connected) {
+            val w = ws.wakeInfo
+            if (w != null) persist(servers.map { if (it.url == ws.activeUrl && it.wake != w) it.copy(wake = w) else it })
+            onConnected()
+        }
     }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     androidx.compose.runtime.LaunchedEffect(Unit) {
         ws.events.collect { ev ->
             if (ev is RhEvent.TrustNeeded) trustFp = ev.fingerprint
@@ -172,6 +179,16 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
+                            }
+                            s.wake?.let { w ->
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        val n = Wake.send(w)
+                                        android.widget.Toast.makeText(ctx,
+                                            if (n > 0) "Wake sent. A PC on this network starts in about 20 s." else "Could not send on this network",
+                                            android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                }) { Text("Wake") }
                             }
                             IconButton(onClick = { editing = s }) {
                                 Icon(Icons.Filled.Settings, contentDescription = "Edit")

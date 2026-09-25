@@ -428,6 +428,9 @@ class WsClient(
         send(Proto.desktopStart(quality))
     }
     /** Also the resync request: the daemon answers with a fresh config + keyframe. */
+    /** What the connected PC reported for waking it later; saved with its entry. */
+    var wakeInfo: WakeInfo? = null
+        private set
     /** Asked for by the user, or imposed by whoever approved the session on the PC. */
     var desktopViewOnly by mutableStateOf(false)
     /** Session status that is not an error, such as waiting for approval on the PC. */
@@ -643,6 +646,11 @@ class WsClient(
                     lastToken = t
                     hello = Proto.hello(t)
                     activeUrl?.let { issuedToken = it to t }
+                }
+                (m["wake"] as? JsonObject)?.let { w ->
+                    val macs = (w["macs"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.let { o -> str(o, "mac") } } ?: emptyList()
+                    val bc = (w["broadcasts"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                    if (macs.isNotEmpty()) wakeInfo = WakeInfo(macs, bc)
                 }
                 tools = Proto.parseTools(m)
                 sessions = Proto.parseSessions(m)

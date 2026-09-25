@@ -11,6 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execSync, spawn } from "node:child_process";
+import { wakeArmedAdapters } from "./wake.js";
 
 const DATA_DIR = process.env.POCKETDESK_DATA || ".pocketdesk";
 
@@ -101,6 +102,16 @@ export async function diagnose({ tls, manifests } = {}) {
     }
   } catch (e) {
     checks.push({ name: "manifests", ok: false, detail: e.message });
+  }
+
+  const armed = await wakeArmedAdapters().catch(() => null);
+  if (armed) {
+    checks.push({
+      name: "wake_on_lan",
+      ok: armed.length > 0,
+      detail: armed.length ? `can wake the PC: ${armed.join(", ")}` : "no network adapter is allowed to wake this PC",
+      hint: armed.length ? undefined : "Device Manager > network adapter > Power Management: allow it to wake the computer, only with a magic packet; enable Wake-on-LAN in the BIOS for a wired port",
+    });
   }
 
   const problems = checks.filter((c) => !c.ok).map((c) => c.name);

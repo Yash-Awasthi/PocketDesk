@@ -18,6 +18,7 @@ import { createActivityMonitor } from "./activity.js";
 import { StreamJsonParser } from "./stream_json_parser.js";
 import { DesktopController } from "./desktop_capture.js";
 import { DesktopPresence } from "./desktop_presence.js";
+import { wakeTargets } from "./wake.js";
 import { DesktopVideo } from "./desktop_video.js";
 import { AdvancedSSHServerManager } from "./advanced_ssh_server.js";
 import { SSHBastion } from "./ssh_bastion.js";
@@ -227,10 +228,13 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     chat.detach(ws);
   }
 
+  // Sent on every welcome so the phone can wake this PC later, when it cannot reach it at all.
+  let wake;
+  wakeTargets().then((w) => { wake = w; }, () => {});
   function welcome(auth, hello, ip) {
     devices.register(auth.id, { name: hello.name, platform: hello.platform, ip });
     const deviceToken = auth.pairing ? devices.issueToken(auth.id) : undefined;
-    return { type: "welcome", version: 1, clientId: auth.id, deviceToken, sessions: allSessions(), manifests: registry.list() };
+    return { type: "welcome", version: 1, clientId: auth.id, deviceToken, sessions: allSessions(), manifests: registry.list(), wake };
   }
 
   function disconnectDevice(clientId) {
