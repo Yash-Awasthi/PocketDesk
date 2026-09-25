@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { FlvToAnnexB, KIND } from "../src/desktop_video.js";
+import { DesktopVideo, FlvToAnnexB, KIND } from "../src/desktop_video.js";
 
 function tag(type, body) {
   const h = Buffer.alloc(11);
@@ -32,4 +32,21 @@ test("FLV video tags become Annex B packets, even when split byte by byte", () =
   assert.deepEqual(out[0].data, Buffer.concat([sc, sps, sc, pps]));
   assert.deepEqual(out[1].data, Buffer.concat([sc, idr]));
   assert.deepEqual(out[2].data, Buffer.concat([sc, p]));
+});
+
+test("congestion steps the preset down, and recovery never goes above what was asked", () => {
+  const v = new DesktopVideo();
+  v.setPreset("quality");
+  assert.equal(v.stepDown(), true);
+  assert.equal(v.stepDown(), true);
+  assert.equal(v.preset, "saver");
+  assert.equal(v.stepDown(), false);
+  assert.equal(v.stepUp(), true);
+  assert.equal(v.stepUp(), true);
+  assert.equal(v.preset, "quality");
+  assert.equal(v.stepUp(), false);
+  v.setPreset("balanced");
+  v.stepDown();
+  v.stepUp();
+  assert.equal(v.stepUp(), false, "a viewer that asked for balanced is never raised to quality");
 });

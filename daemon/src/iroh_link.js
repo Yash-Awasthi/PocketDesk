@@ -125,7 +125,7 @@ export class IrohSocket extends EventEmitter {
 
   /**
    * Queues one desktop video packet. Returns false when the viewer fell too far
-   * behind and the current GOP was dropped, so the caller must produce a keyframe.
+   * behind and the current GOP was dropped: the link is slower than the stream.
    */
   sendVideo(kind, data) {
     if (this.readyState !== 1) return true;

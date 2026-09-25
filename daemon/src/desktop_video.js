@@ -23,6 +23,7 @@ export const ENCODERS = {
   libx264: (q) => ["-preset", "ultrafast", "-tune", "zerolatency", "-crf", String(q - 2)],
 };
 const START_CODE = Buffer.from([0, 0, 0, 1]);
+const LADDER = ["saver", "balanced", "quality"];
 
 /** Packet kinds, first byte of every binary message. */
 export const KIND = { config: 0, key: 1, delta: 2 };
@@ -94,7 +95,23 @@ export class DesktopVideo extends EventEmitter {
   get scale() { return PRESETS[this.preset].scale; }
 
   /** Unknown names keep the current preset. */
-  setPreset(name) { if (PRESETS[name]) this.preset = name; }
+  setPreset(name) { if (PRESETS[name]) this.preset = this.wanted = name; }
+
+  /** Congestion step: one preset lower. False at the bottom. */
+  stepDown() {
+    const i = LADDER.indexOf(this.preset);
+    if (i <= 0) return false;
+    this.preset = LADDER[i - 1];
+    return true;
+  }
+
+  /** Recovery step: one preset higher, never above what the viewer asked for. */
+  stepUp() {
+    const i = LADDER.indexOf(this.preset);
+    if (this.preset === (this.wanted || "balanced") || i < 0 || i === LADDER.length - 1) return false;
+    this.preset = LADDER[i + 1];
+    return true;
+  }
 
   /** Resolves with the encoder in use, or null when none can start. */
   start() {
@@ -133,7 +150,8 @@ export class DesktopVideo extends EventEmitter {
     return new Promise((resolve) => {
       const p = PRESETS[this.preset];
       const args = ["-hide_banner", "-loglevel", "error", "-filter_complex", grab(p),
-        "-c:v", enc, ...ENCODERS[enc](p.q), "-g", "9999", "-bf", "0", "-maxrate", p.maxrate, "-bufsize", p.maxrate,
+        // A keyframe every `fps` changed frames starts each iroh GOP stream; see docs/TRANSPORT-BENCH.md.
+        "-c:v", enc, ...ENCODERS[enc](p.q), ...(enc === "h264_nvenc" ? ["-forced-idr", "1"] : []), "-g", String(p.fps), "-bf", "0", "-maxrate", p.maxrate, "-bufsize", p.maxrate,
         "-flush_packets", "1", "-f", "flv", "-flvflags", "no_duration_filesize", "pipe:1"];
       let proc;
       try { proc = spawn(this.ffmpeg, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true }); }

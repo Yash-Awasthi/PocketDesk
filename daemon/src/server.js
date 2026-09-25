@@ -432,8 +432,9 @@ export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { on
     const msg = Buffer.concat([Buffer.from([kind]), data]);
     for (const w of videoWatchers) {
       if (w.readyState !== 1) continue;
-      // iroh viewers get a QUIC stream per GOP and drop a stale GOP themselves.
-      if (w.sendVideo) { if (!w.sendVideo(kind, data)) resync(); continue; }
+      // iroh viewers get a QUIC stream per GOP and drop a stale GOP themselves;
+      // a dropped GOP means the link is below the bitrate, so the stream steps down.
+      if (w.sendVideo) { if (!w.sendVideo(kind, data)) congested(); continue; }
       if (kind === 0) w._needKey = false;
       if (w._needKey) continue;
       if (w.bufferedAmount > 1_500_000) { w._needKey = true; resync(); continue; }
@@ -441,6 +442,16 @@ export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { on
     }
   });
   video.on("ended", () => { if (videoWatchers.size) resync(); });
+  let lastDrop = 0;
+  function congested() {
+    const now = Date.now();
+    if (now - lastDrop < 3000) return; // one step per burst of drops
+    lastDrop = now;
+    if (video.stepDown()) video.restart();
+  }
+  setInterval(() => {
+    if (video.running && Date.now() - lastDrop > 30_000 && video.stepUp()) video.restart();
+  }, 10_000).unref();
 
   // ── Remote desktop bridge (rustdesk/remodex: session-scoped screen+input) ──
   const rd = new RemoteDesktopBridgeManager(desktop);
