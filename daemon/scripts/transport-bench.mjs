@@ -35,7 +35,8 @@ const ALPN = [...Buffer.from("rh-bench/0")];
 const HEADER = 13; // kind u8, seq u32, sender timestamp f64 (ms)
 const LAG_LIMIT = 1_500_000; // same backlog limit as server.js
 const STALL_MS = 200;
-const now = () => performance.timeOrigin + performance.now();
+// hrtime reads the OS performance counter, which every process shares; timeOrigin differs per process.
+const now = () => Number(process.hrtime.bigint()) / 1e6;
 // The binding drops an endpoint once JS stops referencing it, killing its connections.
 const keep = [];
 
@@ -229,7 +230,7 @@ async function sender() {
   cleanup();
   console.log(JSON.stringify({
     transport: opt.transport, relay: opt.relay ?? null, preset: opt.preset, gop: gopMode ? Number(opt.gop) : null,
-    encoder: opt.encoder, secs: Number(opt.secs), ...result, ...stats,
+    encoder: opt.encoder, secs: Number(opt.secs), clock: "hrtime", ...result, ...stats,
     senderCpuPct: +(((cpu.user + cpu.system) / 1000 / (Date.now() - t0)) * 100).toFixed(1),
   }));
   process.exit(0);
