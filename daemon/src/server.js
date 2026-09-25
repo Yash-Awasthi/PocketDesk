@@ -417,10 +417,10 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     const now = Date.now();
     if (now - lastDrop < 3000) return; // one step per burst of drops
     lastDrop = now;
-    if (video.stepDown()) video.restart();
+    if (video.stepDown()) { console.log(`  video     link too slow, preset -> ${video.preset}`); video.restart(); }
   }
   setInterval(() => {
-    if (video.running && Date.now() - lastDrop > 30_000 && video.stepUp()) video.restart();
+    if (video.running && Date.now() - lastDrop > 30_000 && video.stepUp()) { console.log(`  video     link recovered, preset -> ${video.preset}`); video.restart(); }
   }, 10_000).unref();
 
   // ── Remote desktop bridge (rustdesk/remodex: session-scoped screen+input) ──
