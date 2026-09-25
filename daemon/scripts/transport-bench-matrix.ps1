@@ -13,6 +13,7 @@ $bench = Join-Path $PSScriptRoot "transport-bench.mjs"
 $outDir = Join-Path $env:USERPROFILE ".pocketdesk\bench"
 New-Item -ItemType Directory -Force $outDir | Out-Null
 $out = Join-Path $outDir "results.jsonl"
+$errLog = Join-Path $outDir "errors.log"
 if (-not $env:FFMPEG_PATH) { $env:FFMPEG_PATH = (Get-Command ffmpeg).Source }
 
 # clumsy sees each loopback packet twice (send and receive), so every
@@ -40,12 +41,21 @@ function Invoke-Run($label, $cond, $filter, $benchArgs) {
         Start-Sleep -Seconds 2
     }
     try {
-        $line = & node $bench @benchArgs --secs $Secs | Select-Object -Last 1
+        # A failed run is logged and skipped; one bad run must not end the matrix.
+        $raw = & cmd /c "node `"$bench`" $($benchArgs -join ' ') --secs $Secs 2>&1"
+        $line = $raw | Where-Object { $_ -like '{*' } | Select-Object -Last 1
+        if (-not $line) {
+            Add-Content -Encoding utf8 $errLog "[$label $($cond.name)] $($raw -join "`n")"
+            Write-Host "$label $($cond.name): FAILED (see errors.log)"
+            return
+        }
         $obj = $line | ConvertFrom-Json
         $obj | Add-Member -NotePropertyName condition -NotePropertyValue $cond.name
         $obj | Add-Member -NotePropertyName label -NotePropertyValue $label
         ($obj | ConvertTo-Json -Compress) | Add-Content -Encoding utf8 $out
         Write-Host "$label $($cond.name): fps=$($obj.fps) p50=$($obj.latP50) p95=$($obj.latP95) stalls=$($obj.stalls) stallMs=$($obj.stallMs)"
+    } catch {
+        Add-Content -Encoding utf8 $errLog "[$label $($cond.name)] $_"
     } finally {
         if ($proc) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 1 }
     }
