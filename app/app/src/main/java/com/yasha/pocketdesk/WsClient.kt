@@ -24,11 +24,11 @@ import okhttp3.WebSocketListener
 enum class Status { Disconnected, Connecting, AwaitingTrust, Connected, Reconnecting }
 
 // Pings surface a half-open socket (Wi-Fi to cellular handover) as a failure.
-// A short connect timeout keeps an unreachable LAN address from delaying the fallback.
+// A short connect timeout keeps an unreachable LAN address from delaying the fallback for long.
 class WsClient(
     private val base: OkHttpClient = OkHttpClient.Builder()
         .pingInterval(20, java.util.concurrent.TimeUnit.SECONDS)
-        .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(3, java.util.concurrent.TimeUnit.SECONDS)
         .build(),
 ) {
 
@@ -177,20 +177,49 @@ class WsClient(
         private set
 
     /** Primary url and its fallback for the current server; retries alternate between them. */
-    private var routes: List<String> = emptyList()
+    private var lanUrl: String? = null
+    private var fallbackUrl: String? = null
+    /** Updated by [Link] from the system; decides between the LAN url and iroh. */
+    @Volatile var network = NetInfo(null, local = true)
+        private set
+    /** The network on which the LAN url last failed: iroh goes first there until the phone moves. */
+    private var lanFailedOn: String? = null
+    private var retryJob: kotlinx.coroutines.Job? = null
+
+    private fun route(): String? = lanUrl?.let { ConnectRoute.pick(it, fallbackUrl, network, lanFailedOn) }
 
     fun connect(url: String, token: String, pinnedFingerprint: String?, fallback: String? = null) {
         close()
         userClosed = false
         policy.reset()
         status = Status.Connecting
-        activeUrl = url
-        routes = listOfNotNull(url, fallback)
+        lanUrl = url
+        fallbackUrl = fallback
         lastError = null
         lastToken = token
         lastFingerprint = pinnedFingerprint
         hello = Proto.hello(token)
-        open(url)
+        val first = route() ?: url
+        activeUrl = first
+        open(first)
+    }
+
+    /**
+     * The phone changed networks. A pending retry runs at once on the new network,
+     * and a LAN socket is replaced, since it cannot survive leaving that network.
+     * An iroh connection is left alone: it moves paths by itself.
+     */
+    fun onNetworkChanged(net: NetInfo) {
+        if (net == network) return
+        network = net
+        if (userClosed || lanUrl == null) return
+        val onLan = activeUrl == lanUrl && socket.get() != null
+        if (status == Status.Reconnecting || (status == Status.Connected && onLan && fallbackUrl != null)) {
+            retryJob?.cancel()
+            socket.getAndSet(null)?.let { it.cancel(); failTransfers("network changed") }
+            policy.reset()
+            reconnectNow()
+        }
     }
 
     /** Opens the transport for [url] with the current token and pin; retries reuse it without resetting backoff. */
@@ -249,6 +278,7 @@ class WsClient(
 
     fun close() {
         userClosed = true
+        retryJob?.cancel()
         // A deliberate disconnect leaves no stale error behind; callers that fail set one after.
         lastError = null
         socket.getAndSet(null)?.close(1000, "bye")
@@ -891,26 +921,32 @@ class WsClient(
      * without passing Disconnected, which would stop the foreground service.
      */
     private fun scheduleReconnect() {
-        // The other route first: away from home the LAN url fails, and at home iroh is the spare.
-        val url = activeUrl?.let { cur -> routes.firstOrNull { it != cur } ?: cur }
-        activeUrl = url
-        val token = lastToken
-        if (userClosed || url == null || token == null) {
+        // A LAN url that failed here is skipped on this network from now on.
+        if (activeUrl != null && activeUrl == lanUrl) lanFailedOn = network.id ?: ""
+        if (userClosed || route() == null || lastToken == null) {
             status = Status.Disconnected
             return
         }
-        val delay = policy.nextDelayMs() ?: run {
+        // Switching from a failed LAN url to iroh is not a real failure: no backoff for it.
+        val delay = if (activeUrl == lanUrl && route() != lanUrl) 0L else policy.nextDelayMs() ?: run {
             lastError = "gave up after ${policy.attemptsSoFar} reconnect attempts"
             status = Status.Disconnected
             return
         }
         status = Status.Reconnecting
-        reconnectScope.launch {
+        retryJob = reconnectScope.launch {
             kotlinx.coroutines.delay(delay)
-            if (userClosed) return@launch
-            status = Status.Connecting
-            hello = Proto.hello(token)
-            open(url)
+            reconnectNow()
         }
+    }
+
+    private fun reconnectNow() {
+        val url = route() ?: return
+        val token = lastToken ?: return
+        if (userClosed) return
+        activeUrl = url
+        status = Status.Connecting
+        hello = Proto.hello(token)
+        open(url)
     }
 }
