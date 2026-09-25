@@ -630,6 +630,11 @@ export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { on
         relays: irohCfg.relays,
         onConnection(sock, remoteId) {
           sock._irohId = remoteId;
+          // Hole punching settles within seconds; report where it landed.
+          setTimeout(() => {
+            const p = sock.readyState === 1 && sock.conn.paths().find((x) => x.isSelected);
+            if (p) console.log(`  iroh      ${remoteId.slice(0, 8)} ${p.isRelay ? "relayed" : "direct"}, rtt ${p.rttMs} ms`);
+          }, 8000).unref();
           wss.clients.add(sock);
           sock.once("close", () => wss.clients.delete(sock));
           wss.emit("connection", sock, { socket: { remoteAddress: `iroh:${remoteId}` } });
