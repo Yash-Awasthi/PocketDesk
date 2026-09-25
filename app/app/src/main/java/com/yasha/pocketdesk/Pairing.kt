@@ -6,8 +6,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
 /**
- * The daemon's pairing link, `pocketdesk://pair#<base64url JSON {u,t,f,r,c}>`:
- * LAN url, master token, TLS fingerprint, and optionally a relay url + channel.
+ * The daemon's pairing link, `pocketdesk://pair#<base64url JSON {u,t,f,r,c,i}>`:
+ * LAN url, master token, TLS fingerprint, optionally a relay url + channel, and
+ * optionally an iroh ticket that reaches the PC from any network.
  */
 object Pairing {
     const val SCHEME = "pocketdesk"
@@ -25,7 +26,8 @@ object Pairing {
         val relay = s("r")?.takeIf { it.startsWith("relay://") }?.let {
             ServerEntry("$host (relay)", it.trimEnd('/') + "/" + (s("c") ?: "rh-default"), token)
         }
-        return listOfNotNull(lan, relay)
+        val anywhere = s("i")?.let { ServerEntry("$host (anywhere)", "iroh://$it", token) }
+        return listOfNotNull(lan, anywhere, relay)
     }
 
     /** The daemon prints `AB:CD:…`; [Tls.sha256] compares lowercase hex without separators. */
