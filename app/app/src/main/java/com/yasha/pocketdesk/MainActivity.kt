@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Email
@@ -166,6 +167,13 @@ class MainActivity : ComponentActivity() {
                             onClick = { screen = Screen.Desktop },
                             icon = { Icon(com.yasha.pocketdesk.ui.MonitorIcon, contentDescription = null) },
                             label = { Text("Desktop") },
+                        )
+                        // Disconnects and shows the saved PCs, to switch to another one.
+                        NavigationBarItem(
+                            selected = false,
+                            onClick = { client.close(); screen = Screen.Connect },
+                            icon = { Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null) },
+                            label = { Text("PCs") },
                         )
                     }
                 }

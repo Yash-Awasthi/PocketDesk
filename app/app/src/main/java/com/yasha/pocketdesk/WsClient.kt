@@ -249,6 +249,8 @@ class WsClient(
 
     fun close() {
         userClosed = true
+        // A deliberate disconnect leaves no stale error behind; callers that fail set one after.
+        lastError = null
         socket.getAndSet(null)?.close(1000, "bye")
         irohLink.getAndSet(null)?.close()
         status = Status.Disconnected
