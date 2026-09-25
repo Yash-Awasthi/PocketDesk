@@ -368,16 +368,26 @@ class WsClient(
     fun fbAppOpen() = send(Proto.fbAppOpen())
     fun fbAppQuit() = send(Proto.fbAppQuit())
     // ── Desktop control methods ──
-    fun desktopStart(quality: Int = 55) { desktopStreaming = true; send(Proto.desktopStart(quality)) }
+    /** Re-sends the last desktop start after a reconnect, so the picture does not stay frozen. */
+    private var desktopResume: (() -> Unit)? = null
+    fun desktopStart(quality: Int = 55) {
+        desktopStreaming = true
+        desktopResume = { send(Proto.desktopStart(quality)) }
+        send(Proto.desktopStart(quality))
+    }
     /** Also the resync request: the daemon answers with a fresh config + keyframe. */
     /** saver / balanced / quality; sent with every start so a daemon restart keeps it. */
     var desktopPreset by mutableStateOf("balanced")
-    fun desktopStartVideo() { desktopStreaming = true; send(Proto.desktopStartVideo(desktopPreset)) }
+    fun desktopStartVideo() {
+        desktopStreaming = true
+        desktopResume = { send(Proto.desktopStartVideo(desktopPreset)) }
+        send(Proto.desktopStartVideo(desktopPreset))
+    }
     fun clipboardGet() = send(Proto.clipboardGet())
     /** With [paste], ctrl+v follows once the PC clipboard holds the text. */
     fun clipboardSet(text: String, paste: Boolean) { pasteAfterSet = paste; send(Proto.clipboardSet(text)) }
     @Volatile private var pasteAfterSet = false
-    fun desktopStop() { desktopStreaming = false; send(Proto.desktopStop()) }
+    fun desktopStop() { desktopStreaming = false; desktopResume = null; send(Proto.desktopStop()) }
     fun desktopSnapshot() = send(Proto.desktopFrame())
     /** x/y are frame pixels; click is left|right|middle|double. */
     fun desktopClick(x: Int, y: Int, click: String) = send(Proto.desktopMouse(x, y, click, null))
@@ -574,6 +584,7 @@ class WsClient(
                 status = Status.Connected
                 policy.reset()
                 reattachAll()
+                desktopResume?.invoke()
             }
             "manifests" -> tools = Proto.parseTools(m)
             "auth_status" -> str(m, "harness")?.let { id ->
