@@ -266,7 +266,7 @@ internal fun DirPickerDialog(ws: WsClient, onSelect: (String) -> Unit, onDismiss
     }
 }
 
-private fun queryDisplayName(ctx: Context, uri: Uri): String {
+internal fun queryDisplayName(ctx: Context, uri: Uri): String {
     ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
         if (c.moveToFirst()) {
             val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
@@ -277,7 +277,7 @@ private fun queryDisplayName(ctx: Context, uri: Uri): String {
 }
 
 /** Opens a sink in the public Downloads collection and hands back a finish() that closes it. */
-private inline fun saveToDownloads(ctx: Context, fileName: String, crossinline use: (java.io.OutputStream, (String?) -> Unit) -> Unit) {
+internal inline fun saveToDownloads(ctx: Context, fileName: String, crossinline use: (java.io.OutputStream, (String?) -> Unit) -> Unit) {
     val values = android.content.ContentValues().apply {
         put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
         put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
@@ -301,7 +301,7 @@ private inline fun saveToDownloads(ctx: Context, fileName: String, crossinline u
     }
 }
 
-private class NullOutputStream : java.io.OutputStream() {
+internal class NullOutputStream : java.io.OutputStream() {
     override fun write(b: Int) {}
     override fun write(b: ByteArray, off: Int, len: Int) {}
 }

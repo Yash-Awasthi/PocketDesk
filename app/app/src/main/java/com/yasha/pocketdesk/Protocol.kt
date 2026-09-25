@@ -78,6 +78,12 @@ data class FbConfig(val name: String, val size: Long, val mtime: String)
 /** One captured desktop frame: base64 JPEG, full virtual-screen geometry. */
 data class DesktopFrame(val base64: String, val width: Int, val height: Int)
 
+/** A file or folder on the PC clipboard. */
+data class PcFile(val path: String, val name: String, val size: Long?, val dir: Boolean)
+
+/** PC clipboard content; [requested] is false when the PC copied something on its own. */
+data class PcClip(val kind: String, val text: String?, val png: String?, val files: List<PcFile>, val requested: Boolean)
+
 /** The PC pointer in picture pixels; [shape] is a CSS cursor name such as "arrow" or "text". */
 data class DesktopCursor(val x: Int, val y: Int, val shape: String)
 
@@ -187,7 +193,13 @@ object Proto {
     }
     fun desktopMonitors() = obj { put("type", "desktop_monitors") }
     fun clipboardGet() = obj { put("type", "clipboard_get") }
-    fun clipboardSet(text: String) = obj { put("type", "clipboard_set"); put("text", text) }
+    fun clipboardSet(text: String?, png: String? = null, files: List<String>? = null, paste: Boolean = false) = obj {
+        put("type", "clipboard_set")
+        if (text != null) put("text", text)
+        if (png != null) put("png", png)
+        if (files != null) put("files", JsonArray(files.map { JsonPrimitive(it) }))
+        if (paste) put("paste", true)
+    }
     fun desktopStop() = obj { put("type", "desktop_stop") }
     fun desktopFrame() = obj { put("type", "desktop_frame") }
     fun desktopMouse(x: Int?, y: Int?, click: String?, wheel: Int?, press: String? = null, button: String? = null) = obj {

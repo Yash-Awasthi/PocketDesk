@@ -160,6 +160,10 @@ fun DesktopScreen(
         if (android.os.SystemClock.uptimeMillis() - lastLocal > 300) cursor = Offset(c.x.toFloat(), c.y.toFloat())
     }
 
+    val transfer = remember { DesktopTransfer() }
+    DesktopClipboardSync(ws, transfer)
+    val sendFiles = rememberSendFiles(ws, transfer)
+
     // A keyboard attached to the phone types straight into the PC, with keys held as long as they are held here.
     val keyFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { keyFocus.requestFocus() }
@@ -198,9 +202,11 @@ fun DesktopScreen(
                     ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
                     ws.desktopStartVideo()
                 }) { Text(ws.desktopPreset.replaceFirstChar { it.uppercase() }) }
+                TextButton(onClick = sendFiles) { Text("📎") }
                 TextButton(onClick = { touchpad = !touchpad }) { Text(if (touchpad) "Touchpad" else "Direct tap") }
             }
         }
+        DesktopTransferBar(ws, transfer)
         if (desktopError.isNotEmpty()) {
             Text(desktopError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp))
