@@ -172,6 +172,9 @@ class WsClient(
 
     /** Anywhere transport (iroh://<ticket>) — dials the PC by key, direct or relayed. */
     private val irohLink = AtomicReference<IrohLink?>(null)
+    /** How the current connection reaches the PC: the address dialled, or iroh's "iroh direct 42 ms". */
+    var route by mutableStateOf("")
+        private set
 
     /** Primary url and its fallback for the current server; retries alternate between them. */
     private var routes: List<String> = emptyList()
@@ -198,6 +201,7 @@ class WsClient(
             link = IrohLink(url.removePrefix("iroh://"),
                 onText = { text -> if (irohLink.get() === link) handle(text) },
                 onVideo = { pkt -> if (irohLink.get() === link) onVideoPacket(pkt) },
+                onPath = { p -> if (irohLink.get() === link) route = "iroh $p" },
                 onClosed = { code, reason ->
                     if (irohLink.compareAndSet(link, null)) {
                         failTransfers("connection lost")
@@ -212,9 +216,11 @@ class WsClient(
                     }
                 })
             irohLink.set(link)
+            route = "iroh"
             link.start { hello?.let { link.send(it) } }
             return
         }
+        route = url.substringAfter("://").substringBefore('/')
         val fp = lastFingerprint
         val client: OkHttpClient = when {
             !url.startsWith("wss") -> base

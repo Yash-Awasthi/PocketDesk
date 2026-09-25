@@ -35,6 +35,8 @@ class IrohLink(
     private val onVideo: (ByteArray) -> Unit,
     /** Called once. The code is the daemon's close code (4xxx = refused) when it sent one. */
     private val onClosed: (code: Int?, reason: String) -> Unit,
+    /** The selected path every few seconds, e.g. "direct 42 ms" or "relayed 80 ms". */
+    private val onPath: (String) -> Unit = {},
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val outbox = Channel<ByteArray>(Channel.UNLIMITED)
@@ -51,6 +53,12 @@ class IrohLink(
                 val send = bi.send()
                 scope.launch { for (msg in outbox) send.writeAll(frame(msg)) }
                 scope.launch { acceptVideo(c) }
+                scope.launch {
+                    while (true) {
+                        c.paths().firstOrNull { it.isSelected }?.let { onPath("${if (it.isRelay) "relayed" else "direct"} ${it.rttMs} ms") }
+                        kotlinx.coroutines.delay(3000)
+                    }
+                }
                 scope.launch {
                     val reason = runCatching { c.closed() }.getOrDefault("")
                     finish(Regex("\\b(4\\d{3})\\b").find(reason)?.value?.toInt(), reason)
