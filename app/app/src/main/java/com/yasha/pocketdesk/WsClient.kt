@@ -105,6 +105,16 @@ class WsClient(
     /** True while the daemon's frame loop is running for us. */
     var desktopStreaming by mutableStateOf(false)
         private set
+    /** "h264" when the daemon streams video, "jpeg" for the frame-by-frame fallback. */
+    var desktopMode by mutableStateOf("")
+        private set
+    /** Receives binary H.264 packets; called on the socket thread. */
+    @Volatile var videoSink: ((ByteArray) -> Unit)? = null
+    /** Text read from the PC clipboard, for the screen to put on the phone's. */
+    val pcClipboard = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 1)
+    /** Running totals of received video, for the on-screen rate readout. */
+    @Volatile var videoBytes = 0L
+    @Volatile var videoFrames = 0L
     /** Set on desktop_frame_error / input failures — consumed by the screen. */
     val _desktopError = kotlinx.coroutines.flow.MutableStateFlow("")
 
@@ -281,6 +291,13 @@ class WsClient(
         override fun onMessage(webSocket: WebSocket, text: String) {
             if (webSocket === socket.get()) handle(text)
         }
+
+        override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
+            if (webSocket !== socket.get()) return
+            videoBytes += bytes.size
+            if (bytes.size > 0 && bytes[0].toInt() != 0) videoFrames++
+            videoSink?.invoke(bytes.toByteArray())
+        }
     }
 
     private fun send(line: String): Boolean {
@@ -383,6 +400,14 @@ class WsClient(
     fun fbAppQuit() = send(Proto.fbAppQuit())
     // ── Desktop control methods ──
     fun desktopStart(quality: Int = 55) { desktopStreaming = true; send(Proto.desktopStart(quality)) }
+    /** Also the resync request: the daemon answers with a fresh config + keyframe. */
+    /** saver / balanced / quality; sent with every start so a daemon restart keeps it. */
+    var desktopPreset by mutableStateOf("balanced")
+    fun desktopStartVideo() { desktopStreaming = true; send(Proto.desktopStartVideo(desktopPreset)) }
+    fun clipboardGet() = send(Proto.clipboardGet())
+    /** With [paste], ctrl+v follows once the PC clipboard holds the text. */
+    fun clipboardSet(text: String, paste: Boolean) { pasteAfterSet = paste; send(Proto.clipboardSet(text)) }
+    @Volatile private var pasteAfterSet = false
     fun desktopStop() { desktopStreaming = false; send(Proto.desktopStop()) }
     fun desktopSnapshot() = send(Proto.desktopFrame())
     /** x/y are frame pixels; click is left|right|middle|double. */
@@ -791,13 +816,23 @@ class WsClient(
                 }
             }
             "desktop_started" -> {
-                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) desktopStreaming = true
-                else {
+                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                    desktopStreaming = true
+                    desktopMode = str(m, "mode") ?: "jpeg"
+                } else {
                     desktopStreaming = false
                     _desktopError.value = str(m, "reason") ?: "desktop unavailable"
                 }
             }
             "desktop_stopped" -> desktopStreaming = false
+            "clipboard" ->
+                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) pcClipboard.tryEmit(str(m, "text") ?: "")
+                else _desktopError.value = "PC clipboard: " + (str(m, "error") ?: "failed")
+            "clipboard_set_ok" -> {
+                if (m["ok"]?.jsonPrimitive?.booleanOrNull != true) _desktopError.value = "PC clipboard: " + (str(m, "error") ?: "failed")
+                else if (pasteAfterSet) desktopKey(86, listOf("ctrl"))
+                pasteAfterSet = false
+            }
             "desktop_frame" -> {
                 val b64 = str(m, "base64") ?: return
                 desktopFrame = DesktopFrame(

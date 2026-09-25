@@ -3,10 +3,25 @@ package com.yasha.pocketdesk.ui
 import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.graphics.SurfaceTexture
+import android.view.Surface
+import android.view.TextureView
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import android.util.Base64
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -48,6 +63,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -80,19 +96,40 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit, fullscreen: Boolean, onFull
     var zoom by remember { mutableFloatStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
 
-    DisposableEffect(Unit) {
-        ws.desktopSnapshot()
-        ws.desktopStart(55)
-        onDispose { ws.desktopStop() }
+    var videoSize by remember { mutableStateOf<IntSize?>(null) }
+    var boxSize by remember { mutableStateOf(IntSize.Zero) }
+    // The stream only runs while the app is visible; ON_START also fires on first attach.
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(lifecycle) {
+        val obs = LifecycleEventObserver { _, e ->
+            if (e == Lifecycle.Event.ON_START) ws.desktopStartVideo()
+            if (e == Lifecycle.Event.ON_STOP) ws.desktopStop()
+        }
+        lifecycle.addObserver(obs)
+        onDispose { lifecycle.removeObserver(obs); ws.desktopStop() }
     }
     BackHandler(enabled = fullscreen) { onFullscreen(false) }
 
+    val video = ws.desktopMode == "h264"
     val frame = ws.desktopFrame
-    val bitmap = remember(frame) {
-        frame?.let { f -> Base64.decode(f.base64, Base64.NO_WRAP).let { BitmapFactory.decodeByteArray(it, 0, it.size) } }
+    val bitmap = remember(frame, video) {
+        if (video) null
+        else frame?.let { f -> Base64.decode(f.base64, Base64.NO_WRAP).let { BitmapFactory.decodeByteArray(it, 0, it.size) } }
     }
-    LaunchedEffect(frame?.width, frame?.height) {
-        if (cursor == null && frame != null) cursor = Offset(frame.width / 2f, frame.height / 2f)
+    val dims = if (video) videoSize else frame?.let { IntSize(it.width, it.height) }
+    var rate by remember { mutableStateOf("") }
+    LaunchedEffect(video) {
+        var b = ws.videoBytes
+        var f = ws.videoFrames
+        while (video) {
+            kotlinx.coroutines.delay(1000)
+            rate = "%d fps · %.2f Mbit/s".format(ws.videoFrames - f, (ws.videoBytes - b) * 8 / 1e6)
+            b = ws.videoBytes
+            f = ws.videoFrames
+        }
+    }
+    LaunchedEffect(dims) {
+        if (cursor == null && dims != null) cursor = Offset(dims.width / 2f, dims.height / 2f)
     }
     val here = { cursor?.let { Pair(it.x.toInt(), it.y.toInt()) } }
 
@@ -101,10 +138,14 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit, fullscreen: Boolean, onFull
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 Text(
-                    "Desktop" + (if (ws.desktopStreaming) " · live" else ""),
+                    "Desktop" + (if (ws.desktopStreaming) " · live" + (if (video) " · $rate" else "") else ""),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )
+                if (video) TextButton(onClick = {
+                    ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
+                    ws.desktopStartVideo()
+                }) { Text(ws.desktopPreset.replaceFirstChar { it.uppercase() }) }
                 TextButton(onClick = { touchpad = !touchpad }) { Text(if (touchpad) "Touchpad" else "Direct tap") }
             }
         }
@@ -113,12 +154,28 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit, fullscreen: Boolean, onFull
                 modifier = Modifier.padding(horizontal = 12.dp))
         }
 
-        Box(Modifier.fillMaxWidth().weight(1f)) {
+        Box(Modifier.fillMaxWidth().weight(1f).onSizeChanged { boxSize = it }) {
+            if (video) {
+                AndroidView(
+                    factory = { ctx -> videoView(ctx, ws) { videoSize = it } },
+                    update = { tv ->
+                        val d = videoSize
+                        if (d != null && boxSize.width > 0) {
+                            val v = Viewport(d, boxSize.width.toFloat(), boxSize.height.toFloat(), zoom, pan)
+                            tv.setTransform(Matrix().apply {
+                                setScale(d.width * v.scale / boxSize.width, d.height * v.scale / boxSize.height)
+                                postTranslate(v.left, v.top)
+                            })
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
             Canvas(
                 Modifier
                     .fillMaxSize()
-                    .pointerInput(frame?.width, frame?.height, touchpad) {
-                        val f = frame ?: return@pointerInput
+                    .pointerInput(dims, touchpad) {
+                        val f = dims ?: return@pointerInput
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             val v = Viewport(f, size.width.toFloat(), size.height.toFloat(), zoom, pan)
@@ -164,12 +221,13 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit, fullscreen: Boolean, onFull
                         }
                     },
             ) {
-                val f = frame ?: return@Canvas
-                val bmp = bitmap ?: return@Canvas
+                val f = dims ?: return@Canvas
                 val v = Viewport(f, size.width, size.height, zoom, pan)
-                drawIntoCanvas { c ->
-                    c.nativeCanvas.drawBitmap(bmp, null,
-                        android.graphics.RectF(v.left, v.top, v.left + f.width * v.scale, v.top + f.height * v.scale), null)
+                bitmap?.let { bmp ->
+                    drawIntoCanvas { c ->
+                        c.nativeCanvas.drawBitmap(bmp, null,
+                            android.graphics.RectF(v.left, v.top, v.left + f.width * v.scale, v.top + f.height * v.scale), null)
+                    }
                 }
                 cursor?.let { cur ->
                     val p = Offset(v.left + cur.x * v.scale, v.top + cur.y * v.scale)
@@ -210,8 +268,31 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit, fullscreen: Boolean, onFull
     if (showApps) AppLauncher(ws, onDismiss = { showApps = false })
 }
 
+/** TextureView fed by a hardware decoder; each new surface asks the daemon for a fresh keyframe. */
+private fun videoView(ctx: android.content.Context, ws: WsClient, onSize: (IntSize) -> Unit) = TextureView(ctx).apply {
+    surfaceTextureListener = object : TextureView.SurfaceTextureListener {
+        var player: H264Player? = null
+        var surface: Surface? = null
+        override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
+            val s = Surface(st).also { surface = it }
+            val p = H264Player(s, onSize = { vw, vh -> onSize(IntSize(vw, vh)) }, onLost = { ws.desktopStartVideo() })
+            player = p
+            ws.videoSink = p::feed
+            ws.desktopStartVideo()
+        }
+        override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
+            ws.videoSink = null
+            player?.release()
+            surface?.release()
+            return true
+        }
+        override fun onSurfaceTextureSizeChanged(st: SurfaceTexture, w: Int, h: Int) {}
+        override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
+    }
+}
+
 /** Letterboxed, zoomable placement of the frame inside the view. */
-private class Viewport(val f: DesktopFrame, val viewW: Float, val viewH: Float, val zoom: Float, val pan: Offset) {
+private class Viewport(val f: IntSize, val viewW: Float, val viewH: Float, val zoom: Float, val pan: Offset) {
     val scale = minOf(viewW / f.width, viewH / f.height) * zoom
     val left = (viewW - f.width * scale) / 2f + pan.x
     val top = (viewH - f.height * scale) / 2f + pan.y
@@ -265,27 +346,56 @@ fun DesktopFullscreenEffect(fullscreen: Boolean) {
     }
 }
 
-/** Keyboard: text goes in as typed characters, the rows send single keys and shortcuts. */
+private val PRESETS = listOf("saver", "balanced", "quality")
+private val FN_KEYS = listOf(
+    "esc" to 27, "⇥" to 9, "⌫" to 8, "del" to 46, "⏎" to 13, "←" to 37, "↑" to 38, "↓" to 40, "→" to 39,
+    "home" to 36, "end" to 35, "pgup" to 33, "pgdn" to 34, "⊞" to 91, "prtsc" to 44,
+) + (1..12).map { "F$it" to 111 + it }
+private val OEM_VK = mapOf(
+    '-' to 0xBD, '=' to 0xBB, '[' to 0xDB, ']' to 0xDD, '\\' to 0xDC, ';' to 0xBA,
+    '\'' to 0xDE, ',' to 0xBC, '.' to 0xBE, '/' to 0xBF, '`' to 0xC0,
+)
+private val ROWS = listOf("`1234567890-=", "qwertyuiop[]\\", "asdfghjkl;'", "zxcvbnm,./")
+
+/**
+ * Own keyboard, US layout, every key sent as a virtual key. Ctrl/Shift/Alt/Win latch
+ * on tap and release after the next key, so ctrl then c sends ctrl+c.
+ */
 @Composable
 private fun KeyPanel(ws: WsClient) {
     var text by remember { mutableStateOf("") }
-    val keys = listOf(
-        "⏎" to (13 to emptyList()), "esc" to (27 to emptyList()), "⇥" to (9 to emptyList()),
-        "⌫" to (8 to emptyList()), "del" to (46 to emptyList()), "⊞" to (91 to emptyList()),
-        "←" to (37 to emptyList()), "↑" to (38 to emptyList()), "↓" to (40 to emptyList()), "→" to (39 to emptyList()),
-        "ctrl+c" to (67 to listOf("ctrl")), "ctrl+v" to (86 to listOf("ctrl")), "ctrl+z" to (90 to listOf("ctrl")),
-        "ctrl+a" to (65 to listOf("ctrl")), "alt+tab" to (9 to listOf("alt")), "alt+f4" to (115 to listOf("alt")),
-    )
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            keys.forEach { (label, k) ->
-                OutlinedButton(onClick = { ws.desktopKey(k.first, k.second) }, contentPadding = PaddingValues(horizontal = 10.dp)) {
-                    Text(label, maxLines = 1)
+    var mods by remember { mutableStateOf(emptySet<String>()) }
+    val press = { vk: Int -> ws.desktopKey(vk, mods.toList()); mods = emptySet() }
+    val shift = "shift" in mods
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        ws.pcClipboard.collect {
+            clipboard.setText(AnnotatedString(it))
+            Toast.makeText(context, "Copied from PC", Toast.LENGTH_SHORT).show()
+        }
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Key("paste → PC", Modifier) { clipboard.getText()?.text?.let { ws.clipboardSet(it, paste = true) } }
+            Key("copy ← PC", Modifier) { ws.clipboardGet() }
+            FN_KEYS.forEach { (label, vk) -> Key(label, Modifier) { press(vk) } }
+        }
+        ROWS.forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                row.forEach { ch ->
+                    val vk = OEM_VK[ch] ?: ch.uppercaseChar().code
+                    Key(if (shift) ch.uppercase() else ch.toString(), Modifier.weight(1f)) { press(vk) }
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            listOf("ctrl" to "Ctrl", "shift" to "Shift", "alt" to "Alt", "win" to "Win").forEach { (m, label) ->
+                Key(label, Modifier.weight(1.3f), active = m in mods) { mods = if (m in mods) mods - m else mods + m }
+            }
+            Key("space", Modifier.weight(3f)) { press(32) }
+        }
+        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = text,
                 onValueChange = { text = it },
@@ -295,6 +405,21 @@ private fun KeyPanel(ws: WsClient) {
             )
             TextButton(onClick = { if (text.isNotEmpty()) { ws.desktopType(text); text = "" } }) { Text("Send") }
         }
+    }
+}
+
+@Composable
+private fun Key(label: String, modifier: Modifier, active: Boolean = false, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(6.dp)
+    Box(
+        modifier.padding(vertical = 2.dp).heightIn(min = 40.dp).clip(shape)
+            .background(if (active) MaterialTheme.colorScheme.primary else Color(0xFF21262D))
+            .border(1.dp, Color(0xFF30363D), shape)
+            .clickable(onClick = onClick).padding(horizontal = 6.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(label, maxLines = 1, style = MaterialTheme.typography.bodyMedium,
+            color = if (active) MaterialTheme.colorScheme.onPrimary else Color(0xFFE6EDF3))
     }
 }
 
