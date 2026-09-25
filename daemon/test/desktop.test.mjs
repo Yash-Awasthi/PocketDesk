@@ -160,6 +160,38 @@ async function main() {
     await a1.close();
     fs.rmSync(flag, { force: true });
 
+    // Recording: with the flag on, a watched screen becomes an MP4 and a terminal an asciicast.
+    const home = path.join(os.tmpdir(), "rh-home-" + PORT);
+    const recDir = path.join(home, "recordings");
+    fs.rmSync(recDir, { recursive: true, force: true });
+    fs.writeFileSync(path.join(home, "record-sessions"), "");
+    const r1 = await openAndHello(PORT, TOKEN);
+    r1.send({ type: "create", harness: "node", cwd: os.tmpdir() });
+    const term = await r1.next((m) => m.type === "created", 15000);
+    r1.send({ type: "in", id: term.id, data: Buffer.from('console.log("rec-" + 42)\r').toString("base64") });
+    await r1.next((m) => m.type === "out" && Buffer.from(m.data, "base64").toString().includes("rec-42"), 15000).catch(() => null);
+    r1.send({ type: "kill", id: term.id });
+    await r1.next((m) => m.type === "exit", 10000);
+    r1.send({ type: "desktop_start", quality: 30 });
+    const rs = await r1.next((m) => m.type === "desktop_started", 20000);
+    if (process.env.FFMPEG_PATH) await new Promise((r) => setTimeout(r, 4000));
+    r1.send({ type: "desktop_stop" });
+    await r1.next((m) => m.type === "desktop_stopped", 10000);
+    await new Promise((r) => setTimeout(r, 2500));
+    const files = fs.existsSync(recDir) ? fs.readdirSync(recDir) : [];
+    const cast = files.find((f) => f.endsWith(".cast"));
+    const castText = cast ? fs.readFileSync(path.join(recDir, cast), "utf8") : "";
+    check("terminal session recorded as asciicast", JSON.parse(castText.split("\n")[0] || "{}").version === 2 && castText.includes("rec-42"));
+    const log = fs.existsSync(path.join(recDir, "sessions.log")) ? fs.readFileSync(path.join(recDir, "sessions.log"), "utf8") : "";
+    check("viewer joining and leaving is logged", log.includes('"viewer_joined"') && log.includes('"viewer_left"'));
+    if (process.env.FFMPEG_PATH) {
+      const mp4 = files.find((f) => f.endsWith(".mp4"));
+      const size = mp4 ? fs.statSync(path.join(recDir, mp4)).size : 0;
+      check("watched screen recorded as MP4", rs.recording === true && size > 10_000);
+    }
+    fs.rmSync(path.join(home, "record-sessions"), { force: true });
+    await r1.close();
+
     // Held key: F24 goes down, and dropping the socket releases it.
     const h = await openAndHello(PORT, TOKEN);
     h.send({ type: "desktop_key", key: 0x87, press: "down" });

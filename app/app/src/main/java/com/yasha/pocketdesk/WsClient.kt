@@ -433,6 +433,9 @@ class WsClient(
         private set
     /** Asked for by the user, or imposed by whoever approved the session on the PC. */
     var desktopViewOnly by mutableStateOf(false)
+    /** The PC keeps a recording of this session (its owner turned that on). */
+    var desktopRecording by mutableStateOf(false)
+        private set
     /** Session status that is not an error, such as waiting for approval on the PC. */
     var desktopNotice by mutableStateOf("")
         private set
@@ -875,6 +878,7 @@ class WsClient(
                     desktopStreaming = true
                     desktopMode = str(m, "mode") ?: "jpeg"
                     bool(m, "viewOnly")?.let { desktopViewOnly = it }
+                    desktopRecording = bool(m, "recording") ?: false
                 } else {
                     desktopStreaming = false
                     // A refusal on the PC must not be retried on every reconnect.

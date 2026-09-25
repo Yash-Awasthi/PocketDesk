@@ -19,6 +19,7 @@ import { StreamJsonParser } from "./stream_json_parser.js";
 import { DesktopController } from "./desktop_capture.js";
 import { DesktopPresence } from "./desktop_presence.js";
 import { wakeTargets } from "./wake.js";
+import { Recorder } from "./recorder.js";
 import { DesktopVideo } from "./desktop_video.js";
 import { AdvancedSSHServerManager } from "./advanced_ssh_server.js";
 import { SSHBastion } from "./ssh_bastion.js";
@@ -298,6 +299,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   // loop runs only while at least one watcher is attached.
   const desktop = new DesktopController();
   const presence = new DesktopPresence();
+  const recorder = new Recorder();
   const desktopWatchers = new Set();
   desktop.on("frame", (frame) => {
     for (const w of desktopWatchers) {
@@ -401,13 +403,18 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     scheduler.stop();
     desktop.dispose();
     presence.dispose();
+    recorder.dispose();
     mpc.dispose();
     sshSrv.stop();
     bastion.stop();
     devices.persist();
   });
 
+  sessions.sessionEvents.on("create", (s) => recorder.terminalStarted(s));
+  sessions.sessionEvents.on("resize", ({ id, cols, rows }) => recorder.terminalResized(id, cols, rows));
+  sessions.sessionEvents.on("exit", ({ id }) => recorder.terminalEnded(id));
   sessions.sessionEvents.on("output", ({ id, text }) => {
+    recorder.terminalOutput(id, text);
     activity.feed(id, text);
   });
   sessions.sessionEvents.on("exit", ({ id }) => activity.markChat(id, "idle")); // terminal exit = done
@@ -450,7 +457,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
 
   const ctx = {
     send, broadcast, allSessions, plugins, power,
-    desktop, desktopWatchers, video, videoWatchers, presence, bastion, sshSrv, mpc, streamParser,
+    desktop, desktopWatchers, video, videoWatchers, presence, recorder, bastion, sshSrv, mpc, streamParser,
     activity, tls, rotateToken, disconnectDevice,
   };
   const handlers = {

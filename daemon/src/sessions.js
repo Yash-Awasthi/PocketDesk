@@ -180,6 +180,7 @@ export function resize(id, cols, rows) {
   try {
     s.pty.resize(c, r);
   } catch {}
+  sessionEvents.emit("resize", { id, cols: c, rows: r });
   return true;
 }
 

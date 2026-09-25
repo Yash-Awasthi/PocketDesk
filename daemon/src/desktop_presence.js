@@ -153,10 +153,10 @@ export class DesktopPresence {
   }
 
   /** viewers: [{ name, viewOnly }]; an empty list hides the bar. */
-  async update(viewers) {
+  async update(viewers, recording = false) {
     if (!IS_WIN) return;
     const text = viewers.length
-      ? viewers.map((v) => `${v.name} ${v.viewOnly ? "is viewing" : "is controlling"}`).join(" · ") + " this PC"
+      ? viewers.map((v) => `${v.name} ${v.viewOnly ? "is viewing" : "is controlling"}`).join(" · ") + " this PC" + (recording ? " · recorded" : "")
       : "";
     if (text === this.shown) return;
     this.shown = text;

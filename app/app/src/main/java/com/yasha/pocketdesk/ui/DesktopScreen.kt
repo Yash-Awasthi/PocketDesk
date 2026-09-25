@@ -189,6 +189,7 @@ fun DesktopScreen(
                     Text("Desktop", style = MaterialTheme.typography.titleMedium)
                     Text(
                         listOfNotNull(
+                            "● REC".takeIf { ws.desktopRecording && ws.desktopStreaming },
                             if (!ws.desktopStreaming) "paused" else rate.takeIf { video && it.isNotEmpty() } ?: "live",
                             ws.route.takeIf { it.isNotEmpty() },
                         ).joinToString(" · "),

@@ -2,7 +2,7 @@ import { resolvePath } from "../fs_ops.js";
 import * as devices from "../devices.js";
 
 export default function remoteHandlers(ctx) {
-  const { send, desktop, desktopWatchers, video, videoWatchers, presence } = ctx;
+  const { send, desktop, desktopWatchers, video, videoWatchers, presence, recorder } = ctx;
   // Sockets that took a single snapshot stay on the PC's viewer bar for a few seconds.
   const snapshots = new Map();
   const deviceName = (ws) => devices.list().find((d) => d.id === ws._clientId)?.name || "A remote device";
@@ -13,8 +13,13 @@ export default function remoteHandlers(ctx) {
     desktop.watchClipboard(on);
     if (on && desktop.cursor) desktop.emit("cursor", desktop.cursor);
     const viewers = new Set([...videoWatchers, ...desktopWatchers, ...snapshots.keys()]);
-    presence.update([...viewers].map((w) => ({ name: deviceName(w), viewOnly: !!w._viewOnly })));
+    for (const w of viewers) if (!logged.has(w)) recorder.log("viewer_joined", { device: deviceName(w), viewOnly: !!w._viewOnly, snapshot: snapshots.has(w) && !videoWatchers.has(w) && !desktopWatchers.has(w) });
+    for (const w of logged) if (!viewers.has(w)) recorder.log("viewer_left", { device: deviceName(w) });
+    logged = viewers;
+    recorder.screenWatched(on, { label: viewers.size ? deviceName([...viewers][0]) : "", monitor: video.monitor });
+    presence.update([...viewers].map((w) => ({ name: deviceName(w), viewOnly: !!w._viewOnly })), recorder.recordingScreen);
   }
+  let logged = new Set();
   /** With approval on, the person at the PC answers before a socket sees or touches anything. */
   async function approved(ws, wantsControl) {
     if (ws._desktopApproved || !presence.approvalRequired) return true;
@@ -23,6 +28,7 @@ export default function remoteHandlers(ctx) {
     send(ws, { type: "desktop_pending" });
     try {
       const answer = await presence.ask(`${deviceName(ws)} wants to ${wantsControl ? "view and control" : "view"} this PC.`);
+      recorder.log(answer === "deny" ? "denied" : "approved", { device: deviceName(ws), answer });
       if (answer === "deny") return false;
       if (answer === "view") ws._viewOnly = ws._viewOnlyForced = true;
       ws._desktopApproved = true;
@@ -41,6 +47,7 @@ export default function remoteHandlers(ctx) {
       w._desktopApproved = false;
       send(w, { type: "desktop_stopped", ok: true, reason: "ended on the PC" });
     }
+    recorder.log("ended_on_pc");
     video.stop();
     syncCursor();
   };
@@ -81,8 +88,8 @@ export default function remoteHandlers(ctx) {
             ws._videoCloseHooked = true;
             ws.once?.("close", () => { videoWatchers.delete(ws); if (!videoWatchers.size) video.stop(); syncCursor(); });
           }
-          send(ws, { type: "desktop_started", ok: true, mode: "h264", encoder, preset: video.preset, monitor: video.monitor?.index ?? 0, viewOnly: ws._viewOnly });
-          return syncCursor();
+          syncCursor();
+          return send(ws, { type: "desktop_started", ok: true, mode: "h264", encoder, preset: video.preset, monitor: video.monitor?.index ?? 0, viewOnly: ws._viewOnly, recording: recorder.recordingScreen });
         }
         videoWatchers.delete(ws);
       }
@@ -97,8 +104,8 @@ export default function remoteHandlers(ctx) {
           syncCursor();
         });
       }
-      send(ws, { type: "desktop_started", ...r, viewOnly: ws._viewOnly });
       syncCursor();
+      send(ws, { type: "desktop_started", ...r, viewOnly: ws._viewOnly, recording: recorder.recordingScreen });
     },
     // Viewers align their clock with the daemon's to turn frame stamps into delays.
     async desktop_ping(ws, msg) {
@@ -174,6 +181,7 @@ export default function remoteHandlers(ctx) {
       const text = msg.text == null ? undefined : String(msg.text).slice(0, 1 << 20);
       const png = typeof msg.png === "string" ? msg.png.slice(0, 24 << 20) : undefined;
       const r = await desktop.clipboardSet({ text, png, files });
+      if (r.ok && files) recorder.log("files_sent", { device: deviceName(ws), files });
       if (r.ok && msg.paste) await desktop.inputKey({ key: 86, modifiers: ["ctrl"] });
       send(ws, { type: "clipboard_set_ok", ...r });
     },

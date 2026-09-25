@@ -710,7 +710,7 @@ function handle(m) {
       document.getElementById("deskToggle").textContent = desk.viewing ? "⏸ Stop viewing" : "▶ Start viewing";
       document.getElementById("deskPreset").style.display = desk.mode === "jpeg" ? "none" : "";
       document.getElementById("deskQuality").style.display = desk.mode === "h264" ? "none" : "";
-      document.getElementById("deskStatus").textContent = m.ok ? (desk.mode === "h264" ? `H.264 · ${m.encoder}` : "snapshots (~3 fps)") : (m.reason || "unavailable");
+      document.getElementById("deskStatus").textContent = m.ok ? (m.recording ? "● recorded on the PC · " : "") + (desk.mode === "h264" ? `H.264 · ${m.encoder}` : "snapshots (~3 fps)") : (m.reason || "unavailable");
       if (m.ok && desk.mode === "jpeg") send({ type: "desktop_frame" });
       break;
     case "desktop_stopped":

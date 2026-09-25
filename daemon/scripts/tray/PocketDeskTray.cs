@@ -31,6 +31,8 @@ namespace PocketDeskTray
         static readonly string LogPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "daemon.log");
         // The daemon checks for this file before every remote viewing session.
         static readonly string ApprovalFlag = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "ask-before-viewing");
+        static readonly string RecordFlag = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "record-sessions");
+        static readonly string Recordings = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "recordings");
 
         public TrayContext()
         {
@@ -44,9 +46,12 @@ namespace PocketDeskTray
             menu.Items.Add("Open web UI", null, (s, e) => OpenUrl(BaseUrl()));
             menu.Items.Add("Copy pairing info", null, (s, e) => CopyPairing());
             menu.Items.Add("Open daemon log", null, (s, e) => { try { Process.Start("notepad.exe", LogPath); } catch { } });
-            var askItem = new ToolStripMenuItem("Ask before someone views this PC", null, (s, e) => ToggleApproval());
-            menu.Opening += (s, e) => askItem.Checked = File.Exists(ApprovalFlag);
+            var askItem = new ToolStripMenuItem("Ask before someone views this PC", null, (s, e) => ToggleFlag(ApprovalFlag));
+            var recordItem = new ToolStripMenuItem("Record remote sessions", null, (s, e) => ToggleFlag(RecordFlag));
+            menu.Opening += (s, e) => { askItem.Checked = File.Exists(ApprovalFlag); recordItem.Checked = File.Exists(RecordFlag); };
             menu.Items.Add(askItem);
+            menu.Items.Add(recordItem);
+            menu.Items.Add("Open recordings", null, (s, e) => { try { Directory.CreateDirectory(Recordings); Process.Start("explorer.exe", Recordings); } catch { } });
             menu.Items.Add(new ToolStripSeparator());
             startItem = new ToolStripMenuItem("Start daemon", null, (s, e) => StartDaemon());
             stopItem = new ToolStripMenuItem("Stop daemon", null, (s, e) => StopDaemon());
@@ -65,12 +70,12 @@ namespace PocketDeskTray
             StartDaemon();
         }
 
-        void ToggleApproval()
+        void ToggleFlag(string flag)
         {
             try
             {
-                if (File.Exists(ApprovalFlag)) File.Delete(ApprovalFlag);
-                else File.WriteAllText(ApprovalFlag, "");
+                if (File.Exists(flag)) File.Delete(flag);
+                else File.WriteAllText(flag, "");
             }
             catch (Exception ex) { MessageBox.Show("Could not change the setting: " + ex.Message, "PocketDesk"); }
         }
