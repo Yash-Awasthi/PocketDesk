@@ -4,24 +4,17 @@ import * as registry from "../registry.js";
 import * as appDiscovery from "../app_discovery.js";
 import * as sessions from "../sessions.js";
 import * as chat from "../chat.js";
-import { NotificationEvents } from "../notifications.js";
 import * as sessionStore from "../session-store.js";
-import * as sdkAdapter from "../sdk-adapter.js";
 import * as slashCommands from "../slash-commands.js";
-import * as auditLog from "../audit-log.js";
-import * as resurrect from "../resurrect.js";
-import { TerminalRenderer } from "../terminal_renderer.js";
 import * as promptQueue from "../prompt_queue.js";
 import * as agentTodos from "../agent_todos.js";
 import * as scheduler from "../scheduler.js";
 import * as approvalGuard from "../approval_guard.js";
-import * as liveDigest from "../live_digest.js";
 import * as statsUsage from "../stats_usage.js";
-import * as envProfiles from "../env_profiles.js";
 import * as planMode from "../plan_mode.js";
 
 export default function agentsHandlers(ctx) {
-  const { send, broadcast, allSessions, notifications, plugins, power, shares, activity } = ctx;
+  const { send, broadcast, allSessions, plugins, power, activity } = ctx;
   // Runs one of a manifest's fixed auth commands; nothing from the client reaches the command line.
   const runAuth = (m, args) => new Promise((resolve) => {
     const [bin, argv] = process.platform === "win32" ? ["cmd.exe", ["/c", m.bin, ...args]] : [m.bin, args];
@@ -50,7 +43,6 @@ export default function agentsHandlers(ctx) {
     async auth_logout(ws, msg) {
       const m = authManifest(ws, msg, "logout");
       if (!m) return;
-      auditLog.log("auth_logout", { harness: m.id });
       return self.create(ws, { harness: m.id, cwd: msg.cwd, args: m.auth.logout });
     },
     async auth_login(ws, msg) {
@@ -76,10 +68,8 @@ export default function agentsHandlers(ctx) {
         : registry.get(msg.harness);
       if (!m || m.adapter !== "terminal") return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
       if (!msg.path && !registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
-      auditLog.log("session_create", { harness: m.id, cwd: msg.cwd });
       const s = sessions.create({ harnessId: m.id, bin: m.bin, cwd: msg.cwd, args: msg.args }, broadcast);
       sessionStore.upsert(s.id, { name: m.name, project: msg.cwd || "", type: "terminal", status: "working" });
-      notifications.send(NotificationEvents.SESSION_CONNECTED, { harness: m.name, cwd: msg.cwd });
       plugins.callHook("onSessionCreated", s);
       power.addStatus({ agentId: s.id, state: "running", receivedAt: Date.now() });
       broadcast({ type: "sessions", items: allSessions() });
@@ -92,10 +82,8 @@ export default function agentsHandlers(ctx) {
       if (!registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
       const s = chat.create({ manifest: m, cwd: msg.cwd });
       sessionStore.upsert(s.id, { name: m.name, project: msg.cwd || "", type: "chat", status: "idle" });
-      notifications.send(NotificationEvents.SESSION_CONNECTED, { harness: m.name, cwd: msg.cwd });
       plugins.callHook("onChatCreated", s);
       power.addStatus({ agentId: s.id, state: "running", receivedAt: Date.now() });
-      resurrect.upsert({ id: s.id, harnessId: m.id, cwd: s.cwd });
       chat.attach(s.id, ws);
       send(ws, { type: "created", ...s });
       if (String(msg.prompt || "").trim()) {
@@ -104,7 +92,6 @@ export default function agentsHandlers(ctx) {
       broadcast({ type: "sessions", items: allSessions() });
     },
     async chatmsg(ws, msg) {
-      if (ws._shareMode === "readonly") return send(ws, { type: "error", message: "chat is read-only (spectator)" });
       const c = chat.get(msg.id);
       if (!c) return send(ws, { type: "error", message: `no such chat: ${msg.id}` });
       if (c.state === "running") return send(ws, { type: "error", message: "still working on the previous prompt" });
@@ -129,26 +116,6 @@ export default function agentsHandlers(ctx) {
       sessionStore.upsert(r.chat.id, { name: "fork", project: r.chat.cwd, type: "chat", status: "idle" });
       send(ws, { type: "chat_forked", ok: true, chat: r.chat });
       broadcast({ type: "sessions", items: allSessions() });
-    },
-    // ── Env profiles / BYOK (1code, Vibe Companion): per-chat env overrides ──
-    async env_profile_list(ws, msg) {
-      send(ws, { type: "env_profiles", items: envProfiles.list() });
-    },
-    async env_profile_set(ws, msg) {
-      const r = envProfiles.set(String(msg.name ?? ""), msg.vars);
-      send(ws, r.ok ? { type: "env_profile_ok", ok: true, name: msg.name } : { type: "error", message: r.error });
-    },
-    async env_profile_remove(ws, msg) {
-      const r = envProfiles.remove(String(msg.name ?? ""));
-      send(ws, r.ok ? { type: "env_profile_ok", ok: true, name: msg.name } : { type: "error", message: r.error });
-    },
-    async env_profile_attach(ws, msg) {
-      const r = envProfiles.attach(String(msg.id), String(msg.name ?? ""));
-      send(ws, r.ok ? { type: "env_profile_ok", ok: true, id: r.id, profile: r.profile, keys: r.keys } : { type: "error", message: r.error });
-    },
-    async env_profile_detach(ws, msg) {
-      const r = envProfiles.detach(String(msg.id));
-      send(ws, r.ok ? { type: "env_profile_ok", ok: true, id: r.id } : { type: "error", message: r.error });
     },
     // ── Plan mode (1code): extract the agent's checklist plan, approve it ──
     async plan_get(ws, msg) {
@@ -182,7 +149,6 @@ export default function agentsHandlers(ctx) {
       send(ws, { type: "chat_text", id: c.id, text });
     },
     async chatcancel(ws, msg) {
-      if (ws._shareMode === "readonly") return send(ws, { type: "error", message: "chat is read-only (spectator)" });
       const c = chat.get(msg.id);
       if (c) {
         chat.cancel(c);
@@ -236,15 +202,12 @@ export default function agentsHandlers(ctx) {
       chat.detach(ws, msg.id);
     },
     async in(ws, msg) {
-      if (ws._shareMode === "readonly") return send(ws, { type: "error", message: "session is read-only (spectator)" });
       sessions.write(msg.id, Buffer.from(msg.data, "base64").toString("utf8"));
     },
     async resize(ws, msg) {
       sessions.resize(msg.id, msg.cols, msg.rows);
     },
     async kill(ws, msg) {
-      if (ws._shareMode === "readonly") return send(ws, { type: "error", message: "session is read-only (spectator)" });
-      auditLog.log("session_kill", { id: msg.id });
       if (chat.get(msg.id)) {
         chat.cancel(chat.get(msg.id));
         sessionStore.setStatus(msg.id, "killed");
@@ -253,31 +216,7 @@ export default function agentsHandlers(ctx) {
         sessionStore.setStatus(msg.id, "killed");
       }
       power.removeStatus(msg.id);
-      resurrect.remove(msg.id);
-      shares.revokeSession(msg.id);
       broadcast({ type: "sessions", items: allSessions() });
-    },
-    async sdk_launch(ws, msg) {
-      const m = registry.get(msg.harness);
-      if (!m) return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
-      const s = sdkAdapter.launch({ bin: m.bin, cwd: msg.cwd, args: m.chat?.args, model: msg.model, permissionMode: msg.permissionMode });
-      sessionStore.upsert(s.id, { name: m.name, project: msg.cwd || "", type: "sdk", status: "starting" });
-      send(ws, { type: "sdk_created", id: s.id, cwd: s.cwd });
-      broadcast({ type: "sessions", items: allSessions() });
-    },
-    async sdk_prompt(ws, msg) {
-      if (!sdkAdapter.sendPrompt(msg.id, String(msg.text || ""))) {
-        send(ws, { type: "error", message: `no connected SDK session: ${msg.id}` });
-      }
-    },
-    async sdk_approve(ws, msg) {
-      sdkAdapter.approve(msg.id, msg.requestId, msg.approved);
-    },
-    async sdk_interrupt(ws, msg) {
-      sdkAdapter.interrupt(msg.id);
-    },
-    async sdk_subscribe(ws, msg) {
-      sdkAdapter.subscribe(msg.id, ws);
     },
     async chat_history(ws, msg) {
       send(ws, { type: "chat_history", items: chat.listHistory() });
@@ -289,15 +228,6 @@ export default function agentsHandlers(ctx) {
     async unpin(ws, msg) {
       registry.unpin(msg.id);
       send(ws, { type: "pinned", ids: registry.listPinned() });
-    },
-    // ── Digest render (restty: plain-text read-only render, token savings) ──
-    async render_digest(ws, msg) {
-      const renderer = new TerminalRenderer({ cols: msg.cols || 80, rows: msg.rows || 24 });
-      renderer.feed(String(msg.text ?? ""));
-      const screen = renderer.getScreen().map((row) => row.replace(/\s+$/, ""));
-      // Trailing all-blank rows carry no information — trim them for the wire.
-      while (screen.length > 0 && screen[screen.length - 1]?.trim() === "") screen.pop();
-      send(ws, { type: "digest_render", rows: screen, width: renderer.cols });
     },
     // ── Launch a GUI application (IDEs) ──────────────────────────────────
     // GUI apps have no PTY to stream, so this only starts the process. The
@@ -311,7 +241,6 @@ export default function agentsHandlers(ctx) {
         ? registry.launchApp({ path: known.path, folder: msg.cwd })
         : registry.launchGui(msg.harness, msg.cwd);
       if (!r.ok) return send(ws, { type: "gui_opened", ok: false, harness: label, reason: r.reason });
-      auditLog.log("gui_open", { harness: label, path: r.path, cwd: msg.cwd });
       send(ws, { type: "gui_opened", ok: true, harness: label, path: r.path });
     },
     // Everything installed on this machine, not only what ships a manifest.
@@ -331,25 +260,6 @@ export default function agentsHandlers(ctx) {
     // ── Activity monitor (webmux/purplemux: busy→quiet, per-session status) ──
     async activity_list(ws, msg) {
       send(ws, { type: "activity_list", items: activity.summary() });
-    },
-    // ── Chat resurrection (zellij-resurrect: restore chats after restart) ──
-    async resurrect_list(ws, msg) {
-      send(ws, { type: "resurrect_list", items: resurrect.list() });
-    },
-    async resume(ws, msg) {
-      const rec = resurrect.get(msg.id);
-      const m = rec && registry.get(rec.harnessId);
-      if (!rec || !m || !chat.supported(m)) return send(ws, { type: "error", message: `no resumable chat: ${msg.id}` });
-      const s = chat.create({ manifest: m, cwd: rec.cwd, resumeFirst: true, cliSession: rec.cliSession });
-      sessionStore.upsert(s.id, { name: m.name, project: rec.cwd || "", type: "chat", status: "idle" });
-      power.addStatus({ agentId: s.id, state: "running", receivedAt: Date.now() });
-      // IDs restart from 1 per process, so the resumed chat often reuses the
-      // old record's id — clear the stale record BEFORE re-registering.
-      resurrect.remove(rec.id);
-      resurrect.upsert({ id: s.id, harnessId: m.id, cwd: rec.cwd, name: rec.name, cliSession: rec.cliSession });
-      chat.attach(s.id, ws);
-      send(ws, { type: "created", ...s, resumed: true });
-      broadcast({ type: "sessions", items: allSessions() });
     },
     // ── Prompt queue (1code/ccpocket/oc-remote: queued follow-ups) ───────
     async prompt_enqueue(ws, msg) {
@@ -410,19 +320,6 @@ export default function agentsHandlers(ctx) {
     },
     async usage_get(ws, msg) {
       send(ws, { type: "usage", id: msg.id, ...(statsUsage.get(String(msg.id ?? "")) ?? { inputTokens: 0, outputTokens: 0, costUsd: 0, turns: 0, points: [] }) });
-    },
-    // ── Live digest attach (mcp-interactive-terminal: token-saving view) ──
-    async digest_attach(ws, msg) {
-      if (sessions.get(String(msg.id ?? ""))) {
-        liveDigest.attach(String(msg.id), ws, { cols: msg.cols, rows: msg.rows });
-        send(ws, { type: "digest_attached", ok: true, id: msg.id });
-      } else {
-        send(ws, { type: "error", message: `no live session: ${msg.id}` });
-      }
-    },
-    async digest_detach(ws, msg) {
-      liveDigest.detach(ws, String(msg.id ?? ""));
-      send(ws, { type: "digest_detached", ok: true });
     },
     // ── Chat search (flue/1code: find prompts across history) ─────────
     async chat_search(ws, msg) {

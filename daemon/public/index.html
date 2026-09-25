@@ -118,7 +118,6 @@
   <span class="logo">🔧</span>
   <h1>PocketDesk</h1>
   <span id="status" class="bad">disconnected</span>
-  <button class="btn" style="margin-left:auto" onclick="send({type:'notify_test'})" title="Send a test push to every configured channel (NTFY_TOPIC / Pushover)">🔔 Test push</button>
 </div>
 
 <div class="connect-bar">
@@ -407,19 +406,6 @@
             </div>
             <table class="client-table" id="dSchedTable"><thead><tr><th>Chat</th><th>Prompt</th><th>Kind</th><th>Next</th><th>Runs</th><th></th></tr></thead><tbody></tbody></table>
           </div>
-          <div class="dash-section" id="dQuietSection" style="display:none">
-            <h3>🌙 Quiet Hours</h3>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px">
-              <select id="quietMode">
-                <option value="off">off</option>
-                <option value="priority">priority</option>
-                <option value="silent">silent</option>
-              </select>
-              <input id="quietWindows" placeholder="22:00-07:30, 12:00-13:00" style="flex:1;min-width:180px" />
-              <button class="btn" onclick="quietSet()">Apply</button>
-              <span id="quietActive" style="color:#8b949e"></span>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -519,7 +505,6 @@ function handle(m) {
       if (m.deviceToken) document.getElementById("token").value = m.deviceToken;
       send({ type: "usage_list" });
       send({ type: "device_list" });
-      send({ type: "quiet_status" });
       send({ type: "schedule_list" });
       renderTools(m.manifests || []);
       renderSessions(m.sessions || []);
@@ -642,12 +627,6 @@ function handle(m) {
       send({ type: "device_list" });
       break;
     case "device_allowed": send({ type: "device_list" }); break;
-    case "quiet_status":
-      document.getElementById("dQuietSection").style.display = "";
-      document.getElementById("quietMode").value = m.mode || "off";
-      document.getElementById("quietWindows").value = (m.windows || []).join(", ");
-      document.getElementById("quietActive").textContent = m.active ? "· active now" : "";
-      break;
     case "model_list":
       if (m.ok) renderModelPicker(m.models || [], m.current);
       break;
@@ -728,10 +707,6 @@ function handle(m) {
     case "desktop_quality_ok":
       dashEvent(`desktop quality → ${m.quality}`, 'blue');
       break;
-    case "notify_test":
-      dashEvent(m.ok ? `push sent via [${(m.channels || []).join(", ")}] — check your phone` : `push test failed: ${m.error}`, m.ok ? 'green' : 'red');
-      break;
-    // The window opens on the PC, so only a refusal is worth reporting here.
     case "gui_opened":
       if (!m.ok) dashEvent(`${m.harness || "app"}: ${m.reason || "could not open the app"}`, "red");
       break;
@@ -1476,7 +1451,7 @@ function renderDashboard() {
   ).join('');
 }
 
-// ── Status surfaces (usage/cost, devices, quiet hours) ──
+// ── Status surfaces (usage/cost, devices) ──
 function fmtTok(n) { n = n || 0; return n >= 1000 ? (n / 1000).toFixed(1) + "k" : String(n); }
 function renderUsage(m) {
   document.getElementById("dUsageSection").style.display = "";
@@ -1507,10 +1482,6 @@ function deviceRevoke(id) {
   send({ type: "device_revoke", clientId: id });
 }
 function deviceAllow(id) { send({ type: "device_allow", clientId: id }); }
-function quietSet() {
-  const windows = document.getElementById("quietWindows").value.split(",").map(s => s.trim()).filter(Boolean);
-  send({ type: "quiet_set", mode: document.getElementById("quietMode").value, windows });
-}
 
 // ── Scheduler (⏰) ──
 function syncSchedChatOptions(extraIds) {

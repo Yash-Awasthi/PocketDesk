@@ -23,7 +23,6 @@
     "node-pty@1.1.0": true
   },
   "optionalDependencies": {
-    "@number0/iroh": "^1.1.0",
-    "@whiskeysockets/baileys": "^7.0.0-rc14"
+    "@number0/iroh": "^1.1.0"
   }
 }

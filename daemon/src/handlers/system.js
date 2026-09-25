@@ -2,20 +2,13 @@ import * as registry from "../registry.js";
 import * as sessions from "../sessions.js";
 import * as chat from "../chat.js";
 import * as proposals from "../proposals.js";
-import { NotificationEvents } from "../notifications.js";
-import * as voice from "../voice.js";
-import * as auditLog from "../audit-log.js";
-import { normalizeAwakeMode } from "../power_manager.js";
 import { hostStats } from "../stats.js";
 import * as fbCtrl from "../freebuff_control.js";
 import * as doctor from "../doctor.js";
-import * as wakeOnLan from "../wake_on_lan.js";
-import * as mcpServer from "../mcp_server.js";
-import * as quietHours from "../quiet_hours.js";
 import * as devices from "../devices.js";
 
 export default function systemHandlers(ctx) {
-  const { send, broadcast, allSessions, notifications, plugins, power, shares, recorder, shooter, streamParser, tls, rotateToken, disconnectDevice } = ctx;
+  const { send, broadcast, allSessions, plugins, streamParser, tls, rotateToken, disconnectDevice } = ctx;
   return {
     async propose(ws, msg) {
       const p = proposals.create({
@@ -25,14 +18,12 @@ export default function systemHandlers(ctx) {
         sessionId: msg.sessionId || "unknown",
       });
       plugins.callHook("onProposal", ws, p);
-      notifications.send(NotificationEvents.PROPOSAL_CREATED, { id: p.id, type: p.type, summary: p.summary });
       send(ws, { type: "proposal_created", proposal: { id: p.id, type: p.type, summary: p.summary, status: p.status } });
     },
     async approve(ws, msg) {
       const p = proposals.approve(msg.id);
       if (p) {
         plugins.callHook("onProposalApproved", ws, p);
-        notifications.send(NotificationEvents.PROPOSAL_APPROVED, { id: p.id, summary: p.summary });
         send(ws, { type: "proposal_approved", proposal: { id: p.id, status: p.status } });
       } else {
         send(ws, { type: "error", message: `proposal ${msg.id} not found or already decided` });
@@ -42,7 +33,6 @@ export default function systemHandlers(ctx) {
       const p = proposals.reject(msg.id);
       if (p) {
         plugins.callHook("onProposalRejected", ws, p);
-        notifications.send(NotificationEvents.PROPOSAL_REJECTED, { id: p.id, summary: p.summary });
         send(ws, { type: "proposal_rejected", proposal: { id: p.id, status: p.status } });
       } else {
         send(ws, { type: "error", message: `proposal ${msg.id} not found or already decided` });
@@ -51,66 +41,9 @@ export default function systemHandlers(ctx) {
     async proposal_list(ws, msg) {
       send(ws, { type: "proposal_list", items: proposals.listPending() });
     },
-    async transcribe(ws, msg) {
-      if (!voice.isAvailable()) {
-        send(ws, { type: "error", message: "Voice transcription unavailable. Set OPENAI_API_KEY." });
-        return;
-      }
-      try {
-        const text = await voice.transcribe(msg.audio, msg.format, msg.language);
-        send(ws, { type: "transcribed", text });
-      } catch (e) {
-        send(ws, { type: "error", message: e.message });
-      }
-    },
-    async audit_log(ws, msg) {
-      send(ws, { type: "audit_log", items: auditLog.getLog(msg.limit) });
-    },
-    // ── Session shares (ttyd/gotty/termpair: read-only spectators) ──
-    async share_create(ws, msg) {
-      const share = shares.create({ sessionId: msg.id, mode: msg.mode, ttlMinutes: msg.ttlMinutes, maxViewers: msg.maxViewers });
-      auditLog.log("share_create", { id: msg.id, mode: share.mode });
-      send(ws, { type: "share_created", token: share.token, sessionId: share.sessionId, mode: share.mode, expiresAt: share.expiresAt });
-    },
-    async share_join(ws, msg) {
-      const joined = shares.join(msg.token);
-      if (!joined.ok) return send(ws, { type: "error", message: joined.error });
-      const share = joined.share;
-      const attached = chat.attach(share.sessionId, ws) || sessions.attach(share.sessionId, ws);
-      if (!attached) {
-        shares.leave(share.token);
-        return send(ws, { type: "error", message: `shared session no longer live: ${share.sessionId}` });
-      }
-      if (ws._shareToken) shares.leave(ws._shareToken);
-      ws._shareToken = share.token;
-      ws._shareMode = share.mode;
-      send(ws, { type: "share_joined", sessionId: share.sessionId, mode: share.mode });
-    },
-    async share_list(ws, msg) {
-      send(ws, { type: "share_list", items: shares.list() });
-    },
-    async share_revoke(ws, msg) {
-      shares.revoke(msg.token);
-      send(ws, { type: "share_revoked", token: msg.token });
-    },
     // ── Host stats (webmux/vmux host cards) ──
     async stats(ws, msg) {
       send(ws, hostStats());
-    },
-    // ── Session recording (asciinema/termpair: record + replay/export) ──
-    async record_start(ws, msg) {
-      recorder.startRecording(msg.id);
-      send(ws, { type: "recording", id: msg.id, active: true });
-    },
-    async record_stop(ws, msg) {
-      const rec = recorder.stopRecording(msg.id);
-      send(ws, { type: "recording", id: msg.id, active: false, events: rec?.events?.length ?? 0 });
-    },
-    async record_list(ws, msg) {
-      send(ws, { type: "record_list", items: recorder.listSessions() });
-    },
-    async record_get(ws, msg) {
-      send(ws, { type: "record_get", id: msg.id, events: recorder.getEvents(msg.id), export: recorder.exportSession(msg.id, msg.format || "json") });
     },
     // ── Freebuff control (status/configs/skills/auth from the phone) ───────
     async fb_status(ws, msg) {
@@ -171,30 +104,6 @@ export default function systemHandlers(ctx) {
     async fb_app_quit(ws, msg) {
       send(ws, { type: "fb_app_quit", ...fbCtrl.appQuit() });
     },
-    // ── Smart notifications (shooter: coalescing/dedupe + telemetry) ──────
-    async notify_send(ws, msg) {
-      const result = shooter.sendNotification({
-        projectId: String(msg.projectId ?? "default"),
-        type: String(msg.eventType ?? "info"),
-        text: String(msg.text ?? ""),
-      });
-      send(ws, { type: "notify_sent", ok: result.sent, reason: result.reason ?? null, priority: result.priority ?? null });
-    },
-    async notify_stats(ws, msg) {
-      send(ws, { type: "notify_stats", ...shooter.getTelemetryStats() });
-    },
-    async notify_test(ws, msg) {
-      // Fire a test push through every registered channel so a phone can
-      // verify its subscription end-to-end (ntfy topic, Pushover keys, …).
-      if (notifications.count() === 0) {
-        return send(ws, { type: "notify_test", ok: false, error: "no channels configured (set NTFY_TOPIC or PUSHOVER_TOKEN+PUSHOVER_USER)" });
-      }
-      notifications.send("session_asking", { summary: "PocketDesk test push — if you can read this on your phone, push works 🎉" });
-      send(ws, { type: "notify_test", ok: true, channels: notifications.channels(), note: "sent to all channels — check your phone" });
-    },
-    async notify_bursts(ws, msg) {
-      send(ws, { type: "notify_bursts", items: shooter.detectBursts(Number(msg.windowMs) || 60000) });
-    },
     // ── Stream JSON parser (format-claude-stream: agent JSONL → cards) ────
     async stream_parse(ws, msg) {
       const parsed = streamParser.parseLines(String(msg.lines ?? ""));
@@ -207,44 +116,10 @@ export default function systemHandlers(ctx) {
       streamParser.reset();
       send(ws, { type: "stream_reset", ok: true });
     },
-    // ── Power manager (orca/LinkShell: keep the PC awake while agents run) ──
-    async power_set(ws, msg) {
-      power.setMode(normalizeAwakeMode(msg.mode));
-      send(ws, { type: "power_status", ...power.getStatus() });
-    },
-    async power_status(ws, msg) {
-      send(ws, { type: "power_status", ...power.getStatus() });
-    },
     // ── Doctor (whatsapp-claude-plugin/marchat: self-diagnosis) ──────────
     async doctor(ws, msg) {
       const health = await doctor.diagnose({ tls, manifests: undefined });
       send(ws, { type: "doctor_report", ...health });
-    },
-    // ── Wake-on-LAN (rustdesk: power on a LAN machine) ──────────────────
-    async wake(ws, msg) {
-      const r = await wakeOnLan.wake(msg.mac, { port: msg.port, address: msg.address });
-      send(ws, { type: "wake_result", ...r });
-    },
-    // ── MCP server control (quil/paseo: expose agents as MCP tools) ─────
-    async mcp_start(ws, msg) {
-      mcpServer.start(Number(msg.port) || 4680);
-      send(ws, { type: "mcp_status", ...mcpServer.status() });
-    },
-    async mcp_stop(ws, msg) {
-      mcpServer.stop();
-      send(ws, { type: "mcp_status", ...mcpServer.status() });
-    },
-    async mcp_status(ws, msg) {
-      send(ws, { type: "mcp_status", ...mcpServer.status() });
-    },
-    // ── Quiet hours (marchat/shooter: focus mode) ───────────────────
-    async quiet_set(ws, msg) {
-      if (msg.mode !== undefined) quietHours.setMode(String(msg.mode));
-      if (Array.isArray(msg.windows)) quietHours.setWindows(msg.windows);
-      send(ws, { type: "quiet_status", ...quietHours.getState() });
-    },
-    async quiet_status(ws, msg) {
-      send(ws, { type: "quiet_status", ...quietHours.getState() });
     },
     // ── Client devices (openchamber/netbird: list + revoke) ──────────
     async device_list(ws, msg) {

@@ -1,6 +1,5 @@
 // End-to-end tests for the absorption-pass features:
-// prompt queue, todos, scheduler, doctor, wake, approval guard, usage stats,
-// digest attach, MCP status.
+// prompt queue, todos, scheduler, doctor, approval guard, usage stats.
 import WebSocket from "ws";
 import fs from "node:fs";
 import path from "node:path";
@@ -117,11 +116,6 @@ const dr = await next((m) => m.type === "doctor_report", 30000);
 check("doctor report has checks", Array.isArray(dr.checks) && dr.checks.some((c) => c.name === "node"));
 check("doctor report ok flag", typeof dr.ok === "boolean");
 
-// ── Wake-on-LAN (bad mac must error, not crash) ───────────────────────────
-send({ type: "wake", mac: "not-a-mac" });
-const wr = await next((m) => m.type === "wake_result");
-check("wake with bad mac errors cleanly", wr.ok === false && wr.errors.length > 0);
-
 // ── Approval guard status ─────────────────────────────────────────────────
 send({ type: "approval_waiting" });
 const aw = await next((m) => m.type === "approval_waiting");
@@ -133,14 +127,6 @@ const ul = await next((m) => m.type === "usage_list");
 check("usage_list shape", Array.isArray(ul.items) && typeof ul.totals === "object");
 send({ type: "usage_get", id: "c1" });
 check("usage_get acks", (await next((m) => m.type === "usage")).id === "c1");
-
-// ── Digest attach on a fake session ───────────────────────────────────────
-send({ type: "digest_attach", id: "s424242" });
-check("digest_attach rejects unknown session", (await next((m) => m.type === "error" && m.message?.includes("s424242"))) != null);
-
-// ── MCP status ────────────────────────────────────────────────────────────
-send({ type: "mcp_status" });
-check("mcp_status acks", (await next((m) => m.type === "mcp_status")).running === false);
 
 // ── Recheck-pass features (one-by-one repo recheck) ───────────────────────
 // retach: plain-text scrollback of a real chat (fakeagent manifest is in tmp)
@@ -165,24 +151,6 @@ const scan = await next((m) => m.type === "sessions_scan", 20000);
 // The handler answers an empty list when its probe throws, so the shape alone
 // cannot tell a scan that found nothing from one that failed outright.
 check("sessions_scan returns items", Array.isArray(scan.items) && !scan.error);
-// vmux/orca: worktree create/list against this repo
-send({ type: "wt_create", repo: process.env.RH_TEST_REPO || process.cwd() + "/..", name: "recheck1" });
-const wt = await next((m) => m.type === "worktree_created");
-check("wt_create ok", wt.ok === true && wt.worktree?.path !== undefined, );
-if (wt.ok) {
-  send({ type: "wt_list", repo: process.env.RH_TEST_REPO || process.cwd() + "/.." });
-  const wl = await next((m) => m.type === "worktree_list");
-  check("wt_list shows worktree", wl.ok === true && wl.items.some((i) => i.path === wt.worktree.path));
-  send({ type: "wt_remove", repo: process.env.RH_TEST_REPO || process.cwd() + "/..", path: wt.worktree.path, force: true });
-  const wr = await next((m) => m.type === "worktree_removed");
-  check("wt_remove ok", wr.ok === true);
-}
-// marchat/shooter: quiet hours
-send({ type: "quiet_set", mode: "priority", windows: ["23:00-07:00"] });
-const qs = await next((m) => m.type === "quiet_status");
-check("quiet_set persists mode", qs.mode === "priority" && qs.windows.includes("23:00-07:00"));
-send({ type: "quiet_set", mode: "off", windows: [] });
-await next((m) => m.type === "quiet_status" && m.mode === "off");
 // openchamber/netbird: device registry
 // openchamber/netbird: device registry — fresh socket, hello carries clientId
 const ws2 = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
@@ -238,13 +206,8 @@ check("chat_fork clones chat", fk.ok === true && fk.chat.id !== chatCreated.id &
 send({ type: "chat_text", id: fk.chat.id });
 const fkt = await next((m) => m.type === "chat_text" && m.id === fk.chat.id);
 check("fork carries transcript", fkt.text.includes("recheck ping"));
-// Fork env inheritance: an explicit fork env layers OVER the parent's
-// attached profile (fix: it used to clobber the parent profile entirely).
-send({ type: "env_profile_set", name: "forktest", vars: { RH_FORK_PROBE: "from-parent" } });
-await next((m) => m.type === "env_profile_ok" && m.name === "forktest");
-send({ type: "env_profile_attach", id: chatCreated.id, name: "forktest" });
+// A fork can carry its own environment for the agent process.
 const fam = seen.length;
-await next((m) => m.type === "env_profile_ok" && m.profile === "forktest" && seen.indexOf(m) >= fam);
 send({ type: "chat_fork", id: chatCreated.id, env: { RH_FORK_PROBE: "overridden" } });
 const fk2 = await next((m) => m.type === "chat_forked" && seen.indexOf(m) >= fam);
 check("chat_fork with env override clones", fk2.ok === true && fk2.chat.id !== chatCreated.id);
@@ -252,23 +215,7 @@ send({ type: "chatmsg", id: fk2.chat.id, text: "env-probe" });
 await next((m) => m.type === "chatstate" && m.id === fk2.chat.id && m.state === "idle", 20000);
 send({ type: "chat_text", id: fk2.chat.id });
 const fkt2 = await next((m) => m.type === "chat_text" && m.id === fk2.chat.id);
-check("fork inherits parent env profile (merge not clobber)", fkt2.text.includes("RH_FORK_PROBE=overridden"));
-// 1code / vibe-companion: env profiles (BYOK)
-send({ type: "env_profile_set", name: "test", vars: { RH_TEST_KEY: "abc" } });
-check("env_profile_set acks", (await next((m) => m.type === "env_profile_ok")).ok === true);
-send({ type: "env_profile_list" });
-const el = await next((m) => m.type === "env_profiles");
-check("env_profile_list shows profile", el.items.some((p) => p.name === "test" && p.keys.includes("RH_TEST_KEY")));
-send({ type: "env_profile_attach", id: chatCreated.id, name: "test" });
-const eaBefore = seen.length;
-const ea = await next((m) => m.type === "env_profile_ok" && m.profile === "test" && seen.indexOf(m) >= eaBefore - 1);
-check("env_profile_attach acks", ea.ok === true && ea.profile === "test");
-send({ type: "env_profile_detach", id: chatCreated.id });
-const edBefore = seen.length;
-check("env_profile_detach acks", (await next((m) => m.type === "env_profile_ok" && m.id === chatCreated.id && m.profile === undefined && seen.indexOf(m) >= edBefore - 1)).ok === true);
-send({ type: "env_profile_remove", name: "test" });
-const erBefore = seen.length;
-check("env_profile_remove acks", (await next((m) => m.type === "env_profile_ok" && m.name === "test" && m.id === undefined && seen.indexOf(m) >= erBefore - 1)).ok === true);
+check("fork runs with its own env", fkt2.text.includes("RH_FORK_PROBE=overridden"));
 // 1code: plan mode — no checklist in transcript yet → null plan, approval toggles
 send({ type: "plan_get", id: chatCreated.id });
 const pg = await next((m) => m.type === "plan");
