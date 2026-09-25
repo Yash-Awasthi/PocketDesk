@@ -24,8 +24,12 @@ import okhttp3.WebSocketListener
 enum class Status { Disconnected, Connecting, AwaitingTrust, Connected, Reconnecting }
 
 // Pings surface a half-open socket (Wi-Fi to cellular handover) as a failure.
+// A short connect timeout keeps an unreachable LAN address from delaying the fallback.
 class WsClient(
-    private val base: OkHttpClient = OkHttpClient.Builder().pingInterval(20, java.util.concurrent.TimeUnit.SECONDS).build(),
+    private val base: OkHttpClient = OkHttpClient.Builder()
+        .pingInterval(20, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(4, java.util.concurrent.TimeUnit.SECONDS)
+        .build(),
 ) {
 
     private val statusState = mutableStateOf(Status.Disconnected)
@@ -166,17 +170,22 @@ class WsClient(
     private var hello: String? = null
     private var collectingTm: Tls.CollectingTrustManager? = null
 
-    /** Off-LAN transport (relay://host:port/channel) — raw TCP relay client. */
-    private var relayLink: AtomicReference<RelayLink?> = AtomicReference(null)
     /** Anywhere transport (iroh://<ticket>) — dials the PC by key, direct or relayed. */
     private val irohLink = AtomicReference<IrohLink?>(null)
+    /** How the current connection reaches the PC: the address dialled, or iroh's "iroh direct 42 ms". */
+    var route by mutableStateOf("")
+        private set
 
-    fun connect(url: String, token: String, pinnedFingerprint: String?) {
+    /** Primary url and its fallback for the current server; retries alternate between them. */
+    private var routes: List<String> = emptyList()
+
+    fun connect(url: String, token: String, pinnedFingerprint: String?, fallback: String? = null) {
         close()
         userClosed = false
         policy.reset()
         status = Status.Connecting
         activeUrl = url
+        routes = listOfNotNull(url, fallback)
         lastError = null
         lastToken = token
         lastFingerprint = pinnedFingerprint
@@ -187,14 +196,12 @@ class WsClient(
     /** Opens the transport for [url] with the current token and pin; retries reuse it without resetting backoff. */
     private fun open(url: String) {
         collectingTm = null
-        // relay:// URLs bypass OkHttp entirely: the phone dials OUT to the
-        // relay server (works from any network, no inbound port on the PC)
-        // and the daemon bridges rhreq envelopes to its protocol handler.
         if (url.startsWith("iroh://")) {
             lateinit var link: IrohLink
             link = IrohLink(url.removePrefix("iroh://"),
                 onText = { text -> if (irohLink.get() === link) handle(text) },
                 onVideo = { pkt -> if (irohLink.get() === link) onVideoPacket(pkt) },
+                onPath = { p -> if (irohLink.get() === link) route = "iroh $p" },
                 onClosed = { code, reason ->
                     if (irohLink.compareAndSet(link, null)) {
                         failTransfers("connection lost")
@@ -209,26 +216,11 @@ class WsClient(
                     }
                 })
             irohLink.set(link)
+            route = "iroh"
             link.start { hello?.let { link.send(it) } }
             return
         }
-        if (url.startsWith("relay://")) {
-            val (host, port, channel) = RelayLink.parse(url)
-                ?: run { lastError = "bad relay url"; status = Status.Disconnected; return }
-            lateinit var link: RelayLink
-            link = RelayLink(host, port, channel,
-                onFrame = { frame -> if (relayLink.get() === link) handleRelayFrame(frame) },
-                onClosed = {
-                    if (relayLink.compareAndSet(link, null)) {
-                        failTransfers("connection lost")
-                        scheduleReconnect()
-                    }
-                })
-            relayLink.set(link)
-            link.start()
-            return
-        }
-
+        route = url.substringAfter("://").substringBefore('/')
         val fp = lastFingerprint
         val client: OkHttpClient = when {
             !url.startsWith("wss") -> base
@@ -258,7 +250,6 @@ class WsClient(
     fun close() {
         userClosed = true
         socket.getAndSet(null)?.close(1000, "bye")
-        relayLink.getAndSet(null)?.close()
         irohLink.getAndSet(null)?.close()
         status = Status.Disconnected
         collectingTm = null
@@ -330,59 +321,8 @@ class WsClient(
 
     private fun send(line: String): Boolean {
         irohLink.get()?.let { return it.send(line) }
-        relayLink.get()?.let { link ->
-            // Relay requests go direct to the daemon's connection, never to the channel.
-            val daemon = relayDaemon ?: return false
-            val reqId = relayReqId.getAndIncrement()
-            return link.direct(daemon, """{"rh":true,"type":"rhreq","reqId":$reqId,"msg":$line}""")
-        }
         val ws = socket.get() ?: return false
         return ws.send(line)
-    }
-
-    private val relayReqId = java.util.concurrent.atomic.AtomicLong(0)
-    @Volatile private var relayConnId: String? = null
-    @Volatile private var relayDaemon: String? = null
-
-    /** Relay frames: `rhresp` (reply to our rhreq) and `rhpush` (broadcasts). */
-    private fun handleRelayFrame(frame: String) {
-        val env = runCatching { Json.parseToJsonElement(frame) as? JsonObject }.getOrNull() ?: return
-        when (env["type"]?.jsonPrimitive?.contentOrNull) {
-            "connected" -> {
-                val link = relayLink.get() ?: return
-                relayConnId = str(env, "id")
-                relayDaemon = null
-                link.subscribe()
-                link.publish("""{"rh":true,"type":"rhchallenge"}""")
-            }
-            "direct" -> {
-                val data = env["data"] as? JsonObject ?: return
-                val from = str(env, "from") ?: return
-                if (data["type"]?.jsonPrimitive?.contentOrNull == "rhchallenge") {
-                    // First challenge wins; a channel member answering first learns only
-                    // a proof bound to its own nonce and to our connId, useless elsewhere.
-                    if (relayDaemon != null) return
-                    val nonce = str(data, "nonce") ?: return
-                    val me = relayConnId ?: return
-                    val token = lastToken ?: return
-                    relayDaemon = from
-                    send(Proto.helloProof(RelayLink.proof(token, nonce, me)))
-                    return
-                }
-                if (from != relayDaemon) return
-                when (data["type"]?.jsonPrimitive?.contentOrNull) {
-                    "rherr" -> {
-                        lastError = "relay: " + (data["error"]?.jsonPrimitive?.contentOrNull ?: "rejected")
-                        relayLink.getAndSet(null)?.close()
-                        status = Status.Disconnected
-                    }
-                    "rhresp", "rhpush" -> {
-                        val payload = data["data"] as? JsonObject ?: return
-                        handle(payload.toString())
-                    }
-                }
-            }
-        }
     }
 
     fun rescan(): Boolean = send(Proto.detect())
@@ -428,16 +368,26 @@ class WsClient(
     fun fbAppOpen() = send(Proto.fbAppOpen())
     fun fbAppQuit() = send(Proto.fbAppQuit())
     // ── Desktop control methods ──
-    fun desktopStart(quality: Int = 55) { desktopStreaming = true; send(Proto.desktopStart(quality)) }
+    /** Re-sends the last desktop start after a reconnect, so the picture does not stay frozen. */
+    private var desktopResume: (() -> Unit)? = null
+    fun desktopStart(quality: Int = 55) {
+        desktopStreaming = true
+        desktopResume = { send(Proto.desktopStart(quality)) }
+        send(Proto.desktopStart(quality))
+    }
     /** Also the resync request: the daemon answers with a fresh config + keyframe. */
     /** saver / balanced / quality; sent with every start so a daemon restart keeps it. */
     var desktopPreset by mutableStateOf("balanced")
-    fun desktopStartVideo() { desktopStreaming = true; send(Proto.desktopStartVideo(desktopPreset)) }
+    fun desktopStartVideo() {
+        desktopStreaming = true
+        desktopResume = { send(Proto.desktopStartVideo(desktopPreset)) }
+        send(Proto.desktopStartVideo(desktopPreset))
+    }
     fun clipboardGet() = send(Proto.clipboardGet())
     /** With [paste], ctrl+v follows once the PC clipboard holds the text. */
     fun clipboardSet(text: String, paste: Boolean) { pasteAfterSet = paste; send(Proto.clipboardSet(text)) }
     @Volatile private var pasteAfterSet = false
-    fun desktopStop() { desktopStreaming = false; send(Proto.desktopStop()) }
+    fun desktopStop() { desktopStreaming = false; desktopResume = null; send(Proto.desktopStop()) }
     fun desktopSnapshot() = send(Proto.desktopFrame())
     /** x/y are frame pixels; click is left|right|middle|double. */
     fun desktopClick(x: Int, y: Int, click: String) = send(Proto.desktopMouse(x, y, click, null))
@@ -634,6 +584,7 @@ class WsClient(
                 status = Status.Connected
                 policy.reset()
                 reattachAll()
+                desktopResume?.invoke()
             }
             "manifests" -> tools = Proto.parseTools(m)
             "auth_status" -> str(m, "harness")?.let { id ->
@@ -938,7 +889,9 @@ class WsClient(
      * without passing Disconnected, which would stop the foreground service.
      */
     private fun scheduleReconnect() {
-        val url = activeUrl
+        // The other route first: away from home the LAN url fails, and at home iroh is the spare.
+        val url = activeUrl?.let { cur -> routes.firstOrNull { it != cur } ?: cur }
+        activeUrl = url
         val token = lastToken
         if (userClosed || url == null || token == null) {
             status = Status.Disconnected

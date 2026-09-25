@@ -19,8 +19,8 @@ android {
         applicationId = "com.yasha.pocketdesk"
         minSdk = 30
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 5
+        versionName = "0.3.2"
         // iroh's native library is ~14 MB per ABI: phones are arm64, debug adds the emulator's.
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -52,6 +52,8 @@ android {
     // The iroh JVM jar also carries desktop builds of its native library.
     packaging {
         resources { excludes += listOf("darwin-*/**", "win32-*/**", "linux-*/**") }
+        // Our 16 KB-aligned rebuild in src/main/jniLibs replaces the AAR's; see scripts/build-iroh-android.sh.
+        jniLibs { pickFirsts += "**/libiroh_ffi.so" }
     }
 
     compileOptions {
@@ -73,6 +75,8 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // Brings the Kotlin API, libiroh_ffi.so for each ABI, and JNA's Android build.
     implementation("computer.iroh:iroh-android:1.1.0")
+    // iroh pulls JNA 5.15, whose x86 libraries are 4 KB-aligned; 5.19 aligns every ABI to 16 KB.
+    implementation("net.java.dev.jna:jna:5.19.1@aar")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     testImplementation("junit:junit:4.13.2")

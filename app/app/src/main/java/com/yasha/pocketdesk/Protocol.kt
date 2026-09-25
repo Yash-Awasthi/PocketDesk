@@ -136,10 +136,6 @@ object Proto {
         put("type", "hello"); put("token", token)
         put("name", android.os.Build.MODEL); put("platform", "android")
     }
-    fun helloProof(proof: String) = obj {
-        put("type", "hello"); put("proof", proof)
-        put("name", android.os.Build.MODEL); put("platform", "android")
-    }
     fun detect() = obj { put("type", "detect") }
     fun install(id: String) = obj { put("type", "install"); put("id", id) }
     fun guiOpen(id: String, cwd: String) = obj {

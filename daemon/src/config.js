@@ -23,7 +23,7 @@ export function loadConfig() {
   }
   const fromEnv = (key) => key in process.env;
   // A fully env-driven launch (both RH_PORT and RH_TOKEN set — the test/CI
-  // pattern) must NOT inherit relay/TLS settings from the interactive config
+  // pattern) must NOT inherit TLS or iroh settings from the interactive config
   // file, or every spawned test daemon fights the live one for the port, or
   // picks up wss:// when the test harness expects plain http.
   const envDriven = fromEnv("RH_PORT") && fromEnv("RH_TOKEN");
@@ -47,17 +47,6 @@ export function loadConfig() {
       console.warn("[pocketdesk] install openssl and restart, or run `npm run setup-tls`, to fix this.");
     }
   }
-  // Off-LAN access: outbound relay link (dial OUT to a relay server — works
-  // from any network with no port forwarding) and/or hosting one ourselves.
-  // Explicit env vars win; RH_RELAY_PORT=0 (or empty) disables file config.
-  const hasRelayUrl = "RH_RELAY_URL" in process.env;
-  const hasRelayChannel = "RH_RELAY_CHANNEL" in process.env;
-  const hasRelayPort = "RH_RELAY_PORT" in process.env;
-  cfg.relay = {
-    url: hasRelayUrl ? process.env.RH_RELAY_URL : envDriven ? "" : cfg.relay?.url || "",
-    channel: hasRelayChannel ? process.env.RH_RELAY_CHANNEL : envDriven ? "" : cfg.relay?.channel || "",
-    hostPort: hasRelayPort ? Number(process.env.RH_RELAY_PORT) || 0 : envDriven ? 0 : Number(cfg.relay?.hostPort) || 0,
-  };
   // iroh: reach this PC by key from any network. RH_IROH=0 disables, RH_IROH=local
   // keeps it direct-only (tests), RH_IROH_RELAYS takes comma-separated relay URLs.
   const irohEnv = process.env.RH_IROH;
@@ -79,7 +68,6 @@ export function saveConfig(cfg) {
       port: cfg.port,
       token: cfg.token,
       tls: { enabled: cfg.tls.enabled, cert: cfg.tls.cert, key: cfg.tls.key },
-      relay: { url: cfg.relay?.url || "", channel: cfg.relay?.channel || "", hostPort: cfg.relay?.hostPort || 0 },
       iroh: { enabled: cfg.iroh?.enabled !== false, relays: Array.isArray(cfg.iroh?.relays) ? cfg.iroh.relays : [] },
     }, null, 2),
     { mode: 0o600 },

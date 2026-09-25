@@ -129,6 +129,10 @@ export default function remoteHandlers(ctx) {
       }
       send(ws, { type: "desktop_started", ...r });
     },
+    // iroh viewers report GOP progress so the daemon sees delay hidden in QUIC and relay buffers.
+    async video_ack(ws, msg) {
+      ws.onVideoAck?.(Number(msg.g) || 0, Number(msg.f) || 0);
+    },
     async desktop_stop(ws, msg) {
       if (videoWatchers.delete(ws) && !videoWatchers.size) video.stop();
       desktopWatchers.delete(ws);

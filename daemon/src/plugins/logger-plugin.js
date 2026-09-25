@@ -6,6 +6,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+const NOISY = new Set(["video_ack", "desktop_mouse", "desktop_key", "desktop_type"]);
+
 export default {
   name: "logger",
   version: "1.0.0",
@@ -39,6 +41,8 @@ export default {
   },
 
   onMessage(ctx, ws, msg) {
+    // Input and video acks arrive several times a second and would bury everything else.
+    if (NOISY.has(msg.type)) return;
     this._log("message", { type: msg.type, remote: ws._remote });
   },
 

@@ -138,7 +138,8 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit, fullscreen: Boolean, onFull
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 Text(
-                    "Desktop" + (if (ws.desktopStreaming) " · live" + (if (video) " · $rate" else "") else ""),
+                    "Desktop" + (if (ws.desktopStreaming) " · live" + (if (video) " · $rate" else "") else "") +
+                        (if (ws.route.isNotEmpty()) " · via ${ws.route}" else ""),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f),
                 )

@@ -30,6 +30,7 @@ namespace PocketDeskTray
         bool tlsEnabled;
         string fingerprint = "";
         string daemonDir;
+        static readonly string LogPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "daemon.log");
 
         public TrayContext()
         {
@@ -39,6 +40,7 @@ namespace PocketDeskTray
             var menu = new ContextMenuStrip();
             menu.Items.Add("Open web UI", null, (s, e) => OpenUi());
             menu.Items.Add("Copy pairing info", null, (s, e) => CopyPairing());
+            menu.Items.Add("Open daemon log", null, (s, e) => { try { Process.Start("notepad.exe", LogPath); } catch { } });
             menu.Items.Add(new ToolStripSeparator());
             startItem = new ToolStripMenuItem("Start daemon", null, (s, e) => StartDaemon());
             stopItem = new ToolStripMenuItem("Stop daemon", null, (s, e) => StopDaemon());
@@ -122,10 +124,17 @@ namespace PocketDeskTray
                     WorkingDirectory = daemonDir,
                     CreateNoWindow = true,
                     UseShellExecute = false,
-                    RedirectStandardOutput = false,
-                    RedirectStandardError = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
                 };
+                // Fresh log per start; the daemon's banner and connection lines land here.
+                var log = new StreamWriter(LogPath, false) { AutoFlush = true };
                 daemon = Process.Start(psi);
+                DataReceivedEventHandler write = (s, e) => { if (e.Data != null) lock (log) log.WriteLine(e.Data); };
+                daemon.OutputDataReceived += write;
+                daemon.ErrorDataReceived += write;
+                daemon.BeginOutputReadLine();
+                daemon.BeginErrorReadLine();
                 ShowBalloon("daemon started");
             }
             catch (Exception ex)

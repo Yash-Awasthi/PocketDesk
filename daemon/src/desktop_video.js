@@ -11,6 +11,8 @@ import { EventEmitter } from "node:events";
 
 /** scale: output px per screen px, which input coordinates are divided by. */
 export const PRESETS = {
+  // Only reached by congestion stepping: small enough keyframes for a slow relayed link.
+  low: { fps: 12, scale: 1 / 2, maxrate: "600k", q: 36 },
   saver: { fps: 15, scale: 2 / 3, maxrate: "1500k", q: 34 },
   balanced: { fps: 30, scale: 1, maxrate: "6M", q: 30 },
   quality: { fps: 60, scale: 1, maxrate: "12M", q: 26 },
@@ -23,7 +25,7 @@ export const ENCODERS = {
   libx264: (q) => ["-preset", "ultrafast", "-tune", "zerolatency", "-crf", String(q - 2)],
 };
 const START_CODE = Buffer.from([0, 0, 0, 1]);
-const LADDER = ["saver", "balanced", "quality"];
+const LADDER = ["low", "saver", "balanced", "quality"];
 
 /** Packet kinds, first byte of every binary message. */
 export const KIND = { config: 0, key: 1, delta: 2 };

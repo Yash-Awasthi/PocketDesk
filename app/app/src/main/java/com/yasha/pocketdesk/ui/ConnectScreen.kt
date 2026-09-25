@@ -67,7 +67,7 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
         if (Build.VERSION.SDK_INT >= 33) {
             permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        ws.connect(entry.url, entry.token, entry.pinnedFingerprint)
+        ws.connect(entry.url, entry.token, entry.pinnedFingerprint, entry.fallback)
     }
 
     androidx.compose.runtime.LaunchedEffect(ws.status) {
@@ -150,10 +150,8 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
             if (servers.isEmpty()) {
                 Text(
                     "No PCs saved yet. Tap + to add one. On the PC run: cd daemon && npm start\n\n" +
-                        "Same Wi-Fi: ws://<pc-ip>:8765/ws\n" +
-                        "Kilometers away: relay://<relay-host>:8790/<channel> — the PC dials OUT " +
-                        "to the relay, so no port forwarding is needed. Start the PC side with " +
-                        "RH_RELAY_PORT=8790 npm start.",
+                        "Open https://localhost:8765/pair on the PC and scan the QR. The saved PC " +
+                        "works on the same Wi-Fi and, through iroh, from any other network.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -168,7 +166,7 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
                             Column(Modifier.weight(1f)) {
                                 Text(s.name, style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                    s.url,
+                                    s.url + (if (s.fallback != null) "  ·  + anywhere" else ""),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -234,7 +232,7 @@ private fun ServerFormDialog(initial: ServerEntry?, onSave: (ServerEntry) -> Uni
                     value = url,
                     onValueChange = { url = it },
                     label = { Text("URL") },
-                    placeholder = { Text("ws://192.168.1.10:8765/ws · wss://… · relay://host:8790/channel · pocketdesk://pair#…") },
+                    placeholder = { Text("ws://192.168.1.10:8765/ws · wss://… · iroh://… · pocketdesk://pair#…") },
                     singleLine = true,
                 )
                 OutlinedTextField(value = token, onValueChange = { token = it }, label = { Text("Token") }, singleLine = true)
@@ -242,8 +240,8 @@ private fun ServerFormDialog(initial: ServerEntry?, onSave: (ServerEntry) -> Uni
         },
         confirmButton = {
             TextButton(
-                enabled = name.isNotBlank() && (url.startsWith("ws") || url.startsWith("relay://")) && token.isNotBlank(),
-                onClick = { onSave(ServerEntry(name.trim(), url.trim(), token.trim(), initial?.pinnedFingerprint)) },
+                enabled = name.isNotBlank() && (url.startsWith("ws") || url.startsWith("iroh://")) && token.isNotBlank(),
+                onClick = { onSave(ServerEntry(name.trim(), url.trim(), token.trim(), initial?.pinnedFingerprint, initial?.fallback)) },
             ) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
