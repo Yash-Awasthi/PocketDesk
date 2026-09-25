@@ -23,6 +23,8 @@ data class Manifest(
     val bin: String?,
     val adapter: String = ADAPTER_TERMINAL,
     val chat: Boolean = false,
+    /** Account commands the manifest declares: status, login, logout. */
+    val auth: Set<String> = emptySet(),
 ) {
     val isGui: Boolean get() = adapter == ADAPTER_GUI
 
@@ -141,6 +143,10 @@ object Proto {
         put("type", "gui_open"); put("harness", id); put("cwd", cwd)
     }
 
+    fun auth(op: String, harness: String, cwd: String) = obj {
+        put("type", "auth_$op"); put("harness", harness); put("cwd", cwd)
+    }
+
     fun guiOpenPath(path: String, cwd: String) = obj {
         put("type", "gui_open"); put("path", path); put("cwd", cwd)
     }
@@ -176,10 +182,12 @@ object Proto {
     fun desktopStart(quality: Int) = obj { put("type", "desktop_start"); put("quality", quality) }
     fun desktopStop() = obj { put("type", "desktop_stop") }
     fun desktopFrame() = obj { put("type", "desktop_frame") }
-    fun desktopMouse(x: Int, y: Int, click: String?, wheel: Int?) = obj {
-        put("type", "desktop_mouse"); put("x", x); put("y", y)
+    fun desktopMouse(x: Int?, y: Int?, click: String?, wheel: Int?, press: String? = null) = obj {
+        put("type", "desktop_mouse")
+        if (x != null && y != null) { put("x", x); put("y", y) }
         if (click != null) put("click", click)
         if (wheel != null) put("wheel", wheel)
+        if (press != null) put("press", press)
     }
     fun desktopKey(vk: Int, modifiers: List<String>) = obj {
         put("type", "desktop_key"); put("key", vk)
@@ -285,6 +293,7 @@ object Proto {
                     // The daemon treats a chat adapter as present only when the
                     // manifest carries the runtime args for it.
                     chat = (m["chat"] as? JsonObject)?.containsKey("args") == true,
+                    auth = (m["auth"] as? JsonObject)?.keys ?: emptySet(),
                 ),
                 installed = bool(o, "installed"),
                 version = str(o, "version"),

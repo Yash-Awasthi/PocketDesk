@@ -111,6 +111,17 @@ class WsClient(
         private set
     var chatCurrentModel by mutableStateOf<Map<String, String?>>(emptyMap())
         private set
+    /** Agent id -> (logged in, status text) from the last auth_status. */
+    var authStatus by mutableStateOf<Map<String, Pair<Boolean, String>>>(emptyMap())
+        private set
+    fun authCheck(id: String) = send(Proto.auth("status", id, ""))
+    /** Login and logout open a terminal session (device codes, links, provider pickers). */
+    fun authLogin(id: String, cwd: String) = send(Proto.auth("login", id, cwd))
+    fun authLogout(id: String, cwd: String) = send(Proto.auth("logout", id, cwd))
+
+    /** Chats whose CLI takes any model name, not only the listed ones. */
+    var chatModelCustom by mutableStateOf<Set<String>>(emptySet())
+        private set
 
 
     // ── SSH screen state (profiles, keys, known hosts, local listeners) ──
@@ -369,10 +380,12 @@ class WsClient(
     fun desktopStart(quality: Int = 55) { desktopStreaming = true; send(Proto.desktopStart(quality)) }
     fun desktopStop() { desktopStreaming = false; send(Proto.desktopStop()) }
     fun desktopSnapshot() = send(Proto.desktopFrame())
-    fun desktopTap(x: Int, y: Int) = send(Proto.desktopMouse(x, y, "left", null))
+    /** x/y are frame pixels; click is left|right|middle|double. */
+    fun desktopClick(x: Int, y: Int, click: String) = send(Proto.desktopMouse(x, y, click, null))
     fun desktopMove(x: Int, y: Int) = send(Proto.desktopMouse(x, y, null, null))
-    fun desktopLongTap(x: Int, y: Int) = send(Proto.desktopMouse(x, y, "right", null))
-    fun desktopScroll(down: Boolean) = send(Proto.desktopMouse(0, 0, null, if (down) 120 else -120))
+    /** Holds (down) or releases (up) the left button at x/y, for dragging. */
+    fun desktopPress(x: Int, y: Int, down: Boolean) = send(Proto.desktopMouse(x, y, null, null, if (down) "down" else "up"))
+    fun desktopScroll(down: Boolean) = send(Proto.desktopMouse(null, null, null, if (down) -120 else 120))
     fun desktopKey(vk: Int, modifiers: List<String> = emptyList()) = send(Proto.desktopKey(vk, modifiers))
     fun desktopType(text: String) = send(Proto.desktopType(text))
 
@@ -564,6 +577,9 @@ class WsClient(
                 reattachAll()
             }
             "manifests" -> tools = Proto.parseTools(m)
+            "auth_status" -> str(m, "harness")?.let { id ->
+                authStatus = authStatus + (id to Pair(bool(m, "loggedIn") == true, str(m, "text") ?: ""))
+            }
             "profile_list" -> sshProfiles = Proto.parseProfiles(m)
             "profile_created", "profile_updated", "profile_deleted" -> {
                 if (bool(m, "ok") == false) lastError = str(m, "error")
@@ -783,12 +799,17 @@ class WsClient(
                     val models = (m["models"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
                     chatModels = chatModels.toMutableMap().apply { put(id, models) }
                     chatCurrentModel = chatCurrentModel.toMutableMap().apply { put(id, str(m, "current")) }
+                    chatModelCustom = if (m["custom"]?.jsonPrimitive?.booleanOrNull == true) chatModelCustom + id else chatModelCustom - id
                 }
             }
             "chat_model_set" -> {
-                val id = str(m, "id") ?: return
                 if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                    val id = str(m, "id") ?: return
                     chatCurrentModel = chatCurrentModel.toMutableMap().apply { put(id, str(m, "current")) }
+                } else {
+                    val msg = str(m, "error") ?: "model rejected"
+                    lastError = msg
+                    events.tryEmit(RhEvent.Failure(msg))
                 }
             }
             else -> {}
