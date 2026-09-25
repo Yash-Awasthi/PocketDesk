@@ -365,7 +365,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     if (c) chat.cancel(c);
     broadcast({ type: "approval_auto_denied", chatId });
   });
-  // Release held resources on shutdown: keep-awake helper, tunnel listeners,
+  // Release held resources on shutdown: keep-awake helper and
   // activity sweep. Runs on graceful shutdown AND process.exit paths.
   process.on("exit", () => {
     power.dispose();

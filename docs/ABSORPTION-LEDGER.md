@@ -1,5 +1,11 @@
 # Absorption Ledger — per-repo coverage of the inspiration corpus
 
+> **Removed since this ledger was written:** the WhatsApp and Telegram bridges, push
+> notification channels and quiet hours, the VNC bridge, the session-scoped `rd_*` desktop,
+> session recording, tunnels and port forwards, share links, Wake-on-LAN, LAN peers and file
+> transfer, the MCP endpoint, voice transcription, worktrees, env profiles, the audit log,
+> chat resurrection, SDK sessions and the live digest. Rows marking them ✅ describe the past.
+
 Corpus: `C:\Users\yasha\PROJECTS\inspiration\PocketDesk` (241 directories).
 The local clones were deleted on 2026-09-23 once every directory was covered here;
 [INSPIRATION-SOURCES.md](INSPIRATION-SOURCES.md) lists each upstream URL for re-cloning.
