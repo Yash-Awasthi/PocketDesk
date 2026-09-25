@@ -1,161 +1,107 @@
-#Requires -Version 5.1
-<#
-.SYNOPSIS
-    PocketDesk one-liner installer for Windows.
-.DESCRIPTION
-    Installs PocketDesk daemon, generates auth token, and prints connection info.
-.PARAMETER Dev
-    Install dev dependencies and run tests.
-.PARAMETER Dir
-    Custom install directory (default: %USERPROFILE%\.pocketdesk).
-.EXAMPLE
-    irm https://raw.githubusercontent.com/.../install.ps1 | iex
-    .\install.ps1 -Dev
-#>
+# PocketDesk installer for Windows. No admin rights, nothing to install first.
+#
+#   irm https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.ps1 | iex
+#
+# Run it again to update. Settings, keys and paired phones in %USERPROFILE%\.pocketdesk are kept.
+# From a checkout: powershell -ExecutionPolicy Bypass -File install.ps1 -Source .
+
 param(
-    [switch]$Dev,
-    [string]$Dir = "$env:USERPROFILE\.pocketdesk"
+    [string]$Ref = "",                                   # release tag; the latest release when empty
+    [string]$Source = "",                                # install from a local checkout instead of downloading
+    [string]$InstallDir = "$env:LOCALAPPDATA\PocketDesk",
+    [switch]$NoStart
 )
-
 $ErrorActionPreference = "Stop"
+# The progress bar makes Invoke-WebRequest many times slower on Windows PowerShell 5.
+$ProgressPreference = "SilentlyContinue"
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$repo = "Yash-Awasthi/PocketDesk"
 
-# ── Colors ───────────────────────────────────────────────────────────────────
-function Write-Info  { Write-Host "ℹ  $args" -ForegroundColor Cyan }
-function Write-Ok    { Write-Host "✓  $args" -ForegroundColor Green }
-function Write-Warn  { Write-Host "⚠  $args" -ForegroundColor Yellow }
-function Write-Fail  { Write-Host "✗  $args" -ForegroundColor Red; exit 1 }
-function Write-Step  { Write-Host "`n▸ $args" -ForegroundColor White }
+function Step($message) { Write-Host "==> $message" -ForegroundColor Cyan }
+function Download($url, $file) { Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file }
 
-# ── Banner ───────────────────────────────────────────────────────────────────
-Write-Host ""
-Write-Host "  ┌─────────────────────────────────┐" -ForegroundColor Cyan
-Write-Host "  │   🔧  PocketDesk Installer   │" -ForegroundColor Cyan
-Write-Host "  └─────────────────────────────────┘" -ForegroundColor Cyan
-Write-Host ""
-
-# ── Step 1: Check prerequisites ──────────────────────────────────────────────
-Write-Step "Checking prerequisites"
-
-# Node.js
+$tmp = Join-Path $env:TEMP ("rh-install-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Force -Path $InstallDir, $tmp | Out-Null
 try {
-    $nodeVersion = & node -v 2>$null
-    if (-not $nodeVersion) { throw "not found" }
-    $major = [int]($nodeVersion -replace 'v','' -split '\.' | Select-Object -First 1)
-    if ($major -lt 18) { Write-Fail "Node.js ≥18 required (found $nodeVersion)" }
-    Write-Ok "Node.js $nodeVersion"
-} catch {
-    Write-Fail "Node.js not found. Install from https://nodejs.org (≥18 required)"
-}
-
-# npm
-try {
-    $npmVersion = & npm -v 2>$null
-    Write-Ok "npm $npmVersion"
-} catch {
-    Write-Fail "npm not found. Install Node.js from https://nodejs.org"
-}
-
-# ── Step 2: Clone or update ──────────────────────────────────────────────────
-Write-Step "Setting up PocketDesk"
-
-$RepoUrl = "https://github.com/Yash-Awasthi/PocketDesk.git"
-$DaemonDir = Join-Path $Dir "daemon"
-
-if (Test-Path (Join-Path $Dir ".git")) {
-    Write-Info "Repository already exists at $Dir"
-    if (Test-Path $DaemonDir) {
-        Write-Ok "Daemon directory found — skipping clone"
+    # 1. The daemon.
+    if ($Source) {
+        $srcRoot = (Resolve-Path $Source).Path
+        Step "Using the daemon from $srcRoot\daemon"
     } else {
-        Write-Warn "Daemon directory missing — pulling latest"
-        git -C $Dir pull --quiet 2>$null
+        if (-not $Ref) { $Ref = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases/latest").tag_name }
+        Step "Downloading PocketDesk $Ref"
+        Download "https://github.com/$repo/archive/refs/tags/$Ref.zip" "$tmp\src.zip"
+        Expand-Archive "$tmp\src.zip" "$tmp\src"
+        $srcRoot = (Get-ChildItem "$tmp\src" -Directory | Select-Object -First 1).FullName
     }
-} else {
-    Write-Info "Cloning to $Dir..."
-    git clone --depth 1 $RepoUrl $Dir 2>$null
-    Write-Ok "Repository cloned"
-}
+    $srcDaemon = Join-Path $srcRoot "daemon"
+    # A running tray and daemon hold files open in the install folder.
+    foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe'")) {
+        Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId)" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Stop-Process -Id $t.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Milliseconds 500
+    $daemon = Join-Path $InstallDir "app\daemon"
+    if (Test-Path $daemon) { Remove-Item -Recurse -Force $daemon }
+    robocopy $srcDaemon $daemon /E /XD node_modules /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "copying the daemon failed (robocopy $LASTEXITCODE)" }
+    Copy-Item (Join-Path $srcRoot "uninstall.ps1") $InstallDir -Force
 
-# ── Step 3: Install dependencies ─────────────────────────────────────────────
-Write-Step "Installing dependencies"
+    # 2. Node.js, private to PocketDesk.
+    $nodeDir = Join-Path $InstallDir "node"
+    # The parentheses matter: PowerShell 5 passes an unenumerated JSON array down the pipe as one object.
+    $want = ((Invoke-RestMethod "https://nodejs.org/dist/index.json") | Where-Object { $_.lts } | Select-Object -First 1).version
+    $have = if (Test-Path "$nodeDir\node.exe") { & "$nodeDir\node.exe" --version } else { "" }
+    if ($have -ne $want) {
+        Step "Downloading Node.js $want"
+        Download "https://nodejs.org/dist/$want/node-$want-win-x64.zip" "$tmp\node.zip"
+        Expand-Archive "$tmp\node.zip" "$tmp\node"
+        if (Test-Path $nodeDir) { Remove-Item -Recurse -Force $nodeDir }
+        Move-Item (Get-ChildItem "$tmp\node" -Directory | Select-Object -First 1).FullName $nodeDir
+    }
 
-Push-Location $DaemonDir
-if (Test-Path "node_modules") {
-    Write-Info "node_modules exists — running npm install for updates"
-    npm install --silent 2>$null
-} else {
-    Write-Info "Installing dependencies..."
-    npm install --silent 2>$null
-}
-Write-Ok "Dependencies installed"
+    # 3. ffmpeg for the H.264 desktop stream (without it the desktop falls back to slow JPEG frames).
+    $ffDir = Join-Path $InstallDir "ffmpeg"
+    if (-not (Test-Path "$ffDir\ffmpeg.exe")) {
+        Step "Downloading ffmpeg (about 110 MB, once)"
+        Download "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" "$tmp\ffmpeg.zip"
+        Expand-Archive "$tmp\ffmpeg.zip" "$tmp\ffmpeg"
+        New-Item -ItemType Directory -Force $ffDir | Out-Null
+        Copy-Item (Get-ChildItem "$tmp\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName $ffDir
+    }
 
-if ($Dev) {
-    Write-Info "Dev mode: installing dev dependencies..."
-    npm install --include=dev --silent 2>$null
-    Write-Ok "Dev dependencies installed"
-}
-Pop-Location
-
-# ── Step 4: Generate token ───────────────────────────────────────────────────
-Write-Step "Generating auth token"
-
-$ConfigDir = "$env:USERPROFILE\.pocketdesk"
-$TokenFile = Join-Path $ConfigDir "config.json"
-
-if (Test-Path $TokenFile) {
+    # 4. Dependencies, with the private Node.
+    Step "Installing dependencies"
+    $env:PATH = "$nodeDir;$env:PATH"
+    Push-Location $daemon
     try {
-        $config = Get-Content $TokenFile -Raw | ConvertFrom-Json
-        $Token = $config.token
-        Write-Ok "Using existing token"
-    } catch {
-        $Token = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Max 256) })
-        $config = @{ token = $Token; port = 8765 }
-        $config | ConvertTo-Json | Set-Content $TokenFile
-        Write-Ok "Token generated and saved"
+        & "$nodeDir\npm.cmd" ci --omit=dev --no-audit --no-fund --loglevel=error
+        if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
+    } finally { Pop-Location }
+
+    # 5. The tray: starts at logon and runs the daemon.
+    Step "Installing the tray"
+    & "$daemon\scripts\install-service.ps1" -DaemonDir $daemon -InstallDir $InstallDir -NoStart:$NoStart
+
+    # 6. Pairing: the daemon writes its settings on first start; then the QR page opens.
+    if (-not $NoStart) {
+        Step "Starting; the pairing page opens in your browser"
+        $cfgFile = Join-Path $env:USERPROFILE ".pocketdesk\config.json"
+        for ($i = 0; $i -lt 60; $i++) {
+            if (Test-Path $cfgFile) {
+                $cfg = Get-Content $cfgFile -Raw | ConvertFrom-Json
+                if (Get-NetTCPConnection -State Listen -LocalPort $cfg.port -ErrorAction SilentlyContinue) {
+                    $scheme = if ($cfg.tls.enabled) { "https" } else { "http" }
+                    Start-Process "${scheme}://localhost:$($cfg.port)/pair"
+                    break
+                }
+            }
+            Start-Sleep -Seconds 1
+        }
     }
-} else {
-    New-Item -ItemType Directory -Path $ConfigDir -Force | Out-Null
-    $Token = -join ((1..32) | ForEach-Object { '{0:x2}' -f (Get-Random -Max 256) })
-    $config = @{ token = $Token; port = 8765 }
-    $config | ConvertTo-Json | Set-Content $TokenFile
-    Write-Ok "Token generated and saved"
-}
-
-$Port = 8765
-try {
-    $cfg = Get-Content $TokenFile -Raw | ConvertFrom-Json
-    if ($cfg.port) { $Port = $cfg.port }
-} catch {}
-
-# ── Step 5: Print success ───────────────────────────────────────────────────
-Write-Host ""
-Write-Host "  ═══════════════════════════════════════" -ForegroundColor Green
-Write-Host "    PocketDesk is ready! 🔧" -ForegroundColor Green
-Write-Host "  ═══════════════════════════════════════" -ForegroundColor Green
-Write-Host ""
-Write-Host "  Daemon:  $DaemonDir" -ForegroundColor White
-Write-Host "  Token:   $($Token.Substring(0,8))..." -ForegroundColor White
-Write-Host "  Port:    $Port" -ForegroundColor White
-Write-Host ""
-Write-Host "  To start:" -ForegroundColor Cyan
-Write-Host "    cd $DaemonDir; npm start"
-Write-Host ""
-Write-Host "  Then connect from the Android app:" -ForegroundColor Cyan
-Write-Host "    ws://<your-pc-ip>:$Port/ws"
-Write-Host "    Token: $Token"
-Write-Host ""
-
-if ($Dev) {
-    Write-Host "  Dev mode: Running tests..." -ForegroundColor Yellow
-    Push-Location $DaemonDir
-    try {
-        & node test/proposals.test.mjs 2>$null
-        Write-Ok "Proposal tests pass"
-    } catch {
-        Write-Warn "Proposal tests skipped"
-    }
-    Pop-Location
     Write-Host ""
+    Write-Host "PocketDesk is installed in $InstallDir" -ForegroundColor Green
+    Write-Host "Scan the QR code with the PocketDesk app. Later: tray icon > Pair a phone."
+} finally {
+    Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
-
-Write-Host "  Docs:    $Dir\README.md" -ForegroundColor White
-Write-Host ""

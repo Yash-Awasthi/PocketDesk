@@ -8,8 +8,6 @@ namespace PocketDeskTray
 {
     internal static class Program
     {
-        const string TaskName = "PocketDesk";
-
         [STAThread]
         static void Main()
         {
@@ -38,7 +36,10 @@ namespace PocketDeskTray
             LoadDaemonDir();
 
             var menu = new ContextMenuStrip();
-            menu.Items.Add("Open web UI", null, (s, e) => OpenUi());
+            // Settings change (first run writes them; the port can be edited), so read them on every open.
+            menu.Opening += (s, e) => LoadConfig();
+            menu.Items.Add("Pair a phone...", null, (s, e) => OpenUrl(BaseUrl() + "/pair"));
+            menu.Items.Add("Open web UI", null, (s, e) => OpenUrl(BaseUrl()));
             menu.Items.Add("Copy pairing info", null, (s, e) => CopyPairing());
             menu.Items.Add("Open daemon log", null, (s, e) => { try { Process.Start("notepad.exe", LogPath); } catch { } });
             menu.Items.Add(new ToolStripSeparator());
@@ -117,9 +118,11 @@ namespace PocketDeskTray
             if (daemon != null && !daemon.HasExited) return;
             try
             {
+                // install.ps1 puts a private node and ffmpeg next to the tray; a checkout uses PATH.
+                var bundledNode = Path.Combine(ExeDir, "node", "node.exe");
                 var psi = new ProcessStartInfo
                 {
-                    FileName = "node",
+                    FileName = File.Exists(bundledNode) ? bundledNode : "node",
                     Arguments = "src\\index.js",
                     WorkingDirectory = daemonDir,
                     CreateNoWindow = true,
@@ -127,6 +130,8 @@ namespace PocketDeskTray
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                 };
+                var bundledFfmpeg = Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe");
+                if (File.Exists(bundledFfmpeg)) psi.EnvironmentVariables["FFMPEG_PATH"] = bundledFfmpeg;
                 // Fresh log per start; the daemon's banner and connection lines land here.
                 var log = new StreamWriter(LogPath, false) { AutoFlush = true };
                 daemon = Process.Start(psi);
@@ -189,9 +194,9 @@ namespace PocketDeskTray
             return (tlsEnabled ? "https" : "http") + "://localhost:" + port;
         }
 
-        void OpenUi()
+        void OpenUrl(string url)
         {
-            try { Process.Start(BaseUrl()); } catch { }
+            try { Process.Start(url); } catch { }
         }
 
         void CopyPairing()
