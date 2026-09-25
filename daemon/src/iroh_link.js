@@ -99,6 +99,8 @@ export class IrohSocket extends EventEmitter {
     this.conn = conn;
     this.readyState = 1;
     this._ctl = streamWriter(bi.send);
+    // Replies and terminal output must not queue behind video; GOP streams count up from 1.
+    bi.send.setPriority(2 ** 31 - 1).catch(() => {});
     this._gop = null;
     this._config = null;
     this._prio = 0;
