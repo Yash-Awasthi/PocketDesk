@@ -2,6 +2,7 @@
 // Doctor and Installed-apps sections send, checked against a live daemon and
 // this repository as the git subject.
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { check, finish, makeTmp, openAndHello, REPO, startDaemon, teardown } from "./helpers.mjs";
 
 const tmp = makeTmp("rh-ui-");
@@ -45,9 +46,11 @@ async function main() {
   const apps = await c.next((m) => m.type === "apps", 60000);
   check("apps_discover returns entries the panel can act on", apps.items.length > 0
     && apps.items.every((a) => a.name && a.path && (a.kind === "gui" || a.kind === "cli")));
-  if (process.platform === "win32") {
-    // Calculator ships as a Store app on every Windows 10/11 install and has no Start Menu shortcut.
-    c.send({ type: "apps_discover", q: "calculator" });
+  // Windows Server (the CI runner) ships no Store apps, so compare against what Windows lists.
+  const storeName = process.platform === "win32" && execFileSync("powershell.exe", ["-NoProfile", "-Command",
+    "(Get-StartApps | Where-Object AppID -like '*!*' | Select-Object -First 1).Name"], { encoding: "utf8" }).trim();
+  if (storeName) {
+    c.send({ type: "apps_discover", q: storeName });
     const store = await c.next((m) => m.type === "apps", 60000);
     check("Store apps are discovered", store.items.some((a) => a.path.startsWith("shell:AppsFolder\\")));
   }
