@@ -185,8 +185,19 @@ export default function systemHandlers(ctx) {
       send(ws, { type: "fb_auth_status", ...fbCtrl.authStatus() });
     },
     async fb_auth_logout(ws, msg) {
-      const r = fbCtrl.authLogout(String(msg.confirm ?? ""), { restart: !!msg.restart });
+      const r = fbCtrl.authLogout(String(msg.confirm ?? ""));
       send(ws, { type: "fb_auth_logout", ...r });
+    },
+    async fb_accounts(ws, msg) {
+      send(ws, { type: "fb_accounts", accounts: fbCtrl.accounts() });
+    },
+    async fb_account_switch(ws, msg) {
+      const r = fbCtrl.accountSwitch(String(msg.email ?? ""));
+      send(ws, { type: "fb_account_switch", ...r });
+      if (r.ok) send(ws, { type: "fb_auth_status", ...fbCtrl.authStatus() });
+    },
+    async fb_account_forget(ws, msg) {
+      send(ws, { type: "fb_accounts", accounts: fbCtrl.accountForget(String(msg.email ?? "")) });
     },
     async fb_app_open(ws, msg) {
       send(ws, { type: "fb_app_open", ...fbCtrl.appOpen() });

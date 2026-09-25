@@ -8,14 +8,13 @@
  *   - skills:         ~/.claude/skills (+ project .claude/skills, any dirs in
  *                     FB_SKILLS_DIRS) — the skill store Freebuff loads at
  *                     session start ("read fresh from disk")
- *   - auth:           JWT persisted in the app's Local Storage leveldb.
- *                     fb_auth_status reports ONLY logged-in state and token
- *                     expiry — the token itself is never returned or logged.
- *   - logout:         backs up Local Storage / Session Storage, clears them,
- *                     and can restart the app so the login screen returns.
+ *   - auth:           the codebuff.com session in ~/.config/freebuff-desktop/
+ *                     state.json. Signed-in accounts are saved on the PC so
+ *                     the phone can switch between them; only email and name
+ *                     ever leave the PC.
  *
  * Env knobs (used by tests): FB_PROFILE_DIR, FB_SKILLS_DIRS (path-separator
- * separated), FB_APP_EXE.
+ * separated), FB_APP_EXE, FB_STATE_FILE, FB_VAULT.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -235,103 +234,92 @@ export function skillGet(name) {
   }
 }
 
-/**
- * Auth status — derived from the persisted JWT's *presence and expiry only*.
- * The token itself is never returned, logged, or decoded beyond the payload
- * `exp` claim.
- */
-const JWT_RE = /[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}/;
+// The desktop app keeps its codebuff.com session in state.json (not in its Electron storage).
+const STATE_FILE = process.env.FB_STATE_FILE || path.join(os.homedir(), ".config", "freebuff-desktop", "state.json");
+const AUTH_HOST = "https://www.codebuff.com";
+// Saved sessions for switching accounts; tokens never leave this file.
+const VAULT = process.env.FB_VAULT
+  || path.join(os.homedir(), process.env.POCKETDESK_DATA || ".pocketdesk", "freebuff-accounts.json");
 
-function scanForJwt(file) {
+function readJson(file, fallback) {
   try {
-    const st = fs.statSync(file);
-    if (!st.isFile() || st.size > 64 * 1024 * 1024) return null;
-    const buf = fs.readFileSync(file, "utf8");
-    return buf.match(JWT_RE)?.[0] || null;
+    return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch {
-    return null;
+    return fallback;
   }
 }
 
-function authFiles() {
-  const roots = ["Local Storage/leveldb", "Session Storage", "Network", "Local State", "Preferences"];
-  const files = [];
-  for (const rel of roots) {
-    const p = profilePath(rel);
-    if (!p || !fs.existsSync(p)) continue;
-    if (fs.statSync(p).isDirectory()) {
-      try {
-        for (const f of fs.readdirSync(p)) {
-          const fp = path.join(p, f);
-          if (fs.statSync(fp).isFile() && /\.(log|ldb|json|txt)$/i.test(f)) files.push(fp);
-        }
-      } catch {}
-    } else {
-      files.push(p);
-    }
-  }
-  return files;
+function writeJson(file, value) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.tmp-${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
+  fs.renameSync(tmp, file);
 }
 
-/**
- * Auth status — derived from a JWT's *presence and expiry only* wherever the
- * app persists it (Local Storage leveldb, Session Storage, Network session,
- * Local State). The token itself is never returned, logged, or decoded beyond
- * the payload `exp` claim.
- */
+function currentSession() {
+  const s = readJson(STATE_FILE, {})?.authSessions?.[AUTH_HOST];
+  return s?.token && s?.user?.email ? s : null;
+}
+
+/** Remembers the signed-in account so it can be switched back to later. */
+function remember(session) {
+  const vault = readJson(VAULT, {});
+  vault[session.user.email] = { session, savedAt: new Date().toISOString() };
+  writeJson(VAULT, vault);
+}
+
+/** Signed-in account (email and name only) — the token is never returned. */
 export function authStatus() {
-  let loggedIn = false;
-  let expiresAt = null;
-  for (const file of authFiles()) {
-    const jwt = scanForJwt(file);
-    if (jwt) {
-      loggedIn = true;
-      try {
-        const payload = JSON.parse(Buffer.from(jwt.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"));
-        if (payload?.exp) expiresAt = new Date(payload.exp * 1000).toISOString();
-      } catch {}
-      break;
-    }
-  }
-  const leveldb = profilePath("Local Storage/leveldb");
-  const session = profilePath("Session Storage");
-  return {
-    loggedIn,
-    expiresAt,
-    store: "app persisted state (Local Storage / Session Storage / Network)",
-    storeExists: !!(leveldb && fs.existsSync(leveldb)),
-    sessionStorageExists: !!(session && fs.existsSync(session)),
-  };
+  const s = currentSession();
+  if (s) remember(s);
+  return { loggedIn: !!s, email: s?.user.email ?? null, name: s?.user.name ?? null };
 }
 
-/**
- * Logout: back up the app's persisted web state (which holds the JWT), clear
- * it, and optionally restart Freebuff so the login screen returns. Requires an
- * explicit confirm string to guard against accidental wipes.
- */
-export function authLogout(confirm, { restart = false } = {}) {
-  if (confirm !== "CLEAR") {
-    return { ok: false, error: 'confirm must be exactly "CLEAR"', hint: "restart=true kills and relaunches Freebuff so logout takes effect immediately" };
+export function accounts() {
+  const cur = currentSession();
+  if (cur) remember(cur);
+  const vault = readJson(VAULT, {});
+  return Object.entries(vault)
+    .map(([email, v]) => ({ email, name: v.session?.user?.name ?? "", savedAt: v.savedAt, current: cur?.user.email === email }))
+    .sort((x, y) => x.email.localeCompare(y.email));
+}
+
+/** Quits the app (it rewrites state.json on exit), edits the session, and reopens it. */
+function withAppClosed(edit) {
+  const wasRunning = isRunning();
+  if (wasRunning) {
+    appQuit();
+    for (let i = 0; i < 50 && isRunning(); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    if (isRunning()) return { ok: false, error: "Freebuff did not close; quit it on the PC and retry" };
   }
-  const targets = ["Local Storage", "Session Storage"];
-  const backups = [];
-  for (const rel of targets) {
-    const p = profilePath(rel);
-    if (!p || !fs.existsSync(p)) continue;
-    const backup = `${p}.bak-${Date.now()}`;
-    try {
-      fs.cpSync(p, backup, { recursive: true });
-      fs.rmSync(p, { recursive: true, force: true });
-      backups.push(path.basename(backup));
-    } catch (e) {
-      return { ok: false, error: `failed clearing ${rel}: ${e.message}` };
-    }
-  }
-  let restarted = false;
-  if (restart) {
-    restarted = appRestart();
-  }
-  return { ok: true, backups, restarted };
+  const state = readJson(STATE_FILE, {});
+  state.authSessions = state.authSessions || {};
+  edit(state.authSessions);
+  writeJson(STATE_FILE, state);
+  return { ok: true, reopened: appOpen().ok };
+}
+
+/** Signs Freebuff out (the account stays saved for switching back). Needs confirm "CLEAR". */
+export function authLogout(confirm) {
+  if (confirm !== "CLEAR") return { ok: false, error: 'confirm must be exactly "CLEAR"' };
+  const cur = currentSession();
+  if (cur) remember(cur);
+  return withAppClosed((sessions) => { delete sessions[AUTH_HOST]; });
+}
+
+export function accountSwitch(email) {
+  const saved = readJson(VAULT, {})[String(email)];
+  if (!saved?.session) return { ok: false, error: `no saved Freebuff account: ${email}` };
+  const cur = currentSession();
+  if (cur) remember(cur);
+  return withAppClosed((sessions) => { sessions[AUTH_HOST] = saved.session; });
+}
+
+export function accountForget(email) {
+  const vault = readJson(VAULT, {});
+  delete vault[String(email)];
+  writeJson(VAULT, vault);
+  return accounts();
 }
 
 export function appOpen() {
@@ -344,18 +332,6 @@ export function appOpen() {
   } catch (e) {
     return { ok: false, error: e.message };
   }
-}
-
-export function appRestart() {
-  appQuit();
-  // taskkill returns before the process tree is fully gone — wait for the
-  // app to actually stop, then relaunch (otherwise isRunning() sees it still
-  // up and appOpen() reports alreadyRunning:true, never relaunching).
-  for (let i = 0; i < 30; i++) {
-    if (!isRunning()) break;
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
-  }
-  return appOpen().ok;
 }
 
 export function appQuit() {

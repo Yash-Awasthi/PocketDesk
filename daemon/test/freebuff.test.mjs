@@ -11,6 +11,8 @@ import path from "node:path";
 const tmp = makeTmp("rh-t-");
 const fbProfile = path.join(tmp, "fb-profile");
 const fbSkills = path.join(tmp, "fb-skills");
+const fbState = path.join(tmp, "fb-state.json");
+const fbVault = path.join(tmp, "fb-accounts.json");
 fs.mkdirSync(path.join(fbProfile, "Local Storage", "leveldb"), { recursive: true });
 fs.mkdirSync(path.join(fbSkills, "hello-skill"), { recursive: true });
 fs.writeFileSync(
@@ -60,6 +62,8 @@ async function main() {
       FB_PROFILE_DIR: fbProfile,
       FB_SKILLS_DIRS: fbSkills,
       FB_APP_EXE: path.join(tmp, "no-such-app.exe"),
+      FB_STATE_FILE: fbState,
+      FB_VAULT: fbVault,
     },
   });
   await d.ready;
@@ -111,15 +115,17 @@ async function main() {
   const run = await c.next((m) => m.type === "fb_skill_run");
   check("skill_run reports unknown harness cleanly", run.ok === false && /unknown harness/.test(run.error));
 
-  // ── Auth: status from persisted state (JWT shape), logout with confirm ────
-  // A JWT-looking string (three 16+ char segments) in Session Storage flips loggedIn.
-  const ssDir = path.join(fbProfile, "Session Storage");
-  fs.mkdirSync(ssDir, { recursive: true });
-  const fakeJwt = ["x".repeat(20), Buffer.from(JSON.stringify({ exp: 9999999999 })).toString("base64url"), "y".repeat(20)].join(".");
-  fs.writeFileSync(path.join(ssDir, "000003.log"), `padding ${fakeJwt} padding`);
+  // ── Accounts: the desktop app keeps its codebuff session in state.json ────
+  // Tokens stay on the PC: no reply may carry one, only email and name.
+  const writeState = (sessions) => fs.writeFileSync(fbState, JSON.stringify({ workspace: { activeId: "w1" }, authSessions: sessions }));
+  const sessionFor = (email, token) => ({ "https://www.codebuff.com": { token, user: { id: "u-" + email, email, name: email.split("@")[0] } } });
+  const leaks = [];
+  c.ws.on("message", (d) => { if (/tok-(alpha|bravo)/.test(String(d))) leaks.push(String(d).slice(0, 80)); });
+
+  writeState(sessionFor("a@x.com", "tok-alpha"));
   c.send({ type: "fb_auth_status" });
   const au = await c.next((m) => m.type === "fb_auth_status");
-  check("auth detects persisted JWT", au.loggedIn === true && au.expiresAt != null);
+  check("status names the signed-in account", au.loggedIn === true && au.email === "a@x.com");
 
   c.send({ type: "fb_auth_logout", confirm: "nope" });
   const noConf = await c.next((m) => m.type === "fb_auth_logout");
@@ -127,11 +133,32 @@ async function main() {
 
   c.send({ type: "fb_auth_logout", confirm: "CLEAR" });
   const out = await c.next((m) => m.type === "fb_auth_logout");
-  check("logout clears stores + keeps backups", out.ok === true && out.backups.length === 2 && !fs.existsSync(path.join(fbProfile, "Local Storage", "leveldb")));
-
+  const afterOut = JSON.parse(fs.readFileSync(fbState, "utf8"));
+  check("logout drops the session and keeps the workspace", out.ok === true && !afterOut.authSessions?.["https://www.codebuff.com"] && afterOut.workspace.activeId === "w1");
   c.send({ type: "fb_auth_status" });
   const au2 = await c.next((m) => m.type === "fb_auth_status");
-  check("auth logged out after clear", au2.loggedIn === false);
+  check("status signed out after logout", au2.loggedIn === false);
+
+  // A new login in the app (simulated) is remembered next to the first one.
+  writeState(sessionFor("b@x.com", "tok-bravo"));
+  c.send({ type: "fb_accounts" });
+  const acc = await c.next((m) => m.type === "fb_accounts");
+  const emails = acc.accounts.map((a) => a.email).sort().join(",");
+  check("both accounts saved, current marked", emails === "a@x.com,b@x.com" && acc.accounts.find((a) => a.current).email === "b@x.com");
+
+  c.send({ type: "fb_account_switch", email: "a@x.com" });
+  const sw = await c.next((m) => m.type === "fb_account_switch");
+  const afterSw = JSON.parse(fs.readFileSync(fbState, "utf8"));
+  check("switch restores the saved session", sw.ok === true && afterSw.authSessions["https://www.codebuff.com"].token === "tok-alpha" && afterSw.workspace.activeId === "w1");
+
+  c.send({ type: "fb_account_switch", email: "nobody@x.com" });
+  const swBad = await c.next((m) => m.type === "fb_account_switch");
+  check("switch to an unsaved account refuses", swBad.ok === false);
+
+  c.send({ type: "fb_account_forget", email: "b@x.com" });
+  const fg = await c.next((m) => m.type === "fb_accounts");
+  check("forget removes a saved account", fg.accounts.map((a) => a.email).join(",") === "a@x.com");
+  check("no reply carried a session token", leaks.length === 0);
 
   // ── App open/quit with a bogus exe ────────────────────────────────────────
   c.send({ type: "fb_app_open" });

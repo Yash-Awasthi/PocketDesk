@@ -90,7 +90,9 @@ class WsClient(
         private set
     var fbAuthLoggedIn by mutableStateOf<Boolean?>(null)
         private set
-    var fbAuthExpiresAt by mutableStateOf<String?>(null)
+    var fbAuthEmail by mutableStateOf<String?>(null)
+        private set
+    var fbAccounts by mutableStateOf<List<FbAccount>>(emptyList())
         private set
     /** Last fb_skill_get / fb_config_get payload, consumed by dialogs. */
     val _skillContent = kotlinx.coroutines.flow.MutableStateFlow("")
@@ -373,7 +375,10 @@ class WsClient(
     fun fbConfigGet(name: String) = send(Proto.fbConfigGet(name))
     fun fbConfigSet(name: String, patchJson: String) = send(Proto.fbConfigSet(name, patchJson))
     fun fbAuthStatus() = send(Proto.fbAuthStatus())
-    fun fbAuthLogout(restart: Boolean) = send(Proto.fbAuthLogout(restart))
+    fun fbAuthLogout() = send(Proto.fbAuthLogout())
+    fun fbAccountsList() = send(Proto.fbAccounts())
+    fun fbAccountSwitch(email: String) = send(Proto.fbAccountSwitch(email))
+    fun fbAccountForget(email: String) = send(Proto.fbAccountForget(email))
     fun fbAppOpen() = send(Proto.fbAppOpen())
     fun fbAppQuit() = send(Proto.fbAppQuit())
     // ── Desktop control methods ──
@@ -734,7 +739,7 @@ class WsClient(
                 fbRunning = bool(m, "running")
                 fbProfile = str(m, "profile")
                 fbAuthLoggedIn = (m["auth"] as? JsonObject)?.let { bool(it, "loggedIn") }
-                fbAuthExpiresAt = (m["auth"] as? JsonObject)?.let { str(it, "expiresAt") }
+                fbAuthEmail = (m["auth"] as? JsonObject)?.let { str(it, "email") }
             }
             "fb_skill_list" -> {
                 val items = (m["items"] as? JsonArray)?.mapNotNull { el ->
@@ -760,7 +765,20 @@ class WsClient(
             }
             "fb_auth_status" -> {
                 fbAuthLoggedIn = bool(m, "loggedIn")
-                fbAuthExpiresAt = str(m, "expiresAt")
+                fbAuthEmail = str(m, "email")
+            }
+            "fb_accounts" -> fbAccounts = (m["accounts"] as? JsonArray)?.mapNotNull { el ->
+                val o = el as? JsonObject ?: return@mapNotNull null
+                FbAccount(str(o, "email") ?: return@mapNotNull null, str(o, "name") ?: "", bool(o, "current") == true)
+            } ?: emptyList()
+            "fb_auth_logout", "fb_account_switch" -> {
+                if (bool(m, "ok") == true) {
+                    send(Proto.fbStatus()); send(Proto.fbAccounts())
+                } else {
+                    val msg = str(m, "error") ?: "Freebuff account change failed"
+                    lastError = msg
+                    events.tryEmit(RhEvent.Failure(msg))
+                }
             }
             "fb_skill_get" -> {
                 if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {

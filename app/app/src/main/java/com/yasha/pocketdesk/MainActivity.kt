@@ -151,12 +151,6 @@ class MainActivity : ComponentActivity() {
                             label = { Text("Chats") },
                         )
                         NavigationBarItem(
-                            selected = screen == Screen.Freebuff,
-                            onClick = { screen = Screen.Freebuff },
-                            icon = { Icon(Icons.Filled.Settings, contentDescription = null) },
-                            label = { Text("Freebuff") },
-                        )
-                        NavigationBarItem(
                             selected = screen == Screen.Desktop,
                             onClick = { screen = Screen.Desktop },
                             icon = { Icon(Icons.Filled.Build, contentDescription = null) },
@@ -195,11 +189,12 @@ class MainActivity : ComponentActivity() {
                         openDesktop = { screen = Screen.Desktop },
                         openTerminal = { screen = Screen.Terminal(it) },
                         openSsh = { screen = Screen.Ssh },
+                        openFreebuff = { screen = Screen.Freebuff },
                         lock = lock,
                     )
                     Screen.Sessions -> SessionsScreen(client, openTerminal = { screen = Screen.Terminal(it) })
                     Screen.Chats -> ChatScreen(client)
-                    Screen.Freebuff -> FreebuffScreen(client)
+                    Screen.Freebuff -> FreebuffScreen(client, openDesktop = { screen = Screen.Desktop })
                     Screen.Desktop -> DesktopScreen(
                         client,
                         onClose = { screen = Screen.Sessions },

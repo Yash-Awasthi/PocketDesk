@@ -70,6 +70,9 @@ data class ChatSummary(
 data class FsEntry(val name: String, val isDir: Boolean, val size: Long?)
 
 data class FbSkill(val name: String, val description: String, val dir: String)
+
+/** A Freebuff account saved on the PC; its session token never leaves the PC. */
+data class FbAccount(val email: String, val name: String, val current: Boolean)
 data class FbConfig(val name: String, val size: Long, val mtime: String)
 
 /** One captured desktop frame: base64 JPEG, full virtual-screen geometry. */
@@ -210,9 +213,10 @@ object Proto {
         put("patch", Json.parseToJsonElement(patchJson))
     }
     fun fbAuthStatus() = obj { put("type", "fb_auth_status") }
-    fun fbAuthLogout(restart: Boolean) = obj {
-        put("type", "fb_auth_logout"); put("confirm", "CLEAR"); put("restart", restart)
-    }
+    fun fbAuthLogout() = obj { put("type", "fb_auth_logout"); put("confirm", "CLEAR") }
+    fun fbAccounts() = obj { put("type", "fb_accounts") }
+    fun fbAccountSwitch(email: String) = obj { put("type", "fb_account_switch"); put("email", email) }
+    fun fbAccountForget(email: String) = obj { put("type", "fb_account_forget"); put("email", email) }
     fun fbAppOpen() = obj { put("type", "fb_app_open") }
     fun fbAppQuit() = obj { put("type", "fb_app_quit") }
 
