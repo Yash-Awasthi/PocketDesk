@@ -415,34 +415,41 @@ class WsClient(
         send(Proto.desktopStart(quality))
     }
     /** Also the resync request: the daemon answers with a fresh config + keyframe. */
+    /** Asked for by the user, or imposed by whoever approved the session on the PC. */
+    var desktopViewOnly by mutableStateOf(false)
+    /** Session status that is not an error, such as waiting for approval on the PC. */
+    var desktopNotice by mutableStateOf("")
+        private set
+    /** Desktop input; a view-only session sends none. */
+    private fun control(line: String): Boolean = !desktopViewOnly && send(line)
     /** saver / balanced / quality; sent with every start so a daemon restart keeps it. */
     var desktopPreset by mutableStateOf("balanced")
     fun desktopStartVideo() {
         desktopStreaming = true
-        desktopResume = { send(Proto.desktopStartVideo(desktopPreset, desktopMonitor)) }
-        send(Proto.desktopStartVideo(desktopPreset, desktopMonitor))
+        desktopResume = { send(Proto.desktopStartVideo(desktopPreset, desktopMonitor, desktopViewOnly)) }
+        send(Proto.desktopStartVideo(desktopPreset, desktopMonitor, desktopViewOnly))
         send(Proto.desktopMonitors())
     }
     fun clipboardGet() = send(Proto.clipboardGet())
     /** With [paste], ctrl+v follows once the PC clipboard holds the text. */
-    fun clipboardSet(text: String, paste: Boolean) = send(Proto.clipboardSet(text, paste = paste))
-    fun clipboardSetImage(pngB64: String) = send(Proto.clipboardSet(null, png = pngB64))
+    fun clipboardSet(text: String, paste: Boolean) = control(Proto.clipboardSet(text, paste = paste))
+    fun clipboardSetImage(pngB64: String) = control(Proto.clipboardSet(null, png = pngB64))
     /** Puts files already on the PC on its clipboard; with [paste] they drop into the focused window. */
-    fun clipboardSetFiles(paths: List<String>, paste: Boolean) = send(Proto.clipboardSet(null, files = paths, paste = paste))
+    fun clipboardSetFiles(paths: List<String>, paste: Boolean) = control(Proto.clipboardSet(null, files = paths, paste = paste))
     fun desktopStop() { desktopStreaming = false; desktopResume = null; send(Proto.desktopStop()) }
     fun desktopSnapshot() = send(Proto.desktopFrame())
     /** x/y are frame pixels; click is left|right|middle|double. */
-    fun desktopClick(x: Int, y: Int, click: String) = send(Proto.desktopMouse(x, y, click, null))
-    fun desktopMove(x: Int, y: Int) = send(Proto.desktopMouse(x, y, null, null))
+    fun desktopClick(x: Int, y: Int, click: String) = control(Proto.desktopMouse(x, y, click, null))
+    fun desktopMove(x: Int, y: Int) = control(Proto.desktopMouse(x, y, null, null))
     /** Holds (down) or releases (up) the left button at x/y, for dragging. */
-    fun desktopPress(x: Int, y: Int, down: Boolean) = send(Proto.desktopMouse(x, y, null, null, if (down) "down" else "up"))
-    fun desktopScroll(down: Boolean) = send(Proto.desktopMouse(null, null, null, if (down) -120 else 120))
-    fun desktopKey(vk: Int, modifiers: List<String> = emptyList()) = send(Proto.desktopKey(vk, modifiers))
-    fun desktopKeyPress(vk: Int, down: Boolean) = send(Proto.desktopKey(vk, emptyList(), if (down) "down" else "up"))
+    fun desktopPress(x: Int, y: Int, down: Boolean) = control(Proto.desktopMouse(x, y, null, null, if (down) "down" else "up"))
+    fun desktopScroll(down: Boolean) = control(Proto.desktopMouse(null, null, null, if (down) -120 else 120))
+    fun desktopKey(vk: Int, modifiers: List<String> = emptyList()) = control(Proto.desktopKey(vk, modifiers))
+    fun desktopKeyPress(vk: Int, down: Boolean) = control(Proto.desktopKey(vk, emptyList(), if (down) "down" else "up"))
     fun desktopButton(x: Int, y: Int, button: String, down: Boolean) =
-        send(Proto.desktopMouse(x, y, null, null, if (down) "down" else "up", button))
-    fun desktopWheel(delta: Int) = send(Proto.desktopMouse(null, null, null, delta))
-    fun desktopType(text: String) = send(Proto.desktopType(text))
+        control(Proto.desktopMouse(x, y, null, null, if (down) "down" else "up", button))
+    fun desktopWheel(delta: Int) = control(Proto.desktopMouse(null, null, null, delta))
+    fun desktopType(text: String) = control(Proto.desktopType(text))
 
     fun modelList(chatId: String) = send(Proto.modelList(chatId))
     fun chatModelSet(chatId: String, model: String?) = send(Proto.chatModelSet(chatId, model))
@@ -842,15 +849,23 @@ class WsClient(
                 }
             }
             "desktop_started" -> {
+                desktopNotice = ""
                 if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
                     desktopStreaming = true
                     desktopMode = str(m, "mode") ?: "jpeg"
+                    bool(m, "viewOnly")?.let { desktopViewOnly = it }
                 } else {
                     desktopStreaming = false
+                    // A refusal on the PC must not be retried on every reconnect.
+                    desktopResume = null
                     _desktopError.value = str(m, "reason") ?: "desktop unavailable"
                 }
             }
-            "desktop_stopped" -> desktopStreaming = false
+            "desktop_pending" -> desktopNotice = "Waiting for someone at the PC to allow this…"
+            "desktop_stopped" -> {
+                desktopStreaming = false
+                str(m, "reason")?.let { desktopResume = null; _desktopError.value = "Session $it" }
+            }
             "desktop_cursor" -> {
                 val x = (m["x"] as? JsonPrimitive)?.intOrNull ?: return
                 val y = (m["y"] as? JsonPrimitive)?.intOrNull ?: return

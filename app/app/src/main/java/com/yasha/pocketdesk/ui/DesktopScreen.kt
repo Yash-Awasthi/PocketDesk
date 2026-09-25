@@ -202,11 +202,18 @@ fun DesktopScreen(
                     ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
                     ws.desktopStartVideo()
                 }) { Text(ws.desktopPreset.replaceFirstChar { it.uppercase() }) }
-                TextButton(onClick = sendFiles) { Text("📎") }
+                TextButton(onClick = { ws.desktopViewOnly = !ws.desktopViewOnly; ws.desktopStartVideo() }) {
+                    Text(if (ws.desktopViewOnly) "👁 View" else "🖱 Control")
+                }
+                if (!ws.desktopViewOnly) TextButton(onClick = sendFiles) { Text("📎") }
                 TextButton(onClick = { touchpad = !touchpad }) { Text(if (touchpad) "Touchpad" else "Direct tap") }
             }
         }
         DesktopTransferBar(ws, transfer)
+        if (ws.desktopNotice.isNotEmpty()) {
+            Text(ws.desktopNotice, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp))
+        }
         if (desktopError.isNotEmpty()) {
             Text(desktopError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp))

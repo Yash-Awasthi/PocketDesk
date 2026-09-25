@@ -309,7 +309,7 @@ while ($true) {
 `;
 
 /** Persistent PowerShell helper with id-matched request/reply. */
-class PsHelper {
+export class PsHelper {
   constructor(name, script) {
     this.name = name; // for the temp file name
     this.script = script;
@@ -355,6 +355,7 @@ class PsHelper {
           let obj = null;
           try { obj = JSON.parse(line); } catch { continue; }
           const id = obj?.id;
+          if (id == null && obj?.event) this.onEvent?.(obj);
           if (id != null && this.waiters.has(id)) {
             const w = this.waiters.get(id);
             this.waiters.delete(id);

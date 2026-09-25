@@ -1,14 +1,49 @@
 import { resolvePath } from "../fs_ops.js";
+import * as devices from "../devices.js";
 
 export default function remoteHandlers(ctx) {
-  const { send, desktop, desktopWatchers, video, videoWatchers } = ctx;
-  /** Pointer and clipboard follow the PC only while someone is viewing it. */
+  const { send, desktop, desktopWatchers, video, videoWatchers, presence } = ctx;
+  // Sockets that took a single snapshot stay on the PC's viewer bar for a few seconds.
+  const snapshots = new Map();
+  const deviceName = (ws) => devices.list().find((d) => d.id === ws._clientId)?.name || "A remote device";
+  /** Pointer and clipboard follow the PC only while someone is viewing it, and the bar says who. */
   function syncCursor() {
     const on = videoWatchers.size + desktopWatchers.size > 0;
     desktop.watchCursor(on);
     desktop.watchClipboard(on);
     if (on && desktop.cursor) desktop.emit("cursor", desktop.cursor);
+    const viewers = new Set([...videoWatchers, ...desktopWatchers, ...snapshots.keys()]);
+    presence.update([...viewers].map((w) => ({ name: deviceName(w), viewOnly: !!w._viewOnly })));
   }
+  /** With approval on, the person at the PC answers before a socket sees or touches anything. */
+  async function approved(ws, wantsControl) {
+    if (ws._desktopApproved || !presence.approvalRequired) return true;
+    if (ws._asking) return false;
+    ws._asking = true;
+    send(ws, { type: "desktop_pending" });
+    try {
+      const answer = await presence.ask(`${deviceName(ws)} wants to ${wantsControl ? "view and control" : "view"} this PC.`);
+      if (answer === "deny") return false;
+      if (answer === "view") ws._viewOnly = ws._viewOnlyForced = true;
+      ws._desktopApproved = true;
+      return true;
+    } finally { ws._asking = false; }
+  }
+  /** Input and clipboard writes: never from a view-only socket, never before approval. */
+  function mayControl(ws) {
+    return !ws._viewOnly && (ws._desktopApproved || !presence.approvalRequired);
+  }
+  if (presence) presence.onDisconnect = () => {
+    for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
+      videoWatchers.delete(w);
+      desktopWatchers.delete(w);
+      desktop.stopFrameStream(w._clientId || "anon");
+      w._desktopApproved = false;
+      send(w, { type: "desktop_stopped", ok: true, reason: "ended on the PC" });
+    }
+    video.stop();
+    syncCursor();
+  };
   let monitorList = null;
   async function monitorAt(index) {
     if (!monitorList || !monitorList[index]) monitorList = (await desktop.monitors()).monitors || [];
@@ -32,6 +67,8 @@ export default function remoteHandlers(ctx) {
   return {
     // ── Real desktop control (AnyDesk-style: watch + full input) ─────────
     async desktop_start(ws, msg) {
+      ws._viewOnly = !!msg.viewOnly || !!ws._viewOnlyForced;
+      if (!(await approved(ws, !ws._viewOnly))) return send(ws, { type: "desktop_started", ok: false, reason: "denied on the PC" });
       // Binary frames need a real socket; relay shims fall back to JPEG.
       if (msg.video && typeof ws.bufferedAmount === "number") {
         videoWatchers.add(ws);
@@ -44,7 +81,7 @@ export default function remoteHandlers(ctx) {
             ws._videoCloseHooked = true;
             ws.once?.("close", () => { videoWatchers.delete(ws); if (!videoWatchers.size) video.stop(); syncCursor(); });
           }
-          send(ws, { type: "desktop_started", ok: true, mode: "h264", encoder, preset: video.preset, monitor: video.monitor?.index ?? 0 });
+          send(ws, { type: "desktop_started", ok: true, mode: "h264", encoder, preset: video.preset, monitor: video.monitor?.index ?? 0, viewOnly: ws._viewOnly });
           return syncCursor();
         }
         videoWatchers.delete(ws);
@@ -60,7 +97,7 @@ export default function remoteHandlers(ctx) {
           syncCursor();
         });
       }
-      send(ws, { type: "desktop_started", ...r });
+      send(ws, { type: "desktop_started", ...r, viewOnly: ws._viewOnly });
       syncCursor();
     },
     async desktop_monitors(ws, msg) {
@@ -81,10 +118,15 @@ export default function remoteHandlers(ctx) {
     },
     async desktop_frame(ws, msg) {
       // On-demand single frame (thumbnail / refresh) without starting the loop.
+      if (!(await approved(ws, false))) return send(ws, { type: "desktop_frame_error", reason: "denied on the PC" });
+      clearTimeout(snapshots.get(ws));
+      snapshots.set(ws, setTimeout(() => { snapshots.delete(ws); syncCursor(); }, 5000));
+      syncCursor();
       const r = await desktop.getFrame();
       send(ws, r.ok ? { type: "desktop_frame", ...r } : { type: "desktop_frame_error", reason: r.reason });
     },
     async desktop_mouse(ws, msg) {
+      if (!mayControl(ws)) return send(ws, { type: "desktop_input_ok", ok: false, error: "view only" });
       // Frame px -> real desktop px: the capture helper downscales the full
       // virtual screen by the quality factor (1 / 0.75 / 0.5), so client
       // coords measured on the frame must be divided back out. Wheel-only
@@ -101,20 +143,24 @@ export default function remoteHandlers(ctx) {
       send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
     },
     async desktop_key(ws, msg) {
+      if (!mayControl(ws)) return send(ws, { type: "desktop_input_ok", ok: false, error: "view only" });
       const press = msg.press === "down" || msg.press === "up" ? msg.press : undefined;
       if (press) hold(ws, "k:" + Number(msg.key), press);
       const r = await desktop.inputKey({ key: msg.key, press, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
       send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
     },
     async desktop_type(ws, msg) {
+      if (!mayControl(ws)) return send(ws, { type: "desktop_input_ok", ok: false, error: "view only" });
       const r = await desktop.inputType(String(msg.text ?? ""));
       send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
     },
     async clipboard_get(ws, msg) {
+      if (!ws._desktopApproved && presence.approvalRequired) return send(ws, { type: "clipboard", ok: false, error: "not approved on the PC" });
       send(ws, { type: "clipboard", ...(await desktop.clipboardRead()) });
     },
     /** text, png (base64) or files (paths on the PC, e.g. just uploaded); paste presses Ctrl+V after. */
     async clipboard_set(ws, msg) {
+      if (!mayControl(ws)) return send(ws, { type: "clipboard_set_ok", ok: false, error: "view only" });
       let files;
       try {
         files = Array.isArray(msg.files) ? msg.files.slice(0, 100).map((f) => resolvePath(f)) : undefined;

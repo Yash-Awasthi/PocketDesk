@@ -29,6 +29,8 @@ namespace PocketDeskTray
         string fingerprint = "";
         string daemonDir;
         static readonly string LogPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "daemon.log");
+        // The daemon checks for this file before every remote viewing session.
+        static readonly string ApprovalFlag = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "ask-before-viewing");
 
         public TrayContext()
         {
@@ -42,6 +44,9 @@ namespace PocketDeskTray
             menu.Items.Add("Open web UI", null, (s, e) => OpenUrl(BaseUrl()));
             menu.Items.Add("Copy pairing info", null, (s, e) => CopyPairing());
             menu.Items.Add("Open daemon log", null, (s, e) => { try { Process.Start("notepad.exe", LogPath); } catch { } });
+            var askItem = new ToolStripMenuItem("Ask before someone views this PC", null, (s, e) => ToggleApproval());
+            menu.Opening += (s, e) => askItem.Checked = File.Exists(ApprovalFlag);
+            menu.Items.Add(askItem);
             menu.Items.Add(new ToolStripSeparator());
             startItem = new ToolStripMenuItem("Start daemon", null, (s, e) => StartDaemon());
             stopItem = new ToolStripMenuItem("Stop daemon", null, (s, e) => StopDaemon());
@@ -58,6 +63,16 @@ namespace PocketDeskTray
             };
             SetRunning(false);
             StartDaemon();
+        }
+
+        void ToggleApproval()
+        {
+            try
+            {
+                if (File.Exists(ApprovalFlag)) File.Delete(ApprovalFlag);
+                else File.WriteAllText(ApprovalFlag, "");
+            }
+            catch (Exception ex) { MessageBox.Show("Could not change the setting: " + ex.Message, "PocketDesk"); }
         }
 
         string ExeDir

@@ -188,8 +188,9 @@ object Proto {
 
     // ── Desktop control (AnyDesk-style watch + full input) ──
     fun desktopStart(quality: Int) = obj { put("type", "desktop_start"); put("quality", quality) }
-    fun desktopStartVideo(preset: String, monitor: Int) = obj {
+    fun desktopStartVideo(preset: String, monitor: Int, viewOnly: Boolean) = obj {
         put("type", "desktop_start"); put("video", true); put("preset", preset); put("monitor", monitor)
+        if (viewOnly) put("viewOnly", true)
     }
     fun desktopMonitors() = obj { put("type", "desktop_monitors") }
     fun clipboardGet() = obj { put("type", "clipboard_get") }

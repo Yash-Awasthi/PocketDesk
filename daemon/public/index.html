@@ -248,6 +248,7 @@
               <option value="50">medium (75%)</option>
               <option value="80" selected>high (100%)</option>
             </select>
+            <label style="color:#8b949e"><input type="checkbox" id="deskViewOnly" onchange="desk.viewOnly = this.checked; desktopRestart()" /> view only</label>
             <select id="deskMonitor" title="monitor" style="display:none" onchange="desk.monitor = Number(this.value); desktopRestart()"></select>
             <span id="deskStatus" style="color:#8b949e"></span>
           </div>
@@ -699,8 +700,12 @@ function handle(m) {
     case "desktop_frame_error":
       document.getElementById("deskStatus").textContent = m.reason === "unsupported_platform" ? "desktop control is Windows-only" : "capture failed";
       break;
+    case "desktop_pending":
+      document.getElementById("deskStatus").textContent = "waiting for someone at the PC to allow this…";
+      break;
     case "desktop_started":
       desk.viewing = !!m.ok;
+      if (m.ok) { desk.viewOnly = !!m.viewOnly; document.getElementById("deskViewOnly").checked = desk.viewOnly; }
       desk.mode = m.ok ? (m.mode || "jpeg") : "";
       document.getElementById("deskToggle").textContent = desk.viewing ? "⏸ Stop viewing" : "▶ Start viewing";
       document.getElementById("deskPreset").style.display = desk.mode === "jpeg" ? "none" : "";
@@ -710,6 +715,7 @@ function handle(m) {
       break;
     case "desktop_stopped":
       desktopStopped();
+      if (m.reason) document.getElementById("deskStatus").textContent = "session " + m.reason;
       break;
     case "desktop_cursor":
       desk.cursor = m;
@@ -984,14 +990,15 @@ function renderApps(items) {
 
 // ── Desktop control: H.264 through WebCodecs where the page may use it, JPEG snapshots otherwise ──
 // WebCodecs exists only in secure contexts (https or localhost), so plain http over the LAN gets snapshots.
-const desk = { viewing: false, mode: "", decoder: null, config: null, needKey: true, ts: 0, frames: 0, cursor: null, hover: false, held: new Set(), monitor: 0 };
+const desk = { viewOnly: false, viewing: false, mode: "", decoder: null, config: null, needKey: true, ts: 0, frames: 0, cursor: null, hover: false, held: new Set(), monitor: 0 };
 function desktopOnShow() {
   // A single on-demand frame even when not streaming — instant preview.
   if (!desk.viewing) send({ type: "desktop_frame" });
 }
 function desktopStart() {
-  if (typeof VideoDecoder === "function") send({ type: "desktop_start", video: true, preset: document.getElementById("deskPreset").value, monitor: desk.monitor });
-  else send({ type: "desktop_start", quality: Number(document.getElementById("deskQuality").value) });
+  const viewOnly = desk.viewOnly || undefined;
+  if (typeof VideoDecoder === "function") send({ type: "desktop_start", video: true, preset: document.getElementById("deskPreset").value, monitor: desk.monitor, viewOnly });
+  else send({ type: "desktop_start", quality: Number(document.getElementById("deskQuality").value), viewOnly });
   send({ type: "desktop_monitors" });
 }
 function desktopToggle() {
@@ -1745,14 +1752,14 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
   cv.addEventListener("mouseenter", () => { desk.hover = true; desktopPointer(); });
   cv.addEventListener("mouseleave", () => { desk.hover = false; desktopPointer(); });
   cv.addEventListener("mousemove", (ev) => {
-    if (!desk.viewing || ev.timeStamp - lastMove < 16) return;
+    if (!desk.viewing || desk.viewOnly || ev.timeStamp - lastMove < 16) return;
     lastMove = ev.timeStamp;
     const p = desktopToScreen(ev);
     if (p) send({ type: "desktop_mouse", x: p.x, y: p.y });
   });
   for (const [evt, press] of [["mousedown", "down"], ["mouseup", "up"]]) {
     cv.addEventListener(evt, (ev) => {
-      if (!desk.viewing) return;
+      if (!desk.viewing || desk.viewOnly) return;
       const button = BUTTONS[ev.button];
       const p = desktopToScreen(ev);
       if (!button || !p) return;
@@ -1763,7 +1770,7 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
   }
   cv.addEventListener("contextmenu", (ev) => ev.preventDefault());
   cv.addEventListener("wheel", (ev) => {
-    if (!desk.viewing) return;
+    if (!desk.viewing || desk.viewOnly) return;
     ev.preventDefault();
     const px = ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY;
     const wheel = Math.max(-1200, Math.min(1200, Math.round(-px * 1.2)));
@@ -1772,7 +1779,7 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
   for (const [evt, press] of [["keydown", "down"], ["keyup", "up"]]) {
     cv.addEventListener(evt, (ev) => {
       const vk = DESK_VK[ev.code];
-      if (!desk.viewing || !vk) return;
+      if (!desk.viewing || desk.viewOnly || !vk) return;
       // Ctrl+V becomes a paste event carrying this browser's clipboard; the daemon presses Ctrl+V after setting it.
       if (ev.code === "KeyV" && (ev.ctrlKey || ev.metaKey)) return;
       if (press === "down") desk.held.add("k:" + vk); else desk.held.delete("k:" + vk);
@@ -1783,7 +1790,7 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
   // Keys still down when focus leaves would stay down on the PC.
   cv.addEventListener("blur", desktopReleaseAll);
   document.addEventListener("paste", async (ev) => {
-    if (document.activeElement !== cv || !desk.viewing) return;
+    if (document.activeElement !== cv || !desk.viewing || desk.viewOnly) return;
     ev.preventDefault();
     const files = [...ev.clipboardData.files];
     const image = files.length === 1 && files[0].type.startsWith("image/") && !ev.clipboardData.getData("text/plain");
@@ -1791,9 +1798,9 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
     else if (files.length) desktopSendFiles(files);
     else send({ type: "clipboard_set", text: ev.clipboardData.getData("text/plain"), paste: true });
   });
-  cv.addEventListener("dragover", (ev) => { if (desk.viewing) ev.preventDefault(); });
+  cv.addEventListener("dragover", (ev) => { if (desk.viewing && !desk.viewOnly) ev.preventDefault(); });
   cv.addEventListener("drop", (ev) => {
-    if (!desk.viewing) return;
+    if (!desk.viewing || desk.viewOnly) return;
     ev.preventDefault();
     desktopSendFiles([...ev.dataTransfer.files]);
   });
