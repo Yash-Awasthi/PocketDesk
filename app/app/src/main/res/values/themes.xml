@@ -4,5 +4,7 @@
         <item name="android:windowBackground">#14161A</item>
         <item name="android:statusBarColor">#14161A</item>
         <item name="android:navigationBarColor">#14161A</item>
+        <!-- No window animations: activities and Compose dialogs appear and disappear instantly. -->
+        <item name="android:windowAnimationStyle">@null</item>
     </style>
 </resources>

@@ -33,8 +33,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -86,11 +88,17 @@ import com.yasha.pocketdesk.WsClient
  * cursor, Drag holds the left button, Apps launches anything installed on the PC.
  */
 @Composable
-fun DesktopScreen(ws: WsClient, onClose: () -> Unit, fullscreen: Boolean, onFullscreen: (Boolean) -> Unit) {
+fun DesktopScreen(
+    ws: WsClient,
+    onClose: () -> Unit,
+    fullscreen: Boolean,
+    onFullscreen: (Boolean) -> Unit,
+    showKeys: Boolean,
+    onShowKeys: (Boolean) -> Unit,
+) {
     val desktopError by ws._desktopError.collectAsState()
     var touchpad by remember { mutableStateOf(true) }
     var dragLock by remember { mutableStateOf(false) }
-    var showKeys by remember { mutableStateOf(false) }
     var showApps by remember { mutableStateOf(false) }
     var cursor by remember { mutableStateOf<Offset?>(null) }
     var zoom by remember { mutableFloatStateOf(1f) }
@@ -123,7 +131,7 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit, fullscreen: Boolean, onFull
         var f = ws.videoFrames
         while (video) {
             kotlinx.coroutines.delay(1000)
-            rate = "%d fps · %.2f Mbit/s".format(ws.videoFrames - f, (ws.videoBytes - b) * 8 / 1e6)
+            rate = "%d fps · %.1f Mb/s".format(ws.videoFrames - f, (ws.videoBytes - b) * 8 / 1e6)
             b = ws.videoBytes
             f = ws.videoFrames
         }
@@ -137,12 +145,19 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit, fullscreen: Boolean, onFull
         if (!fullscreen) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                Text(
-                    "Desktop" + (if (ws.desktopStreaming) " · live" + (if (video) " · $rate" else "") else "") +
-                        (if (ws.route.isNotEmpty()) " · via ${ws.route}" else ""),
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
+                Column(Modifier.weight(1f)) {
+                    Text("Desktop", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        listOfNotNull(
+                            if (!ws.desktopStreaming) "paused" else rate.takeIf { video && it.isNotEmpty() } ?: "live",
+                            ws.route.takeIf { it.isNotEmpty() },
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
+                }
                 if (video) TextButton(onClick = {
                     ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
                     ws.desktopStartVideo()
@@ -242,12 +257,12 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit, fullscreen: Boolean, onFull
         }
 
         // Mouse bar: always visible, in fullscreen too.
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val pad = PaddingValues(horizontal = 4.dp)
             FilledTonalButton(onClick = { here()?.let { ws.desktopClick(it.first, it.second, "left") } },
-                modifier = Modifier.weight(2f), contentPadding = pad) { Text("L") }
+                modifier = Modifier.weight(2f).fillMaxHeight(), contentPadding = pad) { Text("L") }
             FilledTonalButton(onClick = { here()?.let { ws.desktopClick(it.first, it.second, "right") } },
-                modifier = Modifier.weight(2f), contentPadding = pad) { Text("R") }
+                modifier = Modifier.weight(2f).fillMaxHeight(), contentPadding = pad) { Text("R") }
             val dragButton: @Composable (Modifier) -> Unit = { m ->
                 val toggle = {
                     here()?.let { ws.desktopPress(it.first, it.second, !dragLock) }
@@ -256,14 +271,18 @@ fun DesktopScreen(ws: WsClient, onClose: () -> Unit, fullscreen: Boolean, onFull
                 if (dragLock) FilledTonalButton(onClick = toggle, modifier = m, contentPadding = pad) { Text("Drop") }
                 else OutlinedButton(onClick = toggle, modifier = m, contentPadding = pad) { Text("Drag") }
             }
-            dragButton(Modifier.weight(2f))
-            OutlinedButton(onClick = { ws.desktopScroll(false) }, modifier = Modifier.weight(1f), contentPadding = pad) { Text("▲") }
-            OutlinedButton(onClick = { ws.desktopScroll(true) }, modifier = Modifier.weight(1f), contentPadding = pad) { Text("▼") }
-            OutlinedButton(onClick = { showKeys = !showKeys }, modifier = Modifier.weight(1f), contentPadding = pad) { Text("⌨") }
-            OutlinedButton(onClick = { showApps = true }, modifier = Modifier.weight(1f), contentPadding = pad) { Text("▦") }
-            OutlinedButton(onClick = { onFullscreen(!fullscreen) }, modifier = Modifier.weight(1f), contentPadding = pad) { Text("⛶") }
+            dragButton(Modifier.weight(2f).fillMaxHeight())
+            OutlinedButton(onClick = { ws.desktopScroll(false) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("▲") }
+            OutlinedButton(onClick = { ws.desktopScroll(true) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("▼") }
+            val keysButton: @Composable (Modifier) -> Unit = { m ->
+                if (showKeys) FilledTonalButton(onClick = { onShowKeys(false) }, modifier = m, contentPadding = pad) { Text("⌨") }
+                else OutlinedButton(onClick = { onShowKeys(true) }, modifier = m, contentPadding = pad) { Text("⌨") }
+            }
+            keysButton(Modifier.weight(1f).fillMaxHeight())
+            OutlinedButton(onClick = { showApps = true }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("▦") }
+            OutlinedButton(onClick = { onFullscreen(!fullscreen) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("⛶") }
         }
-        if (showKeys) KeyPanel(ws)
+        if (showKeys) DesktopKeyboard(ws)
     }
 
     if (showApps) AppLauncher(ws, onDismiss = { showApps = false })
@@ -348,82 +367,6 @@ fun DesktopFullscreenEffect(fullscreen: Boolean) {
 }
 
 private val PRESETS = listOf("saver", "balanced", "quality")
-private val FN_KEYS = listOf(
-    "esc" to 27, "⇥" to 9, "⌫" to 8, "del" to 46, "⏎" to 13, "←" to 37, "↑" to 38, "↓" to 40, "→" to 39,
-    "home" to 36, "end" to 35, "pgup" to 33, "pgdn" to 34, "⊞" to 91, "prtsc" to 44,
-) + (1..12).map { "F$it" to 111 + it }
-private val OEM_VK = mapOf(
-    '-' to 0xBD, '=' to 0xBB, '[' to 0xDB, ']' to 0xDD, '\\' to 0xDC, ';' to 0xBA,
-    '\'' to 0xDE, ',' to 0xBC, '.' to 0xBE, '/' to 0xBF, '`' to 0xC0,
-)
-private val ROWS = listOf("`1234567890-=", "qwertyuiop[]\\", "asdfghjkl;'", "zxcvbnm,./")
-
-/**
- * Own keyboard, US layout, every key sent as a virtual key. Ctrl/Shift/Alt/Win latch
- * on tap and release after the next key, so ctrl then c sends ctrl+c.
- */
-@Composable
-private fun KeyPanel(ws: WsClient) {
-    var text by remember { mutableStateOf("") }
-    var mods by remember { mutableStateOf(emptySet<String>()) }
-    val press = { vk: Int -> ws.desktopKey(vk, mods.toList()); mods = emptySet() }
-    val shift = "shift" in mods
-    val clipboard = LocalClipboardManager.current
-    val context = LocalContext.current
-    LaunchedEffect(Unit) {
-        ws.pcClipboard.collect {
-            clipboard.setText(AnnotatedString(it))
-            Toast.makeText(context, "Copied from PC", Toast.LENGTH_SHORT).show()
-        }
-    }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Key("paste → PC", Modifier) { clipboard.getText()?.text?.let { ws.clipboardSet(it, paste = true) } }
-            Key("copy ← PC", Modifier) { ws.clipboardGet() }
-            FN_KEYS.forEach { (label, vk) -> Key(label, Modifier) { press(vk) } }
-        }
-        ROWS.forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                row.forEach { ch ->
-                    val vk = OEM_VK[ch] ?: ch.uppercaseChar().code
-                    Key(if (shift) ch.uppercase() else ch.toString(), Modifier.weight(1f)) { press(vk) }
-                }
-            }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            listOf("ctrl" to "Ctrl", "shift" to "Shift", "alt" to "Alt", "win" to "Win").forEach { (m, label) ->
-                Key(label, Modifier.weight(1.3f), active = m in mods) { mods = if (m in mods) mods - m else mods + m }
-            }
-            Key("space", Modifier.weight(3f)) { press(32) }
-        }
-        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("Type to PC…") },
-                singleLine = true,
-            )
-            TextButton(onClick = { if (text.isNotEmpty()) { ws.desktopType(text); text = "" } }) { Text("Send") }
-        }
-    }
-}
-
-@Composable
-private fun Key(label: String, modifier: Modifier, active: Boolean = false, onClick: () -> Unit) {
-    val shape = RoundedCornerShape(6.dp)
-    Box(
-        modifier.padding(vertical = 2.dp).heightIn(min = 40.dp).clip(shape)
-            .background(if (active) MaterialTheme.colorScheme.primary else Color(0xFF21262D))
-            .border(1.dp, Color(0xFF30363D), shape)
-            .clickable(onClick = onClick).padding(horizontal = 6.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, maxLines = 1, style = MaterialTheme.typography.bodyMedium,
-            color = if (active) MaterialTheme.colorScheme.onPrimary else Color(0xFFE6EDF3))
-    }
-}
-
 /** Launches any installed PC app (Start Menu, /Applications, .desktop) in the desktop view. */
 @Composable
 private fun AppLauncher(ws: WsClient, onDismiss: () -> Unit) {
