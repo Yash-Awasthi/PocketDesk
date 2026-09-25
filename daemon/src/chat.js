@@ -66,7 +66,7 @@ function lastAssistantPreview(c) {
   return "";
 }
 
-export function create({ manifest, cwd, resumeFirst = false }) {
+export function create({ manifest, cwd, resumeFirst = false, cliSession = null }) {
   const id = "c" + nextId++;
   const dir = cwd && String(cwd).trim()
     ? path.resolve(String(cwd).replace(/^~(?=$|\/|\\)/, os.homedir()))
@@ -79,9 +79,15 @@ export function create({ manifest, cwd, resumeFirst = false }) {
     format: manifest.chat.format || "text",
     args: manifest.chat.args || [],
     resumeArgs: manifest.chat.resumeArgs || null,
+    // Resume by the CLI's own session id: --continue picks the newest conversation in cwd, not this one.
+    resumeIdArgs: manifest.chat.resumeIdArgs || null,
+    cliSession,
+    promptArg: Boolean(manifest.chat.promptArg),
+    inlineHistory: Boolean(manifest.chat.inlineHistory),
     // Model selection (manifest `chat.models` map): per-chat override that
     // appends model args/env at run time — phone picks the model, daemon runs it.
     models: manifest.chat.models || {},
+    modelArg: manifest.chat.modelArg || null,
     model: null,
     // resumeFirst: next turn uses resumeArgs (chat resurrection — re-open a
     // conversation the daemon forgot via the CLI's own --continue history).
@@ -174,8 +180,11 @@ export function sendUserMessage(c, rawText) {
 function runTurn(c, prompt) {
   if (c.proc && c.state === "running") return false;
   const continuing = c.turn > 0 && c.resumeArgs && c.resumeArgs.length > 0;
-  const modelCfg = c.model && c.models && c.models[c.model] ? c.models[c.model] : null;
-  const argv = [...(continuing ? c.resumeArgs : c.args), ...(modelCfg?.args || [])];
+  const modelCfg = !c.model ? null : c.models?.[c.model] ?? (c.modelArg ? { args: [...c.modelArg, c.model] } : null);
+  const byId = c.turn > 0 && c.cliSession && c.resumeIdArgs;
+  const base = byId ? c.resumeIdArgs.map((a) => a.replaceAll("{id}", c.cliSession)) : continuing ? c.resumeArgs : c.args;
+  if (c.inlineHistory && c.turn > 0) prompt = withHistory(c, prompt);
+  const argv = [...base, ...(modelCfg?.args || []), ...(c.promptArg ? [prompt] : [])];
   c.turn++;
   c.state = "running";
   pushState(c);
@@ -186,13 +195,25 @@ function runTurn(c, prompt) {
   // layered over the daemon's environment; a selected model's env wins.
   const env = { ...process.env, ...(c.env || {}), ...(modelCfg?.env || {}) };
 
-  const proc = IS_WIN
-    ? spawn("cmd.exe", ["/c", c.bin, ...argv], { windowsHide: true, cwd: c.cwd, env, stdio: ["pipe", "pipe", "pipe"] })
-    : spawn(c.bin, argv, { cwd: c.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+  const opts = { windowsHide: true, cwd: c.cwd, env, stdio: ["pipe", "pipe", "pipe"] };
+  // cmd.exe re-parses its command line, so a prompt passed as an argument must bypass it.
+  const script = IS_WIN && c.promptArg ? npmShimScript(c.bin) : null;
+  if (IS_WIN && c.promptArg && !script) {
+    c.state = "error";
+    appendSystem(c, `cannot find the npm launcher for ${c.bin}`);
+    push(c, { type: "chatdelta", id: c.id, text: `\n[spawn failed] cannot find the npm launcher for ${c.bin}` });
+    pushState(c);
+    return true;
+  }
+  const proc = script
+    ? spawn(process.execPath, [script, ...argv], opts)
+    : IS_WIN
+      ? spawn("cmd.exe", ["/c", c.bin, ...argv], opts)
+      : spawn(c.bin, argv, opts);
   c.proc = proc;
 
   try {
-    proc.stdin.write(prompt + "\n");
+    if (!c.promptArg) proc.stdin.write(prompt + "\n");
   } catch (e) {
     // Child died instantly (bad bin/args) — surface instead of crashing.
     c.state = "error";
@@ -211,7 +232,7 @@ function runTurn(c, prompt) {
 
   const onChunk = (d) => {
     const s = decoder.write(d);
-    if (c.format === "claude-stream-json" || c.format === "codex-json") {
+    if (PARSERS[c.format]) {
       outBuf += s;
       const lines = outBuf.split(/\r?\n/);
       outBuf = lines.pop();
@@ -222,8 +243,10 @@ function runTurn(c, prompt) {
     }
   };
 
+  let errBuf = "";
   proc.stdout.on("data", onChunk);
-  proc.stderr.on("data", onChunk);
+  // JSON agents print warnings on stderr every run; it only matters when the turn fails.
+  proc.stderr.on("data", PARSERS[c.format] ? (d) => { errBuf = (errBuf + d).slice(-4000); } : onChunk);
   proc.on("error", (e) => {
     if (c.proc !== proc) return;
     c.state = "error";
@@ -236,6 +259,7 @@ function runTurn(c, prompt) {
     if (outBuf.trim()) handleLine(c, outBuf, emitText);
     outBuf = "";
     decoder.end();
+    if (code !== 0 && errBuf.trim()) emitText("\n" + errBuf.trim());
     // A finished turn lets the next one start before this process exits; it must not clobber that turn.
     if (c.proc !== proc) return;
     c.proc = null;
@@ -266,12 +290,25 @@ function handleLine(c, line, emitText) {
     emitText(line + "\n");
     return;
   }
-  if (c.format === "claude-stream-json") parseClaude(c, obj, emitText);
-  else if (c.format === "codex-json") parseCodex(c, obj, emitText);
+  const parse = PARSERS[c.format];
+  if (parse) parse(c, obj, emitText);
   else emitText(line + "\n");
 }
 
+/** Resolves an npm `.cmd` shim on PATH to the node script it launches. */
+function npmShimScript(bin) {
+  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
+    if (!dir) continue;
+    try {
+      const m = fs.readFileSync(path.join(dir, `${bin}.cmd`), "utf8").match(/"%dp0%\\([^"]+)"\s+%\*/);
+      if (m) return path.join(dir, m[1]);
+    } catch {}
+  }
+  return null;
+}
+
 function parseClaude(c, obj, emitText) {
+  if (typeof obj.session_id === "string" && obj.session_id) c.cliSession = obj.session_id;
   switch (obj.type) {
     case "assistant": {
       const content = obj.message?.content ?? [];
@@ -307,32 +344,136 @@ function parseClaude(c, obj, emitText) {
   }
 }
 
+// `codex exec --json`. Top-level "error" events are retry notices; only turn.failed ends a turn.
 function parseCodex(c, obj, emitText) {
-  const msg = obj.msg ?? obj;
-  switch (msg.type) {
-    case "agent_message":
-      emitText(msg.message ?? "");
+  const item = obj.item ?? {};
+  switch (obj.type) {
+    case "thread.started":
+      c.cliSession = obj.thread_id ?? c.cliSession;
       break;
-    case "exec_command_begin":
-      toolUse(c, "exec", (msg.command ?? []).join(" ").slice(0, 160));
+    case "item.started":
+      if (item.type === "command_execution") toolUse(c, "exec", String(item.command ?? "").slice(0, 160));
       break;
-    case "patch_apply_begin":
-      toolUse(c, "patch", (msg.changes ? Object.keys(msg.changes).join(", ") : "").slice(0, 160));
+    case "item.completed":
+      if (item.type === "agent_message") emitText(item.text ?? "");
+      else if (item.type === "command_execution") toolResult(c, String(item.aggregated_output ?? "").slice(0, 200));
+      else if (item.type === "file_change") toolUse(c, "patch", (item.changes ?? []).map((ch) => ch.path).join(", ").slice(0, 160));
       break;
-    case "task_complete":
-      finishTurn(c, "idle", msg.last_agent_message ?? "");
+    case "turn.completed":
+      emitUsage(c, obj.usage, 0);
+      finishTurn(c, "idle", "");
       break;
-    case "token_count":
-      emitUsage(c, msg.info?.total_token_usage ?? msg.info ?? null, 0);
-      break;
-    case "error":
-    case "turn_aborted":
-      finishTurn(c, "error", msg.message ?? "aborted");
+    case "turn.failed":
+      finishTurn(c, "error", obj.error?.message ?? "turn failed");
       break;
     default:
       break;
   }
 }
+
+// `opencode run --format json`: a turn is several steps; the one with reason "stop" is the last.
+function parseOpencode(c, obj, emitText) {
+  if (obj.sessionID) c.cliSession = obj.sessionID;
+  const part = obj.part ?? {};
+  switch (obj.type) {
+    case "text":
+      emitText(part.text ?? "");
+      break;
+    case "tool_use":
+      toolUse(c, part.tool ?? "tool", JSON.stringify(part.state?.input ?? {}));
+      break;
+    case "step_finish":
+      emitUsage(c, part.tokens, part.cost);
+      if (part.reason === "stop") finishTurn(c, "idle", "");
+      break;
+    case "error":
+      finishTurn(c, "error", obj.error?.data?.message ?? obj.error?.name ?? "error");
+      break;
+    default:
+      break;
+  }
+}
+
+// `gemini -o stream-json`.
+function parseGemini(c, obj, emitText) {
+  switch (obj.type) {
+    case "init":
+      c.cliSession = obj.session_id ?? c.cliSession;
+      break;
+    case "message":
+      if (obj.role === "assistant") emitText(obj.content ?? "");
+      break;
+    case "tool_use":
+      toolUse(c, obj.tool_name ?? "tool", JSON.stringify(obj.parameters ?? {}));
+      break;
+    case "tool_result":
+      toolResult(c, String(obj.output ?? obj.status ?? "").slice(0, 200));
+      break;
+    case "result":
+      emitUsage(c, obj.stats, 0);
+      finishTurn(c, obj.status === "success" ? "idle" : "error", obj.status === "success" ? "" : obj.error?.message ?? "");
+      break;
+    default:
+      break;
+  }
+}
+
+// `copilot --output-format json`: deltas stream the text and assistant.message repeats it whole.
+function parseCopilot(c, obj, emitText) {
+  const d = obj.data ?? {};
+  switch (obj.type) {
+    case "assistant.message_delta":
+      emitText(d.deltaContent ?? "");
+      break;
+    case "tool.execution_start":
+      toolUse(c, d.toolName ?? "tool", JSON.stringify(d.arguments ?? {}));
+      break;
+    case "tool.execution_complete":
+      toolResult(c, String(d.result?.content ?? "").slice(0, 200));
+      break;
+    case "result":
+      c.cliSession = obj.sessionId ?? c.cliSession;
+      emitUsage(c, obj.usage, 0);
+      finishTurn(c, obj.exitCode === 0 ? "idle" : "error", "");
+      break;
+    default:
+      break;
+  }
+}
+
+// `cline --json`.
+function parseCline(c, obj, emitText) {
+  const ev = obj.event ?? {};
+  if (obj.type === "agent_event") {
+    if (ev.type === "content_end" && ev.contentType === "text") emitText(ev.text ?? "");
+    else if (ev.type === "content_start" && ev.contentType === "tool") toolUse(c, ev.toolName ?? "tool", JSON.stringify(ev.input ?? {}));
+    else if (ev.type === "content_end" && ev.contentType === "tool") toolResult(c, JSON.stringify(ev.output ?? "").slice(0, 200));
+  } else if (obj.type === "run_result") {
+    emitUsage(c, obj.usage, obj.usage?.totalCost);
+    finishTurn(c, obj.finishReason === "completed" ? "idle" : "error", "");
+  } else if (obj.type === "error") {
+    finishTurn(c, "error", obj.message ?? "error");
+  }
+}
+
+// Cline cannot resume a session without a TTY, so earlier turns ride along in the prompt.
+function withHistory(c, prompt) {
+  const past = c.transcript.slice(0, -1)
+    .filter((t) => t.role === "user" || t.role === "assistant")
+    .map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text}`)
+    .join("\n\n")
+    .slice(-8000);
+  return `Conversation so far:\n\n${past}\n\nUser: ${prompt}`;
+}
+
+const PARSERS = {
+  "claude-stream-json": parseClaude,
+  "codex-json": parseCodex,
+  "opencode-json": parseOpencode,
+  "gemini-json": parseGemini,
+  "copilot-json": parseCopilot,
+  "cline-json": parseCline,
+};
 
 // Usage fields from stream events (c9watch/flue/orca cost dashboards).
 function emitUsage(c, usage, costUsd) {
@@ -411,17 +552,20 @@ function checkWaiting(c, text) {
 export function listModels(id) {
   const c = chats.get(id);
   if (!c) return { ok: false, error: `no such chat: ${id}` };
-  return { ok: true, id, models: Object.keys(c.models), current: c.model };
+  return { ok: true, id, models: Object.keys(c.models), current: c.model, custom: Boolean(c.modelArg) };
 }
+
+// Model names reach a cmd.exe command line on Windows, so only plain identifiers pass.
+const MODEL_NAME = /^[\w.:/-]{1,80}$/;
 
 export function setModel(id, model) {
   const c = chats.get(id);
   if (!c) return { ok: false, error: `no such chat: ${id}` };
-  if (model != null && !c.models[model]) {
+  if (model != null && !c.models[model] && !(c.modelArg && MODEL_NAME.test(model))) {
     return { ok: false, error: `unknown model: ${model} (available: ${Object.keys(c.models).join(", ") || "none"})` };
   }
   c.model = model || null;
-  return { ok: true, id, models: Object.keys(c.models), current: c.model };
+  return { ok: true, id, models: Object.keys(c.models), current: c.model, custom: Boolean(c.modelArg) };
 }
 
 export function cancel(c) {
@@ -444,7 +588,7 @@ export function cancel(c) {
 
 function pushState(c) {
   push(c, { type: "chatstate", id: c.id, state: c.state });
-  chatEvents.emit("state", { id: c.id, state: c.state, harnessId: c.harnessId });
+  chatEvents.emit("state", { id: c.id, state: c.state, harnessId: c.harnessId, cliSession: c.cliSession });
 }
 
 function push(c, obj) {

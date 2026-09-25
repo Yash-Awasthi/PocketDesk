@@ -4,8 +4,12 @@
   "adapter": "terminal",
   "bin": "gemini",
   "install": { "npm": "@google/gemini-cli" },
+  "auth": { "login": [] },
   "chat": {
-    "args": [],
-    "format": "text"
+    "args": ["-o", "stream-json"],
+    "modelArg": ["-m"],
+    "format": "gemini-json",
+    "resumeIdArgs": ["-o", "stream-json", "--resume", "{id}"],
+    "resumeArgs": ["-o", "stream-json", "--resume", "latest"]
   }
 }

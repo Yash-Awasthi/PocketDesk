@@ -74,7 +74,8 @@ export function handle(text, chatId) {
   const args = parts.slice(1);
 
   const cmd = commands.get(name);
-  if (!cmd) return `Unknown command: /${name}. Type /help for available commands.`;
+  // Anything else is the agent's own command or skill.
+  if (!cmd) return null;
 
   try {
     return cmd.handler(args, chatId);

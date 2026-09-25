@@ -30,17 +30,18 @@ function save(records) {
   } catch {}
 }
 
-export function upsert({ id, harnessId, cwd, name }) {
+export function upsert({ id, harnessId, cwd, name, cliSession }) {
   const records = load().filter((r) => r.id !== id);
-  records.push({ id, harnessId, cwd, name: name || "", lastActive: Date.now() });
+  records.push({ id, harnessId, cwd, name: name || "", cliSession: cliSession || null, lastActive: Date.now() });
   save(records);
 }
 
-export function touch(id) {
+export function touch(id, cliSession) {
   const records = load();
   const rec = records.find((r) => r.id === id);
   if (rec) {
     rec.lastActive = Date.now();
+    if (cliSession) rec.cliSession = cliSession;
     save(records);
   }
 }

@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as registry from "../registry.js";
 import * as appDiscovery from "../app_discovery.js";
@@ -22,7 +22,42 @@ import * as planMode from "../plan_mode.js";
 
 export default function agentsHandlers(ctx) {
   const { send, broadcast, allSessions, notifications, plugins, power, shares, activity } = ctx;
-  return {
+  // Runs one of a manifest's fixed auth commands; nothing from the client reaches the command line.
+  const runAuth = (m, args) => new Promise((resolve) => {
+    const [bin, argv] = process.platform === "win32" ? ["cmd.exe", ["/c", m.bin, ...args]] : [m.bin, args];
+    execFile(bin, argv, { timeout: 30000, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) =>
+      resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, text: `${stdout}${stderr}`.trim().slice(0, 2000) }));
+  });
+  const authManifest = (ws, msg, op) => {
+    const m = registry.get(msg.harness);
+    if (!m?.auth?.[op]) {
+      send(ws, { type: "error", message: `${m?.name ?? msg.harness}: no ${op} command, use its terminal` });
+      return null;
+    }
+    return m;
+  };
+  const self = {
+    // ── Agent accounts: status runs headless; login/logout run in a terminal (device codes, links, provider pickers) ──
+    async auth_status(ws, msg) {
+      const m = authManifest(ws, msg, "status");
+      if (!m) return;
+      const r = await runAuth(m, m.auth.status);
+      // OpenCode also counts provider keys from the environment next to its stored credentials.
+      const noCreds = /\b0 credentials/i.test(r.text) && !/[1-9]\d* environment variables?/i.test(r.text);
+      const loggedIn = r.code === 0 && !noCreds && !/not logged in|logged out|no credentials|"loggedIn":\s*false/i.test(r.text);
+      send(ws, { type: "auth_status", harness: m.id, loggedIn, text: r.text });
+    },
+    async auth_logout(ws, msg) {
+      const m = authManifest(ws, msg, "logout");
+      if (!m) return;
+      auditLog.log("auth_logout", { harness: m.id });
+      return self.create(ws, { harness: m.id, cwd: msg.cwd, args: m.auth.logout });
+    },
+    async auth_login(ws, msg) {
+      const m = authManifest(ws, msg, "login");
+      if (!m) return;
+      return self.create(ws, { harness: m.id, cwd: msg.cwd, args: m.auth.login });
+    },
     async detect(ws, msg) {
       await registry.scanAll(broadcast);
     },
@@ -75,8 +110,8 @@ export default function agentsHandlers(ctx) {
       if (c.state === "running") return send(ws, { type: "error", message: "still working on the previous prompt" });
       chat.attach(msg.id, ws);
       const text = String(msg.text || "");
-      if (text.startsWith("/")) {
-        const result = slashCommands.handle(text, msg.id);
+      const result = slashCommands.handle(text, msg.id);
+      if (result !== null) {
         send(ws, { type: "chatdelta", id: msg.id, text: result + "\n" });
         return;
       }
@@ -305,13 +340,13 @@ export default function agentsHandlers(ctx) {
       const rec = resurrect.get(msg.id);
       const m = rec && registry.get(rec.harnessId);
       if (!rec || !m || !chat.supported(m)) return send(ws, { type: "error", message: `no resumable chat: ${msg.id}` });
-      const s = chat.create({ manifest: m, cwd: rec.cwd, resumeFirst: true });
+      const s = chat.create({ manifest: m, cwd: rec.cwd, resumeFirst: true, cliSession: rec.cliSession });
       sessionStore.upsert(s.id, { name: m.name, project: rec.cwd || "", type: "chat", status: "idle" });
       power.addStatus({ agentId: s.id, state: "running", receivedAt: Date.now() });
       // IDs restart from 1 per process, so the resumed chat often reuses the
       // old record's id — clear the stale record BEFORE re-registering.
       resurrect.remove(rec.id);
-      resurrect.upsert({ id: s.id, harnessId: m.id, cwd: rec.cwd, name: rec.name });
+      resurrect.upsert({ id: s.id, harnessId: m.id, cwd: rec.cwd, name: rec.name, cliSession: rec.cliSession });
       chat.attach(s.id, ws);
       send(ws, { type: "created", ...s, resumed: true });
       broadcast({ type: "sessions", items: allSessions() });
@@ -410,4 +445,5 @@ export default function agentsHandlers(ctx) {
       send(ws, { type: "manifests_reloaded", count: registry.list().length });
     },
   };
+  return self;
 }

@@ -496,8 +496,8 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
   // Sessions refresh on every chat-state transition (c9watch attention-first
   // list must reorder the moment an agent gets stuck, not only on create/close).
   chat.chatEvents.on("state", () => broadcast({ type: "sessions", items: allSessions() }));
-  chat.chatEvents.on("state", ({ id, state }) => {
-    if (state === "idle" || state === "error") resurrect.touch(id);
+  chat.chatEvents.on("state", ({ id, state, cliSession }) => {
+    if (state === "idle" || state === "error") resurrect.touch(id, cliSession);
   });
   // Approval auto-deny countdown (cc-pocket): waiting starts the clock.
   chat.chatEvents.on("state", ({ id, state }) => {
