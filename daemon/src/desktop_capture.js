@@ -55,7 +55,7 @@ public static class RHI {
   [StructLayout(LayoutKind.Explicit)] public struct INPUTUNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
   [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public INPUTUNION u; }
   public const uint MOVE=0x0001, LEFTDOWN=0x0002, LEFTUP=0x0004, RIGHTDOWN=0x0008, RIGHTUP=0x0010,
-                    MIDDLEDOWN=0x0020, MIDDLEUP=0x0040, WHEEL=0x0800, ABSOLUTE=0x8000,
+                    MIDDLEDOWN=0x0020, MIDDLEUP=0x0040, WHEEL=0x0800, VIRTUALDESK=0x4000, ABSOLUTE=0x8000,
                     KEYDOWN=0x0000, KEYUP=0x0002, UNICODE=0x0004;
   public static uint Mouse(int x, int y, uint flags, int wheel) {
     var i = new INPUT { type = 0 };
@@ -85,15 +85,20 @@ while ($true) {
   if ($op -eq 'mouse') {
     try {
       $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
-      $x = [int]$cmd.x; $y = [int]$cmd.y
-      $cx = [int][Math]::Round((($x - $vs.X) / [Math]::Max(1,$vs.Width)) * 65535)
-      $cy = [int][Math]::Round((($y - $vs.Y) / [Math]::Max(1,$vs.Height)) * 65535)
-      if ($cx -lt 0) {$cx=0}; if ($cx -gt 65535) {$cx=65535}
-      if ($cy -lt 0) {$cy=0}; if ($cy -gt 65535) {$cy=65535}
-      [RHI]::Mouse($cx, $cy, ([RHI]::MOVE -bor [RHI]::ABSOLUTE), 0) | Out-Null
-      if ($cmd.click -eq 'left')  { [RHI]::Mouse(0,0,[RHI]::LEFTDOWN,0) | Out-Null;  [RHI]::Mouse(0,0,[RHI]::LEFTUP,0) | Out-Null }
+      # x/y are relative to the virtual screen's top-left, the same origin as a captured frame.
+      if ($null -ne $cmd.x) {
+        $cx = [int][Math]::Round(([double]$cmd.x / [Math]::Max(1,$vs.Width - 1)) * 65535)
+        $cy = [int][Math]::Round(([double]$cmd.y / [Math]::Max(1,$vs.Height - 1)) * 65535)
+        if ($cx -lt 0) {$cx=0}; if ($cx -gt 65535) {$cx=65535}
+        if ($cy -lt 0) {$cy=0}; if ($cy -gt 65535) {$cy=65535}
+        [RHI]::Mouse($cx, $cy, ([RHI]::MOVE -bor [RHI]::ABSOLUTE -bor [RHI]::VIRTUALDESK), 0) | Out-Null
+      }
+      if ($cmd.click -eq 'left' -or $cmd.click -eq 'double') { [RHI]::Mouse(0,0,[RHI]::LEFTDOWN,0) | Out-Null;  [RHI]::Mouse(0,0,[RHI]::LEFTUP,0) | Out-Null }
+      if ($cmd.click -eq 'double'){ [RHI]::Mouse(0,0,[RHI]::LEFTDOWN,0) | Out-Null;  [RHI]::Mouse(0,0,[RHI]::LEFTUP,0) | Out-Null }
       if ($cmd.click -eq 'right') { [RHI]::Mouse(0,0,[RHI]::RIGHTDOWN,0) | Out-Null; [RHI]::Mouse(0,0,[RHI]::RIGHTUP,0) | Out-Null }
       if ($cmd.click -eq 'middle'){ [RHI]::Mouse(0,0,[RHI]::MIDDLEDOWN,0) | Out-Null;[RHI]::Mouse(0,0,[RHI]::MIDDLEUP,0) | Out-Null }
+      if ($cmd.press -eq 'down')  { [RHI]::Mouse(0,0,[RHI]::LEFTDOWN,0) | Out-Null }
+      if ($cmd.press -eq 'up')    { [RHI]::Mouse(0,0,[RHI]::LEFTUP,0) | Out-Null }
       if ($cmd.wheel) { [RHI]::Mouse(0,0,[RHI]::WHEEL,[int]$cmd.wheel) | Out-Null }
       [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}')
     } catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
@@ -155,10 +160,18 @@ while ($true) {
       if ($s -le 0 -or $s -gt 1) { $s = 1 }
       $w = [int]($vs.Width * $s); $h = [int]($vs.Height * $s)
       if ($w -lt 1) { $w = 1 }; if ($h -lt 1) { $h = 1 }
-      $bmp = New-Object System.Drawing.Bitmap $w, $h
+      $bmp = New-Object System.Drawing.Bitmap $vs.Width, $vs.Height
       $g = [System.Drawing.Graphics]::FromImage($bmp)
       $g.CopyFromScreen($vs.X, $vs.Y, 0, 0, (New-Object System.Drawing.Size $vs.Width, $vs.Height))
       $g.Dispose()
+      # CopyFromScreen never scales; copying straight into a smaller bitmap crops the right and bottom.
+      if ($w -ne $vs.Width) {
+        $small = New-Object System.Drawing.Bitmap $w, $h
+        $g = [System.Drawing.Graphics]::FromImage($small)
+        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::Bilinear
+        $g.DrawImage($bmp, 0, 0, $w, $h)
+        $g.Dispose(); $bmp.Dispose(); $bmp = $small
+      }
       $ms = New-Object System.IO.MemoryStream
       $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg)
       $bmp.Dispose()
@@ -383,10 +396,11 @@ export class DesktopController extends EventEmitter {
     }
   }
 
-  async inputMouse({ x, y, click, button, wheel }) {
+  /** x/y: virtual-screen pixels from its top-left (omit to act at the cursor); click: left|right|middle|double; press: down|up. */
+  async inputMouse({ x, y, click, press, wheel }) {
     if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
     await this.helperInput.ensure();
-    const r = await this.helperInput.cmd({ op: "mouse", x, y, click, button, wheel }, 8000);
+    const r = await this.helperInput.cmd({ op: "mouse", x, y, click, press, wheel }, 8000);
     return { ok: !!r?.ok, error: r?.error };
   }
 

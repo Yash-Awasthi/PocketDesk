@@ -120,9 +120,10 @@ export default function remoteHandlers(ctx) {
       // coords measured on the frame must be divided back out. Wheel-only
       // events carry no meaningful x/y and skip the transform.
       const factor = desktop.scale;
-      const x = msg.wheel != null ? 0 : Math.round(Number(msg.x) / factor);
-      const y = msg.wheel != null ? 0 : Math.round(Number(msg.y) / factor);
-      const r = await desktop.inputMouse({ x, y, click: msg.click, wheel: msg.wheel });
+      const at = msg.x != null && msg.y != null && msg.wheel == null;
+      const x = at ? Math.round(Number(msg.x) / factor) : undefined;
+      const y = at ? Math.round(Number(msg.y) / factor) : undefined;
+      const r = await desktop.inputMouse({ x, y, click: msg.click, press: msg.press, wheel: msg.wheel });
       send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
     },
     async desktop_key(ws, msg) {

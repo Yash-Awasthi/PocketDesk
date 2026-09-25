@@ -20,7 +20,9 @@ fs.writeFileSync(agentJs, `
 let input = "";
 process.stdin.on("data", (d) => (input += d));
 process.stdin.on("end", () => {
-  process.stdout.write(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "echo: " + input.trim() }] } }) + "\\n");
+  const extra = process.argv.slice(2).join(" ");
+  process.stdout.write(JSON.stringify({ type: "system", subtype: "init", session_id: "sess-1" }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "echo: " + input.trim() + (extra ? " [" + extra + "]" : "") }] } }) + "\\n");
   process.stdout.write(JSON.stringify({ type: "result", is_error: false, result: "" }) + "\\n");
 });
 `);
@@ -35,7 +37,8 @@ process.stdin.on("end", () => {
 `);
 fs.writeFileSync(path.join(tmp, "fakechat.json"), JSON.stringify({
   id: "fakechat", name: "Fake Chat", adapter: "terminal", bin: "node", install: {},
-  chat: { args: [agentJs], format: "claude-stream-json", resumeArgs: [agentResumeJs] },
+  auth: { status: ["-e", "console.log('Logged in as test')"], login: ["-e", "console.log('visit example.com/device')"] },
+  chat: { args: [agentJs], format: "claude-stream-json", resumeArgs: [agentResumeJs], resumeIdArgs: [agentJs, "--resume-id", "{id}"] },
 }));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -208,11 +211,34 @@ async function main() {
   const powerOn = await c2.next((m) => m.type === "power_status");
   check("power_set on activates assertion", powerOn.mode === "on" && powerOn.active === true);
 
+  // Agent accounts: status is headless; login opens a terminal; an agent without a command says so.
+  c2.send({ type: "auth_status", harness: "fakechat" });
+  const st = await c2.next((m) => m.type === "auth_status");
+  check("auth_status reports logged in", st.loggedIn === true && st.text.includes("Logged in as test"));
+  c2.send({ type: "auth_login", harness: "fakechat", cwd: tmp });
+  const login = await c2.next((m) => m.type === "created");
+  check("auth_login opens a terminal session", login.kind !== "chat" && Boolean(login.id));
+  c2.send({ type: "auth_logout", harness: "fakechat" });
+  const noLogout = await c2.next((m) => m.type === "error" && m.message.includes("logout"));
+  check("agent without a logout command is told to use its terminal", noLogout.message.includes("use its terminal"));
+
   // ── Phase 2: chat session for resurrection ────────────────────────────────
   c2.send({ type: "chatsession", harness: "fakechat", cwd: tmp, prompt: "hello-resurrect" });
   const chatCreated = await c2.next((m) => m.type === "created" && m.kind === "chat");
   const chatDone = await c2.next((m) => m.type === "chatstate" && m.id === chatCreated.id && m.state === "idle");
   check("chat turn completed", chatDone.state === "idle");
+  // --continue would pick the newest conversation in cwd, which may belong to another client.
+  c2.send({ type: "chatmsg", id: chatCreated.id, text: "second-turn" });
+  const turn2 = await c2.next((m) => m.type === "chatdelta" && m.id === chatCreated.id && m.text.includes("second-turn"));
+  check("second turn resumes the chat's own CLI session", turn2.text.includes("[--resume-id sess-1]"));
+  await c2.next((m) => m.type === "chatstate" && m.id === chatCreated.id && m.state === "idle");
+  c2.send({ type: "chatmsg", id: chatCreated.id, text: "/status" });
+  const status = await c2.next((m) => m.type === "chatdelta" && m.id === chatCreated.id && m.text.includes("Sessions:"));
+  check("daemon slash command answered by the daemon", status.text.includes("idle"));
+  c2.send({ type: "chatmsg", id: chatCreated.id, text: "/my-skill do it" });
+  const skill = await c2.next((m) => m.type === "chatdelta" && m.id === chatCreated.id && m.text.includes("my-skill"));
+  check("unknown slash command reaches the agent as a skill", skill.text.includes("echo: /my-skill do it"));
+  await c2.next((m) => m.type === "chatstate" && m.id === chatCreated.id && m.state === "idle");
 
   // Simulate restart: the chat record lives on disk, so even a hard stop
   // resurrects. SIGTERM so the exit handler disposes helpers (no leaks).
@@ -239,8 +265,8 @@ async function main() {
   const rez2 = await c3.next((m) => m.type === "resurrect_list");
   check("resurrect tracks resumed chat exactly once", rez2.items.filter((r) => r.harnessId === "fakechat").length === 1);
   c3.send({ type: "chatmsg", id: resumed.id, text: "continue-please" });
-  const delta = await c3.next((m) => m.type === "chatdelta" && m.id === resumed.id && m.text.includes("resumed:"));
-  check("resumed chat uses resumeArgs on first turn", delta.text.includes("resumed: continue-please"));
+  const delta = await c3.next((m) => m.type === "chatdelta" && m.id === resumed.id && m.text.includes("continue-please"));
+  check("resumed chat resumes its recorded CLI session", delta.text.includes("echo: continue-please [--resume-id sess-1]"));
 
   await c3.close();
   d2.kill("SIGTERM");
