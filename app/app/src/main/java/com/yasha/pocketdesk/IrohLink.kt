@@ -6,7 +6,9 @@ import computer.iroh.Endpoint
 import computer.iroh.EndpointOptions
 import computer.iroh.EndpointTicket
 import computer.iroh.RecvStream
+import computer.iroh.RelayMode
 import computer.iroh.SecretKey
+import computer.iroh.presetMinimal
 import computer.iroh.presetN0
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +44,8 @@ class IrohLink(
     fun start(onOpen: () -> Unit) {
         scope.launch {
             try {
-                val c = Node.endpoint().connect(EndpointTicket.fromString(ticket).endpointAddr(), ALPN)
+                val addr = EndpointTicket.fromString(ticket).endpointAddr()
+                val c = Node.endpoint(addr.relayUrl()).connect(addr, ALPN)
                 conn = c
                 val bi = c.openBi()
                 val send = bi.send()
@@ -89,9 +92,12 @@ class IrohLink(
         onClosed(code, reason)
     }
 
-    /** One endpoint per process, keyed by a persisted secret so the PC sees a stable device key. */
+    /**
+     * Endpoints share one persisted secret, so the PC always sees the same device key.
+     * The phone uses the PC's own relay: with a self-hosted relay nothing reaches n0.
+     */
     object Node {
-        private var ep: Endpoint? = null
+        private val eps = HashMap<String, Endpoint>()
         private val lock = Mutex()
         private lateinit var key: ByteArray
 
@@ -104,8 +110,13 @@ class IrohLink(
             }
         }
 
-        suspend fun endpoint(): Endpoint = lock.withLock {
-            ep ?: Endpoint.bind(EndpointOptions(preset = presetN0(), secretKey = key, alpns = listOf(ALPN))).also { ep = it }
+        suspend fun endpoint(relay: String?): Endpoint = lock.withLock {
+            val k = relay ?: ""
+            eps[k] ?: Endpoint.bind(
+                // n0's relays come with its address lookup, which follows the PC across relay changes.
+                if (relay == null || ".n0.iroh.link" in relay) EndpointOptions(preset = presetN0(), secretKey = key, alpns = listOf(ALPN))
+                else EndpointOptions(preset = presetMinimal(), secretKey = key, alpns = listOf(ALPN), relayMode = RelayMode.customFromUrls(listOf(relay))),
+            ).also { eps[k] = it }
         }
     }
 
