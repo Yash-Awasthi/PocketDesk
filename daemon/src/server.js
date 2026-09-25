@@ -48,6 +48,8 @@ import filesHandlers from "./handlers/files.js";
 import remoteHandlers from "./handlers/remote.js";
 import sshHandlers from "./handlers/ssh.js";
 import systemHandlers from "./handlers/system.js";
+import { startIroh } from "./iroh_link.js";
+import { configDir } from "./config.js";
 
 const HELLO_TIMEOUT = 10_000;
 const MAX_AUTH_ATTEMPTS = 5;
@@ -70,7 +72,7 @@ const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugi
   return all.sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9));
 }
 
-export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } = {}) {
+export function start({ port, token, tls, relay: relayCfg, iroh: irohCfg }, { onTokenRotated } = {}) {
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
   const page = fs.readFileSync(path.join(publicDir, "index.html"));
   const pairTemplate = fs.readFileSync(path.join(publicDir, "pair.html"), "utf8");
@@ -86,6 +88,8 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
 
   let pairPage = "";
   let pairFp = "";
+  let irohTicket = "";
+  let irohEp = null;
   // Rebuilt on token rotation, so the QR never shows a dead token.
   function buildPairPage(useTls, fingerprint = pairFp) {
     pairFp = fingerprint;
@@ -94,7 +98,7 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
     // the concrete channel, not an empty "use the default".
     const relayUrl = relayCfg?.url || (relayCfg?.hostPort ? `relay://${lanAddress()}:${relayCfg.hostPort}` : "");
     const payload = Buffer.from(
-      JSON.stringify({ u: url, t: token, f: fingerprint || "", r: relayUrl || undefined, c: relayUrl ? relayCfg?.channel || relay.defaultChannel() : undefined }),
+      JSON.stringify({ u: url, t: token, f: fingerprint || "", r: relayUrl || undefined, c: relayUrl ? relayCfg?.channel || relay.defaultChannel() : undefined, i: irohTicket || undefined }),
       "utf8",
     ).toString("base64url");
     pairPage = pairTemplate
@@ -127,6 +131,9 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
       return;
     }
     if (req.url === "/pair" && loopback) {
+      // The ticket carries current addresses and relay, which change with the network.
+      const t = irohEp?.ticket();
+      if (t && t !== irohTicket) { irohTicket = t; buildPairPage(useTls); }
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       res.end(pairPage);
       return;
@@ -227,11 +234,18 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
           }
           const auth = authenticate(msg);
           if (auth) {
+            // Checked before welcome(), which would re-issue a pairing device's token.
+            if (ws._irohId && !devices.claimEndpoint(auth.id, ws._irohId)) {
+              ws.close(4003, "device key mismatch");
+              return;
+            }
+            const hi = welcome(auth, msg, clientIp);
+            if (ws._irohId) devices.claimEndpoint(auth.id, ws._irohId);
             ws._authed = true;
             authAttempts.delete(clientIp);
             clearTimeout(timer);
             ws._clientId = auth.id;
-            send(ws, welcome(auth, msg, clientIp));
+            send(ws, hi);
           } else {
             ws.close(4003, "bad token");
           }
@@ -418,6 +432,8 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
     const msg = Buffer.concat([Buffer.from([kind]), data]);
     for (const w of videoWatchers) {
       if (w.readyState !== 1) continue;
+      // iroh viewers get a QUIC stream per GOP and drop a stale GOP themselves.
+      if (w.sendVideo) { if (!w.sendVideo(kind, data)) resync(); continue; }
       if (kind === 0) w._needKey = false;
       if (w._needKey) continue;
       if (w.bufferedAmount > 1_500_000) { w._needKey = true; resync(); continue; }
@@ -596,6 +612,25 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
     if (relayCfg?.hostPort) console.log(`  relay     hosting :${relayCfg.hostPort}  (phone URL: relay://<this-pc>:${relayCfg.hostPort}/${relayCfg.channel || relay.defaultChannel()})`);
     console.log("  config    %USERPROFILE%\\.pocketdesk\\config.json");
     console.log("");
+    // iroh sockets join wss.clients so broadcast and revoke reach them like /ws sockets.
+    if (irohCfg?.enabled) {
+      startIroh({
+        dir: configDir,
+        relays: irohCfg.relays,
+        onConnection(sock, remoteId) {
+          sock._irohId = remoteId;
+          wss.clients.add(sock);
+          sock.once("close", () => wss.clients.delete(sock));
+          wss.emit("connection", sock, { socket: { remoteAddress: `iroh:${remoteId}` } });
+        },
+      }).then((ep) => {
+        if (!ep) return console.log("  iroh      unavailable (optional @number0/iroh not installed)");
+        irohEp = ep;
+        irohTicket = ep.ticket();
+        buildPairPage(useTls);
+        console.log(`  iroh      ${ep.id}`);
+      }).catch((e) => console.log(`  iroh      failed to start: ${e?.message || e}`));
+    }
     sessionStore.init();
     cliServer.start();
     proposals.init(broadcast);

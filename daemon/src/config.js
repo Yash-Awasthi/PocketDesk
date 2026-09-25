@@ -58,6 +58,15 @@ export function loadConfig() {
     channel: hasRelayChannel ? process.env.RH_RELAY_CHANNEL : envDriven ? "" : cfg.relay?.channel || "",
     hostPort: hasRelayPort ? Number(process.env.RH_RELAY_PORT) || 0 : envDriven ? 0 : Number(cfg.relay?.hostPort) || 0,
   };
+  // iroh: reach this PC by key from any network. RH_IROH=0 disables, RH_IROH=local
+  // keeps it direct-only (tests), RH_IROH_RELAYS takes comma-separated relay URLs.
+  const irohEnv = process.env.RH_IROH;
+  cfg.iroh = {
+    enabled: irohEnv !== undefined ? irohEnv !== "0" : envDriven ? false : cfg.iroh?.enabled !== false,
+    relays: irohEnv === "local" ? "off"
+      : "RH_IROH_RELAYS" in process.env ? process.env.RH_IROH_RELAYS.split(",").map((s) => s.trim()).filter(Boolean)
+      : Array.isArray(cfg.iroh?.relays) ? cfg.iroh.relays : [],
+  };
   if (!persisted && !fromEnv("RH_PORT") && !fromEnv("RH_TOKEN")) saveConfig(cfg);
   return cfg;
 }
@@ -71,6 +80,7 @@ export function saveConfig(cfg) {
       token: cfg.token,
       tls: { enabled: cfg.tls.enabled, cert: cfg.tls.cert, key: cfg.tls.key },
       relay: { url: cfg.relay?.url || "", channel: cfg.relay?.channel || "", hostPort: cfg.relay?.hostPort || 0 },
+      iroh: { enabled: cfg.iroh?.enabled !== false, relays: Array.isArray(cfg.iroh?.relays) ? cfg.iroh.relays : [] },
     }, null, 2),
     { mode: 0o600 },
   );

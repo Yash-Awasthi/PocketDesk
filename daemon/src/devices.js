@@ -119,8 +119,21 @@ export function revoke(clientId) {
   if (!d) return { ok: false, error: `unknown device: ${clientId}` };
   d.revoked = true;
   delete d.tokenHash;
+  delete d.endpointId;
   save();
   return { ok: true, device: d };
+}
+
+/**
+ * Binds a device to the iroh endpoint it first authenticated from. False when the
+ * device is already bound to another key: its token is being used elsewhere.
+ */
+export function claimEndpoint(clientId, endpointId) {
+  const d = devices.get(String(clientId));
+  if (!d) return true;
+  if (d.endpointId && d.endpointId !== endpointId) return false;
+  if (!d.endpointId) { d.endpointId = endpointId; save(); }
+  return true;
 }
 
 export function allow(clientId) {
