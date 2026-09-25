@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DesktopVideo, FlvToAnnexB, KIND, ffmpegArgs } from "../src/desktop_video.js";
+import { DesktopVideo, FlvToAnnexB, KIND, ffmpegArgs, seiStamp, STAMP_UUID } from "../src/desktop_video.js";
 
 function tag(type, body) {
   const h = Buffer.alloc(11);
@@ -60,4 +60,16 @@ test("a monitor picks its output, and one on another GPU gets that GPU's device"
   const second = ffmpegArgs("libx264", "balanced", { adapter: 1, output: 2 });
   assert.deepEqual(second.slice(3, 7), ["-init_hw_device", "d3d11va=rh:1", "-filter_hw_device", "rh"]);
   assert.match(second[second.indexOf("-filter_complex") + 1], /ddagrab=output_idx=2:/);
+});
+
+test("frame stamps survive as an SEI unit with no zero bytes to escape", () => {
+  const ms = 1790000000123;
+  const sei = seiStamp(ms);
+  assert.deepEqual([...sei.subarray(0, 7)], [0, 0, 0, 1, 0x06, 0x05, 23]);
+  const body = sei.subarray(4);
+  assert.ok(!body.includes(0), "no 0x00 means no 00 00 0x start-code emulation");
+  const at = sei.indexOf(STAMP_UUID) + 16;
+  let v = 0;
+  for (let i = 0; i < 7; i++) v = v * 128 + (sei[at + i] & 0x7f);
+  assert.equal(v, ms);
 });

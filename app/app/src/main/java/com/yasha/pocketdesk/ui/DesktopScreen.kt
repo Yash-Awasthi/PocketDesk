@@ -142,9 +142,13 @@ fun DesktopScreen(
     LaunchedEffect(video) {
         var b = ws.videoBytes
         var f = ws.videoFrames
+        var tick = 0
         while (video) {
+            if (tick++ % 2 == 0) ws.desktopPing()
             kotlinx.coroutines.delay(1000)
-            rate = "%d fps · %.1f Mb/s".format(ws.videoFrames - f, (ws.videoBytes - b) * 8 / 1e6)
+            rate = "%d fps · %.1f Mb/s".format(ws.videoFrames - f, (ws.videoBytes - b) * 8 / 1e6) +
+                (if (ws.videoDelay >= 0) " · ${ws.videoDelay} ms" else "") +
+                (if (ws.desktopRtt >= 0) " (ping ${ws.desktopRtt})" else "")
             b = ws.videoBytes
             f = ws.videoFrames
         }
@@ -391,7 +395,7 @@ private fun videoView(ctx: android.content.Context, ws: WsClient, onSize: (IntSi
         var surface: Surface? = null
         override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
             val s = Surface(st).also { surface = it }
-            val p = H264Player(s, onSize = { vw, vh -> onSize(IntSize(vw, vh)) }, onLost = { ws.desktopStartVideo() })
+            val p = H264Player(s, onSize = { vw, vh -> onSize(IntSize(vw, vh)) }, onLost = { ws.desktopStartVideo() }, onShown = ws::frameShown)
             player = p
             ws.videoSink = p::feed
             ws.desktopStartVideo()

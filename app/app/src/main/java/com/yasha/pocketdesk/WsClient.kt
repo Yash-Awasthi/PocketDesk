@@ -123,6 +123,19 @@ class WsClient(
     @Volatile var videoSink: ((ByteArray) -> Unit)? = null
     /** PC clipboard content, asked for or copied on the PC while the desktop is open. */
     val pcClip = kotlinx.coroutines.flow.MutableSharedFlow<PcClip>(extraBufferCapacity = 4)
+    /** Daemon clock minus ours, from the fastest recent ping; frame stamps are in daemon time. */
+    @Volatile private var clockOffset = 0L
+    private var bestRtt = Long.MAX_VALUE
+    private var bestRttAt = 0L
+    /** Round trip of the last ping and the smoothed age of frames when shown, in ms. */
+    @Volatile var desktopRtt = -1L
+    @Volatile var videoDelay = -1L
+    fun desktopPing() = send(Proto.desktopPing(System.currentTimeMillis()))
+    fun frameShown(sentAtMs: Long) {
+        if (bestRttAt == 0L) return
+        val age = (System.currentTimeMillis() + clockOffset - sentAtMs).coerceAtLeast(0)
+        videoDelay = if (videoDelay < 0) age else (videoDelay * 7 + age) / 8
+    }
     /** Running totals of received video, for the on-screen rate readout. */
     @Volatile var videoBytes = 0L
     @Volatile var videoFrames = 0L
@@ -859,6 +872,19 @@ class WsClient(
                     // A refusal on the PC must not be retried on every reconnect.
                     desktopResume = null
                     _desktopError.value = str(m, "reason") ?: "desktop unavailable"
+                }
+            }
+            "desktop_pong" -> {
+                val t = num(m, "t") ?: return
+                val server = num(m, "server") ?: return
+                val now = System.currentTimeMillis()
+                val rtt = now - t
+                desktopRtt = rtt
+                // The fastest round trip bounds the offset error best; refresh it now and then for drift.
+                if (rtt <= bestRtt || now - bestRttAt > 30_000) {
+                    bestRtt = rtt
+                    bestRttAt = now
+                    clockOffset = server - (t + rtt / 2)
                 }
             }
             "desktop_pending" -> desktopNotice = "Waiting for someone at the PC to allow this…"

@@ -193,6 +193,7 @@ object Proto {
         if (viewOnly) put("viewOnly", true)
     }
     fun desktopMonitors() = obj { put("type", "desktop_monitors") }
+    fun desktopPing(t: Long) = obj { put("type", "desktop_ping"); put("t", t) }
     fun clipboardGet() = obj { put("type", "clipboard_get") }
     fun clipboardSet(text: String?, png: String? = null, files: List<String>? = null, paste: Boolean = false) = obj {
         put("type", "clipboard_set")

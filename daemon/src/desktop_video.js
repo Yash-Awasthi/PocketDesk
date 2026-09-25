@@ -43,6 +43,18 @@ export function ffmpegArgs(enc, presetName, monitor) {
     "-flush_packets", "1", "-f", "flv", "-flvflags", "no_duration_filesize", "pipe:1"];
 }
 
+/**
+ * SEI NAL (user data unregistered) carrying the daemon's send time, so viewers can show
+ * how old each frame is. Decoders skip it. The time is 7 bytes of 7 bits with the high
+ * bit set, so no byte is 0 and the payload needs no emulation-prevention bytes.
+ */
+export const STAMP_UUID = Buffer.from("52482d6c6174656e63792d7374616d70", "hex"); // "RH-latency-stamp"
+export function seiStamp(ms) {
+  const t = Buffer.alloc(7);
+  for (let i = 6, v = ms; i >= 0; i--, v = Math.floor(v / 128)) t[i] = 0x80 | (v % 128);
+  return Buffer.concat([START_CODE, Buffer.from([0x06, 0x05, 16 + 7]), STAMP_UUID, t, Buffer.from([0x80])]);
+}
+
 /** Incremental FLV demuxer yielding { kind, data } with Annex B payloads. */
 export class FlvToAnnexB {
   constructor() { this.buf = Buffer.alloc(0); this.headerDone = false; }
@@ -180,6 +192,7 @@ export class DesktopVideo extends EventEmitter {
         for (const pkt of packets) {
           if (!live()) return;
           if (!started) { started = true; this.proc = proc; resolve(true); }
+          if (pkt.kind !== KIND.config) pkt.data = Buffer.concat([seiStamp(Date.now()), pkt.data]);
           this.stats.packets++;
           this.stats.bytes += pkt.data.length;
           this.emit("packet", pkt);

@@ -100,6 +100,10 @@ export default function remoteHandlers(ctx) {
       send(ws, { type: "desktop_started", ...r, viewOnly: ws._viewOnly });
       syncCursor();
     },
+    // Viewers align their clock with the daemon's to turn frame stamps into delays.
+    async desktop_ping(ws, msg) {
+      send(ws, { type: "desktop_pong", t: msg.t, server: Date.now() });
+    },
     async desktop_monitors(ws, msg) {
       const r = await desktop.monitors();
       if (r.ok) monitorList = r.monitors;
