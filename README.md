@@ -216,6 +216,7 @@ Authentication is always the same: the app sends the token once at connect
 
 | Mode | Phone URL | When to use | PC needs |
 |---|---|---|---|
+| **Anywhere (iroh)** | `iroh://<ticket>`, added by the pairing QR | Any network, no setup | Outbound internet only |
 | **LAN** | `ws://<pc-ip>:8765/ws` | Phone on same Wi-Fi | Nothing special |
 | **Relay** | `relay://<relay-host>:8790/<channel>` | Any network — kilometers away, mobile data, hotel Wi-Fi | Outbound internet only |
 | **Tailscale/VPN** | `ws://<tailscale-ip>:8765/ws` | You manage a tailnet | Tailscale on both ends |
@@ -223,6 +224,17 @@ Authentication is always the same: the app sends the token once at connect
 
 **LAN (same Wi-Fi) — default.** Start the daemon, scan the QR at
 `http://localhost:8765/pair`, done.
+
+**Anywhere — iroh (recommended off-LAN).** The same QR also adds a
+"(anywhere)" entry. The phone dials the PC by its public key: iroh
+hole-punches a direct QUIC connection when the two networks allow it (most do)
+and otherwise falls back to an end-to-end encrypted relay. No VPN, no port
+forward, no account. The phone is bound to the key it paired from, so a copied
+device token is useless on another phone. Desktop video goes one QUIC stream
+per GOP, so a bad link skips ahead instead of falling seconds behind, and the
+quality preset steps down while the link cannot keep up. By default n0's free
+public relays are used; [docs/RELAY.md](docs/RELAY.md) sets up your own.
+Measurements: [docs/TRANSPORT-BENCH.md](docs/TRANSPORT-BENCH.md).
 
 **Kilometers away — the relay (no VPN, no port forwarding).** The daemon dials
 OUT to a relay server and subscribes to a channel; your phone dials the same
@@ -268,8 +280,8 @@ streaming, chats with live deltas, Freebuff control, files, models — because t
 bridge feeds relay messages through the daemon's normal command path and pushes
 every broadcast (output chunks, chat deltas, state changes) back to the channel.
 
-**Tailscale** is the zero-config alternative if you can install it on both
-ends: `ws://<tailscale-ip>:8765/ws` behaves exactly like LAN.
+**Tailscale** still works if you already run it on both ends:
+`ws://<tailscale-ip>:8765/ws` behaves exactly like LAN. It is not needed any more.
 
 ### Security checklist
 
@@ -547,7 +559,7 @@ PocketDesk/
 - **Token auth**: Every WebSocket client must present the token as its first message. Wrong token → connection closed (4003).
 - **TLS + certificate pinning**: With TLS enabled, the app shows the cert's SHA-256 fingerprint. Confirm once — pinned for all future connects.
 - **Proposal system**: Sensitive actions (file writes, commands, network requests) require explicit human approval.
-- **Local-only**: Run inside Tailscale or LAN. **Do not** port-forward to the internet — the protocol has full shell control of your PC.
+- **No open ports**: Reach the PC over LAN or iroh. **Do not** port-forward to the internet — the protocol has full shell control of your PC.
 
 ---
 
