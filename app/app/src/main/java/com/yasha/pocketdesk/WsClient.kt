@@ -121,8 +121,8 @@ class WsClient(
     var desktopMonitor by mutableStateOf(0)
     /** Receives binary H.264 packets; called on the socket thread. */
     @Volatile var videoSink: ((ByteArray) -> Unit)? = null
-    /** Text read from the PC clipboard, for the screen to put on the phone's. */
-    val pcClipboard = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 1)
+    /** PC clipboard content, asked for or copied on the PC while the desktop is open. */
+    val pcClip = kotlinx.coroutines.flow.MutableSharedFlow<PcClip>(extraBufferCapacity = 4)
     /** Running totals of received video, for the on-screen rate readout. */
     @Volatile var videoBytes = 0L
     @Volatile var videoFrames = 0L
@@ -425,8 +425,10 @@ class WsClient(
     }
     fun clipboardGet() = send(Proto.clipboardGet())
     /** With [paste], ctrl+v follows once the PC clipboard holds the text. */
-    fun clipboardSet(text: String, paste: Boolean) { pasteAfterSet = paste; send(Proto.clipboardSet(text)) }
-    @Volatile private var pasteAfterSet = false
+    fun clipboardSet(text: String, paste: Boolean) = send(Proto.clipboardSet(text, paste = paste))
+    fun clipboardSetImage(pngB64: String) = send(Proto.clipboardSet(null, png = pngB64))
+    /** Puts files already on the PC on its clipboard; with [paste] they drop into the focused window. */
+    fun clipboardSetFiles(paths: List<String>, paste: Boolean) = send(Proto.clipboardSet(null, files = paths, paste = paste))
     fun desktopStop() { desktopStreaming = false; desktopResume = null; send(Proto.desktopStop()) }
     fun desktopSnapshot() = send(Proto.desktopFrame())
     /** x/y are frame pixels; click is left|right|middle|double. */
@@ -862,14 +864,16 @@ class WsClient(
                     "${i + 1}" + if (w != null && h != null) " · ${w}×$h" else ""
                 } ?: emptyList()
             }
-            "clipboard" ->
-                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) pcClipboard.tryEmit(str(m, "text") ?: "")
-                else _desktopError.value = "PC clipboard: " + (str(m, "error") ?: "failed")
-            "clipboard_set_ok" -> {
+            "clipboard", "clipboard_changed" ->
+                if (type == "clipboard_changed" || m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                    val files = (m["files"] as? JsonArray)?.mapNotNull { e ->
+                        val o = e as? JsonObject ?: return@mapNotNull null
+                        PcFile(str(o, "path") ?: return@mapNotNull null, str(o, "name") ?: "", num(o, "size"), bool(o, "dir") ?: false)
+                    } ?: emptyList()
+                    pcClip.tryEmit(PcClip(str(m, "kind") ?: "text", str(m, "text"), str(m, "png"), files, type == "clipboard"))
+                } else _desktopError.value = "PC clipboard: " + (str(m, "error") ?: "failed")
+            "clipboard_set_ok" ->
                 if (m["ok"]?.jsonPrimitive?.booleanOrNull != true) _desktopError.value = "PC clipboard: " + (str(m, "error") ?: "failed")
-                else if (pasteAfterSet) desktopKey(86, listOf("ctrl"))
-                pasteAfterSet = false
-            }
             "desktop_frame" -> {
                 val b64 = str(m, "base64") ?: return
                 desktopFrame = DesktopFrame(

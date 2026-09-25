@@ -313,6 +313,13 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     }
   });
 
+  desktop.on("clipboard", (c) => {
+    const { id, ok, seq, ...content } = c;
+    for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
+      try { send(w, { type: "clipboard_changed", ...content }); } catch { /* watcher vanished mid-send */ }
+    }
+  });
+
   // H.264 viewers get binary [kind, ...annexB] messages. A viewer whose socket
   // backs up skips frames until a fresh keyframe, which only a restart produces.
   const video = new DesktopVideo();

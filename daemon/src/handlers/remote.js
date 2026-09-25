@@ -1,20 +1,12 @@
-import { execFile } from "node:child_process";
-
-/** Runs a PowerShell snippet with UTF-8 both ways; stdin feeds [Console]::In. */
-function ps(script, input = "") {
-  return new Promise((resolve, reject) => {
-    const utf8 = "[Console]::InputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);";
-    const p = execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", utf8 + script],
-      { windowsHide: true, timeout: 10000, maxBuffer: 8 << 20 }, (err, out) => (err ? reject(err) : resolve(out)));
-    p.stdin.end(input, "utf8");
-  });
-}
+import { resolvePath } from "../fs_ops.js";
 
 export default function remoteHandlers(ctx) {
   const { send, desktop, desktopWatchers, video, videoWatchers } = ctx;
+  /** Pointer and clipboard follow the PC only while someone is viewing it. */
   function syncCursor() {
     const on = videoWatchers.size + desktopWatchers.size > 0;
     desktop.watchCursor(on);
+    desktop.watchClipboard(on);
     if (on && desktop.cursor) desktop.emit("cursor", desktop.cursor);
   }
   let monitorList = null;
@@ -119,16 +111,21 @@ export default function remoteHandlers(ctx) {
       send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
     },
     async clipboard_get(ws, msg) {
-      try {
-        const text = await ps("$t = Get-Clipboard -Raw; if ($t) { [Console]::Out.Write($t) }");
-        send(ws, { type: "clipboard", ok: true, text });
-      } catch (e) { send(ws, { type: "clipboard", ok: false, error: e.message }); }
+      send(ws, { type: "clipboard", ...(await desktop.clipboardRead()) });
     },
+    /** text, png (base64) or files (paths on the PC, e.g. just uploaded); paste presses Ctrl+V after. */
     async clipboard_set(ws, msg) {
+      let files;
       try {
-        await ps("Set-Clipboard -Value ([Console]::In.ReadToEnd())", String(msg.text ?? "").slice(0, 1 << 20));
-        send(ws, { type: "clipboard_set_ok", ok: true });
-      } catch (e) { send(ws, { type: "clipboard_set_ok", ok: false, error: e.message }); }
+        files = Array.isArray(msg.files) ? msg.files.slice(0, 100).map((f) => resolvePath(f)) : undefined;
+      } catch (e) {
+        return send(ws, { type: "clipboard_set_ok", ok: false, error: e.message });
+      }
+      const text = msg.text == null ? undefined : String(msg.text).slice(0, 1 << 20);
+      const png = typeof msg.png === "string" ? msg.png.slice(0, 24 << 20) : undefined;
+      const r = await desktop.clipboardSet({ text, png, files });
+      if (r.ok && msg.paste) await desktop.inputKey({ key: 86, modifiers: ["ctrl"] });
+      send(ws, { type: "clipboard_set_ok", ...r });
     },
     async desktop_quality(ws, msg) {
       send(ws, { type: "desktop_quality_ok", ...desktop.setQuality(Number(msg.quality) || 60) });

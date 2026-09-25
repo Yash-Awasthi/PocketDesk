@@ -261,7 +261,10 @@
             <button class="btn" onclick="send({type:'desktop_key', key:78, modifiers:['ctrl']})">Ctrl+N</button>
             <button class="btn" onclick="send({type:'desktop_key', key:9, modifiers:['alt']})">Alt+Tab</button>
             <button class="btn" onclick="send({type:'desktop_key', key:0x5B})">Win</button>
+            <button class="btn" onclick="document.getElementById('deskFilePick').click()">Send files…</button>
+            <input type="file" id="deskFilePick" multiple style="display:none" onchange="desktopSendFiles([...this.files]); this.value=''" />
           </div>
+          <div class="dash-section" id="deskTransfer" style="display:none;color:#8b949e"></div>
           <div class="dash-section" style="padding:0;position:relative">
             <canvas id="deskCanvas" width="1280" height="720"
                     style="width:100%;height:auto;background:#0d1117;border-radius:8px;display:block;outline:none"></canvas>
@@ -723,6 +726,18 @@ function handle(m) {
     case "desktop_input_ok":
       if (!m.ok) dashEvent(`desktop input failed: ${m.error || "?"}`, 'red');
       break;
+    case "clipboard_changed":
+      desktopPcClipboard(m);
+      break;
+    case "clipboard_set_ok":
+      if (!m.ok) dashEvent(`PC clipboard: ${m.error || "failed"}`, 'red');
+      break;
+    case "fwritten":
+    case "fchunk": {
+      const done = deskFileWait.get(m.type + ":" + m.path);
+      if (done) { deskFileWait.delete(m.type + ":" + m.path); done(m); }
+      break;
+    }
     case "desktop_quality_ok":
       dashEvent(`desktop quality → ${m.quality}`, 'blue');
       break;
@@ -1085,6 +1100,89 @@ const DESK_VK = (() => {
   for (let i = 1; i <= 12; i++) m["F" + i] = 0x6F + i;
   return m;
 })();
+// ── Clipboard and files between this browser and the PC ──
+const DESK_DROP_DIR = "~/Downloads/PocketDesk";
+const deskFileWait = new Map();
+function deskFileCall(msg, reply) {
+  return new Promise((res) => { deskFileWait.set(reply + ":" + msg.path, res); send(msg); });
+}
+function deskB64(bytes) {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function deskTransfer(text) {
+  const el = document.getElementById("deskTransfer");
+  el.style.display = text ? "" : "none";
+  if (typeof text === "string") el.textContent = text;
+}
+/** Uploads to the PC in 192 KB chunks, then drops the files into the focused PC window. */
+async function desktopSendFiles(files) {
+  if (!files.length) return;
+  const paths = [];
+  for (const [i, f] of files.entries()) {
+    const path = `${DESK_DROP_DIR}/${f.name}`;
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    for (let at = 0; at === 0 || at < bytes.length; at += 196608) {
+      deskTransfer(`Sending ${f.name} (${i + 1}/${files.length}) · ${Math.round(at / 1024)} KB`);
+      const r = await deskFileCall({ type: "fwrite", path, append: at > 0, data: deskB64(bytes.subarray(at, at + 196608)) }, "fwritten");
+      if (r.error) return deskTransfer(`Sending ${f.name} failed: ${r.error}`);
+    }
+    paths.push(path);
+  }
+  send({ type: "clipboard_set", files: paths, paste: true });
+  deskTransfer(`Sent ${paths.length} file${paths.length === 1 ? "" : "s"} to ${DESK_DROP_DIR} and pasted`);
+}
+async function desktopDownload(path, name) {
+  const parts = [];
+  for (let at = 0; ;) {
+    const r = await deskFileCall({ type: "fread", path, offset: at }, "fchunk");
+    if (r.error) return deskTransfer(`Downloading ${name} failed: ${r.error}`);
+    const bin = atob(r.data || "");
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    parts.push(bytes);
+    at += bytes.length;
+    deskTransfer(`Downloading ${name} · ${Math.round(at / 1024)} KB`);
+    if (r.eof) break;
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(parts));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+  deskTransfer(`Downloaded ${name}`);
+}
+/** PC copied something: text and images go on this browser's clipboard, files get download links. */
+async function desktopPcClipboard(m) {
+  try {
+    if (m.kind === "text") await navigator.clipboard.writeText(m.text);
+    else if (m.kind === "image" && m.png) {
+      const blob = await (await fetch("data:image/png;base64," + m.png)).blob();
+      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    }
+  } catch { /* the page needs focus and https or localhost to write the clipboard */ }
+  if (m.kind !== "files") return;
+  const el = document.getElementById("deskTransfer");
+  el.textContent = "Copied on the PC: ";
+  for (const f of m.files.filter((x) => !x.dir)) {
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = `⬇ ${f.name}`;
+    b.onclick = () => desktopDownload(f.path, f.name);
+    el.appendChild(b);
+  }
+  deskTransfer(true);
+}
+async function deskPngB64(file) {
+  if (file.type !== "image/png") {
+    const bmp = await createImageBitmap(file);
+    const c = new OffscreenCanvas(bmp.width, bmp.height);
+    c.getContext("2d").drawImage(bmp, 0, 0);
+    file = await c.convertToBlob({ type: "image/png" });
+  }
+  return deskB64(new Uint8Array(await file.arrayBuffer()));
+}
 function desktopReleaseAll() {
   for (const h of desk.held) {
     const [kind, v] = h.split(":");
@@ -1675,6 +1773,8 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
     cv.addEventListener(evt, (ev) => {
       const vk = DESK_VK[ev.code];
       if (!desk.viewing || !vk) return;
+      // Ctrl+V becomes a paste event carrying this browser's clipboard; the daemon presses Ctrl+V after setting it.
+      if (ev.code === "KeyV" && (ev.ctrlKey || ev.metaKey)) return;
       if (press === "down") desk.held.add("k:" + vk); else desk.held.delete("k:" + vk);
       send({ type: "desktop_key", key: vk, press });
       ev.preventDefault();
@@ -1682,6 +1782,21 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
   }
   // Keys still down when focus leaves would stay down on the PC.
   cv.addEventListener("blur", desktopReleaseAll);
+  document.addEventListener("paste", async (ev) => {
+    if (document.activeElement !== cv || !desk.viewing) return;
+    ev.preventDefault();
+    const files = [...ev.clipboardData.files];
+    const image = files.length === 1 && files[0].type.startsWith("image/") && !ev.clipboardData.getData("text/plain");
+    if (image) send({ type: "clipboard_set", png: await deskPngB64(files[0]), paste: true });
+    else if (files.length) desktopSendFiles(files);
+    else send({ type: "clipboard_set", text: ev.clipboardData.getData("text/plain"), paste: true });
+  });
+  cv.addEventListener("dragover", (ev) => { if (desk.viewing) ev.preventDefault(); });
+  cv.addEventListener("drop", (ev) => {
+    if (!desk.viewing) return;
+    ev.preventDefault();
+    desktopSendFiles([...ev.dataTransfer.files]);
+  });
 })();
 
 // Hook into existing message handler for dashboard events

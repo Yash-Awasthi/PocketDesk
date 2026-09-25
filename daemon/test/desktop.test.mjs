@@ -77,6 +77,48 @@ async function main() {
       await v.close();
     } else console.log("SKIP  video (set FFMPEG_PATH)");
 
+    // Clipboard: the user's own text is put back at the end.
+    c.send({ type: "clipboard_get" });
+    const saved = await c.next((m) => m.type === "clipboard", 20000);
+    const tag = "rh-test-" + Date.now();
+    c.send({ type: "clipboard_set", text: tag });
+    await c.next((m) => m.type === "clipboard_set_ok", 20000);
+    c.send({ type: "clipboard_get" });
+    const got = await c.next((m) => m.type === "clipboard" && m.text === tag, 20000).catch(() => ({}));
+    check("clipboard text round-trips", got.kind === "text");
+
+    const png1 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    c.send({ type: "clipboard_set", png: png1 });
+    await c.next((m) => m.type === "clipboard_set_ok", 20000);
+    c.send({ type: "clipboard_get" });
+    const img = await c.next((m) => m.type === "clipboard" && m.kind === "image", 20000).catch(() => ({}));
+    check("clipboard image round-trips as PNG", img.w === 1 && img.h === 1 && Buffer.from(img.png || "", "base64")[1] === 0x50);
+
+    const upload = "~/Downloads/PocketDesk/rh-test-drop.txt";
+    c.send({ type: "fwrite", path: upload, data: Buffer.from("dropped").toString("base64") });
+    const wr = await c.next((m) => m.type === "fwritten", 10000);
+    c.send({ type: "clipboard_set", files: [upload] });
+    await c.next((m) => m.type === "clipboard_set_ok", 20000);
+    c.send({ type: "clipboard_get" });
+    const fl = await c.next((m) => m.type === "clipboard" && m.kind === "files", 20000).catch(() => ({}));
+    check("uploaded file lands on the clipboard as a file", !wr.error && fl.files?.[0]?.name === "rh-test-drop.txt" && fl.files[0].size === 7);
+
+    // A viewer hears what the PC copies, but not its own writes.
+    const w = await openAndHello(PORT, TOKEN);
+    w.send({ type: "desktop_start", quality: 30 });
+    await w.next((m) => m.type === "desktop_started", 20000);
+    await new Promise((r) => setTimeout(r, 1200));
+    w.send({ type: "clipboard_set", text: tag + "-own" });
+    await w.next((m) => m.type === "clipboard_set_ok", 20000);
+    execFileSync("powershell.exe", ["-NoProfile", "-Command", `Set-Clipboard -Value '${tag}-pc'`]);
+    const ch = await w.next((m) => m.type === "clipboard_changed", 10000).catch(() => ({}));
+    check("PC-side copy is pushed to viewers", ch.text === tag + "-pc");
+    const echo = await w.next((m) => m.type === "clipboard_changed" && m.text === tag + "-own", 1000).catch(() => null);
+    check("a viewer's own clipboard write is not echoed back", echo === null);
+    await w.close();
+    c.send({ type: "clipboard_set", text: saved.kind === "text" ? saved.text : "" });
+    await c.next((m) => m.type === "clipboard_set_ok", 20000);
+
     // Held key: F24 goes down, and dropping the socket releases it.
     const h = await openAndHello(PORT, TOKEN);
     h.send({ type: "desktop_key", key: 0x87, press: "down" });

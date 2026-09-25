@@ -113,6 +113,7 @@ export function writeFileChunk(msg) {
   try {
     let base = 0;
     if (!append) {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, Buffer.alloc(0));
     } else if (fs.existsSync(file)) {
       base = fs.statSync(file).size;

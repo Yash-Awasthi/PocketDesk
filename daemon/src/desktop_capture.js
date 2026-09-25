@@ -245,6 +245,69 @@ while ($true) {
 }
 `;
 
+/**
+ * Clipboard helper, its own process so no single script mixes clipboard reads with
+ * input injection. powershell.exe 5.1 runs STA, which the clipboard needs.
+ */
+const CLIP_SCRIPT = COMMON_PRELUDE + `
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices;
+public static class RHC { [DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber(); }
+'@
+function Reply($o) { [Console]::Out.WriteLine(($o | ConvertTo-Json -Compress -Depth 4)) }
+$stdin = [Console]::In
+while ($true) {
+  $line = $stdin.ReadLine()
+  if ($null -eq $line) { break }
+  try { $cmd = $line | ConvertFrom-Json } catch { [Console]::Out.WriteLine('{"ok":false,"error":"badjson"}'); continue }
+  try {
+    switch ($cmd.op) {
+      'ping' { Reply @{ id = $cmd.id; ok = $true } }
+      'seq' { Reply @{ id = $cmd.id; ok = $true; seq = [RHC]::GetClipboardSequenceNumber() } }
+      'read' {
+        $seq = [RHC]::GetClipboardSequenceNumber()
+        if ([System.Windows.Forms.Clipboard]::ContainsFileDropList()) {
+          $files = @([System.Windows.Forms.Clipboard]::GetFileDropList() | ForEach-Object {
+            $i = Get-Item -LiteralPath $_ -ErrorAction SilentlyContinue
+            @{ path = [string]$_; name = [System.IO.Path]::GetFileName($_); dir = [bool]($i -and $i.PSIsContainer); size = $(if ($i -and -not $i.PSIsContainer) { $i.Length } else { $null }) }
+          })
+          Reply @{ id = $cmd.id; ok = $true; seq = $seq; kind = 'files'; files = $files }
+        } elseif ([System.Windows.Forms.Clipboard]::ContainsImage()) {
+          $img = [System.Windows.Forms.Clipboard]::GetImage()
+          $ms = New-Object System.IO.MemoryStream
+          $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
+          $r = @{ id = $cmd.id; ok = $true; seq = $seq; kind = 'image'; w = $img.Width; h = $img.Height; bytes = $ms.Length }
+          if ($ms.Length -le $cmd.maxImage) { $r.png = [Convert]::ToBase64String($ms.ToArray()) }
+          $img.Dispose(); $ms.Dispose()
+          Reply $r
+        } elseif ([System.Windows.Forms.Clipboard]::ContainsText()) {
+          Reply @{ id = $cmd.id; ok = $true; seq = $seq; kind = 'text'; text = [System.Windows.Forms.Clipboard]::GetText() }
+        } else { Reply @{ id = $cmd.id; ok = $true; seq = $seq; kind = 'empty' } }
+      }
+      'set' {
+        $data = New-Object System.Windows.Forms.DataObject
+        if ($null -ne $cmd.text) { $data.SetText([string]$cmd.text) }
+        if ($cmd.png) {
+          $ms = New-Object System.IO.MemoryStream(,[Convert]::FromBase64String($cmd.png))
+          $data.SetImage([System.Drawing.Image]::FromStream($ms))
+        }
+        if ($cmd.files) {
+          $list = New-Object System.Collections.Specialized.StringCollection
+          foreach ($f in $cmd.files) { [void]$list.Add([string]$f) }
+          $data.SetFileDropList($list)
+        }
+        # Another app may hold the clipboard open for a moment; retry instead of failing.
+        [System.Windows.Forms.Clipboard]::SetDataObject($data, $true, 10, 50)
+        Reply @{ id = $cmd.id; ok = $true; seq = [RHC]::GetClipboardSequenceNumber() }
+      }
+      default { Reply @{ id = $cmd.id; ok = $false; error = 'unknown_op' } }
+    }
+  } catch { Reply @{ id = $cmd.id; ok = $false; error = $_.Exception.Message } }
+}
+`;
+
 /** Persistent PowerShell helper with id-matched request/reply. */
 class PsHelper {
   constructor(name, script) {
@@ -371,6 +434,7 @@ export class DesktopController extends EventEmitter {
     this.stats = { framesSent: 0, capturesFailed: 0, lastCaptureMs: 0 };
     this.helperInput = new PsHelper("input", INPUT_SCRIPT);
     this.helperCapture = new PsHelper("capture", CAPTURE_SCRIPT);
+    this.helperClip = new PsHelper("clipboard", CLIP_SCRIPT);
   }
 
   /** Stream frames for `clientId` (server keeps the ws mapping). */
@@ -518,6 +582,45 @@ export class DesktopController extends EventEmitter {
     }, 33);
   }
 
+  /** { kind: text|image|files|empty, ... }; images above maxImage bytes come back without png. */
+  async clipboardRead(maxImage = 12 << 20) {
+    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
+    await this.helperClip.ensure();
+    const r = await this.helperClip.cmd({ op: "read", maxImage }, 15000);
+    if (r?.ok) this.clipSeq = r.seq;
+    return r?.ok ? r : { ok: false, error: r?.error || "clipboard_failed" };
+  }
+
+  /** Any of text, png (base64) and files (absolute paths) in one clipboard entry. */
+  async clipboardSet({ text, png, files }) {
+    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
+    await this.helperClip.ensure();
+    const r = await this.helperClip.cmd({ op: "set", text, png, files }, 15000);
+    // Our own write must not come back to the viewer as a PC-side change.
+    if (r?.ok) this.clipSeq = r.seq;
+    return { ok: !!r?.ok, error: r?.error };
+  }
+
+  /** While on, emits "clipboard" with the new content whenever something on the PC copies. */
+  watchClipboard(on) {
+    if (!on || !IS_WIN) { clearInterval(this.clipTimer); this.clipTimer = null; return; }
+    if (this.clipTimer) return;
+    let busy = false;
+    this.clipTimer = setInterval(async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        await this.helperClip.ensure();
+        const r = await this.helperClip.cmd({ op: "seq" }, 5000);
+        if (!r?.ok) return;
+        if (this.clipSeq == null) { this.clipSeq = r.seq; return; }
+        if (r.seq === this.clipSeq) return;
+        const c = await this.clipboardRead();
+        if (c.ok && c.kind !== "empty") this.emit("clipboard", c);
+      } finally { busy = false; }
+    }, 500);
+  }
+
   getStatus() {
     return {
       supported: IS_WIN,
@@ -532,9 +635,11 @@ export class DesktopController extends EventEmitter {
 
   dispose() {
     this.watchCursor(false);
+    this.watchClipboard(false);
     this._stopLoop();
     this.clients.clear();
     this.helperInput.kill();
     this.helperCapture.kill();
+    this.helperClip.kill();
   }
 }
