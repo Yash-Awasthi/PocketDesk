@@ -8,8 +8,9 @@
  *
  * Wire (ALPN pocketdesk/1): the client opens one bidirectional stream for
  * control; each message both ways is a u32 length then UTF-8 JSON. The daemon
- * sends desktop video as one unidirectional stream per GOP, each packet a u32
- * length then [kind, ...annexB]. A newer GOP stream supersedes older ones.
+ * sends desktop video as one unidirectional stream per GOP: a u32 GOP number,
+ * then each packet as a u32 length and [kind, ...annexB]. A newer GOP stream
+ * supersedes older ones. The viewer acks {g, f} (GOP, packets read) over control.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -18,6 +19,8 @@ import { EventEmitter } from "node:events";
 export const ALPN = "pocketdesk/1";
 const LAG_LIMIT = 1_500_000; // same backlog limit as the ws video path
 const BEHIND_BYTES = 128 << 10;
+// Acks trail by up to a quarter second plus one-way delay; past this the picture is stale.
+const LATE_MS = 1500;
 const MAX_MESSAGE = 8 << 20; // largest control message; checked before auth
 const KIND_CONFIG = 0, KIND_KEY = 1;
 
@@ -105,9 +108,30 @@ export class IrohSocket extends EventEmitter {
     this._gop = null;
     this._config = null;
     this._prio = 0;
+    this._gops = []; // { id, times: send time of each packet } for GOPs the viewer may still be reading
+    this._ack = null;
     this._opening = Promise.resolve();
     this._readLoop(bi.recv).catch(() => {}).finally(() => this._closed(1006));
     conn.closed().then(() => this._closed(1006), () => this._closed(1006));
+  }
+
+  /** The viewer read `f` packets of GOP `g`. */
+  onVideoAck(g, f) {
+    this._ack = { g, f };
+    while (this._gops.length > 1 && this._gops[0].id < g) this._gops.shift();
+  }
+
+  /**
+   * How long the oldest packet the viewer has not read yet has been in flight,
+   * including what QUIC and the relay buffer out of the daemon's sight. 0 without acks.
+   */
+  lagMs(now = Date.now()) {
+    if (!this._ack) return 0;
+    const { g, f } = this._ack;
+    const i = this._gops.findIndex((x) => x.id === g);
+    const next = i < 0 ? this._gops[0] : f < this._gops[i].times.length ? null : this._gops[i + 1];
+    const t = i >= 0 && f < this._gops[i].times.length ? this._gops[i].times[f] : next?.times[0];
+    return t === undefined ? 0 : now - t;
   }
 
   /** Control backlog; the video path keeps its own per-GOP accounting. */
@@ -141,14 +165,25 @@ export class IrohSocket extends EventEmitter {
       this._gop = null;
       // An unfinished GOP is useless once a newer keyframe exists, and a link that cannot
       // finish one GOP before the next is slower than the stream.
-      // A few trailing frames still queued is normal; a GOP's worth is not.
-      const behind = !!prev && !prev.dead && prev.queued > BEHIND_BYTES;
-      if (prev) { if (prev.queued > 0) prev.reset(); else prev.finish(); }
+      // A few trailing frames still queued is normal; a GOP's worth is not. A stale viewer
+      // gets the old GOP reset too, which also drops what QUIC still holds for it.
+      const late = this.lagMs() > LATE_MS;
+      const behind = !!prev && !prev.dead && (prev.queued > BEHIND_BYTES || late);
+      if (prev) { if (prev.queued > 0 || late) prev.reset(); else prev.finish(); }
       const head = this._config;
+      const gop = { id: this._gops.length ? this._gops.at(-1).id + 1 : 1, times: [] };
+      this._gops.push(gop);
+      if (this._gops.length > 30) this._gops.shift();
+      const now = Date.now();
+      if (head) gop.times.push(now);
+      gop.times.push(now);
       this._opening = this._opening.then(async () => {
         const st = await this.conn.openUni();
         await st.setPriority(++this._prio).catch(() => {});
         this._gop = streamWriter(st);
+        const id = Buffer.alloc(4);
+        id.writeUInt32BE(gop.id, 0);
+        this._gop.write(id);
         if (head) this._gop.write(frame(head));
         this._gop.write(frame(pkt));
       }).catch(() => {});
@@ -156,6 +191,7 @@ export class IrohSocket extends EventEmitter {
     }
     const gop = this._gop;
     if (gop && !gop.dead && gop.queued > LAG_LIMIT) { gop.reset(); return false; }
+    this._gops.at(-1)?.times.push(Date.now());
     // Chained so deltas stay behind a GOP stream that is still opening.
     this._opening = this._opening.then(() => {
       if (this._gop && !this._gop.dead) this._gop.write(frame(pkt));

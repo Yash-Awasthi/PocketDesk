@@ -27,7 +27,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  *
  * Mirrors the daemon's `iroh_link.js`: one bidirectional stream carries control
  * messages as u32 length + UTF-8 JSON; desktop video arrives as one
- * unidirectional stream per GOP, and a newer stream makes older ones obsolete.
+ * unidirectional stream per GOP (a u32 GOP number, then packets), and a newer
+ * stream makes older ones obsolete. Read progress goes back as `video_ack`.
  */
 class IrohLink(
     private val ticket: String,
@@ -38,7 +39,10 @@ class IrohLink(
     /** The selected path every few seconds, e.g. "direct 42 ms" or "relayed 80 ms". */
     private val onPath: (String) -> Unit = {},
 ) {
-    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    // Any loop failing (a timed-out connection throws from every pending call) ends the link and
+    // hands over to the reconnect; uncaught, it would kill the whole app.
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob() +
+        kotlinx.coroutines.CoroutineExceptionHandler { _, t -> finish(null, t.message ?: "connection lost") })
     private val outbox = Channel<ByteArray>(Channel.UNLIMITED)
     private val closed = AtomicBoolean(false)
     @Volatile private var conn: Connection? = null
@@ -81,14 +85,32 @@ class IrohLink(
         scope.cancel()
     }
 
+    /** GOP and packet count read so far; the daemon turns it into the real delay behind QUIC and relay buffers. */
+    @Volatile private var progress = 0L to 0L
+
     private suspend fun acceptVideo(c: Connection) {
         var current: Pair<RecvStream, Job>? = null
         val lock = Mutex()
+        scope.launch {
+            var sent = progress
+            while (true) {
+                kotlinx.coroutines.delay(250)
+                val p = progress
+                if (p != sent && p.first > 0) { send("""{"type":"video_ack","g":${p.first},"f":${p.second}}"""); sent = p }
+            }
+        }
         while (true) {
             val s = c.acceptUni()
             lock.withLock {
                 current?.let { (old, job) -> job.cancel(); runCatching { old.stop(0uL) } }
-                current = s to scope.launch { runCatching { while (true) onVideo(readMessage(s)) } }
+                current = s to scope.launch {
+                    runCatching {
+                        val gop = java.nio.ByteBuffer.wrap(s.readExact(4u)).int.toLong() and 0xffffffffL
+                        var n = 0L
+                        progress = gop to 0L
+                        while (true) { onVideo(readMessage(s)); progress = gop to ++n }
+                    }
+                }
             }
         }
     }

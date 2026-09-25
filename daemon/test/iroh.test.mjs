@@ -88,17 +88,26 @@ async function main() {
   sock.sendVideo(0, pkt(9));
   sock.sendVideo(1, pkt(1));
   sock.sendVideo(2, pkt(2));
+  const gopId = async (s) => Buffer.from(await s.readExact(4)).readUInt32BE(0);
   const s1 = await conn.acceptUni();
+  const id1 = await gopId(s1);
   const first = [await readMsg(s1), await readMsg(s1), await readMsg(s1)].map((b) => b[0]);
-  check("first GOP stream is config, key, delta", first.join() === "0,1,2");
+  check("first GOP stream is numbered, then config, key, delta", id1 === 1 && first.join() === "0,1,2");
   sock.sendVideo(1, pkt(3));
   const s2 = await conn.acceptUni();
+  const id2 = await gopId(s2);
   const second = [await readMsg(s2), await readMsg(s2)].map((b) => b[0]);
-  check("next keyframe opens a new stream that repeats the config", second.join() === "0,1");
+  check("next keyframe opens a new stream that repeats the config", id2 === 2 && second.join() === "0,1");
+  sock.onVideoAck(2, 2);
+  check("a viewer that has read everything is not late", sock.lagMs() === 0);
   // A viewer that stops reading leaves the GOP unfinished: the next keyframe reports congestion.
   sock.sendVideo(1, Buffer.alloc(4 << 20, 5));
   await new Promise((r) => setTimeout(r, 300));
   check("a GOP still unsent when the next keyframe comes reports congestion", sock.sendVideo(1, pkt(6)) === false);
+  // Acks say the viewer has not read the newest GOP for 1.6 s: late even with nothing queued here.
+  sock.onVideoAck(4, 0);
+  await new Promise((r) => setTimeout(r, 1600));
+  check("an ack showing the viewer 1.6 s behind reports congestion", sock.lagMs() > 1500 && sock.sendVideo(1, pkt(7)) === false);
   sock.close();
 
   await teardown(tmp);
