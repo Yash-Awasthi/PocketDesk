@@ -70,6 +70,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.isPrimaryPressed
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
@@ -141,7 +153,20 @@ fun DesktopScreen(
     }
     val here = { cursor?.let { Pair(it.x.toInt(), it.y.toInt()) } }
 
-    Column(Modifier.fillMaxSize().background(Color(0xFF0D1117))) {
+    // A keyboard attached to the phone types straight into the PC, with keys held as long as they are held here.
+    val keyFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { keyFocus.requestFocus() }
+    Column(Modifier.fillMaxSize().background(Color(0xFF0D1117)).focusRequester(keyFocus).focusable().onKeyEvent { e ->
+        val native = e.nativeKeyEvent
+        if (native.device?.isVirtual != false) return@onKeyEvent false
+        val vk = androidKeyToVk(native.keyCode) ?: return@onKeyEvent false
+        when (e.type) {
+            KeyEventType.KeyDown -> ws.desktopKeyPress(vk, true)
+            KeyEventType.KeyUp -> ws.desktopKeyPress(vk, false)
+            else -> return@onKeyEvent false
+        }
+        true
+    }) {
         if (!fullscreen) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
@@ -190,10 +215,43 @@ fun DesktopScreen(
             Canvas(
                 Modifier
                     .fillMaxSize()
+                    .pointerInput(dims) {
+                        // A mouse on the phone drives the PC pointer directly: hover moves, buttons, wheel.
+                        val f = dims ?: return@pointerInput
+                        val held = BooleanArray(3)
+                        var lastMove = 0L
+                        awaitPointerEventScope {
+                            while (true) {
+                                val ev = awaitPointerEvent(PointerEventPass.Initial)
+                                val ch = ev.changes.firstOrNull() ?: continue
+                                if (ch.type != PointerType.Mouse) continue
+                                if (ev.type == PointerEventType.Scroll) {
+                                    ws.desktopWheel((-ch.scrollDelta.y * 120).toInt())
+                                } else {
+                                    val p = Viewport(f, size.width.toFloat(), size.height.toFloat(), zoom, pan).toFrame(ch.position)
+                                    if (p != null) {
+                                        cursor = p
+                                        val now = booleanArrayOf(ev.buttons.isPrimaryPressed, ev.buttons.isSecondaryPressed, ev.buttons.isTertiaryPressed)
+                                        val changed = now.indices.filter { now[it] != held[it] }
+                                        if (changed.isEmpty() && ch.uptimeMillis - lastMove >= 16) {
+                                            lastMove = ch.uptimeMillis
+                                            ws.desktopMove(p.x.toInt(), p.y.toInt())
+                                        }
+                                        for (i in changed) {
+                                            held[i] = now[i]
+                                            ws.desktopButton(p.x.toInt(), p.y.toInt(), MOUSE_BUTTONS[i], now[i])
+                                        }
+                                    }
+                                }
+                                ev.changes.forEach { it.consume() }
+                            }
+                        }
+                    }
                     .pointerInput(dims, touchpad) {
                         val f = dims ?: return@pointerInput
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
+                            if (down.type == PointerType.Mouse) return@awaitEachGesture
                             val v = Viewport(f, size.width.toFloat(), size.height.toFloat(), zoom, pan)
                             if (!touchpad) v.toFrame(down.position)?.let { cursor = it }
                             var moved = 0f
@@ -310,6 +368,8 @@ private fun videoView(ctx: android.content.Context, ws: WsClient, onSize: (IntSi
         override fun onSurfaceTextureUpdated(st: SurfaceTexture) {}
     }
 }
+
+private val MOUSE_BUTTONS = arrayOf("left", "right", "middle")
 
 /** Letterboxed, zoomable placement of the frame inside the view. */
 private class Viewport(val f: IntSize, val viewW: Float, val viewH: Float, val zoom: Float, val pan: Offset) {

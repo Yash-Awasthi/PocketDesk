@@ -184,16 +184,18 @@ object Proto {
     fun clipboardSet(text: String) = obj { put("type", "clipboard_set"); put("text", text) }
     fun desktopStop() = obj { put("type", "desktop_stop") }
     fun desktopFrame() = obj { put("type", "desktop_frame") }
-    fun desktopMouse(x: Int?, y: Int?, click: String?, wheel: Int?, press: String? = null) = obj {
+    fun desktopMouse(x: Int?, y: Int?, click: String?, wheel: Int?, press: String? = null, button: String? = null) = obj {
         put("type", "desktop_mouse")
         if (x != null && y != null) { put("x", x); put("y", y) }
         if (click != null) put("click", click)
         if (wheel != null) put("wheel", wheel)
         if (press != null) put("press", press)
+        if (button != null) put("button", button)
     }
-    fun desktopKey(vk: Int, modifiers: List<String>) = obj {
+    fun desktopKey(vk: Int, modifiers: List<String>, press: String? = null) = obj {
         put("type", "desktop_key"); put("key", vk)
         put("modifiers", JsonArray(modifiers.map { JsonPrimitive(it) }))
+        if (press != null) put("press", press)
     }
     fun desktopType(text: String) = obj { put("type", "desktop_type"); put("text", text) }
 

@@ -428,6 +428,10 @@ class WsClient(
     fun desktopPress(x: Int, y: Int, down: Boolean) = send(Proto.desktopMouse(x, y, null, null, if (down) "down" else "up"))
     fun desktopScroll(down: Boolean) = send(Proto.desktopMouse(null, null, null, if (down) -120 else 120))
     fun desktopKey(vk: Int, modifiers: List<String> = emptyList()) = send(Proto.desktopKey(vk, modifiers))
+    fun desktopKeyPress(vk: Int, down: Boolean) = send(Proto.desktopKey(vk, emptyList(), if (down) "down" else "up"))
+    fun desktopButton(x: Int, y: Int, button: String, down: Boolean) =
+        send(Proto.desktopMouse(x, y, null, null, if (down) "down" else "up", button))
+    fun desktopWheel(delta: Int) = send(Proto.desktopMouse(null, null, null, delta))
     fun desktopType(text: String) = send(Proto.desktopType(text))
 
     fun modelList(chatId: String) = send(Proto.modelList(chatId))

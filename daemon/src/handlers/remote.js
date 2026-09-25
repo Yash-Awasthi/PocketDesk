@@ -12,6 +12,21 @@ function ps(script, input = "") {
 
 export default function remoteHandlers(ctx) {
   const { send, desktop, desktopWatchers, video, videoWatchers } = ctx;
+  // A viewer that drops mid-press would leave the key or button stuck down on the PC.
+  function hold(ws, id, press) {
+    if (!ws._held) {
+      ws._held = new Set();
+      ws.once?.("close", () => {
+        for (const h of ws._held) {
+          const [kind, v] = h.split(":");
+          if (kind === "k") desktop.inputKey({ key: Number(v), press: "up" });
+          else desktop.inputMouse({ press: "up", button: v });
+        }
+        ws._held.clear();
+      });
+    }
+    if (press === "down") ws._held.add(id); else ws._held.delete(id);
+  }
   return {
     // ── Real desktop control (AnyDesk-style: watch + full input) ─────────
     async desktop_start(ws, msg) {
@@ -66,11 +81,16 @@ export default function remoteHandlers(ctx) {
       const at = msg.x != null && msg.y != null && msg.wheel == null;
       const x = at ? Math.round(Number(msg.x) / factor) : undefined;
       const y = at ? Math.round(Number(msg.y) / factor) : undefined;
-      const r = await desktop.inputMouse({ x, y, click: msg.click, press: msg.press, wheel: msg.wheel });
+      const press = msg.press === "down" || msg.press === "up" ? msg.press : undefined;
+      const button = ["left", "right", "middle"].includes(msg.button) ? msg.button : "left";
+      if (press) hold(ws, "b:" + button, press);
+      const r = await desktop.inputMouse({ x, y, click: msg.click, press, button, wheel: msg.wheel });
       send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
     },
     async desktop_key(ws, msg) {
-      const r = await desktop.inputKey({ key: msg.key, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
+      const press = msg.press === "down" || msg.press === "up" ? msg.press : undefined;
+      if (press) hold(ws, "k:" + Number(msg.key), press);
+      const r = await desktop.inputKey({ key: msg.key, press, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
       send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
     },
     async desktop_type(ws, msg) {

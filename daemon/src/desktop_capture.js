@@ -56,7 +56,7 @@ public static class RHI {
   [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public INPUTUNION u; }
   public const uint MOVE=0x0001, LEFTDOWN=0x0002, LEFTUP=0x0004, RIGHTDOWN=0x0008, RIGHTUP=0x0010,
                     MIDDLEDOWN=0x0020, MIDDLEUP=0x0040, WHEEL=0x0800, VIRTUALDESK=0x4000, ABSOLUTE=0x8000,
-                    KEYDOWN=0x0000, KEYUP=0x0002, UNICODE=0x0004;
+                    KEYDOWN=0x0000, EXTENDED=0x0001, KEYUP=0x0002, UNICODE=0x0004;
   public static uint Mouse(int x, int y, uint flags, int wheel) {
     var i = new INPUT { type = 0 };
     i.u.mi = new MOUSEINPUT { dx = x, dy = y, mouseData = unchecked((uint)wheel), dwFlags = flags };
@@ -97,8 +97,12 @@ while ($true) {
       if ($cmd.click -eq 'double'){ [RHI]::Mouse(0,0,[RHI]::LEFTDOWN,0) | Out-Null;  [RHI]::Mouse(0,0,[RHI]::LEFTUP,0) | Out-Null }
       if ($cmd.click -eq 'right') { [RHI]::Mouse(0,0,[RHI]::RIGHTDOWN,0) | Out-Null; [RHI]::Mouse(0,0,[RHI]::RIGHTUP,0) | Out-Null }
       if ($cmd.click -eq 'middle'){ [RHI]::Mouse(0,0,[RHI]::MIDDLEDOWN,0) | Out-Null;[RHI]::Mouse(0,0,[RHI]::MIDDLEUP,0) | Out-Null }
-      if ($cmd.press -eq 'down')  { [RHI]::Mouse(0,0,[RHI]::LEFTDOWN,0) | Out-Null }
-      if ($cmd.press -eq 'up')    { [RHI]::Mouse(0,0,[RHI]::LEFTUP,0) | Out-Null }
+      if ($cmd.press) {
+        $b = @{ left = @([RHI]::LEFTDOWN, [RHI]::LEFTUP); right = @([RHI]::RIGHTDOWN, [RHI]::RIGHTUP); middle = @([RHI]::MIDDLEDOWN, [RHI]::MIDDLEUP) }[[string]$cmd.button]
+        if ($null -eq $b) { $b = @([RHI]::LEFTDOWN, [RHI]::LEFTUP) }
+        if ($cmd.press -eq 'down') { [RHI]::Mouse(0,0,$b[0],0) | Out-Null }
+        if ($cmd.press -eq 'up')   { [RHI]::Mouse(0,0,$b[1],0) | Out-Null }
+      }
       if ($cmd.wheel) { [RHI]::Mouse(0,0,[RHI]::WHEEL,[int]$cmd.wheel) | Out-Null }
       [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}')
     } catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
@@ -107,13 +111,17 @@ while ($true) {
   if ($op -eq 'key') {
     try {
       $vk = [uint16]$cmd.key
+      # Without the extended flag, arrows and the Ins/Del/Home/End block act as numpad keys.
+      $ext = if (@(0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x2D,0x2E,0x5B,0x5C,0x5D,0x6F,0x90,0xA3,0xA5) -contains $vk) { [RHI]::EXTENDED } else { 0 }
+      if ($cmd.press -eq 'down') { [RHI]::Key($vk, [RHI]::KEYDOWN -bor $ext) | Out-Null; [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}'); continue }
+      if ($cmd.press -eq 'up')   { [RHI]::Key($vk, [RHI]::KEYUP -bor $ext) | Out-Null; [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}'); continue }
       $mods = @($cmd.mods)
       if ($mods -contains 'ctrl')  { [RHI]::Key(0x11, [RHI]::KEYDOWN) | Out-Null }
       if ($mods -contains 'alt')   { [RHI]::Key(0x12, [RHI]::KEYDOWN) | Out-Null }
       if ($mods -contains 'shift') { [RHI]::Key(0x10, [RHI]::KEYDOWN) | Out-Null }
       if ($mods -contains 'win')   { [RHI]::Key(0x5B, [RHI]::KEYDOWN) | Out-Null }
-      [RHI]::Key($vk, [RHI]::KEYDOWN) | Out-Null
-      [RHI]::Key($vk, [RHI]::KEYUP) | Out-Null
+      [RHI]::Key($vk, [RHI]::KEYDOWN -bor $ext) | Out-Null
+      [RHI]::Key($vk, [RHI]::KEYUP -bor $ext) | Out-Null
       if ($mods -contains 'win')   { [RHI]::Key(0x5B, [RHI]::KEYUP) | Out-Null }
       if ($mods -contains 'shift') { [RHI]::Key(0x10, [RHI]::KEYUP) | Out-Null }
       if ($mods -contains 'alt')   { [RHI]::Key(0x12, [RHI]::KEYUP) | Out-Null }
@@ -398,20 +406,21 @@ export class DesktopController extends EventEmitter {
     }
   }
 
-  /** x/y: virtual-screen pixels from its top-left (omit to act at the cursor); click: left|right|middle|double; press: down|up. */
-  async inputMouse({ x, y, click, press, wheel }) {
+  /** x/y: virtual-screen pixels from its top-left (omit to act at the cursor); click: left|right|middle|double; press: down|up of button. */
+  async inputMouse({ x, y, click, press, button, wheel }) {
     if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
     await this.helperInput.ensure();
-    const r = await this.helperInput.cmd({ op: "mouse", x, y, click, press, wheel }, 8000);
+    const r = await this.helperInput.cmd({ op: "mouse", x, y, click, press, button, wheel }, 8000);
     return { ok: !!r?.ok, error: r?.error };
   }
 
-  async inputKey({ key, modifiers = [] }) {
+  /** press: down|up sends only that half, for held keys; without it the key is tapped with modifiers. */
+  async inputKey({ key, modifiers = [], press }) {
     if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
     const vk = Number(key);
     if (!Number.isFinite(vk) || vk <= 0 || vk > 254) return { ok: false, error: "bad_vk" };
     await this.helperInput.ensure();
-    const r = await this.helperInput.cmd({ op: "key", key: vk, mods: Array.isArray(modifiers) ? modifiers : [] }, 8000);
+    const r = await this.helperInput.cmd({ op: "key", key: vk, press, mods: Array.isArray(modifiers) ? modifiers : [] }, 8000);
     return { ok: !!r?.ok, error: r?.error };
   }
 

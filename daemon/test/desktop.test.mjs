@@ -6,7 +6,11 @@
  */
 import { check, failureCount, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
 
+import { execFileSync } from "node:child_process";
+
 const IS_WIN = process.platform === "win32";
+const keyDown = (vk) => execFileSync("powershell.exe", ["-NoProfile", "-Command",
+  `(Add-Type -PassThru -Name K -MemberDefinition '[DllImport("user32.dll")] public static extern short GetAsyncKeyState(int k);')::GetAsyncKeyState(${vk}) -band 0x8000`]).toString().trim() !== "0";
 const tmp = makeTmp("rh-desk-");
 
 const PORT = 8821;
@@ -55,6 +59,15 @@ async function main() {
     c.send({ type: "desktop_key", key: 65 });
     const ik = await c.next((m) => m.type === "desktop_input_ok", 15000);
     check("desktop_key ok", ik.ok === true);
+
+    // Held key: F24 goes down, and dropping the socket releases it.
+    const h = await openAndHello(PORT, TOKEN);
+    h.send({ type: "desktop_key", key: 0x87, press: "down" });
+    await h.next((m) => m.type === "desktop_input_ok", 15000);
+    check("held key is down", keyDown(0x87));
+    await h.close();
+    await new Promise((r) => setTimeout(r, 1500));
+    check("dropped viewer releases held key", !keyDown(0x87));
   }
 
   await finish(d, c);

@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { check, failureCount, failureNames, makeTmp, startDaemon, teardown } from "./helpers.mjs";
 
-const PORT = 8897;
+const PORT = 8847;
 const CLI = 4707;
 const TOKEN = "absorbtoken";
 const tmp = makeTmp("rh-absorb-");
