@@ -45,6 +45,9 @@ Right-click it for:
 | Open web UI | The browser dashboard: sessions, schedules, prompt queue, usage, devices. |
 | Copy pairing info | Copies the address and token, for pairing by hand. |
 | Open daemon log | The daemon's output, including how each phone connected (`direct` or `relayed`). |
+| Ask before someone views this PC | Each desktop session, snapshot or input first shows Allow / View only / Deny on the PC; no answer in 30 s denies. |
+| Record remote sessions | Records the screen while anyone watches (MP4) and every terminal session (asciicast). |
+| Open recordings | The folder with recordings and `sessions.log`, which lists every viewer, approval and file sent. |
 | Start / Stop daemon | Starts or stops the daemon without closing the tray. |
 | Exit | Stops the daemon and closes the tray until the next logon. |
 
@@ -70,6 +73,19 @@ Your settings and paired phones stay in `%USERPROFILE%\.pocketdesk`; add `-Remov
 | `%USERPROFILE%\.pocketdesk\iroh.key` | This PC's iroh identity. Keep it: paired phones find the PC by it. |
 | `%USERPROFILE%\.pocketdesk\tls\` | The daemon's certificate. |
 | `%USERPROFILE%\.pocketdesk\daemon.log` | Output of the last daemon start. |
+| `%USERPROFILE%\.pocketdeskecordings\` | Session recordings and `sessions.log`. |
+| `%USERPROFILE%\Downloads\PocketDesk\` | Files sent from a phone or browser into a desktop session. |
+
+While anyone views the desktop, a bar at the top of the PC screen names them and has a
+**Disconnect** button. The bar is kept out of the stream, so it never covers what they see.
+
+## Waking the PC
+
+The phone remembers the PC's network adapters after each connection and shows **Wake** next to
+it. Wake-on-LAN only works from the same network as the PC, and only if Windows lets the adapter
+wake it: Device Manager > the network adapter > Power Management > "Allow this device to wake the
+computer" and "Only allow a magic packet". A wired port usually also needs Wake-on-LAN enabled in
+the BIOS. The browser's **Doctor** reports whether any adapter is allowed to wake the PC.
 
 ## Settings
 
