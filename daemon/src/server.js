@@ -29,6 +29,7 @@ import { RemoteDesktopBridgeManager } from "./remote_desktop_bridge.js";
 import { WhatsAppBridgeManager } from "./whatsapp_bridge.js";
 import { VNCBridge } from "./vnc_bridge.js";
 import { DesktopController } from "./desktop_capture.js";
+import { DesktopVideo } from "./desktop_video.js";
 import { AdvancedSSHServerManager } from "./advanced_ssh_server.js";
 import { SSHBastion } from "./ssh_bastion.js";
 import { MultiProtocolClient } from "./ssh_vnc_client.js";
@@ -404,6 +405,27 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
     }
   });
 
+  // H.264 viewers get binary [kind, ...annexB] messages. A viewer whose socket
+  // backs up skips frames until a fresh keyframe, which only a restart produces.
+  const video = new DesktopVideo();
+  const videoWatchers = new Set();
+  let resyncTimer = null;
+  const resync = () => {
+    if (resyncTimer) return;
+    resyncTimer = setTimeout(() => { resyncTimer = null; if (videoWatchers.size) video.restart(); }, 250);
+  };
+  video.on("packet", ({ kind, data }) => {
+    const msg = Buffer.concat([Buffer.from([kind]), data]);
+    for (const w of videoWatchers) {
+      if (w.readyState !== 1) continue;
+      if (kind === 0) w._needKey = false;
+      if (w._needKey) continue;
+      if (w.bufferedAmount > 1_500_000) { w._needKey = true; resync(); continue; }
+      w.send(msg);
+    }
+  });
+  video.on("ended", () => { if (videoWatchers.size) resync(); });
+
   // ── Remote desktop bridge (rustdesk/remodex: session-scoped screen+input) ──
   const rd = new RemoteDesktopBridgeManager(desktop);
   for (const evt of ["session:connected", "session:disconnected", "frame:received", "input:forwarded", "quality:updated"]) {
@@ -473,6 +495,7 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
     tunnels.closeAll();
     activity.stop();
     relay.dispose();
+    video.stop();
     if (lanDiscoveryStarted) { try { lanDiscovery.stop(); } catch {} }
     scheduler.stop();
     liveDigest.stop();
@@ -541,7 +564,7 @@ export function start({ port, token, tls, relay: relayCfg }, { onTokenRotated } 
 
   const ctx = {
     send, broadcast, allSessions, notifications, plugins, power, shares, recorder, tunnels, relay, wa, rd, vnc,
-    desktop, desktopWatchers, bastion, sshSrv, mpc, shooter, streamParser, lanDiscovery, ensureLanDiscovery,
+    desktop, desktopWatchers, video, videoWatchers, bastion, sshSrv, mpc, shooter, streamParser, lanDiscovery, ensureLanDiscovery,
     activity, tls, rotateToken, disconnectDevice,
   };
   const handlers = {

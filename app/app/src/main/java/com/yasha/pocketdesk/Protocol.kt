@@ -183,6 +183,9 @@ object Proto {
 
     // ── Desktop control (AnyDesk-style watch + full input) ──
     fun desktopStart(quality: Int) = obj { put("type", "desktop_start"); put("quality", quality) }
+    fun desktopStartVideo(preset: String) = obj { put("type", "desktop_start"); put("video", true); put("preset", preset) }
+    fun clipboardGet() = obj { put("type", "clipboard_get") }
+    fun clipboardSet(text: String) = obj { put("type", "clipboard_set"); put("text", text) }
     fun desktopStop() = obj { put("type", "desktop_stop") }
     fun desktopFrame() = obj { put("type", "desktop_frame") }
     fun desktopMouse(x: Int?, y: Int?, click: String?, wheel: Int?, press: String? = null) = obj {
