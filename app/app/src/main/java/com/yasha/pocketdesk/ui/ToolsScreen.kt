@@ -42,7 +42,7 @@ import com.yasha.pocketdesk.WsClient
 import kotlinx.coroutines.delay
 
 @Composable
-fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit, openSsh: () -> Unit, lock: AppLock) {
+fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit, openSsh: () -> Unit, openFreebuff: () -> Unit, lock: AppLock) {
     // One project folder for everything started from this screen: an IDE opens
     // it, a CLI tool runs in it.
     var cwd by remember { mutableStateOf("") }
@@ -99,7 +99,7 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
             }
         }
         items(ws.tools, key = { it.manifest.id }) { tool ->
-            ToolCard(tool, ws, cwd)
+            ToolCard(tool, ws, cwd, openDesktop, openFreebuff)
         }
         item {
             Text("Everything installed", style = MaterialTheme.typography.titleLarge)
@@ -166,7 +166,7 @@ private fun AppCard(app: AppEntry, ws: WsClient, cwd: String) {
 }
 
 @Composable
-private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String) {
+private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String, openDesktop: () -> Unit, openFreebuff: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -201,6 +201,10 @@ private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String) {
                         Text("Install")
                     }
                 }
+            }
+            if (tool.manifest.id == "freebuff-desktop" && tool.installed == true) {
+                FreebuffAccounts(ws, openDesktop)
+                TextButton(onClick = openFreebuff) { Text("Skills & config") }
             }
             val auth = tool.manifest.auth
             if (tool.installed == true && auth.isNotEmpty()) {

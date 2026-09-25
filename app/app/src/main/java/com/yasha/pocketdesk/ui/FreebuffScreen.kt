@@ -35,12 +35,12 @@ import com.yasha.pocketdesk.FbSkill
 import com.yasha.pocketdesk.WsClient
 
 /**
- * Freebuff control from the phone: app status, skills (view/run), allowlisted
- * config files (view/deep-merge edit), and login/logout. The auth token never
- * reaches the phone — only logged-in state and expiry.
+ * Freebuff control from the phone: app status, accounts, skills (view/run) and
+ * allowlisted config files (view/deep-merge edit). Session tokens never reach
+ * the phone — only account email and name.
  */
 @Composable
-fun FreebuffScreen(ws: WsClient) {
+fun FreebuffScreen(ws: WsClient, openDesktop: () -> Unit) {
     var viewSkill by remember { mutableStateOf<FbSkill?>(null) }
     var skillContent by remember { mutableStateOf<String?>(null) }
     var runSkill by remember { mutableStateOf<FbSkill?>(null) }
@@ -48,7 +48,6 @@ fun FreebuffScreen(ws: WsClient) {
     var editConfig by remember { mutableStateOf<FbConfig?>(null) }
     var configContent by remember { mutableStateOf<String?>(null) }
     var configError by remember { mutableStateOf<String?>(null) }
-    var confirmLogout by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         ws.fbStatus(); ws.fbSkillList(); ws.fbConfigList(); ws.fbAuthStatus()
@@ -71,16 +70,11 @@ fun FreebuffScreen(ws: WsClient) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("App: ${when (ws.fbRunning) { true -> "running"; false -> "stopped"; null -> "—" }}", style = MaterialTheme.typography.titleMedium)
                     Text(ws.fbProfile ?: "", style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(
-                        "Login: ${when (ws.fbAuthLoggedIn) { true -> "logged in"; false -> "logged out"; null -> "—" }}" +
-                            (ws.fbAuthExpiresAt?.let { " · token expires ${it.take(10)}" } ?: ""),
-                        style = MaterialTheme.typography.bodySmall,
-                    )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { ws.fbAppOpen() }) { Text("Open") }
                         OutlinedButton(onClick = { ws.fbAppQuit() }) { Text("Quit") }
-                        OutlinedButton(onClick = { confirmLogout = true }) { Text("Logout") }
                     }
+                    FreebuffAccounts(ws, openDesktop)
                 }
             }
         }
@@ -169,15 +163,62 @@ fun FreebuffScreen(ws: WsClient) {
             dismissButton = { TextButton(onClick = { editConfig = null }) { Text("Cancel") } },
         )
     }
-    if (confirmLogout) {
-        AlertDialog(
-            onDismissRequest = { confirmLogout = false },
-            title = { Text("Clear Freebuff login?") },
-            text = { Text("Clears the app's saved login on the PC (a backup is kept). Restart the app to show the login screen again.") },
-            confirmButton = {
-                TextButton(onClick = { ws.fbAuthLogout(true); confirmLogout = false }) { Text("Logout + restart app") }
+}
+
+/**
+ * Signed-in Freebuff account plus every account used before on this PC. Switch
+ * swaps the saved session in and reopens the app; Add account signs out and
+ * opens the Desktop view to finish the login in the app.
+ */
+@Composable
+fun FreebuffAccounts(ws: WsClient, openDesktop: () -> Unit) {
+    var confirm by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { ws.fbAuthStatus(); ws.fbAccountsList() }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            when (ws.fbAuthLoggedIn) {
+                true -> "Signed in: ${ws.fbAuthEmail ?: "unknown account"}"
+                false -> "Signed out"
+                null -> "Account: checking…"
             },
-            dismissButton = { TextButton(onClick = { confirmLogout = false }) { Text("Cancel") } },
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        ws.fbAccounts.filter { !it.current }.forEach { acc ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(acc.email, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                TextButton(onClick = { ws.fbAccountSwitch(acc.email) }) { Text("Switch") }
+                TextButton(onClick = { confirm = "forget:${acc.email}" }) { Text("Forget") }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { confirm = "add" }) { Text("Add account") }
+            if (ws.fbAuthLoggedIn == true) OutlinedButton(onClick = { confirm = "logout" }) { Text("Log out") }
+        }
+    }
+    confirm?.let { op ->
+        val forget = op.startsWith("forget:")
+        AlertDialog(
+            onDismissRequest = { confirm = null },
+            title = { Text(when { forget -> "Forget ${op.removePrefix("forget:")}?"; op == "add" -> "Add a Freebuff account?"; else -> "Log out of Freebuff?" }) },
+            text = {
+                Text(when {
+                    forget -> "Removes its saved session from the PC. Signing in to it again needs the browser."
+                    op == "add" -> "Freebuff signs out and reopens at its login screen; the current account stays saved for Switch. Finish the login in the Desktop view."
+                    else -> "Freebuff restarts signed out. The account stays saved, so Switch brings it back."
+                })
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    when {
+                        forget -> ws.fbAccountForget(op.removePrefix("forget:"))
+                        op == "add" -> { ws.fbAuthLogout(); openDesktop() }
+                        else -> ws.fbAuthLogout()
+                    }
+                    confirm = null
+                }) { Text(if (forget) "Forget" else "Continue") }
+            },
+            dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
         )
     }
 }
