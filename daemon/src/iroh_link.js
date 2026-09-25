@@ -17,6 +17,7 @@ import { EventEmitter } from "node:events";
 
 export const ALPN = "pocketdesk/1";
 const LAG_LIMIT = 1_500_000; // same backlog limit as the ws video path
+const BEHIND_BYTES = 128 << 10;
 const MAX_MESSAGE = 8 << 20; // largest control message; checked before auth
 const KIND_CONFIG = 0, KIND_KEY = 1;
 
@@ -138,7 +139,10 @@ export class IrohSocket extends EventEmitter {
     if (kind === KIND_KEY) {
       const prev = this._gop;
       this._gop = null;
-      // An unfinished GOP is useless once a newer keyframe exists.
+      // An unfinished GOP is useless once a newer keyframe exists, and a link that cannot
+      // finish one GOP before the next is slower than the stream.
+      // A few trailing frames still queued is normal; a GOP's worth is not.
+      const behind = !!prev && !prev.dead && prev.queued > BEHIND_BYTES;
       if (prev) { if (prev.queued > 0) prev.reset(); else prev.finish(); }
       const head = this._config;
       this._opening = this._opening.then(async () => {
@@ -148,7 +152,7 @@ export class IrohSocket extends EventEmitter {
         if (head) this._gop.write(frame(head));
         this._gop.write(frame(pkt));
       }).catch(() => {});
-      return true;
+      return !behind;
     }
     const gop = this._gop;
     if (gop && !gop.dead && gop.queued > LAG_LIMIT) { gop.reset(); return false; }

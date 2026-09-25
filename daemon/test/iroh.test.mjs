@@ -95,6 +95,10 @@ async function main() {
   const s2 = await conn.acceptUni();
   const second = [await readMsg(s2), await readMsg(s2)].map((b) => b[0]);
   check("next keyframe opens a new stream that repeats the config", second.join() === "0,1");
+  // A viewer that stops reading leaves the GOP unfinished: the next keyframe reports congestion.
+  sock.sendVideo(1, Buffer.alloc(4 << 20, 5));
+  await new Promise((r) => setTimeout(r, 300));
+  check("a GOP still unsent when the next keyframe comes reports congestion", sock.sendVideo(1, pkt(6)) === false);
   sock.close();
 
   await teardown(tmp);

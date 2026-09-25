@@ -39,8 +39,10 @@ test("congestion steps the preset down, and recovery never goes above what was a
   v.setPreset("quality");
   assert.equal(v.stepDown(), true);
   assert.equal(v.stepDown(), true);
-  assert.equal(v.preset, "saver");
+  assert.equal(v.stepDown(), true);
+  assert.equal(v.preset, "low");
   assert.equal(v.stepDown(), false);
+  assert.equal(v.stepUp(), true);
   assert.equal(v.stepUp(), true);
   assert.equal(v.stepUp(), true);
   assert.equal(v.preset, "quality");
