@@ -113,7 +113,7 @@ export class RemoteDesktopBridgeManager extends EventEmitter {
         result = await this.controller.inputMouse({ x, y });
         break;
       case "mouse_click":
-        result = await this.controller.inputMouse({ x, y, click: true, button: Number(event.button) || 0 });
+        result = await this.controller.inputMouse({ x, y, click: ["left", "middle", "right"][Number(event.button) || 0] ?? "left" });
         break;
       case "mouse_wheel":
         result = await this.controller.inputMouse({ x, y, wheel: Number(event.wheel) || 0 });

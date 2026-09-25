@@ -45,6 +45,12 @@ async function main() {
   const apps = await c.next((m) => m.type === "apps", 60000);
   check("apps_discover returns entries the panel can act on", apps.items.length > 0
     && apps.items.every((a) => a.name && a.path && (a.kind === "gui" || a.kind === "cli")));
+  if (process.platform === "win32") {
+    // Calculator ships as a Store app on every Windows 10/11 install and has no Start Menu shortcut.
+    c.send({ type: "apps_discover", q: "calculator" });
+    const store = await c.next((m) => m.type === "apps", 60000);
+    check("Store apps are discovered", store.items.some((a) => a.path.startsWith("shell:AppsFolder\\")));
+  }
 
   // Only a discovered path may be launched — the panel never invents one.
   c.send({ type: "create", path: "C:/not/discovered.exe", cwd: tmp });

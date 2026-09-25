@@ -101,7 +101,8 @@ async function detect(id) {
  * ones that do not.
  */
 export function launchApp({ path: p, args = [], folder }) {
-  if (!p || !fs.existsSync(p)) return { ok: false, reason: "not installed" };
+  const store = typeof p === "string" && p.startsWith("shell:AppsFolder\\");
+  if (!p || (!store && !fs.existsSync(p))) return { ok: false, reason: "not installed" };
   let dir;
   if (folder && folder.trim()) {
     const resolved = path.resolve(folder.replace(/^~(?=$|[/\\])/, process.env.USERPROFILE || process.env.HOME || ""));
@@ -113,11 +114,13 @@ export function launchApp({ path: p, args = [], folder }) {
     // A macOS .app bundle is a directory, not an executable, and a Windows
     // .lnk is resolved by the shell: both need a launcher in front of them.
     // Everything else is spawned directly.
-    const [bin, argv] = p.endsWith(".app")
-      ? ["open", ["-a", p, ...args, ...tail]]
-      : p.toLowerCase().endsWith(".lnk")
-        ? ["cmd.exe", ["/c", "start", "", p, ...args, ...tail]]
-        : [p, [...args, ...tail]];
+    const [bin, argv] = store
+      ? ["explorer.exe", [p]]
+      : p.endsWith(".app")
+        ? ["open", ["-a", p, ...args, ...tail]]
+        : p.toLowerCase().endsWith(".lnk")
+          ? ["cmd.exe", ["/c", "start", "", p, ...args, ...tail]]
+          : [p, [...args, ...tail]];
     const child = spawn(bin, argv, { detached: true, stdio: "ignore", cwd: dir, windowsHide: true });
     // Node reports a failed spawn asynchronously on platforms where the call
     // itself does not throw, and there is no caller left by then: an unhandled

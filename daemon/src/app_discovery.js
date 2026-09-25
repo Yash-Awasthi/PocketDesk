@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const IS_WIN = process.platform === "win32";
 // Start Menu folders are mostly these; none of them is a tool to launch.
@@ -61,6 +62,17 @@ function readDesktopEntry(file) {
   return bin ? { name, path: bin, kind: "gui" } : null;
 }
 
+/** Store (MSIX) apps have no Start Menu shortcut; Windows lists them by AppID, which contains "!". */
+function storeApps() {
+  try {
+    const json = execFileSync("powershell.exe", ["-NoProfile", "-Command", "Get-StartApps | Where-Object AppID -like '*!*' | ConvertTo-Json -Compress"],
+      { encoding: "utf8", timeout: 15000, windowsHide: true });
+    return [].concat(JSON.parse(json || "[]")).map((a) => ({ name: a.Name, path: `shell:AppsFolder\\${a.AppID}`, kind: "gui" }));
+  } catch {
+    return [];
+  }
+}
+
 function guiApps() {
   const out = [];
   if (IS_WIN) {
@@ -74,6 +86,7 @@ function guiApps() {
       const name = path.basename(p, path.extname(p));
       if (!JUNK.test(name)) out.push({ name, path: p, kind: "gui" });
     }
+    out.push(...storeApps());
   } else if (process.platform === "darwin") {
     for (const r of ["/Applications", "/System/Applications", path.join(os.homedir(), "Applications")]) {
       let entries;
