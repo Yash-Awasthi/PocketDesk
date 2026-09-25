@@ -193,6 +193,25 @@ private fun ChatConversation(ws: WsClient, chatId: String, onClose: () -> Unit) 
 
     var input by remember { mutableStateOf("") }
     var modelMenuOpen by remember { mutableStateOf(false) }
+    var customModelOpen by remember { mutableStateOf(false) }
+    var customModel by remember { mutableStateOf("") }
+    if (customModelOpen) {
+        AlertDialog(
+            onDismissRequest = { customModelOpen = false },
+            title = { Text("Model name") },
+            text = {
+                OutlinedTextField(value = customModel, onValueChange = { customModel = it.trim() }, singleLine = true,
+                    placeholder = { Text("e.g. gpt-5.5 or anthropic/claude-sonnet-5") })
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (customModel.isNotEmpty()) ws.chatModelSet(chatId, customModel)
+                    customModelOpen = false
+                }) { Text("Use") }
+            },
+            dismissButton = { TextButton(onClick = { customModelOpen = false }) { Text("Cancel") } },
+        )
+    }
     val listState = rememberLazyListState()
 
     // Attach on open so the daemon replays the transcript and streams deltas
@@ -237,7 +256,8 @@ private fun ChatConversation(ws: WsClient, chatId: String, onClose: () -> Unit) 
                 }
                 // Model picker — per-chat model selection (where the CLI offers it).
                 val models = ws.chatModels[chatId] ?: emptyList()
-                if (models.isNotEmpty()) {
+                val custom = chatId in ws.chatModelCustom
+                if (models.isNotEmpty() || custom) {
                     Box {
                         TextButton(onClick = { modelMenuOpen = true }) {
                             Text(ws.chatCurrentModel[chatId] ?: "model: default")
@@ -255,6 +275,15 @@ private fun ChatConversation(ws: WsClient, chatId: String, onClose: () -> Unit) 
                                     text = { Text(mdl) },
                                     onClick = {
                                         ws.chatModelSet(chatId, mdl)
+                                        modelMenuOpen = false
+                                    },
+                                )
+                            }
+                            if (custom) {
+                                DropdownMenuItem(
+                                    text = { Text("Custom…") },
+                                    onClick = {
+                                        customModelOpen = true
                                         modelMenuOpen = false
                                     },
                                 )

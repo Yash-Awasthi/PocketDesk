@@ -112,6 +112,9 @@ class MainActivity : ComponentActivity() {
         }
         // Declared before the lock gate so a re-lock keeps navigation.
         var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Connect) }
+        var desktopFullscreen by rememberSaveable { mutableStateOf(false) }
+        LaunchedEffect(screen) { if (screen != Screen.Desktop) desktopFullscreen = false }
+        com.yasha.pocketdesk.ui.DesktopFullscreenEffect(desktopFullscreen)
 
         if (locked) {
             Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
@@ -127,7 +130,7 @@ class MainActivity : ComponentActivity() {
 
         Scaffold(
             bottomBar = {
-                if (connected && screen !is Screen.Terminal) {
+                if (connected && screen !is Screen.Terminal && !desktopFullscreen) {
                     NavigationBar {
                         NavigationBarItem(
                             selected = screen == Screen.Tools,
@@ -197,7 +200,12 @@ class MainActivity : ComponentActivity() {
                     Screen.Sessions -> SessionsScreen(client, openTerminal = { screen = Screen.Terminal(it) })
                     Screen.Chats -> ChatScreen(client)
                     Screen.Freebuff -> FreebuffScreen(client)
-                    Screen.Desktop -> DesktopScreen(client, onClose = { screen = Screen.Sessions })
+                    Screen.Desktop -> DesktopScreen(
+                        client,
+                        onClose = { screen = Screen.Sessions },
+                        fullscreen = desktopFullscreen,
+                        onFullscreen = { desktopFullscreen = it },
+                    )
                     Screen.Ssh -> SshScreen(client, onClose = { screen = Screen.Tools })
                     is Screen.Terminal -> TerminalScreen(client, s.sessionId, onClose = { screen = Screen.Sessions })
                 }

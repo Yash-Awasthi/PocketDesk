@@ -12,6 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -199,6 +200,43 @@ private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String) {
                     else -> TextButton(onClick = { ws.install(tool.manifest.id) }) {
                         Text("Install")
                     }
+                }
+            }
+            val auth = tool.manifest.auth
+            if (tool.installed == true && auth.isNotEmpty()) {
+                var confirm by remember { mutableStateOf<String?>(null) }
+                if ("status" in auth) LaunchedEffect(tool.manifest.id) { ws.authCheck(tool.manifest.id) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val st = ws.authStatus[tool.manifest.id]
+                    Text(
+                        when {
+                            "status" !in auth -> "account: use Log in to sign in or switch"
+                            st == null -> "account: checking…"
+                            st.first -> "account: signed in"
+                            else -> "account: signed out"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    // Some CLIs drop the current account the moment a login starts, even if it is cancelled.
+                    if ("login" in auth) TextButton(onClick = {
+                        if (st?.first == true) confirm = "login" else ws.authLogin(tool.manifest.id, cwd.trim())
+                    }) { Text("Log in") }
+                    if ("logout" in auth) TextButton(onClick = { confirm = "logout" }) { Text("Log out") }
+                }
+                confirm?.let { op ->
+                    AlertDialog(
+                        onDismissRequest = { confirm = null },
+                        title = { Text(if (op == "login") "Switch account?" else "Log out?") },
+                        text = { Text("${tool.manifest.name} will be signed out on the PC" + (if (op == "login") " until you finish the new login." else ".")) },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                if (op == "login") ws.authLogin(tool.manifest.id, cwd.trim()) else ws.authLogout(tool.manifest.id, cwd.trim())
+                                confirm = null
+                            }) { Text(if (op == "login") "Continue" else "Log out") }
+                        },
+                        dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
+                    )
                 }
             }
             ws.progress[tool.manifest.id]?.let { lines ->
