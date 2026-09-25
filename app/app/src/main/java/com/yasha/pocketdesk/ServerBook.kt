@@ -18,6 +18,8 @@ data class ServerEntry(
     val pinnedFingerprint: String? = null,
     /** Tried when [url] cannot connect: the iroh ticket that reaches the PC from any network. */
     val fallback: String? = null,
+    /** Last reported by the PC, so it can be woken while unreachable. */
+    val wake: WakeInfo? = null,
 )
 
 class ServerBook(context: Context) {
@@ -36,6 +38,10 @@ class ServerBook(context: Context) {
                 token = s("token") ?: "",
                 pinnedFingerprint = s("fp")?.takeIf { it.isNotBlank() },
                 fallback = s("fallback")?.takeIf { it.isNotBlank() },
+                wake = (o["wake"] as? JsonObject)?.let { w ->
+                    fun list(k: String) = (w[k] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
+                    WakeInfo(list("macs"), list("bc")).takeIf { it.macs.isNotEmpty() }
+                },
             )
         }
     }
@@ -49,6 +55,12 @@ class ServerBook(context: Context) {
                     put("token", e.token)
                     put("fp", e.pinnedFingerprint ?: "")
                     e.fallback?.let { put("fallback", it) }
+                    e.wake?.let { w ->
+                        put("wake", buildJsonObject {
+                            put("macs", JsonArray(w.macs.map { JsonPrimitive(it) }))
+                            put("bc", JsonArray(w.broadcasts.map { JsonPrimitive(it) }))
+                        })
+                    }
                 })
             }
         }

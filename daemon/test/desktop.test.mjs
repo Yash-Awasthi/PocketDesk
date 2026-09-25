@@ -7,6 +7,9 @@
 import { check, failureCount, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
 
 import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 const IS_WIN = process.platform === "win32";
 const keyDown = (vk) => execFileSync("powershell.exe", ["-NoProfile", "-Command",
@@ -18,6 +21,8 @@ const CLI_PORT = 46821;
 const TOKEN = "desktoken";
 
 async function main() {
+  // A run that died mid-way can leave the approval flag behind in the test home.
+  fs.rmSync(path.join(os.tmpdir(), "rh-home-" + PORT, "ask-before-viewing"), { force: true });
   const d = startDaemon(PORT, CLI_PORT, { token: TOKEN, manifests: tmp });
   await d.ready;
   const c = await openAndHello(PORT, TOKEN);
@@ -118,6 +123,74 @@ async function main() {
     await w.close();
     c.send({ type: "clipboard_set", text: saved.kind === "text" ? saved.text : "" });
     await c.next((m) => m.type === "clipboard_set_ok", 20000);
+
+    // View only: the socket sees the screen but cannot touch it.
+    const vo = await openAndHello(PORT, TOKEN);
+    vo.send({ type: "desktop_start", quality: 30, viewOnly: true });
+    const vos = await vo.next((m) => m.type === "desktop_started", 20000);
+    vo.send({ type: "desktop_key", key: 0x87 });
+    const vok = await vo.next((m) => m.type === "desktop_input_ok", 10000);
+    check("view-only viewer cannot send input", vos.viewOnly === true && vok.ok === false && vok.error === "view only");
+    await vo.close();
+
+    // Approval: the prompt on the PC is answered with keystrokes, Enter = Allow, Alt+F4 = Deny.
+    const flag = path.join(os.tmpdir(), "rh-home-" + PORT, "ask-before-viewing");
+    fs.writeFileSync(flag, "");
+    const answer = (keys) => execFileSync("powershell.exe", ["-NoProfile", "-Command",
+      // Keys go out only once the prompt itself is active, never to whatever window has focus.
+      `Add-Type -A Microsoft.VisualBasic, System.Windows.Forms; $ok = $false
+       for ($i = 0; $i -lt 40 -and -not $ok; $i++) { try { [Microsoft.VisualBasic.Interaction]::AppActivate('PocketDesk'); $ok = $true } catch { Start-Sleep -Milliseconds 250 } }
+       if (-not $ok) { exit 1 }; Start-Sleep -Milliseconds 300; [System.Windows.Forms.SendKeys]::SendWait('${keys}')`]);
+    const a1 = await openAndHello(PORT, TOKEN);
+    a1.send({ type: "desktop_key", key: 0x87 });
+    const blocked = await a1.next((m) => m.type === "desktop_input_ok", 10000);
+    check("input before approval is refused", blocked.ok === false);
+    a1.send({ type: "desktop_start", quality: 30 });
+    await a1.next((m) => m.type === "desktop_pending", 10000);
+    answer("%{F4}");
+    const denied = await a1.next((m) => m.type === "desktop_started", 20000);
+    check("denied on the PC", denied.ok === false && denied.reason === "denied on the PC");
+    a1.send({ type: "desktop_start", quality: 30 });
+    await a1.next((m) => m.type === "desktop_pending", 10000);
+    answer("{ENTER}");
+    const allowed = await a1.next((m) => m.type === "desktop_started", 20000);
+    a1.send({ type: "desktop_key", key: 0x87 });
+    const afterOk = await a1.next((m) => m.type === "desktop_input_ok", 10000);
+    check("allowed on the PC, then input works", allowed.ok === true && allowed.viewOnly === false && afterOk.ok === true);
+    await a1.close();
+    fs.rmSync(flag, { force: true });
+
+    // Recording: with the flag on, a watched screen becomes an MP4 and a terminal an asciicast.
+    const home = path.join(os.tmpdir(), "rh-home-" + PORT);
+    const recDir = path.join(home, "recordings");
+    fs.rmSync(recDir, { recursive: true, force: true });
+    fs.writeFileSync(path.join(home, "record-sessions"), "");
+    const r1 = await openAndHello(PORT, TOKEN);
+    r1.send({ type: "create", harness: "node", cwd: os.tmpdir() });
+    const term = await r1.next((m) => m.type === "created", 15000);
+    r1.send({ type: "in", id: term.id, data: Buffer.from('console.log("rec-" + 42)\r').toString("base64") });
+    await r1.next((m) => m.type === "out" && Buffer.from(m.data, "base64").toString().includes("rec-42"), 15000).catch(() => null);
+    r1.send({ type: "kill", id: term.id });
+    await r1.next((m) => m.type === "exit", 10000);
+    r1.send({ type: "desktop_start", quality: 30 });
+    const rs = await r1.next((m) => m.type === "desktop_started", 20000);
+    if (process.env.FFMPEG_PATH) await new Promise((r) => setTimeout(r, 4000));
+    r1.send({ type: "desktop_stop" });
+    await r1.next((m) => m.type === "desktop_stopped", 10000);
+    await new Promise((r) => setTimeout(r, 2500));
+    const files = fs.existsSync(recDir) ? fs.readdirSync(recDir) : [];
+    const cast = files.find((f) => f.endsWith(".cast"));
+    const castText = cast ? fs.readFileSync(path.join(recDir, cast), "utf8") : "";
+    check("terminal session recorded as asciicast", JSON.parse(castText.split("\n")[0] || "{}").version === 2 && castText.includes("rec-42"));
+    const log = fs.existsSync(path.join(recDir, "sessions.log")) ? fs.readFileSync(path.join(recDir, "sessions.log"), "utf8") : "";
+    check("viewer joining and leaving is logged", log.includes('"viewer_joined"') && log.includes('"viewer_left"'));
+    if (process.env.FFMPEG_PATH) {
+      const mp4 = files.find((f) => f.endsWith(".mp4"));
+      const size = mp4 ? fs.statSync(path.join(recDir, mp4)).size : 0;
+      check("watched screen recorded as MP4", rs.recording === true && size > 10_000);
+    }
+    fs.rmSync(path.join(home, "record-sessions"), { force: true });
+    await r1.close();
 
     // Held key: F24 goes down, and dropping the socket releases it.
     const h = await openAndHello(PORT, TOKEN);

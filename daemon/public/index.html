@@ -248,6 +248,7 @@
               <option value="50">medium (75%)</option>
               <option value="80" selected>high (100%)</option>
             </select>
+            <label style="color:#8b949e"><input type="checkbox" id="deskViewOnly" onchange="desk.viewOnly = this.checked; desktopRestart()" /> view only</label>
             <select id="deskMonitor" title="monitor" style="display:none" onchange="desk.monitor = Number(this.value); desktopRestart()"></select>
             <span id="deskStatus" style="color:#8b949e"></span>
           </div>
@@ -699,18 +700,34 @@ function handle(m) {
     case "desktop_frame_error":
       document.getElementById("deskStatus").textContent = m.reason === "unsupported_platform" ? "desktop control is Windows-only" : "capture failed";
       break;
+    case "desktop_pending":
+      document.getElementById("deskStatus").textContent = "waiting for someone at the PC to allow this…";
+      break;
     case "desktop_started":
       desk.viewing = !!m.ok;
+      if (m.ok) { desk.viewOnly = !!m.viewOnly; document.getElementById("deskViewOnly").checked = desk.viewOnly; }
       desk.mode = m.ok ? (m.mode || "jpeg") : "";
       document.getElementById("deskToggle").textContent = desk.viewing ? "⏸ Stop viewing" : "▶ Start viewing";
       document.getElementById("deskPreset").style.display = desk.mode === "jpeg" ? "none" : "";
       document.getElementById("deskQuality").style.display = desk.mode === "h264" ? "none" : "";
-      document.getElementById("deskStatus").textContent = m.ok ? (desk.mode === "h264" ? `H.264 · ${m.encoder}` : "snapshots (~3 fps)") : (m.reason || "unavailable");
+      document.getElementById("deskStatus").textContent = m.ok ? (m.recording ? "● recorded on the PC · " : "") + (desk.mode === "h264" ? `H.264 · ${m.encoder}` : "snapshots (~3 fps)") : (m.reason || "unavailable");
       if (m.ok && desk.mode === "jpeg") send({ type: "desktop_frame" });
       break;
     case "desktop_stopped":
       desktopStopped();
+      if (m.reason) document.getElementById("deskStatus").textContent = "session " + m.reason;
       break;
+    case "desktop_pong": {
+      const now = Date.now();
+      desk.rtt = now - m.t;
+      // The fastest round trip bounds the offset error best; refresh it now and then for drift.
+      if (desk.rtt <= desk.bestRtt || now - desk.bestAt > 30000) {
+        desk.bestRtt = desk.rtt;
+        desk.bestAt = now;
+        desk.offset = m.server - (m.t + desk.rtt / 2);
+      }
+      break;
+    }
     case "desktop_cursor":
       desk.cursor = m;
       desktopPointer();
@@ -984,14 +1001,15 @@ function renderApps(items) {
 
 // ── Desktop control: H.264 through WebCodecs where the page may use it, JPEG snapshots otherwise ──
 // WebCodecs exists only in secure contexts (https or localhost), so plain http over the LAN gets snapshots.
-const desk = { viewing: false, mode: "", decoder: null, config: null, needKey: true, ts: 0, frames: 0, cursor: null, hover: false, held: new Set(), monitor: 0 };
+const desk = { offset: 0, bestRtt: Infinity, bestAt: 0, rtt: -1, delay: -1, viewOnly: false, viewing: false, mode: "", decoder: null, config: null, needKey: true, ts: 0, frames: 0, cursor: null, hover: false, held: new Set(), monitor: 0 };
 function desktopOnShow() {
   // A single on-demand frame even when not streaming — instant preview.
   if (!desk.viewing) send({ type: "desktop_frame" });
 }
 function desktopStart() {
-  if (typeof VideoDecoder === "function") send({ type: "desktop_start", video: true, preset: document.getElementById("deskPreset").value, monitor: desk.monitor });
-  else send({ type: "desktop_start", quality: Number(document.getElementById("deskQuality").value) });
+  const viewOnly = desk.viewOnly || undefined;
+  if (typeof VideoDecoder === "function") send({ type: "desktop_start", video: true, preset: document.getElementById("deskPreset").value, monitor: desk.monitor, viewOnly });
+  else send({ type: "desktop_start", quality: Number(document.getElementById("deskQuality").value), viewOnly });
   send({ type: "desktop_monitors" });
 }
 function desktopToggle() {
@@ -1025,6 +1043,14 @@ function desktopDrawJpeg(f) {
   };
   img.src = "data:image/jpeg;base64," + f.base64;
 }
+const DESK_STAMP = [0, 0, 0, 1, 0x06, 0x05, 23, ...new TextEncoder().encode("RH-latency-stamp")];
+/** Daemon send time (ms) from the SEI unit the daemon puts in front of each frame, or 0. */
+function desktopStamp(data) {
+  if (data.length < DESK_STAMP.length + 7 || DESK_STAMP.some((b, i) => data[i] !== b)) return 0;
+  let v = 0;
+  for (let i = 0; i < 7; i++) v = v * 128 + (data[DESK_STAMP.length + i] & 0x7f);
+  return v;
+}
 /** Binary message: [kind, ...Annex B]; kind 0 = SPS/PPS, 1 = keyframe, 2 = delta. */
 function desktopPacket(buf) {
   const kind = buf[0], data = buf.subarray(1);
@@ -1035,7 +1061,9 @@ function desktopPacket(buf) {
   let payload = data;
   if (kind === 1) { payload = new Uint8Array(desk.config.length + data.length); payload.set(desk.config); payload.set(data, desk.config.length); }
   desk.needKey = false;
-  try { d.decode(new EncodedVideoChunk({ type: kind === 1 ? "key" : "delta", timestamp: (desk.ts += 16667), data: payload })); }
+  // The daemon's send time rides through the decoder as the chunk timestamp.
+  const sent = desktopStamp(data);
+  try { d.decode(new EncodedVideoChunk({ type: kind === 1 ? "key" : "delta", timestamp: sent ? sent * 1000 : (desk.ts += 16667), data: payload })); }
   catch { desk.needKey = true; }
 }
 function desktopConfigure(cfg) {
@@ -1047,6 +1075,10 @@ function desktopConfigure(cfg) {
     output: (frame) => {
       desktopCanvasSize(frame.displayWidth, frame.displayHeight);
       document.getElementById("deskCanvas").getContext("2d").drawImage(frame, 0, 0);
+      if (desk.bestAt && frame.timestamp > 1e15) {
+        const age = Math.max(0, Date.now() + desk.offset - frame.timestamp / 1000);
+        desk.delay = desk.delay < 0 ? age : (desk.delay * 7 + age) / 8;
+      }
       frame.close();
       desk.frames++;
     },
@@ -1056,8 +1088,11 @@ function desktopConfigure(cfg) {
 }
 setInterval(() => {
   if (desk.mode !== "h264" || !desk.viewing) return;
+  if ((desk.tick = (desk.tick || 0) + 1) % 2) send({ type: "desktop_ping", t: Date.now() });
   const st = document.getElementById("deskStatus");
-  st.textContent = st.textContent.replace(/ · \d+ fps$/, "") + ` · ${desk.frames} fps`;
+  const delay = desk.delay >= 0 ? ` · ${Math.round(desk.delay)} ms` : "";
+  const ping = desk.rtt >= 0 ? ` (ping ${desk.rtt})` : "";
+  st.textContent = st.textContent.replace(/ · \d+ fps.*$/, "") + ` · ${desk.frames} fps${delay}${ping}`;
   desk.frames = 0;
 }, 1000);
 const DESK_CURSOR_CSS = { arrow: "default", hand: "pointer" };
@@ -1745,14 +1780,14 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
   cv.addEventListener("mouseenter", () => { desk.hover = true; desktopPointer(); });
   cv.addEventListener("mouseleave", () => { desk.hover = false; desktopPointer(); });
   cv.addEventListener("mousemove", (ev) => {
-    if (!desk.viewing || ev.timeStamp - lastMove < 16) return;
+    if (!desk.viewing || desk.viewOnly || ev.timeStamp - lastMove < 16) return;
     lastMove = ev.timeStamp;
     const p = desktopToScreen(ev);
     if (p) send({ type: "desktop_mouse", x: p.x, y: p.y });
   });
   for (const [evt, press] of [["mousedown", "down"], ["mouseup", "up"]]) {
     cv.addEventListener(evt, (ev) => {
-      if (!desk.viewing) return;
+      if (!desk.viewing || desk.viewOnly) return;
       const button = BUTTONS[ev.button];
       const p = desktopToScreen(ev);
       if (!button || !p) return;
@@ -1763,7 +1798,7 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
   }
   cv.addEventListener("contextmenu", (ev) => ev.preventDefault());
   cv.addEventListener("wheel", (ev) => {
-    if (!desk.viewing) return;
+    if (!desk.viewing || desk.viewOnly) return;
     ev.preventDefault();
     const px = ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY;
     const wheel = Math.max(-1200, Math.min(1200, Math.round(-px * 1.2)));
@@ -1772,7 +1807,7 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
   for (const [evt, press] of [["keydown", "down"], ["keyup", "up"]]) {
     cv.addEventListener(evt, (ev) => {
       const vk = DESK_VK[ev.code];
-      if (!desk.viewing || !vk) return;
+      if (!desk.viewing || desk.viewOnly || !vk) return;
       // Ctrl+V becomes a paste event carrying this browser's clipboard; the daemon presses Ctrl+V after setting it.
       if (ev.code === "KeyV" && (ev.ctrlKey || ev.metaKey)) return;
       if (press === "down") desk.held.add("k:" + vk); else desk.held.delete("k:" + vk);
@@ -1783,7 +1818,7 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
   // Keys still down when focus leaves would stay down on the PC.
   cv.addEventListener("blur", desktopReleaseAll);
   document.addEventListener("paste", async (ev) => {
-    if (document.activeElement !== cv || !desk.viewing) return;
+    if (document.activeElement !== cv || !desk.viewing || desk.viewOnly) return;
     ev.preventDefault();
     const files = [...ev.clipboardData.files];
     const image = files.length === 1 && files[0].type.startsWith("image/") && !ev.clipboardData.getData("text/plain");
@@ -1791,9 +1826,9 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
     else if (files.length) desktopSendFiles(files);
     else send({ type: "clipboard_set", text: ev.clipboardData.getData("text/plain"), paste: true });
   });
-  cv.addEventListener("dragover", (ev) => { if (desk.viewing) ev.preventDefault(); });
+  cv.addEventListener("dragover", (ev) => { if (desk.viewing && !desk.viewOnly) ev.preventDefault(); });
   cv.addEventListener("drop", (ev) => {
-    if (!desk.viewing) return;
+    if (!desk.viewing || desk.viewOnly) return;
     ev.preventDefault();
     desktopSendFiles([...ev.dataTransfer.files]);
   });

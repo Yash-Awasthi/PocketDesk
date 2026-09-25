@@ -17,6 +17,9 @@ import { PowerManager, normalizeAwakeMode } from "./power_manager.js";
 import { createActivityMonitor } from "./activity.js";
 import { StreamJsonParser } from "./stream_json_parser.js";
 import { DesktopController } from "./desktop_capture.js";
+import { DesktopPresence } from "./desktop_presence.js";
+import { wakeTargets } from "./wake.js";
+import { Recorder } from "./recorder.js";
 import { DesktopVideo } from "./desktop_video.js";
 import { AdvancedSSHServerManager } from "./advanced_ssh_server.js";
 import { SSHBastion } from "./ssh_bastion.js";
@@ -226,10 +229,13 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     chat.detach(ws);
   }
 
+  // Sent on every welcome so the phone can wake this PC later, when it cannot reach it at all.
+  let wake;
+  wakeTargets().then((w) => { wake = w; }, () => {});
   function welcome(auth, hello, ip) {
     devices.register(auth.id, { name: hello.name, platform: hello.platform, ip });
     const deviceToken = auth.pairing ? devices.issueToken(auth.id) : undefined;
-    return { type: "welcome", version: 1, clientId: auth.id, deviceToken, sessions: allSessions(), manifests: registry.list() };
+    return { type: "welcome", version: 1, clientId: auth.id, deviceToken, sessions: allSessions(), manifests: registry.list(), wake };
   }
 
   function disconnectDevice(clientId) {
@@ -292,6 +298,8 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   // ~200-300 KB each, too heavy for the broadcast fan-out) and the capture
   // loop runs only while at least one watcher is attached.
   const desktop = new DesktopController();
+  const presence = new DesktopPresence();
+  const recorder = new Recorder();
   const desktopWatchers = new Set();
   desktop.on("frame", (frame) => {
     for (const w of desktopWatchers) {
@@ -315,7 +323,9 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
 
   desktop.on("clipboard", (c) => {
     const { id, ok, seq, ...content } = c;
+    // View-only viewers do not get the PC clipboard.
     for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
+      if (w._viewOnly) continue;
       try { send(w, { type: "clipboard_changed", ...content }); } catch { /* watcher vanished mid-send */ }
     }
   });
@@ -392,13 +402,19 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     video.stop();
     scheduler.stop();
     desktop.dispose();
+    presence.dispose();
+    recorder.dispose();
     mpc.dispose();
     sshSrv.stop();
     bastion.stop();
     devices.persist();
   });
 
+  sessions.sessionEvents.on("create", (s) => recorder.terminalStarted(s));
+  sessions.sessionEvents.on("resize", ({ id, cols, rows }) => recorder.terminalResized(id, cols, rows));
+  sessions.sessionEvents.on("exit", ({ id }) => recorder.terminalEnded(id));
   sessions.sessionEvents.on("output", ({ id, text }) => {
+    recorder.terminalOutput(id, text);
     activity.feed(id, text);
   });
   sessions.sessionEvents.on("exit", ({ id }) => activity.markChat(id, "idle")); // terminal exit = done
@@ -441,7 +457,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
 
   const ctx = {
     send, broadcast, allSessions, plugins, power,
-    desktop, desktopWatchers, video, videoWatchers, bastion, sshSrv, mpc, streamParser,
+    desktop, desktopWatchers, video, videoWatchers, presence, recorder, bastion, sshSrv, mpc, streamParser,
     activity, tls, rotateToken, disconnectDevice,
   };
   const handlers = {
