@@ -1,4 +1,4 @@
-// Per-device tokens, real revocation, and share-token spectators.
+// Per-device tokens and real revocation.
 import { check, connect, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
 
 const tmp = makeTmp("rh-auth-");
@@ -12,7 +12,7 @@ async function hello(msg) {
   await new Promise((res, rej) => { c.ws.on("open", res); c.ws.on("error", rej); });
   const closed = new Promise((res) => c.ws.once("close", (code) => res(code)));
   c.send({ type: "hello", ...msg });
-  const first = await Promise.race([c.next((m) => m.type === "welcome" || m.type === "share_joined"), closed]);
+  const first = await Promise.race([c.next((m) => m.type === "welcome"), closed]);
   return { c, first, closed };
 }
 
@@ -46,33 +46,9 @@ async function main() {
   check("new master token pairs", byNewMaster.first.type === "welcome");
   await byNewMaster.c.close();
 
-  // Share token: a spectator logs in with it and is pinned to one session.
-  admin.send({ type: "create", harness: "node", cwd: tmp });
-  const s = await admin.next((m) => m.type === "created");
-  admin.send({ type: "create", harness: "node", cwd: tmp });
-  const other = await admin.next((m) => m.type === "created" && m.id !== s.id);
-  admin.send({ type: "share_create", id: s.id, mode: "readwrite" });
-  const share = await admin.next((m) => m.type === "share_created");
-
-  const viewer = await hello({ share: share.token });
-  check("share token logs in to its session", viewer.first.type === "share_joined" && viewer.first.sessionId === s.id);
-  viewer.c.send({ type: "attach", id: other.id });
-  check("spectator cannot attach another session", /not allowed/.test((await viewer.c.next((m) => m.type === "error")).message));
-  viewer.c.send({ type: "fs", path: "." });
-  check("spectator cannot browse files", /not allowed/.test((await viewer.c.next((m) => m.type === "error")).message));
-  const seen = [];
-  viewer.c.ws.on("message", (d) => seen.push(JSON.parse(d.toString())));
-  admin.send({ type: "create", harness: "node", cwd: tmp });
-  await admin.next((m) => m.type === "created" && m.id !== s.id && m.id !== other.id);
-  await new Promise((r) => setTimeout(r, 500));
-  check("spectator does not receive the session list broadcast", !seen.some((m) => m.type === "sessions"));
   admin.send({ type: "constructor" });
   check("prototype names are not handler types", /unknown type/.test((await admin.next((m) => m.type === "error")).message));
-  const bad = await hello({ share: "nope" });
-  check("unknown share token is refused", bad.first === 4003);
-
   await admin.close();
-  await viewer.c.close();
 }
 
 main()

@@ -11,23 +11,11 @@ import * as sessions from "./sessions.js";
 import * as chat from "./chat.js";
 import { createPluginManager } from "./plugins.js";
 import * as proposals from "./proposals.js";
-import { createNotificationManager, NotificationEvents } from "./notifications.js";
 import * as sessionStore from "./session-store.js";
-import * as sdkAdapter from "./sdk-adapter.js";
 import * as cliServer from "./cli-server.js";
-import { SessionRecorder } from "./session_recorder.js";
-import { TunnelManager } from "./tunnel_manager.js";
 import { PowerManager, normalizeAwakeMode } from "./power_manager.js";
 import { createActivityMonitor } from "./activity.js";
-import { createShareManager } from "./shares.js";
-import { startTelegramControl } from "./telegram_control.js";
-import * as resurrect from "./resurrect.js";
-import { PeerDiscovery } from "./lan_file_transfer.js";
 import { StreamJsonParser } from "./stream_json_parser.js";
-import { ShooterNotifications } from "./shooter_notifications.js";
-import { RemoteDesktopBridgeManager } from "./remote_desktop_bridge.js";
-import { WhatsAppBridgeManager } from "./whatsapp_bridge.js";
-import { VNCBridge } from "./vnc_bridge.js";
 import { DesktopController } from "./desktop_capture.js";
 import { DesktopVideo } from "./desktop_video.js";
 import { AdvancedSSHServerManager } from "./advanced_ssh_server.js";
@@ -37,10 +25,7 @@ import * as promptQueue from "./prompt_queue.js";
 import * as agentTodos from "./agent_todos.js";
 import * as scheduler from "./scheduler.js";
 import * as approvalGuard from "./approval_guard.js";
-import * as mcpServer from "./mcp_server.js";
-import * as liveDigest from "./live_digest.js";
 import * as statsUsage from "./stats_usage.js";
-import * as quietHours from "./quiet_hours.js";
 import * as devices from "./devices.js";
 import agentsHandlers from "./handlers/agents.js";
 import filesHandlers from "./handlers/files.js";
@@ -52,14 +37,6 @@ import { configDir } from "./config.js";
 
 const HELLO_TIMEOUT = 10_000;
 const MAX_AUTH_ATTEMPTS = 5;
-// A read-only spectator may only do these. Allowlist, not per-case guards:
-// there are ~190 handlers and every new one would default to writable,
-// so a "read-only" share could still write files, install, or open tunnels.
-const SPECTATOR_TYPES = new Set([
-  "attach", "detach", "sessions", "sessions_get", "chat_text", "share_join",
-]);
-const SHARE_READ_TYPES = new Set(["attach", "detach", "chat_text"]);
-const SHARE_WRITE_TYPES = new Set(["in", "resize", "chatmsg"]);
 const authAttempts = new Map();
 const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
 
@@ -210,23 +187,6 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
           for (const [ip, r] of authAttempts) if (Date.now() - r.at > 10 * 60_000) authAttempts.delete(ip);
           authAttempts.set(clientIp, { n: attempts + 1, at: Date.now() });
 
-          if (msg.type === "hello" && typeof msg.share === "string") {
-            const joined = shares.join(msg.share);
-            const sid = joined.ok && joined.share.sessionId;
-            if (!joined.ok || !(chat.attach(sid, ws) || sessions.attach(sid, ws))) {
-              if (joined.ok) shares.leave(msg.share);
-              ws.close(4003, "bad share");
-              return;
-            }
-            ws._authed = true;
-            authAttempts.delete(clientIp);
-            clearTimeout(timer);
-            ws._shareToken = msg.share;
-            ws._shareMode = joined.share.mode;
-            ws._shareSession = sid;
-            send(ws, { type: "share_joined", sessionId: sid, mode: joined.share.mode });
-            return;
-          }
           const auth = authenticate(msg);
           if (auth) {
             // Checked before welcome(), which would re-issue a pairing device's token.
@@ -257,20 +217,13 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     });
   });
 
-  // A share-token socket sees only events about its own session, never the
-  // session list or other sessions' state.
   function broadcast(obj) {
-    for (const ws of wss.clients) {
-      if (ws._authed && (!ws._shareSession || String(obj.id) === ws._shareSession)) send(ws, obj);
-    }
+    for (const ws of wss.clients) if (ws._authed) send(ws, obj);
   }
 
   function detachClient(ws) {
-    if (ws._shareToken) shares.leave(ws._shareToken);
     sessions.detach(ws);
     chat.detach(ws);
-    liveDigest.detach(ws);
-    sdkAdapter.unsubscribe(ws);
   }
 
   function welcome(auth, hello, ip) {
@@ -306,15 +259,6 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   }
 
   async function handle(ws, msg) {
-    if (ws._shareSession) {
-      const rw = ws._shareMode === "readwrite" && SHARE_WRITE_TYPES.has(msg.type);
-      if (!(SHARE_READ_TYPES.has(msg.type) || rw) || String(msg.id) !== ws._shareSession) {
-        return send(ws, { type: "error", message: `not allowed for a shared session: ${msg.type}` });
-      }
-    }
-    if (ws._shareMode === "readonly" && !SPECTATOR_TYPES.has(msg.type)) {
-      return send(ws, { type: "error", message: `read-only (spectator): ${msg.type}` });
-    }
     const h = Object.hasOwn(handlers, msg.type) ? handlers[msg.type] : null;
     if (!h) return send(ws, { type: "error", message: `unknown type: ${msg.type}` });
     await h(ws, msg);
@@ -325,37 +269,16 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   }
 
   // ─── Plugin system ───────────────────────────────────────────────────────
-  const notifConfig = {
-    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN,
-    TELEGRAM_CHAT_ID: process.env.TELEGRAM_CHAT_ID,
-    DISCORD_WEBHOOK_URL: process.env.DISCORD_WEBHOOK_URL,
-    SMTP_HOST: process.env.SMTP_HOST,
-    SMTP_PORT: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined,
-    SMTP_USER: process.env.SMTP_USER,
-    SMTP_PASS: process.env.SMTP_PASS,
-    SMTP_FROM: process.env.SMTP_FROM,
-    NOTIFY_EMAIL: process.env.NOTIFY_EMAIL,
-    LINE_CHANNEL_ACCESS_TOKEN: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-    LINE_USER_ID: process.env.LINE_USER_ID,
-    LINE_GROUP_ID: process.env.LINE_GROUP_ID,
-    SLACK_WEBHOOK_URL: process.env.SLACK_WEBHOOK_URL,
-  };
-  const notifications = createNotificationManager({ config: notifConfig });
-  const pluginCtx = { sessions, chat, registry, proposals, broadcast: null, notifications, config: { port, token, dataDir: process.env.POCKETDESK_DATA || ".pocketdesk" } };
+  const pluginCtx = { sessions, chat, registry, proposals, broadcast: null, config: { port, token, dataDir: process.env.POCKETDESK_DATA || ".pocketdesk" } };
   const plugins = createPluginManager(pluginCtx);
   pluginCtx.broadcast = broadcast; // wire after broadcast is defined
 
   // ── Absorbed feature managers ──────────────────────────────────────────────
-  const recorder = new SessionRecorder();
-  const tunnels = new TunnelManager();
   const power = new PowerManager({ mode: normalizeAwakeMode(process.env.RH_AWAKE || "auto") });
-  const shares = createShareManager();
   const activity = createActivityMonitor({
     quietMs: (Number(process.env.RH_QUIET_MS) || 20_000),
     onEvent({ id, state }) {
       broadcast({ type: "activity", id, state });
-      if (state === "quiet") notifications.send(NotificationEvents.SESSION_QUIET, { id });
-      if (state === "asking") notifications.send(NotificationEvents.SESSION_ASKING, { id });
     },
   });
   activity.start();
@@ -363,17 +286,6 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
 
   // ── Stream JSON parser (format-claude-stream: agent JSONL → structured) ──
   const streamParser = new StreamJsonParser();
-
-  // ── WhatsApp bridge (channel surface; real baileys transport is roadmap) ──
-  const wa = new WhatsAppBridgeManager();
-  for (const evt of ["auth:qr", "auth:completed", "channel:ready", "message:received", "command:received", "message:sent", "channel:disconnected"]) {
-    wa.on(evt, (payload) => broadcast({ type: "wa_event", waEvent: evt.replace(":", "_"), ...payload }));
-  }
-  // Commands from allowlisted phones drive terminal sessions.
-  wa.on("command:received", ({ channelId, from, command }) => {
-    const ch = wa.getChannels().find((c) => c.id === channelId);
-    if (ch) sessions.write(ch.sessionId, command + "\n");
-  });
 
   // ── Real desktop capture + input (the frame SOURCE for rd_/desktop UIs) ──
   // Frames are client-scoped (a watching ws gets them directly — they are
@@ -423,18 +335,6 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     if (video.running && Date.now() - lastDrop > 30_000 && video.stepUp()) { console.log(`  video     link recovered, preset -> ${video.preset}`); video.restart(); }
   }, 10_000).unref();
 
-  // ── Remote desktop bridge (rustdesk/remodex: session-scoped screen+input) ──
-  const rd = new RemoteDesktopBridgeManager(desktop);
-  for (const evt of ["session:connected", "session:disconnected", "frame:received", "input:forwarded", "quality:updated"]) {
-    rd.on(evt, (payload) => broadcast({ type: "rd_event", rdEvent: evt.split(":")[1], ...payload }));
-  }
-
-  // ── VNC bridge (noVNC/guacamole: TCP frame server fed by real capture) ──
-  const vnc = new VNCBridge(5900, desktop);
-  for (const evt of ["bridge:started", "bridge:stopped", "client:connected", "frame:received"]) {
-    vnc.on(evt, (payload) => broadcast({ type: "vnc_event", vncEvent: evt.split(":")[1], ...payload }));
-  }
-
   // ── SSH bastion (sshportal/bifroest/cardea: jump-host access control) ───
   const bastion = new SSHBastion();
   for (const evt of ["user:registered", "host:registered", "access:created", "session:started", "session:ended"]) {
@@ -453,14 +353,6 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     mpc.on(evt, (payload) => broadcast({ type: "mproto_event", mprotoEvent: evt.split(":")[1], ...payload }));
   }
 
-  // ── Smart notifications (shooter: decision-first + coalescing/dedupe) ─────
-  // The brain decides; the existing channel registry (notifications.js) delivers.
-  const shooter = new ShooterNotifications({ channels: ["web"] });
-  shooter.on("notification", (event) => {
-    notifications.send("shooter:" + event.type, { projectId: event.projectId, text: event.text });
-    broadcast({ type: "notify_event", event });
-  });
-
   // ── Run scheduler (codeman/codex-bee/kagora: auto-continue loops) ────────
   scheduler.init(async ({ job }) => {
     const c = job.chatId === "newest" ? chat.get(chat.summary().at(-1)?.id) : chat.get(job.chatId);
@@ -473,41 +365,22 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     if (c) chat.cancel(c);
     broadcast({ type: "approval_auto_denied", chatId });
   });
-  // ── MCP server (quil/paseo: expose agents as MCP tools over localhost) ──
-  if (process.env.RH_MCP_PORT) mcpServer.start(process.env.RH_MCP_PORT);
-
-  // ── LAN file transfer (lanlink: LocalSend v2 + UDP peer discovery) ────────
-  const lanDiscovery = new PeerDiscovery({ alias: process.env.RH_LAN_ALIAS || "PocketDesk" });
-  let lanDiscoveryStarted = false;
-  function ensureLanDiscovery() {
-    if (lanDiscoveryStarted) return;
-    lanDiscoveryStarted = true;
-    lanDiscovery.start().catch(() => {});
-  }
-
   // Release held resources on shutdown: keep-awake helper, tunnel listeners,
   // activity sweep. Runs on graceful shutdown AND process.exit paths.
   process.on("exit", () => {
     power.dispose();
-    tunnels.closeAll();
     activity.stop();
     video.stop();
-    if (lanDiscoveryStarted) { try { lanDiscovery.stop(); } catch {} }
     scheduler.stop();
-    liveDigest.stop();
-    mcpServer.stop();
     desktop.dispose();
     mpc.dispose();
     sshSrv.stop();
     bastion.stop();
-    for (const ch of wa.getChannels()) wa.disconnect(ch.id);
     devices.persist();
   });
 
   sessions.sessionEvents.on("output", ({ id, text }) => {
     activity.feed(id, text);
-    try { recorder.recordOutput(id, text); } catch {}
-    liveDigest.feed(id, text);
   });
   sessions.sessionEvents.on("exit", ({ id }) => activity.markChat(id, "idle")); // terminal exit = done
   sessions.sessionEvents.on("gone", ({ id }) => activity.forget(id));
@@ -515,22 +388,11 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   // Sessions refresh on every chat-state transition (c9watch attention-first
   // list must reorder the moment an agent gets stuck, not only on create/close).
   chat.chatEvents.on("state", () => broadcast({ type: "sessions", items: allSessions() }));
-  chat.chatEvents.on("state", ({ id, state, cliSession }) => {
-    if (state === "idle" || state === "error") resurrect.touch(id, cliSession);
-  });
   // Approval auto-deny countdown (cc-pocket): waiting starts the clock.
   chat.chatEvents.on("state", ({ id, state }) => {
     if (state === "waiting") approvalGuard.markWaiting(id);
     else approvalGuard.clearWaiting(id);
   });
-  // Quiet hours (marchat/shooter): notifications respect the schedule —
-  // decision-first events bypass in "priority" mode.
-  const _notifySendQuiet = notifications.send.bind(notifications);
-  notifications.send = (event, payload) => {
-    const decision = quietHours.shouldDeliver(event);
-    if (!decision.deliver) return false;
-    return _notifySendQuiet(event, payload);
-  };
   // Derived todos (c9watch/claude-threads): scan the finished turn's last
   // assistant message for markdown checkboxes and push the board.
   chat.chatEvents.on("state", ({ id, state }) => {
@@ -559,8 +421,8 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   });
 
   const ctx = {
-    send, broadcast, allSessions, notifications, plugins, power, shares, recorder, tunnels, wa, rd, vnc,
-    desktop, desktopWatchers, video, videoWatchers, bastion, sshSrv, mpc, shooter, streamParser, lanDiscovery, ensureLanDiscovery,
+    send, broadcast, allSessions, plugins, power,
+    desktop, desktopWatchers, video, videoWatchers, bastion, sshSrv, mpc, streamParser,
     activity, tls, rotateToken, disconnectDevice,
   };
   const handlers = {
@@ -624,25 +486,5 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     await plugins.startAll();
     const loaded = plugins.list();
     if (loaded.length) console.log(`  plugins: ${loaded.map(p => p.name).join(", ")}`);
-    // Two-way Telegram control — inbound leg (channels/* are outbound only).
-    if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_ALLOW_CHAT_IDS) {
-      startTelegramControl({
-        token: process.env.TELEGRAM_BOT_TOKEN,
-        allowChatIds: process.env.TELEGRAM_ALLOW_CHAT_IDS.split(",").map((s) => s.trim()).filter(Boolean),
-        handlers: {
-          listSessions: () => allSessions(),
-          say: (id, text) => {
-            const c = chat.get(id);
-            return c ? chat.sendUserMessage(c, String(text || "")) : false;
-          },
-          listProposals: () => proposals.listPending(),
-          decide: (pid, approve) => (approve ? proposals.approve(pid) : proposals.reject(pid)),
-          newestChat: () => {
-            const cs = chat.summary();
-            return cs.length ? cs[cs.length - 1].id : null;
-          },
-        },
-      });
-    }
   });
 }

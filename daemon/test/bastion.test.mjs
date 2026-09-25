@@ -1,9 +1,6 @@
-// VNC bridge + SSH bastion + advanced SSH server + multi-protocol client
-// absorption test — exercises the newly wired protocol surfaces from the
-// noVNC/guacamole (vnc_bridge), sshportal/bifroest/cardea (ssh_bastion,
-// advanced_ssh_server) and haven-ssh-client (ssh_vnc_client) inspirations.
-// Fully in-memory — deterministic, no external processes, no real listeners
-// beyond the ephemeral VNC TCP port (port 0) started and stopped in-test.
+// SSH bastion + advanced SSH server + multi-protocol client: the protocol
+// surfaces from sshportal/bifroest/cardea (ssh_bastion, advanced_ssh_server)
+// and haven-ssh-client (ssh_vnc_client). In-memory and deterministic.
 import { check, connectRaw, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
 import ssh2 from "ssh2";
 
@@ -18,35 +15,6 @@ async function main() {
   const d = startDaemon(PORT, CLI_PORT, { token: TOKEN, manifests: tmp });
   await d.ready;
   const c = await openAndHello(PORT, TOKEN);
-
-  // ── VNC bridge (noVNC/guacamole: TCP frame server + frame feed) ─────────
-  c.send({ type: "vnc_start", port: 0 });
-  const started = await c.next((m) => m.type === "vnc_started");
-  check("vnc_start binds ephemeral port", started.ok === true && started.port > 0);
-
-  c.send({ type: "vnc_status" });
-  const st = await c.next((m) => m.type === "vnc_status");
-  check("vnc_status reports running", st.running === true && st.port === started.port);
-
-  // Frames come from the real capture controller, with no client pushing any.
-  if (IS_WIN) {
-    const live = await c.next((m) => m.type === "vnc_event" && m.vncEvent === "received", 25000);
-    check("vnc serves real captured frames", live.width > 100 && live.height > 100 && live.bytes > 1000);
-  } else {
-    check("vnc reports no capture off-platform", started.capturing === true && st.frameBytes === 0);
-  }
-
-  c.send({ type: "vnc_frame", data: Buffer.from("fakeframe").toString("base64"), width: 1280, height: 720 });
-  await c.next((m) => m.type === "vnc_frame_ok");
-  const frameEvt = await c.next((m) => m.type === "vnc_event" && m.vncEvent === "received");
-  check("vnc_frame processed + broadcast", frameEvt.width === 1280 && frameEvt.height === 720);
-
-  c.send({ type: "vnc_stop" });
-  const stopped = await c.next((m) => m.type === "vnc_stopped");
-  check("vnc_stop acks", stopped.ok === true);
-  c.send({ type: "vnc_status" });
-  const st2 = await c.next((m) => m.type === "vnc_status");
-  check("vnc_status reports stopped", st2.running === false);
 
   // ── SSH bastion (sshportal/bifroest/cardea: users, hosts, access rules) ─
   c.send({ type: "bastion_user_add", username: "alice", publicKey: "ssh-ed25519 AAAA", accessLevel: "admin" });

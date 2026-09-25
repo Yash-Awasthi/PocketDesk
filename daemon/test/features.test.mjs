@@ -1,18 +1,15 @@
-// Features absorption test — exercises every protocol surface added in the
-// inspiration-corpus absorption pass: seq backfill, shares, stats, git panel,
-// activity monitor, session recording, tunnels, power manager, chat resurrection.
+// Features absorption test: seq backfill, host stats, git panel, activity
+// monitor, agent accounts, and per-chat CLI sessions.
 import WebSocket from "ws";
 import { check, connect, failureCount, failureNames, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import net from "node:net";
 
 const REPO = path.dirname(new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")); // git repo root for git_* surfaces
 const tmp = makeTmp("rh-features-");
 
 const PORT = 8795;
-const PORT2 = 8797;
 const TOKEN = "featuretoken";
 
 const agentJs = path.join(tmp, "fakeagent.js");
@@ -82,67 +79,6 @@ async function main() {
   const incrReplay = await c2.next((m) => m.type === "replay" && m.id === created.id);
   check("backfill replay is incremental", incrReplay.incremental === true && incrReplay.data === "");
 
-  // Read-only share: spectator joined via token cannot inject input
-  c2.send({ type: "share_create", id: created.id, mode: "readonly", ttlMinutes: 10 });
-  const share = await c2.next((m) => m.type === "share_created");
-  check("share token issued", typeof share.token === "string" && share.mode === "readonly");
-  const spect = connect(PORT);
-  await new Promise((res) => spect.ws.on("open", res));
-  spect.send({ type: "hello", token: TOKEN });
-  await spect.next((m) => m.type === "welcome");
-  spect.send({ type: "share_join", token: share.token });
-  const joined = await spect.next((m) => m.type === "share_joined");
-  check("spectator joined share", joined.mode === "readonly" && joined.sessionId === created.id);
-  spect.send({ type: "in", id: created.id, data: Buffer.from("echo bad").toString("base64") });
-  const denied = await spect.next((m) => m.type === "error");
-  check("readonly spectator input blocked", /read-only/.test(denied.message));
-  // The gate is an allowlist, so write verbs outside the terminal are refused
-  // too — a spectator used to be able to write files and open tunnels.
-  spect.send({ type: "fwrite", path: "spectator-should-not-write.txt", data: "" });
-  const deniedWrite = await spect.next((m) => m.type === "error");
-  check("readonly spectator cannot write files", /read-only/.test(deniedWrite.message));
-  spect.send({ type: "tunnel_create", localPort: PORT, remotePort: 18999 });
-  const deniedTunnel = await spect.next((m) => m.type === "error");
-  check("readonly spectator cannot open tunnels", /read-only/.test(deniedTunnel.message));
-
-  // maxViewers was stored and never enforced.
-  c2.send({ type: "share_create", id: created.id, mode: "readonly", ttlMinutes: 10, maxViewers: 1 });
-  const capped = await c2.next((m) => m.type === "share_created");
-  const v1 = connect(PORT);
-  await new Promise((res) => v1.ws.on("open", res));
-  v1.send({ type: "hello", token: TOKEN });
-  await v1.next((m) => m.type === "welcome");
-  v1.send({ type: "share_join", token: capped.token });
-  await v1.next((m) => m.type === "share_joined");
-  const v2 = connect(PORT);
-  await new Promise((res) => v2.ws.on("open", res));
-  v2.send({ type: "hello", token: TOKEN });
-  await v2.next((m) => m.type === "welcome");
-  v2.send({ type: "share_join", token: capped.token });
-  const full = await v2.next((m) => m.type === "error");
-  check("maxViewers enforced", /full/.test(full.message));
-  await v1.close();
-  await v2.close();
-  c2.send({ type: "share_revoke", token: capped.token });
-  await c2.next((m) => m.type === "share_revoked");
-  c2.send({ type: "in", id: created.id, data: Buffer.from("echo ok\r").toString("base64") });
-  check("owner input still works", true);
-  c2.send({ type: "share_list" });
-  const shares = await c2.next((m) => m.type === "share_list");
-  check("share_list lists active share", shares.items.length === 1);
-
-  // Expired share
-  c2.send({ type: "share_create", id: created.id, mode: "readwrite", ttlMinutes: 0.01 });
-  await c2.next((m) => m.type === "share_created");
-  await sleep(900);
-  const spect2 = connect(PORT);
-  await new Promise((res) => spect2.ws.on("open", res));
-  spect2.send({ type: "hello", token: TOKEN });
-  await spect2.next((m) => m.type === "welcome");
-  spect2.send({ type: "share_join", token: "bogus" });
-  const expired = await spect2.next((m) => m.type === "error");
-  check("bogus/expired share rejected", /not found/.test(expired.message));
-
   // Host stats
   c2.send({ type: "stats" });
   const stats = await c2.next((m) => m.type === "stats");
@@ -173,44 +109,6 @@ async function main() {
   const actList = await c2.next((m) => m.type === "activity_list");
   check("activity_list tracks both sessions", actList.items.some((a) => a.id === sq.id && a.state === "quiet"));
 
-  // Session recording
-  c2.send({ type: "record_start", id: created.id });
-  await c2.next((m) => m.type === "recording" && m.active === true);
-  c2.send({ type: "in", id: created.id, data: Buffer.from("echo recorded\r").toString("base64") });
-  // Wait for the echo itself: a fixed sleep raced the PTY and flaked.
-  await Promise.race([
-    c2.next((m) => m.type === "out" && m.id === created.id && Buffer.from(m.data, "base64").toString().includes("recorded"), 5000),
-    sleep(3000),
-  ]).catch(() => {});
-  c2.send({ type: "record_stop", id: created.id });
-  await c2.next((m) => m.type === "recording" && m.active === false);
-  c2.send({ type: "record_get", id: created.id });
-  const recGet = await c2.next((m) => m.type === "record_get");
-  check("recorder captured events", Array.isArray(recGet.events) && recGet.events.length > 0);
-  check("recorder export available", typeof recGet.export === "string" && recGet.export.length > 10);
-
-  // Tunnel: TCP listener forwarding to the daemon's own HTTP port
-  c2.send({ type: "tunnel_create", localPort: PORT, remotePort: 18777 });
-  await c2.next((m) => m.type === "tunnel_created");
-  const httpResp = await new Promise((resolve, reject) => {
-    const sock = net.connect(18777, "127.0.0.1", () => {
-      sock.write(`GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`);
-    });
-    let buf = "";
-    sock.on("data", (d) => (buf += d.toString()));
-    sock.on("close", () => resolve(buf));
-    sock.on("error", reject);
-    setTimeout(() => reject(new Error("tunnel http timeout")), 8000);
-  });
-  check("tunnel forwards TCP to local service", httpResp.includes("healthy"));
-  c2.send({ type: "tunnel_close", id: "t1" });
-  await c2.next((m) => m.type === "tunnel_closed");
-
-  // Power manager status
-  c2.send({ type: "power_set", mode: "on" });
-  const powerOn = await c2.next((m) => m.type === "power_status");
-  check("power_set on activates assertion", powerOn.mode === "on" && powerOn.active === true);
-
   // Agent accounts: status is headless; login opens a terminal; an agent without a command says so.
   c2.send({ type: "auth_status", harness: "fakechat" });
   const st = await c2.next((m) => m.type === "auth_status");
@@ -222,7 +120,7 @@ async function main() {
   const noLogout = await c2.next((m) => m.type === "error" && m.message.includes("logout"));
   check("agent without a logout command is told to use its terminal", noLogout.message.includes("use its terminal"));
 
-  // ── Phase 2: chat session for resurrection ────────────────────────────────
+  // ── Chat session: per-chat CLI session, daemon slash commands ─────────────
   c2.send({ type: "chatsession", harness: "fakechat", cwd: tmp, prompt: "hello-resurrect" });
   const chatCreated = await c2.next((m) => m.type === "created" && m.kind === "chat");
   const chatDone = await c2.next((m) => m.type === "chatstate" && m.id === chatCreated.id && m.state === "idle");
@@ -240,36 +138,9 @@ async function main() {
   check("unknown slash command reaches the agent as a skill", skill.text.includes("echo: /my-skill do it"));
   await c2.next((m) => m.type === "chatstate" && m.id === chatCreated.id && m.state === "idle");
 
-  // Simulate restart: the chat record lives on disk, so even a hard stop
-  // resurrects. SIGTERM so the exit handler disposes helpers (no leaks).
   await c2.close();
   await c.close();
   d1.kill("SIGTERM");
-  await sleep(1200);
-
-  // ── Phase 3: daemon #2 — chat resurrection ────────────────────────────────
-  const d2 = startDaemon(PORT2, 46792, { token: TOKEN, manifests: tmp });
-  await d2.ready;
-  const c3 = connect(PORT2);
-  await new Promise((res, rej) => { c3.ws.on("open", res); c3.ws.on("error", rej); });
-  c3.send({ type: "hello", token: TOKEN });
-  await c3.next((m) => m.type === "welcome");
-  c3.send({ type: "resurrect_list" });
-  const rez = await c3.next((m) => m.type === "resurrect_list");
-  check("resurrect_list remembers chat after crash", rez.items.some((r) => r.harnessId === "fakechat"));
-  const rec = rez.items.find((r) => r.harnessId === "fakechat");
-  c3.send({ type: "resume", id: rec.id });
-  const resumed = await c3.next((m) => m.type === "created" && m.kind === "chat");
-  check("resume creates new chat marked resumed", resumed.resumed === true);
-  c3.send({ type: "resurrect_list" });
-  const rez2 = await c3.next((m) => m.type === "resurrect_list");
-  check("resurrect tracks resumed chat exactly once", rez2.items.filter((r) => r.harnessId === "fakechat").length === 1);
-  c3.send({ type: "chatmsg", id: resumed.id, text: "continue-please" });
-  const delta = await c3.next((m) => m.type === "chatdelta" && m.id === resumed.id && m.text.includes("continue-please"));
-  check("resumed chat resumes its recorded CLI session", delta.text.includes("echo: continue-please [--resume-id sess-1]"));
-
-  await c3.close();
-  d2.kill("SIGTERM");
   // cleanup test data dir in home
   try { fs.rmSync(path.join(os.homedir(), ".pocketdesk-test"), { recursive: true, force: true }); } catch {}
   await teardown(tmp);
