@@ -301,6 +301,18 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     }
   });
 
+  // Viewers draw the pointer themselves, in the pixels of the picture they receive.
+  desktop.on("cursor", (c) => {
+    for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
+      const video_ = videoWatchers.has(w);
+      const s = video_ ? video.scale : desktop.scale;
+      const m = video_ ? video.monitor : null;
+      try {
+        send(w, { type: "desktop_cursor", x: Math.round((c.x - (m?.x || 0)) * s), y: Math.round((c.y - (m?.y || 0)) * s), shape: c.shape, visible: c.visible });
+      } catch { /* watcher vanished mid-send */ }
+    }
+  });
+
   // H.264 viewers get binary [kind, ...annexB] messages. A viewer whose socket
   // backs up skips frames until a fresh keyframe, which only a restart produces.
   const video = new DesktopVideo();

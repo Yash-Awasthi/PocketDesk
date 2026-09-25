@@ -67,6 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
@@ -152,6 +153,12 @@ fun DesktopScreen(
         if (cursor == null && dims != null) cursor = Offset(dims.width / 2f, dims.height / 2f)
     }
     val here = { cursor?.let { Pair(it.x.toInt(), it.y.toInt()) } }
+    // The PC pointer wins unless this phone moved it a moment ago, so local drags do not jitter back.
+    var lastLocal by remember { mutableStateOf(0L) }
+    LaunchedEffect(ws.desktopCursor) {
+        val c = ws.desktopCursor ?: return@LaunchedEffect
+        if (android.os.SystemClock.uptimeMillis() - lastLocal > 300) cursor = Offset(c.x.toFloat(), c.y.toFloat())
+    }
 
     // A keyboard attached to the phone types straight into the PC, with keys held as long as they are held here.
     val keyFocus = remember { FocusRequester() }
@@ -183,6 +190,10 @@ fun DesktopScreen(
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                 }
+                if (video && ws.desktopMonitors.size > 1) TextButton(onClick = {
+                    ws.desktopMonitor = (ws.desktopMonitor + 1) % ws.desktopMonitors.size
+                    ws.desktopStartVideo()
+                }) { Text("🖥 " + ws.desktopMonitors.getOrElse(ws.desktopMonitor) { "1" }.substringBefore(" ")) }
                 if (video) TextButton(onClick = {
                     ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
                     ws.desktopStartVideo()
@@ -233,6 +244,7 @@ fun DesktopScreen(
                                         cursor = p
                                         val now = booleanArrayOf(ev.buttons.isPrimaryPressed, ev.buttons.isSecondaryPressed, ev.buttons.isTertiaryPressed)
                                         val changed = now.indices.filter { now[it] != held[it] }
+                                        lastLocal = ch.uptimeMillis
                                         if (changed.isEmpty() && ch.uptimeMillis - lastMove >= 16) {
                                             lastMove = ch.uptimeMillis
                                             ws.desktopMove(p.x.toInt(), p.y.toInt())
@@ -276,6 +288,7 @@ fun DesktopScreen(
                                     else vp.toFrame(ch.position)
                                     if (next != null && moved > 8f) {
                                         cursor = next
+                                        lastLocal = ch.uptimeMillis
                                         if (touchpad) pan = vp.follow(next)
                                         if (ch.uptimeMillis - lastSent >= 40) {
                                             lastSent = ch.uptimeMillis
@@ -305,8 +318,20 @@ fun DesktopScreen(
                 }
                 cursor?.let { cur ->
                     val p = Offset(v.left + cur.x * v.scale, v.top + cur.y * v.scale)
-                    drawCircle(Color.White, radius = 11f, center = p, style = Stroke(width = 4f))
-                    drawCircle(Color(0xFFE53935), radius = 5f, center = p)
+                    if (ws.desktopCursor?.shape == "text") {
+                        val h = 12.dp.toPx()
+                        drawLine(Color.Black, p.copy(y = p.y - h), p.copy(y = p.y + h), strokeWidth = 5f)
+                        drawLine(Color.White, p.copy(y = p.y - h), p.copy(y = p.y + h), strokeWidth = 2.5f)
+                    } else {
+                        val u = 1.dp.toPx()
+                        val arrow = Path().apply {
+                            moveTo(p.x, p.y); lineTo(p.x, p.y + 17 * u); lineTo(p.x + 4.5f * u, p.y + 13 * u)
+                            lineTo(p.x + 7.5f * u, p.y + 19.5f * u); lineTo(p.x + 10 * u, p.y + 18.5f * u)
+                            lineTo(p.x + 7 * u, p.y + 12 * u); lineTo(p.x + 12.5f * u, p.y + 12 * u); close()
+                        }
+                        drawPath(arrow, Color.White)
+                        drawPath(arrow, Color.Black, style = Stroke(width = 1.5f * u))
+                    }
                 }
             }
             if (fullscreen) {

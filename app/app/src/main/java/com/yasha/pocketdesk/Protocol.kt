@@ -78,6 +78,9 @@ data class FbConfig(val name: String, val size: Long, val mtime: String)
 /** One captured desktop frame: base64 JPEG, full virtual-screen geometry. */
 data class DesktopFrame(val base64: String, val width: Int, val height: Int)
 
+/** The PC pointer in picture pixels; [shape] is a CSS cursor name such as "arrow" or "text". */
+data class DesktopCursor(val x: Int, val y: Int, val shape: String)
+
 data class FsListing(val path: String, val parent: String?, val items: List<FsEntry>)
 
 
@@ -179,7 +182,10 @@ object Proto {
 
     // ── Desktop control (AnyDesk-style watch + full input) ──
     fun desktopStart(quality: Int) = obj { put("type", "desktop_start"); put("quality", quality) }
-    fun desktopStartVideo(preset: String) = obj { put("type", "desktop_start"); put("video", true); put("preset", preset) }
+    fun desktopStartVideo(preset: String, monitor: Int) = obj {
+        put("type", "desktop_start"); put("video", true); put("preset", preset); put("monitor", monitor)
+    }
+    fun desktopMonitors() = obj { put("type", "desktop_monitors") }
     fun clipboardGet() = obj { put("type", "clipboard_get") }
     fun clipboardSet(text: String) = obj { put("type", "clipboard_set"); put("text", text) }
     fun desktopStop() = obj { put("type", "desktop_stop") }

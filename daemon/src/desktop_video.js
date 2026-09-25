@@ -17,7 +17,8 @@ export const PRESETS = {
   balanced: { fps: 30, scale: 1, maxrate: "6M", q: 30 },
   quality: { fps: 60, scale: 1, maxrate: "12M", q: 26 },
 };
-const grab = (p) => `ddagrab=framerate=${p.fps}:dup_frames=0,hwdownload,format=bgra,`
+// The pointer is left out of the picture; viewers draw it from desktop_cursor so it moves without video delay.
+const grab = (p, output) => `ddagrab=output_idx=${output}:framerate=${p.fps}:dup_frames=0:draw_mouse=0,hwdownload,format=bgra,`
   + (p.scale === 1 ? "" : `scale=trunc(iw*${p.scale}/2)*2:-2,`) + "format=nv12";
 export const ENCODERS = {
   h264_nvenc: (q) => ["-preset", "p1", "-tune", "ull", "-zerolatency", "1", "-rc", "vbr", "-cq", String(q), "-b:v", "0"],
@@ -29,6 +30,18 @@ const LADDER = ["low", "saver", "balanced", "quality"];
 
 /** Packet kinds, first byte of every binary message. */
 export const KIND = { config: 0, key: 1, delta: 2 };
+
+/** ffmpeg arguments for one encoder; a monitor on another GPU needs its own D3D11 device. */
+export function ffmpegArgs(enc, presetName, monitor) {
+  const p = PRESETS[presetName];
+  const adapter = monitor?.adapter || 0;
+  return ["-hide_banner", "-loglevel", "error",
+    ...(adapter ? ["-init_hw_device", `d3d11va=rh:${adapter}`, "-filter_hw_device", "rh"] : []),
+    "-filter_complex", grab(p, monitor?.output || 0),
+    // A keyframe every `fps` changed frames starts each iroh GOP stream; see docs/TRANSPORT-BENCH.md.
+    "-c:v", enc, ...ENCODERS[enc](p.q), ...(enc === "h264_nvenc" ? ["-forced-idr", "1"] : []), "-g", String(p.fps), "-bf", "0", "-maxrate", p.maxrate, "-bufsize", p.maxrate,
+    "-flush_packets", "1", "-f", "flv", "-flvflags", "no_duration_filesize", "pipe:1"];
+}
 
 /** Incremental FLV demuxer yielding { kind, data } with Annex B payloads. */
 export class FlvToAnnexB {
@@ -79,7 +92,7 @@ function lengthPrefixedToAnnexB(b) {
 /**
  * Emits "packet" ({ kind, data }) while running. restart() begins a fresh stream
  * starting with config + keyframe, which is how a new or lagging viewer resyncs.
- * ponytail: primary monitor only; pass output_idx to ddagrab for others.
+ * monitor: an entry from DesktopController.monitors(), or null for the first output.
  */
 export class DesktopVideo extends EventEmitter {
   constructor({ ffmpeg = process.env.FFMPEG_PATH || "ffmpeg" } = {}) {
@@ -90,6 +103,7 @@ export class DesktopVideo extends EventEmitter {
     this.gen = 0;
     this.encoder = null;
     this.preset = "balanced";
+    this.monitor = null;
     this.stats = { packets: 0, bytes: 0, restarts: 0 };
   }
 
@@ -150,11 +164,7 @@ export class DesktopVideo extends EventEmitter {
   /** True once the first packet arrives; false if ffmpeg dies first. */
   _spawn(enc, gen) {
     return new Promise((resolve) => {
-      const p = PRESETS[this.preset];
-      const args = ["-hide_banner", "-loglevel", "error", "-filter_complex", grab(p),
-        // A keyframe every `fps` changed frames starts each iroh GOP stream; see docs/TRANSPORT-BENCH.md.
-        "-c:v", enc, ...ENCODERS[enc](p.q), ...(enc === "h264_nvenc" ? ["-forced-idr", "1"] : []), "-g", String(p.fps), "-bf", "0", "-maxrate", p.maxrate, "-bufsize", p.maxrate,
-        "-flush_packets", "1", "-f", "flv", "-flvflags", "no_duration_filesize", "pipe:1"];
+      const args = ffmpegArgs(enc, this.preset, this.monitor);
       let proc;
       try { proc = spawn(this.ffmpeg, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true }); }
       catch { return resolve(false); }

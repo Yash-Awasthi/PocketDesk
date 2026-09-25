@@ -112,6 +112,13 @@ class WsClient(
     /** "h264" when the daemon streams video, "jpeg" for the frame-by-frame fallback. */
     var desktopMode by mutableStateOf("")
         private set
+    /** Latest PC pointer; the video carries no pointer, so the screen draws this. */
+    var desktopCursor by mutableStateOf<DesktopCursor?>(null)
+        private set
+    /** Monitor names in the daemon's order; the video shows [desktopMonitor]. */
+    var desktopMonitors by mutableStateOf<List<String>>(emptyList())
+        private set
+    var desktopMonitor by mutableStateOf(0)
     /** Receives binary H.264 packets; called on the socket thread. */
     @Volatile var videoSink: ((ByteArray) -> Unit)? = null
     /** Text read from the PC clipboard, for the screen to put on the phone's. */
@@ -412,8 +419,9 @@ class WsClient(
     var desktopPreset by mutableStateOf("balanced")
     fun desktopStartVideo() {
         desktopStreaming = true
-        desktopResume = { send(Proto.desktopStartVideo(desktopPreset)) }
-        send(Proto.desktopStartVideo(desktopPreset))
+        desktopResume = { send(Proto.desktopStartVideo(desktopPreset, desktopMonitor)) }
+        send(Proto.desktopStartVideo(desktopPreset, desktopMonitor))
+        send(Proto.desktopMonitors())
     }
     fun clipboardGet() = send(Proto.clipboardGet())
     /** With [paste], ctrl+v follows once the PC clipboard holds the text. */
@@ -841,6 +849,19 @@ class WsClient(
                 }
             }
             "desktop_stopped" -> desktopStreaming = false
+            "desktop_cursor" -> {
+                val x = (m["x"] as? JsonPrimitive)?.intOrNull ?: return
+                val y = (m["y"] as? JsonPrimitive)?.intOrNull ?: return
+                desktopCursor = DesktopCursor(x, y, str(m, "shape") ?: "arrow")
+            }
+            "desktop_monitors" -> if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                desktopMonitors = (m["monitors"] as? JsonArray)?.mapIndexed { i, e ->
+                    val o = e as? JsonObject
+                    val w = (o?.get("w") as? JsonPrimitive)?.intOrNull
+                    val h = (o?.get("h") as? JsonPrimitive)?.intOrNull
+                    "${i + 1}" + if (w != null && h != null) " · ${w}×$h" else ""
+                } ?: emptyList()
+            }
             "clipboard" ->
                 if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) pcClipboard.tryEmit(str(m, "text") ?: "")
                 else _desktopError.value = "PC clipboard: " + (str(m, "error") ?: "failed")

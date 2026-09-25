@@ -45,10 +45,16 @@ async function main() {
     check("desktop_frame returns a real JPEG", fr.type === "desktop_frame" && head[0] === 0xff && head[1] === 0xd8 && fr.width > 0 && fr.height > 0);
     check("frame has plausible size", b64.length > 10_000);
 
+    c.send({ type: "desktop_monitors" });
+    const mons = await c.next((m) => m.type === "desktop_monitors", 20000);
+    check("monitors listed with one primary", mons.ok && mons.monitors.length >= 1 && mons.monitors.filter((m) => m.primary).length === 1 && mons.monitors[0].w > 0);
+
     // Streaming: start → frames arrive as pushes → stop.
     c.send({ type: "desktop_start", quality: 40 });
     const ss = await c.next((m) => m.type === "desktop_started", 20000);
     check("desktop_start ok", ss.ok === true && ss.quality > 0);
+    const cur = await c.next((m) => m.type === "desktop_cursor", 20000);
+    check("watchers get the pointer position", Number.isFinite(cur.x) && typeof cur.shape === "string");
     const pushed = await c.next((m) => m.type === "desktop_frame", 20000);
     check("desktop_frame pushed while streaming", Buffer.from(pushed.base64, "base64")[0] === 0xff);
     c.send({ type: "desktop_stop" });
@@ -59,6 +65,17 @@ async function main() {
     c.send({ type: "desktop_key", key: 65 });
     const ik = await c.next((m) => m.type === "desktop_input_ok", 15000);
     check("desktop_key ok", ik.ok === true);
+
+    // H.264 needs ffmpeg; the first packet of a stream is always the decoder config.
+    if (process.env.FFMPEG_PATH) {
+      const v = await openAndHello(PORT, TOKEN);
+      const first = new Promise((res) => v.ws.on("message", (raw, bin) => { if (bin) res(raw); }));
+      v.send({ type: "desktop_start", video: true, preset: "saver", monitor: 0 });
+      const vs = await v.next((m) => m.type === "desktop_started", 30000);
+      check("video starts on the chosen monitor", vs.ok && vs.mode === "h264" && vs.monitor === 0);
+      check("video stream opens with decoder config", (await first)[0] === 0);
+      await v.close();
+    } else console.log("SKIP  video (set FFMPEG_PATH)");
 
     // Held key: F24 goes down, and dropping the socket releases it.
     const h = await openAndHello(PORT, TOKEN);
