@@ -4,6 +4,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.ui.platform.compositionContext
+import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Email
@@ -61,15 +64,22 @@ private val ScreenSaver = Saver<Screen, String>(
     },
 )
 
+private object NoMotion : androidx.compose.ui.MotionDurationScale {
+    override val scaleFactor = 0f
+}
+
 class MainActivity : ComponentActivity() {
 
     private var locked by mutableStateOf(false)
     private lateinit var lock: AppLock
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class, androidx.compose.ui.InternalComposeUiApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         lock = AppLock(this) { locked = false }
         takePairing(intent)
+        // Every Compose animation (ripples, visibility, scrolling, text fields) runs at zero duration.
+        window.decorView.compositionContext = window.decorView.createLifecycleAwareWindowRecomposer(NoMotion, lifecycle)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Root()
@@ -113,6 +123,7 @@ class MainActivity : ComponentActivity() {
         // Declared before the lock gate so a re-lock keeps navigation.
         var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Connect) }
         var desktopFullscreen by rememberSaveable { mutableStateOf(false) }
+        var desktopKeys by rememberSaveable { mutableStateOf(false) }
         LaunchedEffect(screen) { if (screen != Screen.Desktop) desktopFullscreen = false }
         com.yasha.pocketdesk.ui.DesktopFullscreenEffect(desktopFullscreen)
 
@@ -130,7 +141,8 @@ class MainActivity : ComponentActivity() {
 
         Scaffold(
             bottomBar = {
-                if (connected && screen !is Screen.Terminal && !desktopFullscreen) {
+                // The desktop keyboard needs the room, so the tabs step aside while it is open.
+                if (connected && screen !is Screen.Terminal && !desktopFullscreen && !(screen == Screen.Desktop && desktopKeys)) {
                     NavigationBar {
                         NavigationBarItem(
                             selected = screen == Screen.Tools,
@@ -153,8 +165,15 @@ class MainActivity : ComponentActivity() {
                         NavigationBarItem(
                             selected = screen == Screen.Desktop,
                             onClick = { screen = Screen.Desktop },
-                            icon = { Icon(Icons.Filled.Build, contentDescription = null) },
+                            icon = { Icon(com.yasha.pocketdesk.ui.MonitorIcon, contentDescription = null) },
                             label = { Text("Desktop") },
+                        )
+                        // Disconnects and shows the saved PCs, to switch to another one.
+                        NavigationBarItem(
+                            selected = false,
+                            onClick = { client.close(); screen = Screen.Connect },
+                            icon = { Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null) },
+                            label = { Text("PCs") },
                         )
                     }
                 }
@@ -200,6 +219,8 @@ class MainActivity : ComponentActivity() {
                         onClose = { screen = Screen.Sessions },
                         fullscreen = desktopFullscreen,
                         onFullscreen = { desktopFullscreen = it },
+                        showKeys = desktopKeys,
+                        onShowKeys = { desktopKeys = it },
                     )
                     Screen.Ssh -> SshScreen(client, onClose = { screen = Screen.Tools })
                     is Screen.Terminal -> TerminalScreen(client, s.sessionId, onClose = { screen = Screen.Sessions })

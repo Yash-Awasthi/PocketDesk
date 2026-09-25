@@ -30,6 +30,16 @@ object Link {
 
     fun start(app: Context) {
         Notifier.ensureChannel(app)
+        // Wi-Fi or mobile data decides whether the LAN address is worth trying.
+        app.getSystemService(android.net.ConnectivityManager::class.java).registerDefaultNetworkCallback(
+            object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onCapabilitiesChanged(n: android.net.Network, caps: android.net.NetworkCapabilities) {
+                    val local = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ||
+                        caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)
+                    scope.launch { client.onNetworkChanged(NetInfo(n.toString(), local)) }
+                }
+            },
+        )
         scope.launch {
             client.statusFlow.map { it != Status.Disconnected }.distinctUntilChanged().collect { LinkService.sync(app, it) }
         }

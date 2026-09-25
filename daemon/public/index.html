@@ -638,8 +638,7 @@ function handle(m) {
     case "prompt_queue": renderPromptQueue(m); break;
     case "device_list": renderDevices(m); break;
     case "device_revoked":
-      if (m.pairingToken) alert("Device revoked. New pairing token for other devices:
-" + m.pairingToken);
+      if (m.pairingToken) alert("Device revoked. New pairing token for other devices:\n" + m.pairingToken);
       send({ type: "device_list" });
       break;
     case "device_allowed": send({ type: "device_list" }); break;

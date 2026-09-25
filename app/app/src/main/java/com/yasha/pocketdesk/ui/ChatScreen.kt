@@ -1,6 +1,5 @@
 package com.yasha.pocketdesk.ui
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -227,7 +226,7 @@ private fun ChatConversation(ws: WsClient, chatId: String, onClose: () -> Unit) 
     // Auto-scroll to bottom when new items arrive
     LaunchedEffect(transcript.size) {
         if (transcript.isNotEmpty()) {
-            listState.animateScrollToItem(transcript.lastIndex)
+            listState.scrollToItem(transcript.lastIndex)
         }
     }
 
@@ -294,7 +293,7 @@ private fun ChatConversation(ws: WsClient, chatId: String, onClose: () -> Unit) 
             }
         },
         floatingActionButton = {
-            AnimatedVisibility(visible = !running && input.isNotBlank()) {
+            if (!running && input.isNotBlank()) {
                 FloatingActionButton(onClick = {
                     if (input.isNotBlank()) {
                         ws.sendChatMessage(chatId, input.trim())

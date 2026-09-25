@@ -166,7 +166,7 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
                             Column(Modifier.weight(1f)) {
                                 Text(s.name, style = MaterialTheme.typography.titleMedium)
                                 Text(
-                                    s.url + (if (s.fallback != null) "  ·  + anywhere" else ""),
+                                    s.url.substringAfter("://").removeSuffix("/ws") + (if (s.fallback != null) " · anywhere" else ""),
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
@@ -184,6 +184,14 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
                             }
                         }
                     }
+                }
+            }
+            // A PC that stopped answering keeps the app retrying; this frees the list again.
+            if (ws.status == Status.Connecting || ws.status == Status.Reconnecting) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(if (ws.status == Status.Connecting) "Connecting…" else "Reconnecting…",
+                        style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { ws.close() }) { Text("Stop") }
                 }
             }
             ws.lastError?.let {
