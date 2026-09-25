@@ -73,7 +73,7 @@ Your settings and paired phones stay in `%USERPROFILE%\.pocketdesk`; add `-Remov
 | `%USERPROFILE%\.pocketdesk\iroh.key` | This PC's iroh identity. Keep it: paired phones find the PC by it. |
 | `%USERPROFILE%\.pocketdesk\tls\` | The daemon's certificate. |
 | `%USERPROFILE%\.pocketdesk\daemon.log` | Output of the last daemon start. |
-| `%USERPROFILE%\.pocketdeskecordings\` | Session recordings and `sessions.log`. |
+| `%USERPROFILE%\.pocketdesk\recordings\` | Session recordings and `sessions.log`. |
 | `%USERPROFILE%\Downloads\PocketDesk\` | Files sent from a phone or browser into a desktop session. |
 
 While anyone views the desktop, a bar at the top of the PC screen names them and has a
