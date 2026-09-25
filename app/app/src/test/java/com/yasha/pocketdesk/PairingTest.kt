@@ -27,6 +27,15 @@ class PairingTest {
     }
 
     @Test
+    fun `an iroh ticket adds an anywhere entry between LAN and relay`() {
+        val entries = Pairing.parse(link("""{"u":"ws://10.0.0.2:8765/ws","t":"x","f":"","i":"endpointabc"}"""))
+        assertEquals(listOf(
+            ServerEntry("10.0.0.2", "ws://10.0.0.2:8765/ws", "x", null),
+            ServerEntry("10.0.0.2 (anywhere)", "iroh://endpointabc", "x"),
+        ), entries)
+    }
+
+    @Test
     fun `malformed or foreign links are rejected`() {
         assertTrue(Pairing.parse("https://evil.example/pair#abc").isEmpty())
         assertTrue(Pairing.parse("pocketdesk://pair#not-base64!").isEmpty())

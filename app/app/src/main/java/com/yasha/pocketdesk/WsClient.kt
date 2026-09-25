@@ -168,6 +168,8 @@ class WsClient(
 
     /** Off-LAN transport (relay://host:port/channel) — raw TCP relay client. */
     private var relayLink: AtomicReference<RelayLink?> = AtomicReference(null)
+    /** Anywhere transport (iroh://<ticket>) — dials the PC by key, direct or relayed. */
+    private val irohLink = AtomicReference<IrohLink?>(null)
 
     fun connect(url: String, token: String, pinnedFingerprint: String?) {
         close()
@@ -188,6 +190,28 @@ class WsClient(
         // relay:// URLs bypass OkHttp entirely: the phone dials OUT to the
         // relay server (works from any network, no inbound port on the PC)
         // and the daemon bridges rhreq envelopes to its protocol handler.
+        if (url.startsWith("iroh://")) {
+            lateinit var link: IrohLink
+            link = IrohLink(url.removePrefix("iroh://"),
+                onText = { text -> if (irohLink.get() === link) handle(text) },
+                onVideo = { pkt -> if (irohLink.get() === link) onVideoPacket(pkt) },
+                onClosed = { code, reason ->
+                    if (irohLink.compareAndSet(link, null)) {
+                        failTransfers("connection lost")
+                        // Same rule as the socket path: a 4xxx refusal must not be retried.
+                        if (code != null) {
+                            lastError = reason.ifEmpty { "refused by server ($code)" }
+                            status = Status.Disconnected
+                        } else {
+                            lastError = reason
+                            scheduleReconnect()
+                        }
+                    }
+                })
+            irohLink.set(link)
+            link.start { hello?.let { link.send(it) } }
+            return
+        }
         if (url.startsWith("relay://")) {
             val (host, port, channel) = RelayLink.parse(url)
                 ?: run { lastError = "bad relay url"; status = Status.Disconnected; return }
@@ -235,6 +259,7 @@ class WsClient(
         userClosed = true
         socket.getAndSet(null)?.close(1000, "bye")
         relayLink.getAndSet(null)?.close()
+        irohLink.getAndSet(null)?.close()
         status = Status.Disconnected
         collectingTm = null
         failTransfers("disconnected")
@@ -293,14 +318,18 @@ class WsClient(
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
-            if (webSocket !== socket.get()) return
-            videoBytes += bytes.size
-            if (bytes.size > 0 && bytes[0].toInt() != 0) videoFrames++
-            videoSink?.invoke(bytes.toByteArray())
+            if (webSocket === socket.get()) onVideoPacket(bytes.toByteArray())
         }
     }
 
+    private fun onVideoPacket(pkt: ByteArray) {
+        videoBytes += pkt.size
+        if (pkt.isNotEmpty() && pkt[0].toInt() != 0) videoFrames++
+        videoSink?.invoke(pkt)
+    }
+
     private fun send(line: String): Boolean {
+        irohLink.get()?.let { return it.send(line) }
         relayLink.get()?.let { link ->
             // Relay requests go direct to the daemon's connection, never to the channel.
             val daemon = relayDaemon ?: return false

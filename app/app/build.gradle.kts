@@ -21,6 +21,8 @@ android {
         targetSdk = 36
         versionCode = 2
         versionName = "0.2.0"
+        // iroh's native library is ~14 MB per ABI: phones are arm64, debug adds the emulator's.
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     signingConfigs {
@@ -35,6 +37,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            ndk { abiFilters += "x86_64" }
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -42,6 +47,11 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             }
         }
+    }
+
+    // The iroh JVM jar also carries desktop builds of its native library.
+    packaging {
+        resources { excludes += listOf("darwin-*/**", "win32-*/**", "linux-*/**") }
     }
 
     compileOptions {
@@ -61,6 +71,8 @@ dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Brings the Kotlin API, libiroh_ffi.so for each ABI, and JNA's Android build.
+    implementation("computer.iroh:iroh-android:1.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     testImplementation("junit:junit:4.13.2")

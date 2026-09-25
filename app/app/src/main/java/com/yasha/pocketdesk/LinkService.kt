@@ -44,6 +44,7 @@ object Link {
 class RhApp : android.app.Application() {
     override fun onCreate() {
         super.onCreate()
+        IrohLink.Node.init(this)
         Link.start(this)
     }
 }

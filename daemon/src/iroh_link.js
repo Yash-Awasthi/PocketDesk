@@ -99,6 +99,8 @@ export class IrohSocket extends EventEmitter {
     this.conn = conn;
     this.readyState = 1;
     this._ctl = streamWriter(bi.send);
+    // Replies and terminal output must not queue behind video; GOP streams count up from 1.
+    bi.send.setPriority(2 ** 31 - 1).catch(() => {});
     this._gop = null;
     this._config = null;
     this._prio = 0;
@@ -125,7 +127,7 @@ export class IrohSocket extends EventEmitter {
 
   /**
    * Queues one desktop video packet. Returns false when the viewer fell too far
-   * behind and the current GOP was dropped, so the caller must produce a keyframe.
+   * behind and the current GOP was dropped: the link is slower than the stream.
    */
   sendVideo(kind, data) {
     if (this.readyState !== 1) return true;
