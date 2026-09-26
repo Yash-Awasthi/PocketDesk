@@ -1,8 +1,26 @@
 # Stops and unregisters the PocketDesk tray/daemon autostart.
+# -Purge also deletes the console endpoint's paired token (kept by default, so
+# the phone stays paired across a reinstall).
 
+param([switch]$Purge)
 $ErrorActionPreference = "Stop"
 Get-Process PocketDeskTray -ErrorAction SilentlyContinue | Stop-Process -Force
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -ErrorAction SilentlyContinue
 # Older installs registered a scheduled task instead.
 try { schtasks /Delete /F /TN "PocketDesk" 2>$null | Out-Null } catch {}
-Write-Host "removed. the daemon is no longer registered to start at logon."
+
+# Console endpoint: stop the SYSTEM launcher + its daemon, then unregister the task.
+try { Stop-ScheduledTask -TaskName "PocketDeskConsole" -ErrorAction SilentlyContinue } catch {}
+try { Unregister-ScheduledTask -TaskName "PocketDeskConsole" -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+Get-Process PocketDeskConsole -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# The listener on 8766 is the console daemon, whichever session it runs in.
+Get-NetTCPConnection -State Listen -LocalPort 8766 -ErrorAction SilentlyContinue |
+    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+
+$consoleHome = Join-Path $env:ProgramData "PocketDesk\console"
+if ($Purge -and (Test-Path $consoleHome)) {
+    Remove-Item -Recurse -Force $consoleHome -ErrorAction SilentlyContinue
+    Write-Host "removed. tray autostart and console endpoint gone, including the paired token (-Purge)."
+} else {
+    Write-Host "removed. tray autostart and console endpoint gone. Console token kept in $consoleHome (use -Purge to delete)."
+}

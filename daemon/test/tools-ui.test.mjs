@@ -41,6 +41,11 @@ async function main() {
   const doc = await c.next((m) => m.type === "doctor_report", 30000);
   check("doctor returns named checks", Array.isArray(doc.checks) && doc.checks.length > 0
     && doc.checks.every((x) => typeof x.name === "string" && typeof x.ok === "boolean"));
+  if (process.platform === "win32") {
+    // Optional console endpoint: absent here (CI has no task), so it reports ok.
+    const ce = doc.checks.find((x) => x.name === "console_endpoint");
+    check("doctor reports the console endpoint (ok when not installed)", ce && ce.ok === true);
+  }
 
   c.send({ type: "apps_discover", q: "" });
   const apps = await c.next((m) => m.type === "apps", 60000);

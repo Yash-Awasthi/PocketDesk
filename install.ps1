@@ -9,7 +9,8 @@ param(
     [string]$Ref = "",                                   # release tag; the latest release when empty
     [string]$Source = "",                                # install from a local checkout instead of downloading
     [string]$InstallDir = "$env:LOCALAPPDATA\PocketDesk",
-    [switch]$NoStart
+    [switch]$NoStart,
+    [switch]$Console                                     # also install the SYSTEM console endpoint (one UAC prompt)
 )
 $ErrorActionPreference = "Stop"
 # The progress bar makes Invoke-WebRequest many times slower on Windows PowerShell 5.
@@ -83,6 +84,15 @@ try {
     Step "Installing the tray"
     & "$daemon\scripts\install-service.ps1" -DaemonDir $daemon -InstallDir $InstallDir -NoStart:$NoStart
 
+    # 5b. Console endpoint (opt-in): the SYSTEM secure-desktop entry. Needs one elevation.
+    if ($Console) {
+        Step "Installing the console endpoint (elevation required)"
+        $consoleArgs = @('-ExecutionPolicy','Bypass','-File',"$daemon\scripts\install-service.ps1",
+                         '-Console','-DaemonDir',$daemon,'-InstallDir',$InstallDir)
+        if ($NoStart) { $consoleArgs += '-NoStart' }
+        Start-Process powershell -Verb RunAs -Wait -ArgumentList $consoleArgs
+    }
+
     # 6. Pairing: the daemon writes its settings on first start; then the QR page opens.
     if (-not $NoStart) {
         Step "Starting; the pairing page opens in your browser"
@@ -102,6 +112,7 @@ try {
     Write-Host ""
     Write-Host "PocketDesk is installed in $InstallDir" -ForegroundColor Green
     Write-Host "Scan the QR code with the PocketDesk app. Later: tray icon > Pair a phone."
+    if (-not $Console) { Write-Host "Lock screen / UAC / before-login from the phone? Re-run with -Console (one UAC prompt)." }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }

@@ -48,6 +48,35 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
 
 ## State at save (IMPORTANT — current)
 
+**2026-09-26 pass — console (secure-desktop) endpoint (newest):**
+
+- A second daemon instance runs as SYSTEM in the active console session so it can reach the
+  secure desktop (UAC prompts, lock screen, before login), which the user daemon cannot. It is
+  the full daemon reused unchanged, on its own port 8766, with its own config/token/TLS/iroh
+  key under `%ProgramData%\PocketDesk\console` (ACL: Administrators + SYSTEM only).
+- Launcher `daemon/scripts/console/PocketDeskConsole.cs` (compiled by csc.exe, System.dll
+  only) is started by the `PocketDeskConsole` SYSTEM scheduled task at boot. It polls
+  `WTSGetActiveConsoleSessionId`, moves a duplicated SYSTEM token into that session
+  (`SetTokenInformation(TokenSessionId)`), and `CreateProcessAsUser`-launches node on
+  `winsta0\default`, relaunching across session/logon changes and on child exit.
+- Env that drives it: `RH_CONSOLE=1`, `RH_HOME`, `RH_PORT=8766`, `RH_LABEL="PC (console)"`.
+  `config.js` under `RH_CONSOLE` icacls-locks the dir to Admins+SYSTEM and refuses to start
+  without TLS. The capture/input helpers gain `SetThreadDesktop(OpenInputDesktop())` before
+  each op ONLY under `RH_CONSOLE`, so they follow the secure desktop; the user daemon's helper
+  scripts stay byte-identical (a test enforces this). The pair payload gained an `n` (name)
+  field, folded into the phone entry name (`Pairing.kt`).
+- Install: `install-service.ps1 -Console` (elevated) compiles the launcher, ACLs the dir,
+  registers the task, opens `https://localhost:8766/pair`. `install.ps1 -Console` opts in with
+  one UAC relaunch. `uninstall-service.ps1`/`uninstall.ps1` tear down the task + port 8766 and
+  keep the token unless `-Purge`/`-RemoveData`. `doctor` reports `console_endpoint`.
+- Ports now: 8765 user daemon, 8766 console daemon. Security trade-off on the record: the
+  console endpoint is the full daemon as SYSTEM, so anything run through it (agents, SSH,
+  files) runs as SYSTEM; it is gated only by its own admin-only token and separate pairing.
+- UNPROVEN: the secure-desktop injection, before-login reach, and UAC-approval path have only
+  been unit-checked and reasoned through, never run on hardware. `npm.cmd test` = all pass;
+  Android `PairingTest` passes; all PS scripts parse. Manual steps pending in
+  `docs/console-plan/60-verification.md` (delete that folder once the hardware run is done).
+
 0. 2026-09-23 pass:
    - `server.js` split: message handlers live in `src/handlers/{agents,files,remote,ssh,system}.js`
      (a lookup table guarded by `Object.hasOwn`), relay bridging in `relay_bridge.js`, file

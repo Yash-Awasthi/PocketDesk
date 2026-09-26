@@ -31,6 +31,12 @@ class PairingTest {
     }
 
     @Test
+    fun `the pair payload name becomes the entry name`() {
+        val entries = Pairing.parse(link("""{"u":"ws://10.0.0.2:8766/ws","t":"x","f":"","n":"PC (console)"}"""))
+        assertEquals(listOf(ServerEntry("PC (console)", "ws://10.0.0.2:8766/ws", "x", null)), entries)
+    }
+
+    @Test
     fun `malformed or foreign links are rejected`() {
         assertTrue(Pairing.parse("https://evil.example/pair#abc").isEmpty())
         assertTrue(Pairing.parse("pocketdesk://pair#not-base64!").isEmpty())

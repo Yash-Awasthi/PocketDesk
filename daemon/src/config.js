@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { execSync } from "node:child_process";
 import { generateSelfSignedCert } from "./tls-gen.js";
 
 // RH_HOME relocates every piece of daemon state (config, TLS, SSH keys) —
@@ -11,6 +12,13 @@ const file = path.join(dir, "config.json");
 
 export function loadConfig() {
   fs.mkdirSync(dir, { recursive: true });
+  // The console endpoint's token opens a SYSTEM daemon, so only Administrators (S-1-5-32-544)
+  // and SYSTEM (S-1-5-18) may read its folder. Well-known SIDs keep this locale-independent.
+  if (process.env.RH_CONSOLE && process.platform === "win32") {
+    try {
+      execSync(`icacls "${dir}" /inheritance:r /grant *S-1-5-32-544:(OI)(CI)F /grant *S-1-5-18:(OI)(CI)F`, { stdio: "ignore", windowsHide: true });
+    } catch { /* best effort, like the chmod below */ }
+  }
   let cfg = {};
   let persisted = null;
   if (fs.existsSync(file)) {
@@ -42,6 +50,8 @@ export function loadConfig() {
     if (generateSelfSignedCert(cfg.tls, dir)) {
       cfg.tls.enabled = true;
       saveConfig(cfg);
+    } else if (process.env.RH_CONSOLE) {
+      throw new Error("console endpoint needs TLS: its token opens a SYSTEM daemon. Install Git for Windows (for openssl) and restart.");
     } else {
       console.warn("[pocketdesk] TLS not enabled and no certificate found — the pairing token is crossing the LAN in plaintext.");
       console.warn("[pocketdesk] install openssl and restart, or run `npm run setup-tls`, to fix this.");

@@ -73,7 +73,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     pairFp = fingerprint;
     const url = `${useTls ? "wss" : "ws"}://${lanAddress()}:${port}/ws`;
     const payload = Buffer.from(
-      JSON.stringify({ u: url, t: token, f: fingerprint || "", i: irohTicket || undefined }),
+      JSON.stringify({ u: url, t: token, f: fingerprint || "", i: irohTicket || undefined, n: process.env.RH_LABEL || undefined }),
       "utf8",
     ).toString("base64url");
     pairPage = pairTemplate

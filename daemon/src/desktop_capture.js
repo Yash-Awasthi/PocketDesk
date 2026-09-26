@@ -42,6 +42,23 @@ const COMMON_PRELUDE = `
 $ErrorActionPreference = 'Stop'
 `;
 
+// The console endpoint runs as SYSTEM in the console session, which may attach to the
+// secure desktop (UAC, lock screen). Only it gets this, so the user daemon's scripts stay unchanged.
+const IS_CONSOLE = IS_WIN && !!process.env.RH_CONSOLE;
+const DESK_MEMBERS = IS_CONSOLE ? `
+  [DllImport("user32.dll", SetLastError=true)] static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
+  [DllImport("user32.dll", SetLastError=true)] static extern bool SetThreadDesktop(IntPtr h);
+  [DllImport("user32.dll", SetLastError=true)] static extern bool CloseDesktop(IntPtr h);
+  static IntPtr cur = IntPtr.Zero;
+  /** Moves this thread onto whichever desktop has input now, keeping exactly one handle open. */
+  public static void FollowInput() {
+    IntPtr d = OpenInputDesktop(0, false, 0x02000000);
+    if (d == IntPtr.Zero) return;
+    if (SetThreadDesktop(d)) { if (cur != IntPtr.Zero && cur != d) CloseDesktop(cur); cur = d; } else CloseDesktop(d);
+  }
+` : "";
+const followInput = (cls) => (IS_CONSOLE ? `[${cls}]::FollowInput()\n  ` : "");
+
 const INPUT_SCRIPT = COMMON_PRELUDE + `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition @'
@@ -84,7 +101,7 @@ public static class RHI {
     var i = new INPUT { type = 1 };
     i.u.ki = new KEYBDINPUT { wVk = 0, wScan = scan, dwFlags = flags };
     return SendInput(1, new INPUT[]{ i }, Marshal.SizeOf(typeof(INPUT)));
-  }
+  }${DESK_MEMBERS}
 }
 '@
 [RHI]::SetProcessDPIAware() | Out-Null
@@ -95,7 +112,7 @@ while ($true) {
   try { $cmd = $line | ConvertFrom-Json } catch { [Console]::Out.WriteLine('{"ok":false,"error":"badjson"}'); continue }
   $op = $cmd.op
   if ($op -eq 'ping') { [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}'); continue }
-  if ($op -eq 'mouse') {
+  ${followInput("RHI")}if ($op -eq 'mouse') {
     try {
       $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
       # x/y are relative to the virtual screen's top-left, the same origin as a captured frame.
@@ -197,7 +214,7 @@ public static class RHD {
       }
     }
     return string.Join(",", list);
-  }
+  }${DESK_MEMBERS}
 }
 '@
 [RHD]::SetProcessDPIAware() | Out-Null
@@ -215,7 +232,7 @@ while ($true) {
   }
   if ($op -eq 'capture') {
     try {
-      $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+      ${followInput("RHD")}$vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
       $s = [double]$cmd.s
       if ($s -le 0 -or $s -gt 1) { $s = 1 }
       $w = [int]($vs.Width * $s); $h = [int]($vs.Height * $s)

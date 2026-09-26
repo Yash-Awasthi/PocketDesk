@@ -34,6 +34,40 @@ certificate. Choose **Advanced**, then **Continue to localhost**.
   phone is on the PC's network and connects over iroh (direct or through a relay) otherwise.
 - **Another phone:** open the pairing page again and scan it with that phone.
 
+## Console access: lock screen, UAC and before login
+
+The everyday connection runs as you, so it cannot reach Windows' secure desktop:
+User Account Control prompts, the lock screen, and the sign-in screen before
+anyone logs in. Reaching those needs a process running as the system account in
+the console session. Console access adds exactly that, as a **separate** phone
+entry named "PC (console)", so ordinary use never gains those rights by accident.
+
+Install it by re-running the installer elevated (right-click PowerShell > **Run
+as administrator**), which adds one more step to the normal install:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1 -Source . -Console
+```
+
+From an existing install you can add just this part:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PocketDesk\app\daemon\scripts\install-service.ps1" -Console
+```
+
+It registers a system scheduled task that starts at boot (so it is reachable
+before login), then opens a second pairing page at `https://localhost:8766/pair`.
+Scan that QR to add the "PC (console)" entry. Use that entry when you need the
+lock screen, a UAC prompt, or the machine before you have signed in; use the
+normal entry for everything else.
+
+What to understand before turning it on: the console entry runs with full system
+rights, so anything done through it — including approving a UAC prompt — has
+those rights. It has its own token that only administrators can read, on its own
+port (8766), separate from the everyday connection. Keeping it separate is the
+point: it means the everyday connection, and any program running as you, cannot
+silently approve UAC on your behalf. Remove it any time (see Uninstall).
+
 ## Daily use: the tray icon
 
 A dot in the notification area shows the daemon's state: **green** running, **grey** stopped.
@@ -64,6 +98,10 @@ powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PocketDesk\uninstall
 Or run `uninstall.ps1` from a checkout. It removes the tray, the autostart and the program files.
 Your settings and paired phones stay in `%USERPROFILE%\.pocketdesk`; add `-RemoveData` to delete them too.
 
+If you installed console access, run the uninstall **as administrator** so it can also remove the
+system task. The console pairing token in `%ProgramData%\PocketDesk` is kept unless you pass
+`-RemoveData` (or run `install-service.ps1 -Console`'s counterpart, `uninstall-service.ps1 -Purge`).
+
 ## Where things live
 
 | Path | Contents |
@@ -75,6 +113,7 @@ Your settings and paired phones stay in `%USERPROFILE%\.pocketdesk`; add `-Remov
 | `%USERPROFILE%\.pocketdesk\daemon.log` | Output of the last daemon start. |
 | `%USERPROFILE%\.pocketdesk\recordings\` | Session recordings and `sessions.log`. |
 | `%USERPROFILE%\Downloads\PocketDesk\` | Files sent from a phone or browser into a desktop session. |
+| `%ProgramData%\PocketDesk\console\` | Console endpoint's own config, token and iroh key (system-only; port 8766). Present only with console access. |
 
 While anyone views the desktop, a bar at the top of the PC screen names them and has a
 **Disconnect** button. The bar is kept out of the stream, so it never covers what they see.

@@ -4,7 +4,7 @@
  * helpers respond ok, streaming starts and stops. Elsewhere: every command
  * degrades with unsupported_platform and the daemon stays healthy.
  */
-import { check, failureCount, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
+import { check, failureCount, makeTmp, openAndHello, startDaemon, teardown, REPO } from "./helpers.mjs";
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -31,6 +31,22 @@ async function main() {
   c.send({ type: "desktop_status" });
   const st = await c.next((m) => m.type === "desktop_status");
   check("desktop_status reports support + counters", typeof st.supported === "boolean" && st.clients === 0 && Array.isArray(st.lastFrame) === false);
+
+  // Console mode adds secure-desktop following to the helper scripts, and only then.
+  // IS_CONSOLE is read at module load, so probe it in a subprocess with RH_CONSOLE set.
+  const probeFollow = (env) => JSON.parse(execFileSync(process.execPath, ["-e", `
+    import("./src/desktop_capture.js").then(m => {
+      const c = new m.DesktopController();
+      const s = c.helperInput.script + c.helperCapture.script + c.helperClip.script;
+      process.stdout.write(JSON.stringify({ follow: /void FollowInput/.test(s), calls: (s.match(/::FollowInput\\(\\)/g) || []).length }));
+    });
+  `], { cwd: path.join(REPO, "daemon"), env: { ...process.env, ...env } }).toString());
+  const plainScripts = probeFollow({ RH_CONSOLE: "" });
+  check("no desktop-follow without RH_CONSOLE", plainScripts.follow === false && plainScripts.calls === 0);
+  if (IS_WIN) {
+    const consoleScripts = probeFollow({ RH_CONSOLE: "1" });
+    check("desktop-follow present under RH_CONSOLE", consoleScripts.follow === true && consoleScripts.calls === 2);
+  }
 
   if (!IS_WIN) {
     // Graceful degradation everywhere, no crashes.
