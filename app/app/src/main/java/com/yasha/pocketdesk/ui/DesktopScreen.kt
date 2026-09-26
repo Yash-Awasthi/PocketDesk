@@ -25,6 +25,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculateCentroidSize
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
@@ -327,8 +329,8 @@ fun DesktopScreen(
                             val start = down.uptimeMillis
                             var end = start
                             var two = TwoFinger.Undecided
-                            var pinch = 1f
-                            var travel = 0f
+                            var startSpread = -1f
+                            var startCentre = Offset.Zero
                             var scrollLeft = 0f
                             var dragging = false
                             while (true) {
@@ -339,15 +341,21 @@ fun DesktopScreen(
                                     multi = true
                                     val z = ev.calculateZoom()
                                     val p = ev.calculatePan()
-                                    if (two == TwoFinger.Undecided) {
-                                        pinch *= z
-                                        travel += p.getDistance()
-                                        two = classifyTwoFinger(pinch, travel, panWhenZoomed = zoom > 1f && !touchpad)
-                                    }
+                                    val centre = ev.calculateCentroid()
+                                    val spread = ev.calculateCentroidSize()
+                                    if (startSpread < 0f) { startSpread = spread; startCentre = centre }
+                                    val spreadChange = kotlin.math.abs(spread - startSpread)
+                                    val travel = (centre - startCentre).getDistance()
+                                    if (two == TwoFinger.Undecided) two = classifyTwoFinger(spreadChange, travel, panWhenZoomed = zoom > 1f && !touchpad)
+                                    else if (two == TwoFinger.Scroll && scrollBecomesPinch(spreadChange, travel)) two = TwoFinger.Zoom
                                     when (two) {
                                         TwoFinger.Zoom -> {
-                                            zoom = (zoom * z).coerceIn(1f, 6f)
-                                            pan = Viewport(f, size.width.toFloat(), size.height.toFloat(), zoom, pan + p).clampedPan()
+                                            // Zoom around the fingers, and let the picture follow them as they move.
+                                            val newZoom = (zoom * z).coerceIn(1f, 6f)
+                                            val view = IntSize(size.width, size.height)
+                                            val anchored = panForZoom(f, view, zoom, pan, newZoom, centre - p, centre)
+                                            pan = Viewport(f, size.width.toFloat(), size.height.toFloat(), newZoom, anchored).clampedPan()
+                                            zoom = newZoom
                                         }
                                         TwoFinger.Scroll -> {
                                             val (notches, rest) = wheelNotches(scrollLeft + p.y)
