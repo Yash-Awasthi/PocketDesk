@@ -94,6 +94,10 @@ fun FilesScreen(ws: WsClient) {
         }
     }
     BackHandler(enabled = searching) { searching = false; ws.fsFound = null }
+    // Back walks up the folders until the home folder, then leaves the tab as usual.
+    BackHandler(enabled = !searching && listing != null && listing.home != null && listing.path != listing.home) {
+        listing?.parent?.let { open(it) }
+    }
 
     val upload = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val dir = listing?.path ?: return@rememberLauncherForActivityResult

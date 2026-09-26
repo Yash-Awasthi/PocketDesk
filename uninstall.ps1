@@ -16,6 +16,9 @@ foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe
 }
 Start-Sleep -Milliseconds 500
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -ErrorAction SilentlyContinue
+foreach ($dir in @([Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop"))) {
+    Remove-Item (Join-Path $dir "PocketDesk.lnk") -ErrorAction SilentlyContinue
+}
 
 # Console endpoint (only present if it was ever installed with -Console). Unregistering a
 # SYSTEM task needs elevation; run this uninstall as administrator to remove it fully.

@@ -37,7 +37,7 @@ Status legend:
 | tmux-backed detach (process survives daemon restart) | terminal-web, webtmux, multimux | ➖ removed 2026-09-22 — the tmux manager had no caller and no screen; PTY sessions survive a reconnect, not a daemon restart |
 | ZMODEM/trzsz in-band file transfer | ttyd, tabby | 🗺️ |
 | Read-only/plain-text digest render (token savings) | mcp-interactive-terminal | ✅ `render_digest` → `digest_render` (ANSI-stripped plain rows, trailing blank trimmed; `terminal_renderer.js` ported CJS→ESM) + ✅ `digest_attach` live digest mode (diffed row updates streamed to cheap subscribers) |
-| Per-user ACLs / TOTP / OIDC | warpgate, gateone | 🗺️ (single-user threat model today) |
+| Per-user ACLs / TOTP / OIDC | warpgate, gateone | ✅ TOTP for master-token pairing (`totp_*`, close 4011); ACLs/OIDC ➖ single-user |
 | Reverse-connect relay / E2E blind relay | tty2web, yepanywhere, sshx | ✅ `relay_*` — outbound relay link (phone can reach the PC off-LAN) + optional relay hosting; `relay_server.js` ported CJS→ESM |
 | REST command API alongside WS | persistent-terminal-api, tty2web | ⚙️ (CLI server `/sessions /status /query`) |
 | One-shot mode, DNS-tunnel transport | gotty, tty2web | ➖ |
@@ -121,10 +121,10 @@ Status legend:
 | Chat UI w/ streaming + tool indicators | stream-chat-android patterns | ⚙️ |
 | Background end-of-session notifications | — | ⚙️ |
 | Auto-reconnect with exponential backoff + jitter | client-kt, krossbow | ✅ app-side `ReconnectPolicy` (1s→30s exp + 20% jitter, 8 attempts) + auto-reattach with `since` seq after reconnect (status `Reconnecting` shown) — daemon-side the **relay link** auto-reconnects with capped exponential backoff + equal jitter (`relay.js`, behavioral tests in `reconnect.test.mjs`) |
-| Foreground service holding sessions through screen-off | termux, nectarssh | 🗺️ |
+| Foreground service holding sessions through screen-off | termux, nectarssh | ⚙️ `LinkService` |
 | Reattach with `since` seq after reconnect | cc-pocket | ✅ protocol + ✅ app adoption (WsClient tracks last seq per session and reattaches incrementally) |
-| Tool-approval cards + inline diff viewer | opencode-mobile, hermes-android | 🗺️ app |
-| Biometric app lock / encrypted token vault | haven, skerryssh, hermes-android | 🗺️ app |
+| Tool-approval cards + inline diff viewer | opencode-mobile, hermes-android | ✅ Claude Code `PermissionRequest` hook → proposal → `ApprovalCard` with red/green diff |
+| Biometric app lock / encrypted token vault | haven, skerryssh, hermes-android | ⚙️ `AppLock` (vault 🗺️) |
 | Host-key TOFU fingerprint confirm | haven, connectbot | ⚙️ (pinning confirm on first connect) |
 | Multi-protocol connection profiles + host-key TOFU + SSH key mgmt | haven-ssh-client | ✅ `profile_create/list/update/delete/connect/disconnect` + `hostkey_verify/list` + `sshkey_generate/list/delete` + `mproto_status` (simulated transport, like `rd_*`; real SSH/SFTP layer can slot in) |
 | OSC 52 clipboard / OSC 8 hyperlinks / OSC 9;777 notifications | haven, kmp-terminal-emulator | 🗺️ |
@@ -142,7 +142,7 @@ Status legend:
 | Per-chat-user allowlist + prompt-injection-safe approval | whatsapp-claude-plugin | ✅ (`TELEGRAM_ALLOW_CHAT_IDS`; approvals from chat map to proposals) |
 | Rich notification payload (what the agent asked) | anotifier | ⚙️ partial (proposals carry summary) |
 | Quiet hours / focus mode / priority tiers | marchat, shooter | ✅ `quiet_set` — off/notify/priority/silent with time windows (quiet_hours.js) |
-| Lock-screen action buttons (approve/deny from push) | shooter, remote-control | 🗺️ app |
+| Lock-screen action buttons (approve/deny from push) | shooter, remote-control | ✅ Allow/Deny on the approval notification |
 | Notification coalescing/dedupe + telemetry | shooter, anotifier | ✅ `notify_send`/`notify_stats`/`notify_bursts` — shooter brain (decision-first, dedupe window, per-project coalescing, idle gate, telemetry) feeding the channel registry; two latent bugs fixed |
 | Pusher-style pub/sub channels + presence | soketi | ➖ (direct WS model fits better) |
 | History replay on reconnect | marchat | ✅ chat transcript replay + terminal backfill |
@@ -333,3 +333,19 @@ anywhere — the read-only Git panel (`git_status`/`git_log`/`git_diff`/
 `git_branches`), the `doctor` self-check, and `apps_discover` with **Open** for
 a GUI app and **Run** for a CLI tool. `test/tools-ui.test.mjs` drives exactly
 the messages that tab sends. Full suite: 30 files, all pass.
+
+## Remote-desktop parity (AnyDesk / RustDesk), personal use
+
+| Feature | Reference | Status |
+|---|---|---|
+| File manager | AnyDesk File Manager | ✅ Files tab: open, share, save, upload, rename, mkdir, delete to Recycle Bin, search (`fs_op`, `fs_search`) |
+| Privacy mode (blank screen, block local input) | AnyDesk Privacy Mode, RustDesk privacy mode 2 | ✅ capture-excluded cover + low-level hooks that pass injected input (`desktop_privacy`) |
+| Screen frame while connected | AnyDesk Screen Frame | ✅ red edge per monitor, excluded from capture |
+| Session requests | AnyDesk Session Requests | ⚙️ Allow / View only / Deny; buttons armed after 1.5 s |
+| Two-factor authentication | AnyDesk 2FA | ✅ TOTP on pairing |
+| Remote restart / power | AnyDesk, RustDesk | ✅ `pc_power` |
+| Wake on LAN | AnyDesk | ⚙️ |
+| Screen recording | AnyDesk | ⚙️ |
+| Unattended access | AnyDesk | ⚙️ tray at logon; console task at boot |
+| One-click installer | AnyDesk, RustDesk | ✅ `PocketDesk-Setup.exe` (IExpress around `install.ps1`) and Start Menu shortcut |
+| Audio, whiteboard, remote printing, address book sync, group policies, REST API for admins | AnyDesk | ➖ out of scope: personal use, no sound |

@@ -7,7 +7,7 @@
 [![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-orange.svg)](#protocol-v1)
 [![Android](https://img.shields.io/badge/Android-Kotlin-purple.svg)](https://developer.android.com)
 [![Plugins](https://img.shields.io/badge/Plugins-4-blueviolet.svg)](#plugin-system)
-[![Tests](https://img.shields.io/badge/Tests-24%20suites-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-28%20suites-brightgreen.svg)](#testing)
 
 **No cloud. No accounts. Your machine, your data, your agents.**
 
@@ -22,13 +22,13 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 🖥️ **Live Terminal** | Real-time PTY streaming with extra keys (Esc, Tab, Ctrl+C/D/Z, arrows) — seq-numbered output with missed-output backfill after reconnect |
 | 💬 **AI Chat** | ChatGPT-style conversation with streaming responses and tool indicators |
 | 📊 **Dashboard** | Real-time stats, activity timeline, plugin status, connected clients |
-| 📁 **File Browser** | Browse, upload, and download files on your PC from your phone |
+| 📁 **Files** | A Files tab for your home folder: open or share a file in any phone app, save it to Downloads, upload, rename, create folders, delete to the Recycle Bin, search by name, copy a path (`fs_op`, `fs_search`) |
 | 🔐 **TLS + Pinning** | Self-signed cert support with SHA-256 fingerprint pinning |
 | 📦 **Auto-Install** | One-tap npm/pip install with live progress output |
 | 🪟 **IDE Launch** | Open any installed desktop IDE or GUI app on the PC from the phone, at the project folder you picked — the window opens on the PC, then the Desktop screen drives it (`gui_open`) |
 | 🔎 **App discovery** | Everything installed, not only what ships a manifest: Start Menu shortcuts, `/Applications` bundles and `.desktop` entries for GUI apps, PATH for command-line tools. Search on the Tools screen, **Open** for a GUI app, **Run** for a CLI tool in a PTY (`apps_discover`) |
 | 🔌 **Plugin System** | Drop a JS file to extend the daemon — no core changes needed |
-| 📝 **Proposals** | Agent actions require human approval — safety by default |
+| 📝 **Agent approvals** | Claude Code's permission prompts come to the phone as a card with the command or a red/green diff: Deny, Allow, or Allow all for that session, also from the notification. Each chat picks its permission mode (ask, auto-accept edits, plan only, full access) |
 | 📱 **Multi-PC** | Connect to multiple PCs, each with pinned certificates |
 | 🔔 **Background Notify** | Get notified when sessions end while the app is in background |
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states |
@@ -37,6 +37,10 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 👁 **Session privacy** | The PC shows who is viewing with a Disconnect button, can require Allow / View only / Deny first, and viewers can join view-only. |
 | 🎥 **Session recording** | Optional MP4 of the watched screen, asciicast of terminals, and a log of every viewer, approval and file sent. |
 | ⏰ **Wake-on-LAN** | Wake a sleeping PC from the phone on the same network. |
+| 🕶️ **Privacy mode** | Blank the PC's own monitors and ignore its local keyboard and mouse while you work from the phone; the phone still sees the desktop. Three Esc presses at the PC take it back (`desktop_privacy`; Windows) |
+| 🟥 **Viewing frame** | A red edge around every monitor while someone is connected, seen only at the PC |
+| 🔌 **PC power** | Lock, sign out, sleep, restart or shut down the PC from the phone (`pc_power`) |
+| 🔑 **Two-factor pairing** | Optionally require a code from an authenticator app before a new device may pair (`totp_*`) |
 | 🛡️ **SSH Bastion** | A real jump host: log in as `user@host` with your registered key, the access rule is checked, and the channel is proxied to the target with byte accounting (`bastion_*`) |
 | 🔒 **SSH Server Control** | A real SSH listener on the PC: per-user password/public-key auth, command allowlists enforced before a command runs, PTY shells, session recording (`sshserver_*`) |
 | 📇 **Connection Profiles** | Real SSH, SFTP and VNC connections from saved profiles, host-key trust-on-first-use, OpenSSH key generation kept out of the protocol (`profile_*`/`hostkey_*`/`sshkey_*`) |
@@ -56,13 +60,20 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 
 ## ⚡ Quick Install
 
-**Windows** (PowerShell, no admin, nothing to install first):
+**Windows:** download **PocketDesk-Setup.exe** from the
+[latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest) and double-click it.
+No admin rights and nothing to install first. Windows may say it protected your PC, because the file
+is not code-signed: choose **More info**, then **Run anyway**.
+
+Or the same installer from PowerShell:
 ```powershell
 irm https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.ps1 | iex
 ```
 
 It downloads the daemon with its own Node.js and ffmpeg, installs a tray icon that
-starts it at logon, and opens the pairing QR. Scan it with the app and you are done.
+starts it at logon, adds a **PocketDesk** shortcut to the Start Menu and the desktop, and opens the
+pairing QR. Scan it with the app and you are done. Clicking the shortcut later starts PocketDesk,
+or shows the pairing QR again if it is already running.
 Full guide, updating and uninstalling: [docs/SETUP-PC.md](docs/SETUP-PC.md).
 
 **macOS / Linux:**
@@ -350,10 +361,17 @@ Plugins receive a `ctx` object:
 
 ## 📝 Proposal System
 
-Inspired by claude-code-hermit's operator-gated proposal pattern:
+**Claude Code prompts on the phone.** Every `claude` the daemon starts, in a chat or a terminal, gets a
+`PermissionRequest` hook through `--settings` (`tool_approval.js`, `approve-hook.js`). When Claude Code
+would ask for permission, the hook posts the tool call to the daemon's local endpoint, the phone shows
+it, and the answer goes back to Claude Code. Allow all trusts the rest of that agent session. Nobody
+answering within about 4.5 minutes leaves the decision to Claude Code's own prompt. If your Claude Code
+settings use `bypassPermissions`, nothing asks until a chat's permission menu is set to **Ask on phone**.
+
+The same proposals are open to plugins, inspired by claude-code-hermit's operator-gated pattern:
 
 1. Agent suggests an action (file write, command, network request)
-2. Proposal card appears in the web UI
+2. Proposal card appears on the phone
 3. User clicks **Approve** or **Reject**
 4. Action executes or is blocked
 
@@ -398,7 +416,7 @@ Proposals auto-expire after 5 minutes.
 JSON frames; binary payloads are base64.
 
 **Client → Server:**
-`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `propose` · `approve` · `reject` · `proposal_list` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
+`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `fs_op {op: mkdir|rename|delete}` · `fs_search {path, q}` · `propose` · `approve {id, all?}` · `reject` · `proposal_list` · `desktop_privacy {on}` · `pc_power {action}` · `totp_status` · `totp_setup` · `totp_enable {code}` · `totp_disable {code}` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
 <details>
 <summary>Absorbed-feature messages</summary>
 
@@ -417,7 +435,7 @@ JSON frames; binary payloads are base64.
 </details>
 
 **Server → Client:**
-`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `chatreplay` · `chatuser` · `chatdelta` · `chartool` · `chatstate` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `activity` · `gui_opened` · `apps` · `error`
+`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `fs_result` · `fs_found` · `chatreplay` · `chatuser` · `chatdelta` · `chartool` · `chatstate` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `proposal_expired` · `desktop_privacy` · `pc_power` · `totp_status` · `totp_setup` · `activity` · `gui_opened` · `apps` · `error`
 
 Every `out` frame carries a monotonic `seq`; on reconnect send `attach {id, since: <last seq>}` and the daemon replays only what you missed.
 
@@ -472,6 +490,7 @@ PocketDesk/
 │   │   ├── registry.js           # Tool discovery + install
 │   │   ├── plugins.js            # Plugin loader + lifecycle
 │   │   ├── proposals.js          # Proposal/approval manager
+│   │   ├── tool_approval.js      # Claude Code permission prompts to the phone
 │   │   └── plugins/              # Built-in plugins
 │   │       ├── logger-plugin.js
 │   │       ├── metrics-plugin.js
@@ -484,6 +503,9 @@ PocketDesk/
 │       ├── ui/
 │       │   ├── ChatScreen.kt     # AI chat conversation
 │       │   ├── TerminalScreen.kt # Live terminal
+│       │   ├── FilesScreen.kt    # PC file manager
+│       │   ├── ApprovalCard.kt   # Agent approval card with diff
+│       │   ├── PcControls.kt     # Power actions and two-factor pairing
 │       │   ├── SessionsScreen.kt # Session manager
 │       │   └── ToolsScreen.kt    # Tool installer
 │       ├── WsClient.kt           # WebSocket client
@@ -492,6 +514,7 @@ PocketDesk/
 ├── docs/SETUP-PC.md              # PC install, tray, update, uninstall
 ├── install.sh                    # One-liner installer (Linux/Mac)
 ├── install.ps1                   # One-liner installer (Windows)
+│                                 # daemon/scripts/build-setup.ps1 wraps it as PocketDesk-Setup.exe
 ├── uninstall.ps1                 # Removes the Windows install
 └── README.md
 ```
@@ -503,6 +526,8 @@ PocketDesk/
 - **Token auth**: Every WebSocket client must present the token as its first message. Wrong token → connection closed (4003).
 - **TLS + certificate pinning**: With TLS enabled, the app shows the cert's SHA-256 fingerprint. Confirm once — pinned for all future connects.
 - **Proposal system**: Sensitive actions (file writes, commands, network requests) require explicit human approval.
+- **Two-factor pairing**: optional authenticator code before the master token can pair a new device; paired devices keep their own tokens.
+- **At the PC**: a red frame and a viewer bar show when someone is connected; with *Ask before someone views this PC* on, the Allow button ignores keys for the first 1.5 s so typing cannot approve by accident.
 - **No open ports**: Reach the PC over LAN or iroh. **Do not** port-forward to the internet — the protocol has full shell control of your PC.
 
 ---
@@ -512,8 +537,6 @@ PocketDesk/
 - [ ] Screen bridge (WebRTC) for GUI-only apps
 - [ ] Provider presets (DeepSeek, Kimi, GLM, OpenRouter)
 - [ ] Cross-platform app (iOS / Desktop)
-- [ ] Foreground service holding sessions through screen-off
-- [ ] Diff viewer / approval cards in the app chat
 
 One-by-one status of **every feature from the inspiration corpus** (241 reference repos):
 see [docs/FEATURE-MATRIX.md](docs/FEATURE-MATRIX.md); the **per-repo ledger** is

@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace PocketDeskTray
@@ -11,9 +12,17 @@ namespace PocketDeskTray
         [STAThread]
         static void Main()
         {
-            Application.EnableVisualStyles();
-            Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new TrayContext());
+            // A second launch (Start Menu, desktop shortcut) asks the running tray to show the pairing page.
+            bool first;
+            using (var show = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\PocketDeskTrayShow", out first))
+            {
+                if (!first) { show.Set(); return; }
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                var tray = new TrayContext();
+                new Thread(() => { while (show.WaitOne()) tray.ShowPairing(); }) { IsBackground = true }.Start();
+                Application.Run(tray);
+            }
         }
     }
 
@@ -207,6 +216,12 @@ namespace PocketDeskTray
                 }
                 return Icon.FromHandle(bmp.GetHicon());
             }
+        }
+
+        public void ShowPairing()
+        {
+            LoadConfig();
+            OpenUrl(BaseUrl() + "/pair?k=" + Uri.EscapeDataString(token));
         }
 
         string BaseUrl()

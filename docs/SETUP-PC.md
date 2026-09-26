@@ -1,11 +1,16 @@
 # Setting up the PC
 
 PocketDesk has two parts: the **daemon** on your PC and the **app** on your Android phone.
-This page covers the PC. It takes one command and one QR scan.
+This page covers the PC. It takes one download (or one command) and one QR scan.
 
 ## Install (Windows 10/11)
 
-Open PowerShell (no admin needed) and run:
+Download **PocketDesk-Setup.exe** from the
+[latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest) and double-click it.
+No admin rights are needed. The file is not code-signed, so Windows SmartScreen may say it protected
+your PC: choose **More info**, then **Run anyway**. A console window shows the progress.
+
+The setup file only wraps `install.ps1`; you can run that directly from PowerShell instead:
 
 ```powershell
 irm https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.ps1 | iex
@@ -20,7 +25,8 @@ What the installer does, with nothing installed beforehand:
 2. Downloads a private copy of Node.js and of ffmpeg (for the fast H.264 desktop stream).
    Nothing is added to your PATH and no other program is affected.
 3. Installs the daemon's dependencies.
-4. Installs the tray icon and registers it to start at logon.
+4. Installs the tray icon, registers it to start at logon, and adds a **PocketDesk** shortcut to
+   the Start Menu and the desktop.
 5. Starts everything and opens the pairing page.
 
 The first install downloads about 150 MB and takes a few minutes. Your browser may warn that the
@@ -76,6 +82,9 @@ silently approve UAC on your behalf. Remove it any time (see Uninstall).
 
 ## Daily use: the tray icon
 
+The **PocketDesk** shortcut in the Start Menu or on the desktop starts the tray if it is not
+running. If it already runs, the shortcut opens the pairing page instead.
+
 A dot in the notification area shows the daemon's state: **green** running, **grey** stopped.
 Right-click it for:
 
@@ -93,7 +102,8 @@ Right-click it for:
 
 ## Update
 
-Run the install command again. It replaces the program and keeps your settings, keys and paired phones.
+Run the setup file or the install command again. It replaces the program and keeps your settings, keys
+and paired phones.
 
 ## Uninstall
 
@@ -101,7 +111,7 @@ Run the install command again. It replaces the program and keeps your settings, 
 powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PocketDesk\uninstall.ps1"
 ```
 
-Or run `uninstall.ps1` from a checkout. It removes the tray, the autostart and the program files.
+Or run `uninstall.ps1` from a checkout. It removes the tray, the autostart, the shortcuts and the program files.
 Your settings and paired phones stay in `%USERPROFILE%\.pocketdesk`; add `-RemoveData` to delete them too.
 
 If you installed console access, run the uninstall **as administrator** so it can also remove the
@@ -123,7 +133,31 @@ system task. The console pairing token in `%ProgramData%\PocketDesk` is kept unl
 | `%ProgramData%\PocketDesk\console\` | Console endpoint's own config, token and iroh key (system-only; port 8766). Present only with console access. |
 
 While anyone views the desktop, a bar at the top of the PC screen names them and has a
-**Disconnect** button. The bar is kept out of the stream, so it never covers what they see.
+**Disconnect** button, and a red frame runs around every monitor. Both are kept out of the stream,
+so they never cover what the phone sees.
+
+With **Ask before someone views this PC** on, the Allow / View only / Deny buttons stay disabled for
+the first 1.5 seconds, so a key you were already typing cannot answer the prompt.
+
+## Privacy mode
+
+From the phone's Desktop screen (⋮ menu), **Privacy mode** blanks the PC's monitors and ignores the
+PC's own keyboard and mouse while you work remotely. The phone keeps seeing and controlling the real
+desktop. It ends when you turn it off, when the last viewer disconnects, or when someone at the PC
+presses **Esc** three times within two seconds. Ctrl+Alt+Del always works.
+
+## Two-factor pairing
+
+On the phone: **Tools > Two-factor pairing > Set up**. Add the key to an authenticator app
+(Google Authenticator, Aegis, 1Password and so on), enter the 6-digit code, and tap **Turn on**.
+From then on, pairing a new device with the QR also asks for a current code. Phones that are already
+paired keep working without one. Turning it off needs a code as well.
+
+## Power
+
+**Tools > PC power** on the phone, or the Desktop screen's ⋮ menu: lock, sign out, sleep, restart or
+shut down. Restart and shut down wait 5 seconds. After a restart the phone reconnects once
+PocketDesk runs again, which is after you sign in (or at boot with console access).
 
 ## Waking the PC
 

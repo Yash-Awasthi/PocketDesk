@@ -105,7 +105,7 @@ data class PcClip(val kind: String, val text: String?, val png: String?, val fil
 /** The PC pointer in picture pixels; [shape] is a CSS cursor name such as "arrow" or "text". */
 data class DesktopCursor(val x: Int, val y: Int, val shape: String)
 
-data class FsListing(val path: String, val parent: String?, val items: List<FsEntry>)
+data class FsListing(val path: String, val parent: String?, val items: List<FsEntry>, val home: String? = null)
 
 
 /** The daemon's own SSH listeners, addressed by protocol prefix. */
@@ -434,7 +434,7 @@ object Proto {
                 )
             }
             ?: return null
-        return FsListing(path = str(o, "path") ?: "", parent = str(o, "parent"), items = items)
+        return FsListing(path = str(o, "path") ?: "", parent = str(o, "parent"), items = items, home = str(o, "home"))
     }
 
     fun parseProposal(el: JsonElement?): Proposal? {

@@ -103,6 +103,13 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
         }
         item { PowerRow(ws) }
         item { TwoFactorSection(ws) }
+        if (lock.available) item {
+            var on by remember { mutableStateOf(lock.enabled) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Lock app with fingerprint or PIN", modifier = Modifier.weight(1f))
+                Switch(checked = on, onCheckedChange = { on = it; lock.enabled = it })
+            }
+        }
         item {
             Text("Everything installed", style = MaterialTheme.typography.titleLarge)
         }
@@ -120,13 +127,6 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
         }
         item { GitSection(ws, cwd) }
         item { DoctorSection(ws) }
-        if (lock.available) item {
-            var on by remember { mutableStateOf(lock.enabled) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Lock app with fingerprint or PIN", modifier = Modifier.weight(1f))
-                Switch(checked = on, onCheckedChange = { on = it; lock.enabled = it })
-            }
-        }
     }
 
     if (browsing) {

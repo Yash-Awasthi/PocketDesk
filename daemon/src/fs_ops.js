@@ -65,7 +65,7 @@ export function listDir(p, hidden = false) {
       return { name: e.name, dir: e.isDirectory(), size, mtime };
     })
     .sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name));
-  return { type: "fs", path: dir, parent: path.dirname(dir), items, truncated: shown.length > items.length };
+  return { type: "fs", path: dir, parent: path.dirname(dir), home: realResolve(os.homedir()), items, truncated: shown.length > items.length };
 }
 
 /** mkdir, rename and delete for the phone's file manager. Never overwrites an existing target. */
