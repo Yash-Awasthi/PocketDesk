@@ -44,6 +44,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -183,10 +184,12 @@ fun DesktopScreen(
         true
     }) {
         if (!fullscreen) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                // Only the title and two controls share the row; everything else lives in the menu,
+                // so the title never gets squeezed on a narrow phone.
                 Column(Modifier.weight(1f)) {
-                    Text("Desktop", style = MaterialTheme.typography.titleMedium)
+                    Text("Desktop", style = MaterialTheme.typography.titleMedium, maxLines = 1, softWrap = false)
                     Text(
                         listOfNotNull(
                             "● REC".takeIf { ws.desktopRecording && ws.desktopStreaming },
@@ -200,31 +203,34 @@ fun DesktopScreen(
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                 }
-                if (video && ws.desktopMonitors.size > 1) TextButton(onClick = {
-                    ws.desktopMonitor = (ws.desktopMonitor + 1) % ws.desktopMonitors.size
-                    ws.desktopStartVideo()
-                }) { Text("🖥 " + ws.desktopMonitors.getOrElse(ws.desktopMonitor) { "1" }.substringBefore(" ")) }
-                if (video) TextButton(onClick = {
-                    ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
-                    ws.desktopStartVideo()
-                }) { Text(ws.desktopPreset.replaceFirstChar { it.uppercase() }) }
                 TextButton(onClick = { ws.desktopViewOnly = !ws.desktopViewOnly; ws.desktopStartVideo() }) {
-                    Text(if (ws.desktopViewOnly) "👁 View" else "🖱 Control")
+                    Text(if (ws.desktopViewOnly) "View only" else "Control", maxLines = 1, softWrap = false)
                 }
-                if (!ws.desktopViewOnly) TextButton(onClick = sendFiles) { Text("📎") }
-                TextButton(onClick = { touchpad = !touchpad }) { Text(if (touchpad) "Touchpad" else "Direct tap") }
                 var more by remember { mutableStateOf(false) }
                 var power by remember { mutableStateOf<String?>(null) }
                 Box {
-                    TextButton(onClick = { more = true }) { Text("⋮") }
+                    IconButton(onClick = { more = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
                     androidx.compose.material3.DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
-                        if (!ws.desktopViewOnly) androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(if (ws.desktopPrivacy) "Turn privacy mode off" else "Privacy mode (blank the PC screen)") },
-                            onClick = { more = false; ws.setDesktopPrivacy(!ws.desktopPrivacy) },
-                        )
-                        POWER_ACTIONS.forEach { (a, l) ->
-                            androidx.compose.material3.DropdownMenuItem(text = { Text(l) }, onClick = { more = false; power = a })
+                        @Composable
+                        fun Item(label: String, onClick: () -> Unit) =
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { more = false; onClick() })
+                        if (video && ws.desktopMonitors.size > 1) Item("Screen: " + ws.desktopMonitors.getOrElse(ws.desktopMonitor) { "1" } + " (switch)") {
+                            ws.desktopMonitor = (ws.desktopMonitor + 1) % ws.desktopMonitors.size
+                            ws.desktopStartVideo()
                         }
+                        if (video) Item("Quality: " + ws.desktopPreset.replaceFirstChar { it.uppercase() } + " (switch)") {
+                            ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
+                            ws.desktopStartVideo()
+                        }
+                        Item(if (touchpad) "Input: Touchpad (switch to direct tap)" else "Input: Direct tap (switch to touchpad)") { touchpad = !touchpad }
+                        if (!ws.desktopViewOnly) {
+                            Item("Send files to the PC", sendFiles)
+                            Item(if (ws.desktopPrivacy) "Turn privacy mode off" else "Privacy mode (blank the PC screen)") {
+                                ws.setDesktopPrivacy(!ws.desktopPrivacy)
+                            }
+                        }
+                        androidx.compose.material3.HorizontalDivider()
+                        POWER_ACTIONS.forEach { (a, l) -> Item(l) { power = a } }
                     }
                 }
                 power?.let { PowerConfirmDialog(ws, it) { power = null } }
