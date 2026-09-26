@@ -4,6 +4,7 @@ import { execFile } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { EventEmitter } from "node:events";
 import pty from "node-pty";
+import * as toolApproval from "./tool_approval.js";
 
 const IS_WIN = process.platform === "win32";
 
@@ -92,9 +93,11 @@ export function create({ harnessId, bin, cwd, args = [] }, broadcast) {
   const dir = cwd && cwd.trim() ? path.resolve(cwd.replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir();
   // cmd.exe /c on Windows wraps the real bin in a PTY; on POSIX spawn the bin
   // directly (node-pty cannot run cmd.exe there).
+  if (harnessId === "claude") args = [...args, ...toolApproval.claudeArgs()];
+  const env = harnessId === "claude" ? { ...process.env, ...toolApproval.env(id) } : process.env;
   const proc = IS_WIN
-    ? pty.spawn("cmd.exe", ["/c", bin, ...args], { name: "xterm-256color", cols: 100, rows: 30, cwd: dir, env: process.env })
-    : pty.spawn(bin, args, { name: "xterm-256color", cols: 100, rows: 30, cwd: dir, env: process.env });
+    ? pty.spawn("cmd.exe", ["/c", bin, ...args], { name: "xterm-256color", cols: 100, rows: 30, cwd: dir, env })
+    : pty.spawn(bin, args, { name: "xterm-256color", cols: 100, rows: 30, cwd: dir, env });
   const s = { id, harnessId, cwd: dir, pty: proc, decoder: new StringDecoder("utf8"), scrollback: "", chunks: [], seq: 0, subs: new Set(), exitCode: null, lastActivity: Date.now() };
   sessions.set(id, s);
   sessionEvents.emit("create", { id, harnessId: s.harnessId, cwd: dir });

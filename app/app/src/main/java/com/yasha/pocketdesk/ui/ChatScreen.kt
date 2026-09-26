@@ -253,6 +253,19 @@ private fun ChatConversation(ws: WsClient, chatId: String, onClose: () -> Unit) 
                         Icon(Icons.Filled.Close, contentDescription = "Stop", tint = MaterialTheme.colorScheme.error)
                     }
                 }
+                if (chat?.harnessId == "claude") {
+                    var permOpen by remember { mutableStateOf(false) }
+                    Box {
+                        TextButton(onClick = { permOpen = true }) {
+                            Text(PERMISSION_MODES.firstOrNull { it.first == ws.chatPermission[chatId] }?.second ?: "Permissions")
+                        }
+                        DropdownMenu(expanded = permOpen, onDismissRequest = { permOpen = false }) {
+                            PERMISSION_MODES.forEach { (mode, label) ->
+                                DropdownMenuItem(text = { Text(label) }, onClick = { ws.setChatPermission(chatId, mode); permOpen = false })
+                            }
+                        }
+                    }
+                }
                 // Model picker — per-chat model selection (where the CLI offers it).
                 val models = ws.chatModels[chatId] ?: emptyList()
                 val custom = chatId in ws.chatModelCustom
@@ -430,3 +443,11 @@ private fun SystemBubble(text: String) {
         )
     }
 }
+
+/** Claude Code permission modes as the daemon names them; "ask" sends each prompt to this phone. */
+private val PERMISSION_MODES = listOf(
+    "ask" to "Ask on phone",
+    "autopilot" to "Auto-accept edits",
+    "readonly" to "Plan only",
+    "yolo" to "Full access",
+)

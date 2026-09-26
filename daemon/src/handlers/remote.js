@@ -18,6 +18,8 @@ export default function remoteHandlers(ctx) {
     logged = viewers;
     recorder.screenWatched(on, { label: viewers.size ? deviceName([...viewers][0]) : "", monitor: video.monitor });
     presence.update([...viewers].map((w) => ({ name: deviceName(w), viewOnly: !!w._viewOnly })), recorder.recordingScreen);
+    // Nobody left to drive the PC: hand the screen and input back to whoever sits at it.
+    if (!on && presence.privacyOn) presence.setPrivacy(false);
   }
   let logged = new Set();
   /** With approval on, the person at the PC answers before a socket sees or touches anything. */
@@ -39,6 +41,9 @@ export default function remoteHandlers(ctx) {
   function mayControl(ws) {
     return !ws._viewOnly && (ws._desktopApproved || !presence.approvalRequired);
   }
+  if (presence) presence.onPrivacyChange = (on) => {
+    for (const w of new Set([...videoWatchers, ...desktopWatchers])) send(w, { type: "desktop_privacy", ok: true, on });
+  };
   if (presence) presence.onDisconnect = () => {
     for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
       videoWatchers.delete(w);
@@ -73,6 +78,14 @@ export default function remoteHandlers(ctx) {
   }
   return {
     // ── Real desktop control (AnyDesk-style: watch + full input) ─────────
+    async desktop_privacy(ws, msg) {
+      if (!mayControl(ws) || !(videoWatchers.has(ws) || desktopWatchers.has(ws))) {
+        return send(ws, { type: "desktop_privacy", ok: false, on: presence.privacyOn, error: "open the desktop with control first" });
+      }
+      const r = await presence.setPrivacy(msg.on === true);
+      recorder.log(r.on ? "privacy_on" : "privacy_off", { device: deviceName(ws) });
+      send(ws, { type: "desktop_privacy", ...r });
+    },
     async desktop_start(ws, msg) {
       ws._viewOnly = !!msg.viewOnly || !!ws._viewOnlyForced;
       if (!(await approved(ws, !ws._viewOnly))) return send(ws, { type: "desktop_started", ok: false, reason: "denied on the PC" });

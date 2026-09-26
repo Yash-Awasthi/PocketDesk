@@ -1,19 +1,25 @@
 import * as sessions from "../sessions.js";
 import { gitStatus, gitDiff, gitLog, gitBranches } from "../gitpanel.js";
 import * as mentions from "../mentions.js";
-import { listDir, readFileChunk, writeFileChunk, resolvePath } from "../fs_ops.js";
+import { listDir, readFileChunk, writeFileChunk, resolvePath, fileOp, searchFiles } from "../fs_ops.js";
 
 export default function filesHandlers(ctx) {
   const { send } = ctx;
   return {
     async fs(ws, msg) {
-      send(ws, listDir(msg.path));
+      send(ws, listDir(msg.path, msg.hidden === true));
     },
     async fread(ws, msg) {
       send(ws, readFileChunk(msg.path, msg.offset));
     },
     async fwrite(ws, msg) {
       send(ws, writeFileChunk(msg));
+    },
+    async fs_op(ws, msg) {
+      send(ws, await fileOp(msg));
+    },
+    async fs_search(ws, msg) {
+      send(ws, await searchFiles(msg.path, msg.q));
     },
     // ── Git panel (ccpocket/vibego: read-only repo inspection) ──
     async git_status(ws, msg) {

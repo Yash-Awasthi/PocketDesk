@@ -190,6 +190,7 @@ fun DesktopScreen(
                     Text(
                         listOfNotNull(
                             "● REC".takeIf { ws.desktopRecording && ws.desktopStreaming },
+                            "privacy on".takeIf { ws.desktopPrivacy },
                             if (!ws.desktopStreaming) "paused" else rate.takeIf { video && it.isNotEmpty() } ?: "live",
                             ws.route.takeIf { it.isNotEmpty() },
                         ).joinToString(" · "),
@@ -212,6 +213,21 @@ fun DesktopScreen(
                 }
                 if (!ws.desktopViewOnly) TextButton(onClick = sendFiles) { Text("📎") }
                 TextButton(onClick = { touchpad = !touchpad }) { Text(if (touchpad) "Touchpad" else "Direct tap") }
+                var more by remember { mutableStateOf(false) }
+                var power by remember { mutableStateOf<String?>(null) }
+                Box {
+                    TextButton(onClick = { more = true }) { Text("⋮") }
+                    androidx.compose.material3.DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                        if (!ws.desktopViewOnly) androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(if (ws.desktopPrivacy) "Turn privacy mode off" else "Privacy mode (blank the PC screen)") },
+                            onClick = { more = false; ws.setDesktopPrivacy(!ws.desktopPrivacy) },
+                        )
+                        POWER_ACTIONS.forEach { (a, l) ->
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(l) }, onClick = { more = false; power = a })
+                        }
+                    }
+                }
+                power?.let { PowerConfirmDialog(ws, it) { power = null } }
             }
         }
         DesktopTransferBar(ws, transfer)

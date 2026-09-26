@@ -38,7 +38,7 @@ export function resolvePath(p) {
   return resolved;
 }
 
-export function listDir(p) {
+export function listDir(p, hidden = false) {
   let dir;
   try {
     dir = resolvePath(p);
@@ -51,20 +51,107 @@ export function listDir(p) {
   } catch (e) {
     return { type: "fs", error: e.message };
   }
-  const items = entries
-    .filter((e) => !e.name.startsWith("."))
-    .slice(0, 500)
+  const shown = entries.filter((e) => hidden || !e.name.startsWith("."));
+  const items = shown
+    .slice(0, 2000)
     .map((e) => {
       let size = null;
-      if (!e.isDirectory()) {
-        try {
-          size = fs.statSync(path.join(dir, e.name)).size;
-        } catch {}
-      }
-      return { name: e.name, dir: e.isDirectory(), size };
+      let mtime = null;
+      try {
+        const st = fs.statSync(path.join(dir, e.name));
+        if (!e.isDirectory()) size = st.size;
+        mtime = Math.round(st.mtimeMs);
+      } catch {}
+      return { name: e.name, dir: e.isDirectory(), size, mtime };
     })
     .sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name));
-  return { type: "fs", path: dir, parent: path.dirname(dir), items };
+  return { type: "fs", path: dir, parent: path.dirname(dir), items, truncated: shown.length > items.length };
+}
+
+/** mkdir, rename and delete for the phone's file manager. Never overwrites an existing target. */
+export async function fileOp(msg) {
+  const op = String(msg.op || "");
+  const reply = { type: "fs_result", op, path: msg.path };
+  try {
+    // Resolve only the parent: a rename or delete must act on a link itself, never on what it points to.
+    const raw = String(msg.path || "").replace(/[\\/]+$/, "");
+    const target = path.join(resolvePath(path.dirname(raw)), path.basename(raw));
+    if (target === realResolve(os.homedir())) throw new Error("refusing to change the home folder itself");
+    if (op === "mkdir") {
+      if (fs.existsSync(target)) throw new Error("already exists");
+      fs.mkdirSync(target, { recursive: true });
+    } else if (op === "rename") {
+      const to = resolvePath(msg.to);
+      if (fs.existsSync(to)) throw new Error("a file with that name already exists");
+      fs.renameSync(target, to);
+      reply.to = msg.to;
+    } else if (op === "delete") {
+      const st = fs.lstatSync(target, { throwIfNoEntry: false });
+      if (!st) throw new Error("not found");
+      if (st.isSymbolicLink()) fs.rmSync(target);
+      else await removeToTrash(target);
+    } else {
+      throw new Error("unknown op " + op);
+    }
+    return { ...reply, ok: true };
+  } catch (e) {
+    return { ...reply, ok: false, error: e.message };
+  }
+}
+
+/** Windows deletes go to the Recycle Bin so a mis-tap on the phone is recoverable. */
+async function removeToTrash(target) {
+  if (process.platform !== "win32" || process.env.RH_FS_NO_TRASH) {
+    fs.rmSync(target, { recursive: true, force: true });
+    return;
+  }
+  const { execFile } = await import("node:child_process");
+  const kind = fs.statSync(target).isDirectory() ? "DeleteDirectory" : "DeleteFile";
+  const script = `Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::${kind}($env:RH_TRASH, 'OnlyErrorDialogs', 'SendToRecycleBin')`;
+  await new Promise((resolve, reject) => {
+    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, RH_TRASH: target }, windowsHide: true, timeout: 60000 },
+      (err, _out, stderr) => (err ? reject(new Error(String(stderr).trim().split("\n")[0] || err.message)) : resolve()));
+  });
+  if (fs.existsSync(target)) throw new Error("could not move to the Recycle Bin");
+}
+
+const SKIP_DIRS = new Set(["node_modules", ".git", "AppData", "$Recycle.Bin", "__pycache__", ".venv", "build", "dist"]);
+
+/** Case-insensitive name search below a folder, breadth first, so near matches come first. */
+export async function searchFiles(p, q, limit = 200) {
+  const needle = String(q || "").trim().toLowerCase();
+  let root;
+  try {
+    root = resolvePath(p);
+  } catch (e) {
+    return { type: "fs_found", path: p, q, error: e.message, items: [] };
+  }
+  if (!needle) return { type: "fs_found", path: root, q, items: [] };
+  const items = [];
+  const queue = [root];
+  let scanned = 0;
+  while (queue.length && items.length < limit && scanned < 20000) {
+    const dir = queue.shift();
+    scanned++;
+    let entries;
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (e.name.startsWith(".")) continue;
+      const full = path.join(dir, e.name);
+      if (e.name.toLowerCase().includes(needle)) {
+        let size = null;
+        if (!e.isDirectory()) try { size = (await fs.promises.stat(full)).size; } catch {}
+        items.push({ path: full, name: e.name, dir: e.isDirectory(), size });
+        if (items.length >= limit) break;
+      }
+      if (e.isDirectory() && !SKIP_DIRS.has(e.name)) queue.push(full);
+    }
+  }
+  return { type: "fs_found", path: root, q, items, truncated: queue.length > 0 };
 }
 
 // Replies echo the requested path: the phone keys transfers by it, and the

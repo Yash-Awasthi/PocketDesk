@@ -67,7 +67,25 @@ data class ChatSummary(
     val preview: String,
 )
 
-data class FsEntry(val name: String, val isDir: Boolean, val size: Long?)
+data class FsEntry(val name: String, val isDir: Boolean, val size: Long?, val mtime: Long? = null)
+
+/** Outcome of a mkdir, rename or delete on the PC. */
+data class FsResult(val op: String, val path: String, val ok: Boolean, val error: String?)
+
+/** An agent's tool call waiting for a decision from the phone. [input] is the tool's raw arguments. */
+data class Proposal(
+    val id: String,
+    val kind: String,
+    val summary: String,
+    val tool: String,
+    val input: JsonObject,
+    val cwd: String,
+    val agentSession: String,
+    val owner: String,
+)
+
+/** Name matches below a folder on the PC. */
+data class FsFound(val root: String, val query: String, val items: List<PcFile>, val truncated: Boolean)
 
 data class FbSkill(val name: String, val description: String, val dir: String)
 
@@ -132,6 +150,11 @@ sealed interface RhEvent {
 
     /** Result of a profile_connect attempt — the SSH screen reports both ways. */
     data class SshConnect(val ok: Boolean, val detail: String) : RhEvent
+
+    data class ApprovalNeeded(val proposal: Proposal) : RhEvent
+    data class ApprovalGone(val id: String) : RhEvent
+
+    data class PowerDone(val action: String, val ok: Boolean, val error: String?) : RhEvent
 }
 
 object Proto {
@@ -141,8 +164,8 @@ object Proto {
     private fun obj(build: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit) =
         buildJsonObject(build).toString()
 
-    fun hello(token: String) = obj {
-        put("type", "hello"); put("token", token)
+    fun hello(token: String, totp: String? = null) = obj {
+        put("type", "hello"); put("token", token); totp?.let { put("totp", it) }
         put("name", android.os.Build.MODEL); put("platform", "android")
     }
     fun detect() = obj { put("type", "detect") }
@@ -258,7 +281,18 @@ object Proto {
     }
 
     fun chatCancel(id: String) = obj { put("type", "chatcancel"); put("id", id) }
-    fun fs(path: String?) = obj { put("type", "fs"); put("path", path ?: "") }
+    fun fs(path: String?, hidden: Boolean = false) = obj { put("type", "fs"); put("path", path ?: ""); if (hidden) put("hidden", true) }
+    fun fsOp(op: String, path: String, to: String? = null) = obj {
+        put("type", "fs_op"); put("op", op); put("path", path); to?.let { put("to", it) }
+    }
+    fun approve(id: String, all: Boolean) = obj { put("type", "approve"); put("id", id); if (all) put("all", true) }
+    fun reject(id: String) = obj { put("type", "reject"); put("id", id) }
+    fun proposalList() = obj { put("type", "proposal_list") }
+    fun desktopPrivacy(on: Boolean) = obj { put("type", "desktop_privacy"); put("on", on) }
+    fun pcPower(action: String) = obj { put("type", "pc_power"); put("action", action) }
+    fun totp(op: String, code: String? = null) = obj { put("type", "totp_$op"); code?.let { put("code", it) } }
+    fun chatPermission(id: String, mode: String) = obj { put("type", "chat_permission"); put("id", id); put("mode", mode) }
+    fun fsSearch(path: String, query: String) = obj { put("type", "fs_search"); put("path", path); put("q", query) }
     fun fread(path: String, offset: Long) = obj {
         put("type", "fread"); put("path", path); put("offset", offset)
     }
@@ -396,11 +430,37 @@ object Proto {
                     name = str(it, "name") ?: return@mapNotNull null,
                     isDir = bool(it, "dir") ?: false,
                     size = (it["size"] as? JsonPrimitive)?.longOrNull,
+                    mtime = (it["mtime"] as? JsonPrimitive)?.longOrNull,
                 )
             }
             ?: return null
         return FsListing(path = str(o, "path") ?: "", parent = str(o, "parent"), items = items)
     }
+
+    fun parseProposal(el: JsonElement?): Proposal? {
+        val o = el as? JsonObject ?: return null
+        val detail = o["detail"] as? JsonObject ?: return null
+        return Proposal(
+            id = str(o, "id") ?: return null,
+            kind = str(o, "type") ?: "",
+            summary = str(o, "summary") ?: "",
+            tool = str(detail, "tool") ?: "",
+            input = detail["input"] as? JsonObject ?: JsonObject(emptyMap()),
+            cwd = str(detail, "cwd") ?: "",
+            agentSession = str(detail, "agentSession") ?: "",
+            owner = str(o, "sessionId") ?: "",
+        )
+    }
+
+    fun parseFsFound(o: JsonObject): FsFound = FsFound(
+        root = str(o, "path") ?: "",
+        query = str(o, "q") ?: "",
+        items = (o["items"] as? JsonArray)?.mapNotNull { e ->
+            val it = e as? JsonObject ?: return@mapNotNull null
+            PcFile(str(it, "path") ?: return@mapNotNull null, str(it, "name") ?: "", (it["size"] as? JsonPrimitive)?.longOrNull, bool(it, "dir") ?: false)
+        } ?: emptyList(),
+        truncated = bool(o, "truncated") ?: false,
+    )
 
 
     private fun items(el: JsonElement?): List<JsonObject> =

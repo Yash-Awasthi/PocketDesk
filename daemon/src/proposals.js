@@ -11,6 +11,8 @@ import crypto from "node:crypto";
 
 /** @type {Map<string, Proposal>} */
 const pending = new Map();
+/** Final status of proposals already removed from `pending`, for anyone still waiting on them. */
+const decided = new Map();
 
 const TTL_MS = 5 * 60 * 1000; // 5 minutes
 const CLEANUP_INTERVAL = 30_000; // check every 30s
@@ -107,6 +109,7 @@ export function reject(id) {
     });
   }
   pending.delete(id);
+  decided.set(id, "rejected");
   return p;
 }
 
@@ -138,12 +141,16 @@ export function waitForDecision(id, timeoutMs = TTL_MS) {
     const check = () => {
       const p = pending.get(id);
       if (!p || p.status !== "pending") {
-        resolve({ status: p ? p.status : "expired", proposal: p ? serialize(p) : null });
+        pending.delete(id);
+        const status = p ? p.status : decided.get(id) || "expired";
+        decided.delete(id);
+        resolve({ status, proposal: p ? serialize(p) : null });
         return;
       }
       if (Date.now() - start > timeoutMs) {
         p.status = "expired";
         pending.delete(id);
+        broadcastFn?.({ type: "proposal_expired", proposal: serialize(p) });
         resolve({ status: "expired", proposal: serialize(p) });
         return;
       }

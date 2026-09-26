@@ -2,6 +2,7 @@ import http from "node:http";
 import crypto from "node:crypto";
 import * as sessions from "./sessions.js";
 import * as chat from "./chat.js";
+import * as toolApproval from "./tool_approval.js";
 
 function allSessions() {
   return [...sessions.summary(), ...chat.summary()];
@@ -16,8 +17,25 @@ export function start(getToken, port = Number(process.env.RH_CLI_PORT) || 4679) 
       res.writeHead(403).end(JSON.stringify({ error: "forbidden" }));
       return;
     }
+    const bearer = String(req.headers.authorization || "").replace(/^Bearer /i, "");
+    if (req.url === "/approval" && req.method === "POST" && toolApproval.keyMatches(bearer)) {
+      let body = "";
+      req.on("data", (d) => {
+        body += d;
+        if (body.length > 64 << 10) req.destroy();
+      });
+      req.on("end", async () => {
+        try {
+          const result = await toolApproval.request(JSON.parse(body));
+          res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(result));
+        } catch (e) {
+          res.writeHead(400).end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
     // Loopback admits every local account, so the master token is required too.
-    const given = Buffer.from(String(req.headers.authorization || "").replace(/^Bearer /i, ""));
+    const given = Buffer.from(bearer);
     const want = Buffer.from(getToken());
     if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) {
       res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
@@ -81,6 +99,7 @@ export function start(getToken, port = Number(process.env.RH_CLI_PORT) || 4679) 
   });
 
   cliServer.listen(port, "127.0.0.1", () => {
+    toolApproval.init(port);
     console.log(`  cli       http://127.0.0.1:${port}`);
   });
 }

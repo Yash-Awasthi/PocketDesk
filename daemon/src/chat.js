@@ -7,6 +7,7 @@ const IS_WIN = process.platform === "win32";
 import { StringDecoder } from "node:string_decoder";
 import { EventEmitter } from "node:events";
 import { expand as expandMentions } from "./mentions.js";
+import * as toolApproval from "./tool_approval.js";
 
 // Chat lifecycle events (state transitions) — consumed by the activity monitor.
 export const chatEvents = new EventEmitter();
@@ -177,6 +178,9 @@ export function sendUserMessage(c, rawText) {
   return true;
 }
 
+// Phone and browser names for Claude Code permission modes; unset keeps the user's own setting.
+const CLAUDE_MODES = { default: "default", ask: "default", autopilot: "acceptEdits", acceptEdits: "acceptEdits", readonly: "plan", plan: "plan", yolo: "bypassPermissions", bypassPermissions: "bypassPermissions" };
+
 function runTurn(c, prompt) {
   if (c.proc && c.state === "running") return false;
   const continuing = c.turn > 0 && c.resumeArgs && c.resumeArgs.length > 0;
@@ -184,7 +188,10 @@ function runTurn(c, prompt) {
   const byId = c.turn > 0 && c.cliSession && c.resumeIdArgs;
   const base = byId ? c.resumeIdArgs.map((a) => a.replaceAll("{id}", c.cliSession)) : continuing ? c.resumeArgs : c.args;
   if (c.inlineHistory && c.turn > 0) prompt = withHistory(c, prompt);
-  const argv = [...base, ...(modelCfg?.args || []), ...(c.promptArg ? [prompt] : [])];
+  const claude = c.format === "claude-stream-json";
+  const mode = claude && Object.hasOwn(CLAUDE_MODES, c.permissionMode) && CLAUDE_MODES[c.permissionMode];
+  const approvals = claude ? [...toolApproval.claudeArgs(), ...(mode ? ["--permission-mode", mode] : [])] : [];
+  const argv = [...base, ...approvals, ...(modelCfg?.args || []), ...(c.promptArg ? [prompt] : [])];
   c.turn++;
   c.state = "running";
   pushState(c);
@@ -193,7 +200,7 @@ function runTurn(c, prompt) {
   const decoder = new StringDecoder("utf8");
   // Env profiles (1code BYOK / Vibe Companion envs): per-chat overrides
   // layered over the daemon's environment; a selected model's env wins.
-  const env = { ...process.env, ...(c.env || {}), ...(modelCfg?.env || {}) };
+  const env = { ...process.env, ...(c.env || {}), ...(modelCfg?.env || {}), ...(approvals.length ? toolApproval.env(c.id) : {}) };
 
   const opts = { windowsHide: true, cwd: c.cwd, env, stdio: ["pipe", "pipe", "pipe"] };
   // cmd.exe re-parses its command line, so a prompt passed as an argument must bypass it.
