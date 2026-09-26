@@ -30,6 +30,7 @@ import * as scheduler from "./scheduler.js";
 import * as approvalGuard from "./approval_guard.js";
 import * as statsUsage from "./stats_usage.js";
 import * as devices from "./devices.js";
+import * as totp from "./totp.js";
 import agentsHandlers from "./handlers/agents.js";
 import filesHandlers from "./handlers/files.js";
 import remoteHandlers from "./handlers/remote.js";
@@ -220,6 +221,10 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
           authAttempts.set(clientIp, { n: attempts + 1, at: Date.now() });
 
           const auth = authenticate(msg);
+          if (auth?.totpRequired) {
+            ws.close(4011, "two-factor code required");
+            return;
+          }
           if (auth) {
             // Checked before welcome(), which would re-issue a pairing device's token.
             if (ws._irohId && !devices.claimEndpoint(auth.id, ws._irohId)) {
@@ -284,6 +289,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
       if (devices.isRevoked(id)) return null;
       // Claiming a paired device's id would replace its token and take over its identity.
       if (devices.hasToken(id)) id = crypto.randomUUID();
+      if (!totp.allowsPairing(msg.totp)) return { totpRequired: true };
       return { id, pairing: true };
     }
     const d = devices.byToken(t);

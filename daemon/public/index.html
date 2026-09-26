@@ -479,14 +479,19 @@ function debounce(fn, ms) { let t; return function() { clearTimeout(t); t = setT
 // ── WebSocket with auto-reconnect ──
 function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
 
+let pairCode;
 function connect() {
   if (ws) { ws.onclose = null; ws.close(); }
   clearTimeout(reconnectTimer);
   reconnectDelay = 1000;
   const url = document.getElementById("host").value || "ws://localhost:8765/ws";
   ws = new WebSocket(url);
-  ws.onopen = () => { reconnectDelay = 1000; send({ type: "hello", token: document.getElementById("token").value }); };
-  ws.onclose = () => { setStatus(false); scheduleReconnect(); };
+  ws.onopen = () => { reconnectDelay = 1000; send({ type: "hello", token: document.getElementById("token").value, totp: pairCode }); pairCode = undefined; };
+  ws.onclose = (ev) => {
+    setStatus(false);
+    if (ev.code === 4011) { pairCode = prompt("Two-factor code from your authenticator app") || undefined; if (pairCode) connect(); return; }
+    scheduleReconnect();
+  };
   ws.onerror = () => { setStatus(false); };
   ws.binaryType = "arraybuffer";
   ws.onmessage = (ev) => typeof ev.data === "string" ? handle(JSON.parse(ev.data)) : desktopPacket(new Uint8Array(ev.data));

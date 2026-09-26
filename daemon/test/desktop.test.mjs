@@ -78,6 +78,14 @@ async function main() {
     check("watchers get the pointer position", Number.isFinite(cur.x) && typeof cur.shape === "string");
     const pushed = await c.next((m) => m.type === "desktop_frame", 20000);
     check("desktop_frame pushed while streaming", Buffer.from(pushed.base64, "base64")[0] === 0xff);
+    c.send({ type: "desktop_privacy", on: true });
+    const pv = await c.next((m) => m.type === "desktop_privacy", 20000);
+    check("privacy mode turns on for a controlling viewer", pv.ok && pv.on);
+    const hidden = await c.next((m) => m.type === "desktop_frame" && m.base64 !== pushed.base64, 20000);
+    check("the viewer still sees the desktop under privacy mode", Buffer.from(hidden.base64, "base64").length > 10_000);
+    c.send({ type: "desktop_privacy", on: false });
+    const off = await c.next((m) => m.type === "desktop_privacy" && m.on === false, 20000).catch(() => ({ on: "timeout" }));
+    check("privacy mode turns off", off.on === false);
     c.send({ type: "desktop_stop" });
     const sp = await c.next((m) => m.type === "desktop_stopped", 10000);
     check("desktop_stop ok", sp.ok === true);
@@ -131,7 +139,8 @@ async function main() {
     await new Promise((r) => setTimeout(r, 1200));
     w.send({ type: "clipboard_set", text: tag + "-own" });
     await w.next((m) => m.type === "clipboard_set_ok", 20000);
-    execFileSync("powershell.exe", ["-NoProfile", "-Command", `Set-Clipboard -Value '${tag}-pc'`]);
+    // The daemon reads the clipboard right after its own write; Windows lets one process hold it at a time.
+    execFileSync("powershell.exe", ["-NoProfile", "-Command", `for ($i = 0; $i -lt 10; $i++) { try { Set-Clipboard -Value '${tag}-pc'; exit 0 } catch { Start-Sleep -Milliseconds 200 } }; exit 1`]);
     const ch = await w.next((m) => m.type === "clipboard_changed", 10000).catch(() => ({}));
     check("PC-side copy is pushed to viewers", ch.text === tag + "-pc");
     const echo = await w.next((m) => m.type === "clipboard_changed" && m.text === tag + "-own", 1000).catch(() => null);
@@ -149,26 +158,38 @@ async function main() {
     check("view-only viewer cannot send input", vos.viewOnly === true && vok.ok === false && vok.error === "view only");
     await vo.close();
 
-    // Approval: the prompt on the PC is answered with keystrokes, Enter = Allow, Alt+F4 = Deny.
+    // Approval: the prompt on the PC is answered by clicking Allow or Deny.
     const flag = path.join(os.tmpdir(), "rh-home-" + PORT, "ask-before-viewing");
     fs.writeFileSync(flag, "");
-    const answer = (keys) => execFileSync("powershell.exe", ["-NoProfile", "-Command",
-      // Keys go out only once the prompt itself is active, never to whatever window has focus.
-      `Add-Type -A Microsoft.VisualBasic, System.Windows.Forms; $ok = $false
-       for ($i = 0; $i -lt 40 -and -not $ok; $i++) { try { [Microsoft.VisualBasic.Interaction]::AppActivate('PocketDesk'); $ok = $true } catch { Start-Sleep -Milliseconds 250 } }
-       if (-not $ok) { exit 1 }; Start-Sleep -Milliseconds 300; [System.Windows.Forms.SendKeys]::SendWait('${keys}')`]);
+    // Clicks the prompt's button through UI Automation: no keystrokes, so nothing can reach
+    // another window (Alt+F4 once closed a terminal whose title also said PocketDesk).
+    const answer = (button) => execFileSync("powershell.exe", ["-NoProfile", "-Command",
+      `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
+       Add-Type -Name W -Namespace Rh -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);'
+       $helper = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*-File*rh-home-${PORT}*presence.ps1' } | Select-Object -First 1
+       if (-not $helper) { exit 2 }
+       $root = [System.Windows.Automation.AutomationElement]::RootElement
+       $byPid = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$helper.ProcessId)
+       $byName = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, '${button}')
+       for ($i = 0; $i -lt 40; $i++) {
+         $btn = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $byPid) | ForEach-Object { $_.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $byName) } | Where-Object { $_ } | Select-Object -First 1
+         if ($btn -and $btn.Current.IsEnabled) { [void][Rh.W]::SendMessage([IntPtr]$btn.Current.NativeWindowHandle, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); exit 0 }
+         Start-Sleep -Milliseconds 250
+       }
+       $root.FindAll([System.Windows.Automation.TreeScope]::Children, $byPid) | ForEach-Object { [Console]::Error.WriteLine('window: ' + $_.Current.Name) }
+       exit 1`], { stdio: ["ignore", "pipe", "inherit"] });
     const a1 = await openAndHello(PORT, TOKEN);
     a1.send({ type: "desktop_key", key: 0x87 });
     const blocked = await a1.next((m) => m.type === "desktop_input_ok", 10000);
     check("input before approval is refused", blocked.ok === false);
     a1.send({ type: "desktop_start", quality: 30 });
     await a1.next((m) => m.type === "desktop_pending", 10000);
-    answer("%{F4}");
+    answer("Deny");
     const denied = await a1.next((m) => m.type === "desktop_started", 20000);
     check("denied on the PC", denied.ok === false && denied.reason === "denied on the PC");
     a1.send({ type: "desktop_start", quality: 30 });
     await a1.next((m) => m.type === "desktop_pending", 10000);
-    answer("{ENTER}");
+    answer("Allow");
     const allowed = await a1.next((m) => m.type === "desktop_started", 20000);
     a1.send({ type: "desktop_key", key: 0x87 });
     const afterOk = await a1.next((m) => m.type === "desktop_input_ok", 10000);

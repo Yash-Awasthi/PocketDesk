@@ -128,7 +128,7 @@ async function main() {
   // --continue would pick the newest conversation in cwd, which may belong to another client.
   c2.send({ type: "chatmsg", id: chatCreated.id, text: "second-turn" });
   const turn2 = await c2.next((m) => m.type === "chatdelta" && m.id === chatCreated.id && m.text.includes("second-turn"));
-  check("second turn resumes the chat's own CLI session", turn2.text.includes("[--resume-id sess-1]"));
+  check("second turn resumes the chat's own CLI session", /\[--resume-id sess-1[ \]]/.test(turn2.text));
   await c2.next((m) => m.type === "chatstate" && m.id === chatCreated.id && m.state === "idle");
   c2.send({ type: "chatmsg", id: chatCreated.id, text: "/status" });
   const status = await c2.next((m) => m.type === "chatdelta" && m.id === chatCreated.id && m.text.includes("Sessions:"));

@@ -45,7 +45,11 @@ object Link {
         }
         scope.launch {
             client.events.collect { ev ->
-                if (ev is RhEvent.Exit && !MainActivity.foreground) Notifier.sessionEnded(app, ev.harnessId, ev.code)
+                when {
+                    ev is RhEvent.Exit && !MainActivity.foreground -> Notifier.sessionEnded(app, ev.harnessId, ev.code)
+                    ev is RhEvent.ApprovalNeeded && !MainActivity.foreground -> Notifier.approval(app, ev.proposal)
+                    ev is RhEvent.ApprovalGone -> Notifier.approvalGone(app, ev.id)
+                }
             }
         }
     }
@@ -68,6 +72,12 @@ class LinkService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        val proposal = intent?.getStringExtra(EXTRA_ID)
+        if (proposal != null && (intent.action == ACTION_ALLOW || intent.action == ACTION_DENY)) {
+            if (intent.action == ACTION_ALLOW) Link.client.approve(proposal) else Link.client.reject(proposal)
+            Notifier.approvalGone(this, proposal)
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_DISCONNECT) {
             Link.client.close()
             stopSelf()
@@ -107,6 +117,9 @@ class LinkService : Service() {
         private const val CHANNEL = "link"
         private const val ID = 1
         private const val ACTION_DISCONNECT = "disconnect"
+        const val ACTION_ALLOW = "allow"
+        const val ACTION_DENY = "deny"
+        const val EXTRA_ID = "proposal"
 
         fun sync(ctx: Context, connected: Boolean) {
             val i = Intent(ctx, LinkService::class.java)

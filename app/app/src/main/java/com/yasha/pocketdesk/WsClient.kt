@@ -54,6 +54,18 @@ class WsClient(
         private set
     var dirListing by mutableStateOf<FsListing?>(null)
         private set
+    /** Why the last folder could not be listed; cleared by the next listing. */
+    var fsError by mutableStateOf<String?>(null)
+        private set
+    var fsFound by mutableStateOf<FsFound?>(null)
+    /** Agent tool calls waiting for Allow or Deny, oldest first. */
+    var proposals by mutableStateOf<List<Proposal>>(emptyList())
+        private set
+    /** Permission mode chosen on this phone per chat; absent means the PC user's own setting. */
+    var chatPermission by mutableStateOf<Map<String, String>>(emptyMap())
+        private set
+    /** Mkdir, rename and delete outcomes, for the file manager to report. */
+    val fsResults = MutableSharedFlow<FsResult>(extraBufferCapacity = 16)
     var lastError by mutableStateOf<String?>(null)
         private set
     var activeUrl: String? = null
@@ -257,6 +269,7 @@ class WsClient(
                         // Same rule as the socket path: a 4xxx refusal must not be retried.
                         if (code != null) {
                             lastError = reason.ifEmpty { "refused by server ($code)" }
+                            totpNeeded = code == 4011
                             status = Status.Disconnected
                         } else {
                             lastError = reason
@@ -350,6 +363,7 @@ class WsClient(
             // rate limit): retrying spends the IP's 5-attempt budget and locks it out.
             if (code >= 4000) {
                 lastError = reason.ifEmpty { "refused by server ($code)" }
+                totpNeeded = code == 4011
                 status = Status.Disconnected
                 return
             }
@@ -436,6 +450,33 @@ class WsClient(
     /** The PC keeps a recording of this session (its owner turned that on). */
     var desktopRecording by mutableStateOf(false)
         private set
+    /** The PC's own monitors are blanked and its local input ignored. */
+    var desktopPrivacy by mutableStateOf(false)
+        private set
+    fun setDesktopPrivacy(on: Boolean): Boolean = send(Proto.desktopPrivacy(on))
+    fun pcPower(action: String): Boolean = send(Proto.pcPower(action))
+
+    /** Two-factor pairing on the PC: null until asked. */
+    var totpEnabled by mutableStateOf<Boolean?>(null)
+        private set
+    /** Secret and otpauth link offered by the PC, waiting for a first code. */
+    var totpOffer by mutableStateOf<Pair<String, String>?>(null)
+        private set
+    var totpError by mutableStateOf<String?>(null)
+        private set
+    fun totp(op: String, code: String? = null): Boolean { totpError = null; return send(Proto.totp(op, code)) }
+
+    /** The PC wants an authenticator code before this new device may pair. */
+    var totpNeeded by mutableStateOf(false)
+        private set
+    fun dismissPairCode() { totpNeeded = false }
+    fun pairWithCode(code: String) {
+        val token = lastToken ?: return
+        totpNeeded = false
+        hello = Proto.hello(token, code)
+        status = Status.Connecting
+        open(activeUrl ?: lanUrl ?: return)
+    }
     /** Session status that is not an error, such as waiting for approval on the PC. */
     var desktopNotice by mutableStateOf("")
         private set
@@ -495,7 +536,12 @@ class WsClient(
     fun sendInput(id: String, dataB64: String): Boolean = send(Proto.input(id, dataB64))
     fun sendResize(id: String, cols: Int, rows: Int): Boolean = send(Proto.resize(id, cols, rows))
     fun kill(id: String): Boolean = send(Proto.kill(id))
-    fun browse(path: String?): Boolean = send(Proto.fs(path))
+    fun browse(path: String?, hidden: Boolean = false): Boolean = send(Proto.fs(path, hidden))
+    fun fileOp(op: String, path: String, to: String? = null): Boolean = send(Proto.fsOp(op, path, to))
+    fun searchFiles(path: String, query: String): Boolean = send(Proto.fsSearch(path, query))
+    fun approve(id: String, all: Boolean = false): Boolean = send(Proto.approve(id, all))
+    fun reject(id: String): Boolean = send(Proto.reject(id))
+    fun setChatPermission(id: String, mode: String): Boolean = send(Proto.chatPermission(id, mode))
 
     fun createChat(harness: String, cwd: String, prompt: String? = null): Boolean =
         send(Proto.chatSession(harness, cwd, prompt))
@@ -662,6 +708,7 @@ class WsClient(
                 policy.reset()
                 reattachAll()
                 desktopResume?.invoke()
+                send(Proto.proposalList())
             }
             "manifests" -> tools = Proto.parseTools(m)
             "auth_status" -> str(m, "harness")?.let { id ->
@@ -767,7 +814,32 @@ class WsClient(
                     merge(id, line) { a, b -> (a + "\n" + b).takeLast(2000) }
                 }
             }
-            "fs" -> dirListing = Proto.parseFs(m)
+            "fs" -> {
+                fsError = str(m, "error")
+                Proto.parseFs(m)?.let { dirListing = it }
+            }
+            "fs_found" -> fsFound = Proto.parseFsFound(m)
+            "proposal_created" -> Proto.parseProposal(m["proposal"])?.let { p ->
+                if (proposals.none { it.id == p.id }) {
+                    proposals = proposals + p
+                    events.tryEmit(RhEvent.ApprovalNeeded(p))
+                }
+            }
+            "proposal_approved", "proposal_rejected", "proposal_expired" -> {
+                val id = (m["proposal"] as? JsonObject)?.let { str(it, "id") } ?: return
+                proposals = proposals.filterNot { it.id == id }
+                events.tryEmit(RhEvent.ApprovalGone(id))
+            }
+            "chat_permission_ok" -> {
+                val id = str(m, "id") ?: return
+                chatPermission = chatPermission + (id to (str(m, "mode") ?: return))
+            }
+            "proposal_list" -> {
+                proposals = (m["items"] as? JsonArray)?.mapNotNull { Proto.parseProposal(it) } ?: emptyList()
+            }
+            "fs_result" -> fsResults.tryEmit(
+                FsResult(str(m, "op") ?: "", str(m, "path") ?: "", bool(m, "ok") ?: false, str(m, "error")),
+            )
             "fchunk" -> onFChunk(m)
             "fwritten" -> onFWritten(m)
             "error" -> {
@@ -900,7 +972,19 @@ class WsClient(
                 }
             }
             "desktop_pending" -> desktopNotice = "Waiting for someone at the PC to allow this…"
+            "desktop_privacy" -> {
+                desktopPrivacy = bool(m, "on") == true
+                str(m, "error")?.let { _desktopError.value = it }
+            }
+            "pc_power" -> events.tryEmit(RhEvent.PowerDone(str(m, "action") ?: "", bool(m, "ok") == true, str(m, "error")))
+            "totp_status" -> {
+                totpEnabled = bool(m, "enabled")
+                totpError = str(m, "error")
+                if (totpError == null) totpOffer = null
+            }
+            "totp_setup" -> totpOffer = (str(m, "secret") ?: return) to (str(m, "uri") ?: "")
             "desktop_stopped" -> {
+                desktopPrivacy = false
                 desktopStreaming = false
                 str(m, "reason")?.let { desktopResume = null; _desktopError.value = "Session $it" }
             }

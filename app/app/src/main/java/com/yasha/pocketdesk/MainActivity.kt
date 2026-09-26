@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import com.yasha.pocketdesk.ui.ChatScreen
 import com.yasha.pocketdesk.ui.DesktopScreen
 import com.yasha.pocketdesk.ui.ConnectScreen
+import com.yasha.pocketdesk.ui.FilesScreen
 import com.yasha.pocketdesk.ui.FreebuffScreen
 import com.yasha.pocketdesk.ui.SessionsScreen
 import com.yasha.pocketdesk.ui.SshScreen
@@ -51,6 +52,7 @@ sealed interface Screen {
     data object Chats : Screen
     data object Freebuff : Screen
     data object Desktop : Screen
+    data object Files : Screen
     data object Ssh : Screen
     data class Terminal(val sessionId: String) : Screen
 }
@@ -59,7 +61,7 @@ private val ScreenSaver = Saver<Screen, String>(
     save = { if (it is Screen.Terminal) "terminal:" + it.sessionId else it.toString() },
     restore = { s ->
         if (s.startsWith("terminal:")) Screen.Terminal(s.removePrefix("terminal:"))
-        else listOf(Screen.Connect, Screen.Tools, Screen.Sessions, Screen.Chats, Screen.Freebuff, Screen.Desktop, Screen.Ssh)
+        else listOf(Screen.Connect, Screen.Tools, Screen.Sessions, Screen.Chats, Screen.Freebuff, Screen.Desktop, Screen.Files, Screen.Ssh)
             .firstOrNull { it.toString() == s } ?: Screen.Connect
     },
 )
@@ -120,6 +122,15 @@ class MainActivity : ComponentActivity() {
             val book = ServerBook(applicationContext)
             book.save(book.load().map { if (it.url == url || it.fallback == url) it.copy(token = token) else it })
         }
+        LaunchedEffect(client) {
+            client.events.collect { ev ->
+                if (ev is RhEvent.PowerDone) android.widget.Toast.makeText(
+                    this@MainActivity,
+                    if (ev.ok) "PC: ${ev.action} sent" else "PC: ${ev.action} failed: ${ev.error}",
+                    android.widget.Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
         // Declared before the lock gate so a re-lock keeps navigation.
         var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Connect) }
         var desktopFullscreen by rememberSaveable { mutableStateOf(false) }
@@ -161,6 +172,12 @@ class MainActivity : ComponentActivity() {
                             onClick = { screen = Screen.Chats },
                             icon = { Icon(Icons.Filled.Email, contentDescription = null) },
                             label = { Text("Chats") },
+                        )
+                        NavigationBarItem(
+                            selected = screen == Screen.Files,
+                            onClick = { screen = Screen.Files },
+                            icon = { Icon(com.yasha.pocketdesk.ui.FolderIcon, contentDescription = null) },
+                            label = { Text("Files") },
                         )
                         NavigationBarItem(
                             selected = screen == Screen.Desktop,
@@ -213,6 +230,7 @@ class MainActivity : ComponentActivity() {
                     )
                     Screen.Sessions -> SessionsScreen(client, openTerminal = { screen = Screen.Terminal(it) })
                     Screen.Chats -> ChatScreen(client)
+                    Screen.Files -> FilesScreen(client)
                     Screen.Freebuff -> FreebuffScreen(client, openDesktop = { screen = Screen.Desktop })
                     Screen.Desktop -> DesktopScreen(
                         client,
@@ -224,6 +242,9 @@ class MainActivity : ComponentActivity() {
                     )
                     Screen.Ssh -> SshScreen(client, onClose = { screen = Screen.Tools })
                     is Screen.Terminal -> TerminalScreen(client, s.sessionId, onClose = { screen = Screen.Sessions })
+                }
+                if (client.status != Status.Disconnected) {
+                    com.yasha.pocketdesk.ui.ApprovalCard(client, Modifier.align(androidx.compose.ui.Alignment.TopCenter))
                 }
             }
         }

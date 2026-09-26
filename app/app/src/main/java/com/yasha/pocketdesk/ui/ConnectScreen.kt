@@ -55,6 +55,7 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
     var editing by remember { mutableStateOf<ServerEntry?>(null) }
     var adding by remember { mutableStateOf(false) }
     var trustFp by remember { mutableStateOf<String?>(null) }
+    PairCodeDialog(ws)
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),

@@ -2,6 +2,10 @@ import * as registry from "../registry.js";
 import * as sessions from "../sessions.js";
 import * as chat from "../chat.js";
 import * as proposals from "../proposals.js";
+import * as toolApproval from "../tool_approval.js";
+import * as totp from "../totp.js";
+import * as pcPower from "../pc_power.js";
+import os from "node:os";
 import { hostStats } from "../stats.js";
 import * as fbCtrl from "../freebuff_control.js";
 import * as doctor from "../doctor.js";
@@ -23,6 +27,7 @@ export default function systemHandlers(ctx) {
     async approve(ws, msg) {
       const p = proposals.approve(msg.id);
       if (p) {
+        if (msg.all === true) toolApproval.trust(p.detail?.agentSession);
         plugins.callHook("onProposalApproved", ws, p);
         send(ws, { type: "proposal_approved", proposal: { id: p.id, status: p.status } });
       } else {
@@ -37,6 +42,24 @@ export default function systemHandlers(ctx) {
       } else {
         send(ws, { type: "error", message: `proposal ${msg.id} not found or already decided` });
       }
+    },
+    async pc_power(ws, msg) {
+      send(ws, { type: "pc_power", action: msg.action, ...(await pcPower.run(msg.action)) });
+    },
+    // ── Two-factor pairing: a code from an authenticator app before the master token pairs ──
+    async totp_status(ws) {
+      send(ws, { type: "totp_status", enabled: totp.enabled() });
+    },
+    async totp_setup(ws) {
+      send(ws, { type: "totp_setup", ...totp.setup(os.hostname()) });
+    },
+    async totp_enable(ws, msg) {
+      const ok = totp.enable(msg.code);
+      send(ws, { type: "totp_status", enabled: totp.enabled(), ...(ok ? {} : { error: "wrong code" }) });
+    },
+    async totp_disable(ws, msg) {
+      const ok = totp.disable(msg.code);
+      send(ws, { type: "totp_status", enabled: totp.enabled(), ...(ok ? {} : { error: "wrong code" }) });
     },
     async proposal_list(ws, msg) {
       send(ws, { type: "proposal_list", items: proposals.listPending() });

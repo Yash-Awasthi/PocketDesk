@@ -101,6 +101,8 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
         items(ws.tools, key = { it.manifest.id }) { tool ->
             ToolCard(tool, ws, cwd, openDesktop, openFreebuff)
         }
+        item { PowerRow(ws) }
+        item { TwoFactorSection(ws) }
         item {
             Text("Everything installed", style = MaterialTheme.typography.titleLarge)
         }
