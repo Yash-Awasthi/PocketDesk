@@ -10,6 +10,11 @@ let cliServer = null;
 
 export function start(port = Number(process.env.RH_CLI_PORT) || 4679) {
   cliServer = http.createServer((req, res) => {
+    // No auth here, so a DNS-rebound web page (which reaches 127.0.0.1 under its own Host) must not read it.
+    if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(req.headers.host || "")) {
+      res.writeHead(403).end(JSON.stringify({ error: "forbidden" }));
+      return;
+    }
     if (req.method !== "GET" && req.method !== "POST") {
       res.writeHead(405).end(JSON.stringify({ error: "method not allowed" }));
       return;

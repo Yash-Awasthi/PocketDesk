@@ -109,7 +109,8 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
       /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(req.headers.host || "");
     if (req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ status: "healthy", service: "pocketdesk", sessions: allSessions().length }));
+      // Anyone on the network may probe liveness; only this machine learns how busy it is.
+      res.end(JSON.stringify({ status: "healthy", service: "pocketdesk", sessions: loopback ? allSessions().length : undefined }));
       return;
     }
     if (req.url === "/pair" && loopback) {
@@ -136,7 +137,8 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   // WebSocket upgrade with origin check (ttyd/gotty pattern): browsers always
   // send Origin — cross-origin upgrades are rejected at the HTTP level (403)
   // before any socket is established. Native app clients send no Origin.
-  const wss = new WebSocketServer({ noServer: true });
+  // Largest legitimate message is a clipboard image (24 MB of base64, see clipboard_set).
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 32 << 20 });
   server.on("upgrade", (req, socket, head) => {
     const samePath = req.url === "/ws";
     let originOk = true;
@@ -175,6 +177,8 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
       plugins.callHook("onDisconnect", ws);
     });
     ws.on("message", (raw) => {
+      // A hello is tiny; anything big before auth is only there to burn memory and CPU.
+      if (!ws._authed && raw.length > 16 << 10) return ws.close(1009, "hello too large");
       let msg;
       try {
         msg = JSON.parse(raw.toString());

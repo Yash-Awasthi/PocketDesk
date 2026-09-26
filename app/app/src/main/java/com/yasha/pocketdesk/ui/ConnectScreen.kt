@@ -130,6 +130,10 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
                 Text(
                     pairing.joinToString("\n") { it.url } +
                         (pairing.first().pinnedFingerprint?.let { "\n\nCertificate:\n" + it.chunked(2).joinToString(" ") } ?: "") +
+                        // A changed pin for a saved address is what a man-in-the-middle link looks like.
+                        (if (servers.any { s -> s.pinnedFingerprint != null && pairing.any { it.url == s.url && it.pinnedFingerprint != s.pinnedFingerprint } })
+                            "\n\nWARNING: this replaces the certificate saved for this address. Accept only if you regenerated it on your PC."
+                        else "") +
                         "\n\nOnly accept a link you just scanned from your own PC.",
                 )
             },
