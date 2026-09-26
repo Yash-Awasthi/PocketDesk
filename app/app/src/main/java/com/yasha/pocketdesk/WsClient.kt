@@ -86,7 +86,8 @@ class WsClient(
     // ── Auto-reconnect (client-kt/krossbow backoff + cc-pocket since-reattach) ──
     private var lastToken: String? = null
     private var lastFingerprint: String? = null
-    private var userClosed = false
+    // Read by OkHttp and retry threads; a stale false there reconnects after the user said stop.
+    @Volatile private var userClosed = false
     private val reconnectScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val policy = ReconnectPolicy()
     /** Last output seq seen per session, for missed-output backfill on reattach. */
@@ -342,6 +343,7 @@ class WsClient(
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             if (webSocket !== socket.get()) return
+            if (userClosed) { webSocket.close(1000, "bye"); return }
             val tm = collectingTm
             if (tm != null) {
                 val fp = tm.seen
@@ -360,7 +362,7 @@ class WsClient(
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (!socket.compareAndSet(webSocket, null)) return
-            lastError = t.message ?: "connection failed"
+            lastError = friendly(t)
             failTransfers("connection lost")
             scheduleReconnect()
         }
@@ -386,6 +388,14 @@ class WsClient(
         override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
             if (webSocket === socket.get()) onVideoPacket(bytes.toByteArray())
         }
+    }
+
+    private fun friendly(t: Throwable): String = when (t) {
+        is java.net.ConnectException -> "PC not reachable. Is PocketDesk running on it?"
+        is java.net.SocketTimeoutException -> "PC did not answer in time"
+        is java.net.UnknownHostException -> "PC address not found on this network"
+        is java.net.NoRouteToHostException -> "No route to the PC from this network"
+        else -> t.message ?: "connection failed"
     }
 
     private fun onVideoPacket(pkt: ByteArray) {

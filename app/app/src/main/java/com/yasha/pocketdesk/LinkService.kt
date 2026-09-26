@@ -13,8 +13,6 @@ import android.os.IBinder
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.core.app.NotificationCompat
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -41,7 +39,16 @@ object Link {
             },
         )
         scope.launch {
-            client.statusFlow.map { it != Status.Disconnected }.distinctUntilChanged().collect { LinkService.sync(app, it) }
+            var was = Status.Disconnected
+            client.statusFlow.collect { now ->
+                LinkService.sync(app, now)
+                // close() clears lastError, so an error here means the link ended without the user asking.
+                if (now == Status.Disconnected && was != Status.Disconnected && !MainActivity.foreground) {
+                    client.lastError?.let { Notifier.linkLost(app, it) }
+                }
+                if (now == Status.Connected) Notifier.linkLostGone(app)
+                was = now
+            }
         }
         scope.launch {
             client.events.collect { ev ->
@@ -83,34 +90,23 @@ class LinkService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        val n = notification(Link.client.activeUrl ?: "")
+        pending = false
+        // startForeground must come even when the link already ended, or Android kills the app for it.
+        val status = Link.client.status
+        val n = notification(this, status)
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(ID, n)
         }
+        running = true
+        if (status == Status.Disconnected) stopSelf()
         return START_NOT_STICKY
     }
 
-    private fun notification(url: String): Notification {
-        val mgr = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-        if (mgr.getNotificationChannel(CHANNEL) == null) {
-            mgr.createNotificationChannel(NotificationChannel(CHANNEL, "Connection", NotificationManager.IMPORTANCE_LOW))
-        }
-        val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
-        )
-        val disconnect = PendingIntent.getService(
-            this, 1, Intent(this, LinkService::class.java).setAction(ACTION_DISCONNECT), PendingIntent.FLAG_IMMUTABLE,
-        )
-        return NotificationCompat.Builder(this, CHANNEL)
-            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
-            .setContentTitle("Connected")
-            .setContentText(url)
-            .setOngoing(true)
-            .setContentIntent(open)
-            .addAction(0, "Disconnect", disconnect)
-            .build()
+    override fun onDestroy() {
+        running = false
+        super.onDestroy()
     }
 
     companion object {
@@ -121,15 +117,53 @@ class LinkService : Service() {
         const val ACTION_DENY = "deny"
         const val EXTRA_ID = "proposal"
 
-        fun sync(ctx: Context, connected: Boolean) {
+        @Volatile private var running = false
+        @Volatile private var pending = false
+
+        private fun notification(ctx: Context, status: Status): Notification {
+            val mgr = ctx.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            if (mgr.getNotificationChannel(CHANNEL) == null) {
+                mgr.createNotificationChannel(NotificationChannel(CHANNEL, "Connection", NotificationManager.IMPORTANCE_LOW))
+            }
+            val open = PendingIntent.getActivity(
+                ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE,
+            )
+            val disconnect = PendingIntent.getService(
+                ctx, 1, Intent(ctx, LinkService::class.java).setAction(ACTION_DISCONNECT), PendingIntent.FLAG_IMMUTABLE,
+            )
+            val (title, text) = when (status) {
+                Status.Connected -> "Connected to your PC" to (Link.client.activeUrl ?: "")
+                Status.Reconnecting -> "Connection lost, retrying" to (Link.client.lastError ?: "")
+                Status.AwaitingTrust -> "Waiting for you to trust the PC" to "Open the app to confirm"
+                else -> "Connecting to your PC" to (Link.client.activeUrl ?: "")
+            }
+            return NotificationCompat.Builder(ctx, CHANNEL)
+                .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+                .setContentTitle(title)
+                .setContentText(text)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(open)
+                .addAction(0, if (status == Status.Connected) "Disconnect" else "Stop", disconnect)
+                .build()
+        }
+
+        fun sync(ctx: Context, status: Status) {
             val i = Intent(ctx, LinkService::class.java)
-            if (!connected) {
-                ctx.stopService(i)
+            if (status == Status.Disconnected) {
+                // A start still on its way ends itself in onStartCommand; stopping it now would crash.
+                if (!pending) ctx.stopService(i)
                 return
             }
+            if (running) {
+                (ctx.getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(ID, notification(ctx, status))
+                return
+            }
+            if (pending) return
             // Android 12+ refuses a start from the background; the link itself keeps running.
             try {
                 ctx.startForegroundService(i)
+                pending = true
             } catch (_: IllegalStateException) {
             }
         }

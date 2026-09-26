@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.ui.platform.compositionContext
 import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -206,10 +207,11 @@ class MainActivity : ComponentActivity() {
                 // the app dropped to a bare "disconnected" with no hint).
                 when (client.status) {
                     Status.Reconnecting -> Text(
-                        "⟳ reconnecting…",
+                        "⟳ reconnecting… tap to stop",
                         color = androidx.compose.material3.MaterialTheme.colorScheme.onErrorContainer,
                         modifier = Modifier
                             .align(androidx.compose.ui.Alignment.TopCenter)
+                            .clickable { client.close() }
                             .background(androidx.compose.material3.MaterialTheme.colorScheme.errorContainer)
                             .padding(horizontal = 12.dp, vertical = 4.dp),
                     )

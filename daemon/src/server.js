@@ -66,6 +66,12 @@ function audit(ws, msg) {
   return all.sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9));
 }
 
+let liveWss = null;
+
+export function closeClients(code, reason) {
+  for (const ws of liveWss?.clients ?? []) try { ws.close(code, reason); } catch {}
+}
+
 export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = {}) {
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
   const page = fs.readFileSync(path.join(publicDir, "index.html"));
@@ -160,6 +166,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   // before any socket is established. Native app clients send no Origin.
   // Largest legitimate message is a clipboard image (24 MB of base64, see clipboard_set).
   const wss = new WebSocketServer({ noServer: true, maxPayload: 32 << 20 });
+  liveWss = wss;
   server.on("upgrade", (req, socket, head) => {
     const samePath = req.url === "/ws";
     let originOk = true;

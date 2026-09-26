@@ -62,6 +62,26 @@ object Notifier {
 
     private const val APPROVAL_ID = 7
 
+    private const val LINK_LOST_ID = 8
+
+    fun linkLost(ctx: Context, reason: String) {
+        if (!canNotify(ctx)) return
+        val pi = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val n = NotificationCompat.Builder(ctx, CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentTitle("Disconnected from your PC")
+            .setContentText(reason)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(reason))
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .build()
+        (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(LINK_LOST_ID, n)
+    }
+
+    fun linkLostGone(ctx: Context) {
+        (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(LINK_LOST_ID)
+    }
+
     fun sessionEnded(ctx: Context, label: String, code: Int) {
         if (!canNotify(ctx)) return
         val pi = PendingIntent.getActivity(

@@ -31,6 +31,9 @@ namespace PocketDeskTray
         readonly NotifyIcon icon;
         readonly ToolStripMenuItem pauseItem;
         Process daemon;
+        StreamWriter log;
+        DateTime startedAt;
+        int quickCrashes;
         SynchronizationContext ui;
         string port = "8765";
         string token = "";
@@ -157,7 +160,7 @@ namespace PocketDeskTray
             return json.Substring(start, numEnd - start);
         }
 
-        void StartDaemon()
+        void StartDaemon(bool keepLog = false)
         {
             if (daemon != null && !daemon.HasExited) return;
             try
@@ -179,13 +182,16 @@ namespace PocketDeskTray
                 if (File.Exists(bundledFfmpeg)) psi.EnvironmentVariables["FFMPEG_PATH"] = bundledFfmpeg;
                 // Closing stdin asks the daemon to stop its agents and helpers, then exit.
                 psi.EnvironmentVariables["RH_STOP_ON_STDIN_EOF"] = "1";
-                // Fresh log per start; the daemon's banner and connection lines land here.
-                var log = new StreamWriter(LogPath, false) { AutoFlush = true };
+                // Fresh log per start, except after a crash, whose reason must stay readable.
+                // The previous run's writer still holds the file open; the next start could not open it otherwise.
+                if (log != null) lock (log) log.Dispose();
+                var w = log = new StreamWriter(LogPath, keepLog) { AutoFlush = true };
                 daemon = Process.Start(psi);
+                startedAt = DateTime.Now;
                 var started = daemon;
                 daemon.EnableRaisingEvents = true;
-                daemon.Exited += (s, e) => ui.Post(_ => { if (daemon == started) { daemon = null; SetRunning(false); ShowBalloon("daemon stopped"); } }, null);
-                DataReceivedEventHandler write = (s, e) => { if (e.Data != null) lock (log) log.WriteLine(e.Data); };
+                daemon.Exited += (s, e) => ui.Post(_ => { if (daemon == started) OnCrash(); }, null);
+                DataReceivedEventHandler write = (s, e) => { if (e.Data != null) lock (w) try { w.WriteLine(e.Data); } catch (ObjectDisposedException) { } };
                 daemon.OutputDataReceived += write;
                 daemon.ErrorDataReceived += write;
                 daemon.BeginOutputReadLine();
@@ -197,6 +203,23 @@ namespace PocketDeskTray
                 ShowBalloon("failed to start daemon: " + ex.Message);
             }
             SetRunning(daemon != null && !daemon.HasExited);
+        }
+
+        // StopDaemon clears the field first, so an exit that still finds it set was not asked for.
+        void OnCrash()
+        {
+            daemon = null;
+            SetRunning(false);
+            quickCrashes = (DateTime.Now - startedAt).TotalSeconds < 60 ? quickCrashes + 1 : 1;
+            if (quickCrashes >= 3)
+            {
+                ShowBalloon("PocketDesk keeps stopping. Right-click > Open daemon log to see why, then Resume.");
+                return;
+            }
+            ShowBalloon("PocketDesk stopped unexpectedly; restarting");
+            var t = new System.Windows.Forms.Timer { Interval = 3000 };
+            t.Tick += (s, e) => { t.Dispose(); if (daemon == null) StartDaemon(true); };
+            t.Start();
         }
 
         void StopDaemon()

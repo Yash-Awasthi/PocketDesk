@@ -1,5 +1,5 @@
 import { loadConfig, saveConfig } from "./config.js";
-import { start } from "./server.js";
+import { start, closeClients } from "./server.js";
 import { killAll, liveIds, stopReaper } from "./sessions.js";
 import * as chat from "./chat.js";
 
@@ -16,6 +16,8 @@ function gracefulShutdown(signal) {
   }
   _shuttingDown = true;
 
+  // 4100 tells the phone the PC stopped on purpose, so it shows why and does not keep retrying.
+  closeClients(4100, "PocketDesk was stopped on the PC");
   const ids = liveIds();
   console.log(`\n[shutdown] ${signal} received — cleaning up ${ids.length} live session(s)`);
 
@@ -28,7 +30,8 @@ function gracefulShutdown(signal) {
   stopReaper();
 
   console.log("[shutdown] clean exit");
-  process.exit(0);
+  // Gives the close frames a moment to leave before the sockets die with the process.
+  setTimeout(() => process.exit(0), 500);
 }
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
