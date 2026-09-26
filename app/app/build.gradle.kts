@@ -53,7 +53,11 @@ android {
     packaging {
         resources { excludes += listOf("darwin-*/**", "win32-*/**", "linux-*/**") }
         // Our 16 KB-aligned rebuild in src/main/jniLibs replaces the AAR's; see scripts/build-iroh-android.sh.
-        jniLibs { pickFirsts += "**/libiroh_ffi.so" }
+        jniLibs {
+            pickFirsts += "**/libiroh_ffi.so"
+            // Compressed in the APK (14 MB of iroh shrinks to about 6); Android unpacks it once at install.
+            useLegacyPackaging = true
+        }
     }
 
     compileOptions {
