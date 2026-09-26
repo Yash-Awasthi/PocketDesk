@@ -17,6 +17,7 @@ import { configDir } from "./config.js";
 import { verifySignature } from "./advanced_ssh_server.js";
 
 const { Server, Client, utils } = ssh2;
+const INVITE_TTL_MS = 7 * 24 * 3600_000;
 
 /** Host key for the bastion listener, generated once and reused after. */
 function hostKey() {
@@ -210,7 +211,7 @@ export class SSHBastion extends EventEmitter {
    */
   acceptInvite(token, username, publicKey) {
     const invite = this.invites.get(token);
-    if (!invite || invite.used) return null;
+    if (!invite || invite.used || Date.now() - invite.createdAt > INVITE_TTL_MS) return null;
     invite.used = true;
     return this.registerUser(username, publicKey, invite.accessLevel, invite.email);
   }
@@ -226,7 +227,7 @@ export class SSHBastion extends EventEmitter {
   // ─── Real jump-host listener ───────────────────────────────────────
 
   /** Bind the bastion. Port 0 picks an ephemeral port, reported back. */
-  async start({ port = 2223, host = "0.0.0.0" } = {}) {
+  async start({ port = 2223, host = "127.0.0.1" } = {}) {
     if (this.server) return { ok: false, reason: "already_running", port: this.port };
     this.server = new Server({ hostKeys: [hostKey()] }, (client, info) => this._onClient(client, info));
     await new Promise((resolve, reject) => {

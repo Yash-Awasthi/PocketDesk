@@ -56,7 +56,8 @@ powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PocketDesk\app\daemo
 ```
 
 It registers a system scheduled task that starts at boot (so it is reachable
-before login), then opens a second pairing page at `https://localhost:8766/pair`.
+before login), then opens a second pairing page at `https://localhost:8766/pair?k=<token>`, where the token is the
+one in `%ProgramData%\PocketDesk\console\config.json` (readable by administrators only).
 Scan that QR to add the "PC (console)" entry. Use that entry when you need the
 lock screen, a UAC prompt, or the machine before you have signed in; use the
 normal entry for everything else.

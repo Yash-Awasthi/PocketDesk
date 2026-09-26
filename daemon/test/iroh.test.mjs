@@ -52,7 +52,7 @@ async function main() {
 
   let ticket = null;
   for (let i = 0; i < 50 && !ticket; i++) {
-    const html = await fetch(`http://127.0.0.1:${PORT}/pair`).then((r) => r.text());
+    const html = await fetch(`http://127.0.0.1:${PORT}/pair?k=${TOKEN}`).then((r) => r.text());
     ticket = JSON.parse(Buffer.from(html.match(/pocketdesk:\/\/pair#([\w-]+)/)[1], "base64url").toString()).i;
     if (!ticket) await new Promise((r) => setTimeout(r, 100));
   }

@@ -112,7 +112,7 @@ try {
                 $cfg = Get-Content $cfgFile -Raw | ConvertFrom-Json
                 if (Get-NetTCPConnection -State Listen -LocalPort $cfg.port -ErrorAction SilentlyContinue) {
                     $scheme = if ($cfg.tls.enabled) { "https" } else { "http" }
-                    Start-Process "${scheme}://localhost:$($cfg.port)/pair"
+                    Start-Process "${scheme}://localhost:$($cfg.port)/pair?k=$([uri]::EscapeDataString($cfg.token))"
                     break
                 }
             }

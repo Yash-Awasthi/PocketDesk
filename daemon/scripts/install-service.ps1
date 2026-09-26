@@ -77,14 +77,15 @@ if ($Console) {
         $cfgFile = Join-Path $consoleHome "config.json"
         for ($i = 0; $i -lt 60; $i++) {
             if ((Test-Path $cfgFile) -and (Get-NetTCPConnection -State Listen -LocalPort 8766 -ErrorAction SilentlyContinue)) {
-                Start-Process "https://localhost:8766/pair"
+                $consoleToken = (Get-Content $cfgFile -Raw | ConvertFrom-Json).token
+                Start-Process "https://localhost:8766/pair?k=$([uri]::EscapeDataString($consoleToken))"
                 break
             }
             Start-Sleep -Seconds 1
         }
     }
     Write-Host "  console endpoint installed (SYSTEM task 'PocketDeskConsole', port 8766)."
-    Write-Host "  pair it from the QR at https://localhost:8766/pair  (entry: PC (console))."
+    Write-Host "  pair it from the QR at https://localhost:8766/pair?k=<token in $consoleHome\config.json>  (entry: PC (console))."
     return
 }
 

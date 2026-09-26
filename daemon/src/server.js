@@ -113,7 +113,11 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
       res.end(JSON.stringify({ status: "healthy", service: "pocketdesk", sessions: loopback ? allSessions().length : undefined }));
       return;
     }
-    if (req.url === "/pair" && loopback) {
+    // Loopback alone admits every local account, and the console endpoint's token is SYSTEM;
+    // the key is the token itself, so only whoever can read the config dir can open the page.
+    const key = new URL(req.url, "http://x").searchParams.get("k") || "";
+    const keyOk = key.length === token.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(token));
+    if (req.url.startsWith("/pair?") && loopback && keyOk) {
       // The ticket carries current addresses and relay, which change with the network.
       const t = irohEp?.ticket();
       if (t && t !== irohTicket) { irohTicket = t; buildPairPage(useTls); }
@@ -489,15 +493,17 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     console.log("  PocketDesk daemon");
     console.log(`  local     http${useTls ? "s" : ""}://localhost:${port}`);
     console.log(`  websocket ${scheme}://<this-pc>:${port}/ws`);
-    // The token is a pairing credential for the user's own devices: the full
-    // token prints in dev only (never in production). /pair is loopback-gated.
-    if (process.env.NODE_ENV !== 'production') {
+    // Only to an interactive console: the tray and service capture stdout into log files.
+    if (process.env.NODE_ENV !== 'production' && process.stdout.isTTY) {
       console.log(`  token     ${token}`);
     }
     if (useTls) {
       console.log(`  tls       enabled, cert fingerprint ${fp}`);
     }
-    console.log(`  pairing   http${useTls ? "s" : ""}://localhost:${port}/pair  (open on THIS PC, scan the QR from the app)`);
+    const pairUrl = `http${useTls ? "s" : ""}://localhost:${port}/pair`;
+    console.log(process.stdout.isTTY
+      ? `  pairing   ${pairUrl}?k=${token}  (open on THIS PC, scan the QR from the app)`
+      : `  pairing   tray icon > Pair a phone, or ${pairUrl}?k=<token from config.json>`);
     console.log("  config    %USERPROFILE%\\.pocketdesk\\config.json");
     console.log("");
     // iroh sockets join wss.clients so broadcast and revoke reach them like /ws sockets.

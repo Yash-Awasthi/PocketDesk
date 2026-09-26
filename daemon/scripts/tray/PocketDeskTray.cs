@@ -42,7 +42,7 @@ namespace PocketDeskTray
             var menu = new ContextMenuStrip();
             // Settings change (first run writes them; the port can be edited), so read them on every open.
             menu.Opening += (s, e) => LoadConfig();
-            menu.Items.Add("Pair a phone...", null, (s, e) => OpenUrl(BaseUrl() + "/pair"));
+            menu.Items.Add("Pair a phone...", null, (s, e) => OpenUrl(BaseUrl() + "/pair?k=" + Uri.EscapeDataString(token)));
             menu.Items.Add("Open web UI", null, (s, e) => OpenUrl(BaseUrl()));
             menu.Items.Add("Copy pairing info", null, (s, e) => CopyPairing());
             menu.Items.Add("Open daemon log", null, (s, e) => { try { Process.Start("notepad.exe", LogPath); } catch { } });
