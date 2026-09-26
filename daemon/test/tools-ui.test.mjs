@@ -51,6 +51,10 @@ async function main() {
   const apps = await c.next((m) => m.type === "apps", 60000);
   check("apps_discover returns entries the panel can act on", apps.items.length > 0
     && apps.items.every((a) => a.name && a.path && (a.kind === "gui" || a.kind === "cli")));
+  c.send({ type: "apps_discover", q: "", kind: "gui" });
+  const gui = await c.next((m) => m.type === "apps", 60000);
+  check("the app drawer gets every windowed app, none crowded out by PATH tools",
+    gui.items.every((a) => a.kind === "gui") && gui.items.length >= apps.items.filter((a) => a.kind === "gui").length);
   // Windows Server (the CI runner) ships no Store apps, so compare against what Windows lists.
   const storeName = process.platform === "win32" && execFileSync("powershell.exe", ["-NoProfile", "-Command",
     "(Get-StartApps | Where-Object AppID -like '*!*' | Select-Object -First 1).Name"], { encoding: "utf8" }).trim();

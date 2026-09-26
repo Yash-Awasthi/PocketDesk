@@ -81,7 +81,9 @@ async function main() {
     c.send({ type: "desktop_privacy", on: true });
     const pv = await c.next((m) => m.type === "desktop_privacy", 20000);
     check("privacy mode turns on for a controlling viewer", pv.ok && pv.on);
-    const hidden = await c.next((m) => m.type === "desktop_frame" && m.base64 !== pushed.base64, 20000);
+    // A still desktop pushes no new frames, so ask for one.
+    c.send({ type: "desktop_frame" });
+    const hidden = await c.next((m) => m.type === "desktop_frame", 20000);
     check("the viewer still sees the desktop under privacy mode", Buffer.from(hidden.base64, "base64").length > 10_000);
     c.send({ type: "desktop_privacy", on: false });
     const off = await c.next((m) => m.type === "desktop_privacy" && m.on === false, 20000).catch(() => ({ on: "timeout" }));

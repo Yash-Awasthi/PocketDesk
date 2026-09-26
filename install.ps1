@@ -53,12 +53,23 @@ try {
     if ($LASTEXITCODE -ge 8) { throw "copying the daemon failed (robocopy $LASTEXITCODE)" }
     Copy-Item (Join-Path $srcRoot "uninstall.ps1") $InstallDir -Force
 
-    # 2. Node.js, private to PocketDesk.
+    # 2. Node.js: a Node 20+ already on PATH is reused, otherwise a private copy. node-pty uses
+    # Node-API, so upgrading that Node later does not break it. Console access needs the private copy.
     $nodeDir = Join-Path $InstallDir "node"
-    # The parentheses matter: PowerShell 5 passes an unenumerated JSON array down the pipe as one object.
-    $want = ((Invoke-RestMethod "https://nodejs.org/dist/index.json") | Where-Object { $_.lts } | Select-Object -First 1).version
+    $npm = "$nodeDir\npm.cmd"
+    $systemNode = Get-Command node.exe -ErrorAction SilentlyContinue
+    $systemMajor = if ($systemNode) { [int]((& $systemNode.Source --version) -replace '^v(\d+).*', '$1') } else { 0 }
+    if (-not $Console -and -not (Test-Path "$nodeDir\node.exe") -and $systemMajor -ge 20) {
+        Step "Using Node.js $(& $systemNode.Source --version) from $($systemNode.Source)"
+        $npm = Join-Path (Split-Path $systemNode.Source) "npm.cmd"
+        $want = $null
+    } else {
+        # The parentheses matter: PowerShell 5 passes an unenumerated JSON array down the pipe as one object.
+        $want = ((Invoke-RestMethod "https://nodejs.org/dist/index.json") | Where-Object { $_.lts } | Select-Object -First 1).version
+        $env:PATH = "$nodeDir;$env:PATH"
+    }
     $have = if (Test-Path "$nodeDir\node.exe") { & "$nodeDir\node.exe" --version } else { "" }
-    if ($have -ne $want) {
+    if ($want -and $have -ne $want) {
         Step "Downloading Node.js $want"
         Download "https://nodejs.org/dist/$want/node-$want-win-x64.zip" "$tmp\node.zip"
         Download "https://nodejs.org/dist/$want/SHASUMS256.txt" "$tmp\node.sha256"
@@ -70,8 +81,12 @@ try {
     }
 
     # 3. ffmpeg for the H.264 desktop stream (without it the desktop falls back to slow JPEG frames).
+    # One already on PATH is used as is; the daemon looks there when no private copy exists.
     $ffDir = Join-Path $InstallDir "ffmpeg"
-    if (-not (Test-Path "$ffDir\ffmpeg.exe")) {
+    $systemFfmpeg = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
+    if (-not (Test-Path "$ffDir\ffmpeg.exe") -and $systemFfmpeg) {
+        Step "Using ffmpeg from $($systemFfmpeg.Source)"
+    } elseif (-not (Test-Path "$ffDir\ffmpeg.exe")) {
         Step "Downloading ffmpeg (about 110 MB, once)"
         Download "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" "$tmp\ffmpeg.zip"
         Download "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256" "$tmp\ffmpeg.sha256"
@@ -81,18 +96,35 @@ try {
         Copy-Item (Get-ChildItem "$tmp\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName $ffDir
     }
 
-    # 4. Dependencies, with the private Node.
+    # 4. Dependencies.
     Step "Installing dependencies"
-    $env:PATH = "$nodeDir;$env:PATH"
     Push-Location $daemon
     try {
-        & "$nodeDir\npm.cmd" ci --omit=dev --no-audit --no-fund --loglevel=error
+        & $npm ci --omit=dev --no-audit --no-fund --loglevel=error
         if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
     } finally { Pop-Location }
 
     # 5. The tray: starts at logon and runs the daemon.
     Step "Installing the tray"
     & "$daemon\scripts\install-service.ps1" -DaemonDir $daemon -InstallDir $InstallDir -NoStart:$NoStart
+
+    # Listed under Settings > Apps > Installed apps, whose Uninstall button runs uninstall.ps1.
+    $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PocketDesk"
+    New-Item -Path $key -Force | Out-Null
+    $size = [int]((Get-ChildItem $InstallDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1KB)
+    $entry = @{
+        DisplayName     = "PocketDesk"
+        DisplayVersion  = if ($Ref) { $Ref.TrimStart("v") } else { "dev" }
+        Publisher       = "PocketDesk"
+        InstallLocation = $InstallDir
+        DisplayIcon     = Join-Path $InstallDir "PocketDeskTray.exe"
+        UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`""
+        URLInfoAbout    = "https://github.com/$repo"
+    }
+    foreach ($name in $entry.Keys) { Set-ItemProperty -Path $key -Name $name -Value $entry[$name] }
+    foreach ($name in "NoModify", "NoRepair", "EstimatedSize") {
+        New-ItemProperty -Path $key -Name $name -PropertyType DWord -Value $(if ($name -eq "EstimatedSize") { $size } else { 1 }) -Force | Out-Null
+    }
 
     # 5b. Console endpoint (opt-in): the SYSTEM secure-desktop entry. Needs one elevation.
     if ($Console) {

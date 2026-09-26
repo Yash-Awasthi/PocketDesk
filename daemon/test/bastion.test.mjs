@@ -3,6 +3,7 @@
 // and haven-ssh-client (ssh_vnc_client). In-memory and deterministic.
 import { check, connectRaw, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
 import ssh2 from "ssh2";
+import { generateKeyPair as edPair } from "../src/advanced_ssh_server.js";
 
 const IS_WIN = process.platform === "win32";
 const tmp = makeTmp("rh-t-");
@@ -220,7 +221,7 @@ async function main() {
   c.send({ type: "sshserver_user_add", username: "jumped", password: "tpw" });
   await c.next((m) => m.type === "sshserver_user_added");
 
-  const pair = ssh2.utils.generateKeyPairSync("ed25519");
+  const pair = edPair();
   c.send({ type: "bastion_user_add", username: "alice2", publicKey: pair.public, accessLevel: "admin" });
   const ju = await c.next((m) => m.type === "bastion_user_added");
 
@@ -258,7 +259,7 @@ async function main() {
   check("proxied traffic is accounted", !!proxied && proxied.outputBytes > 0 && proxied.commandCount === 1);
 
   // Offers alice2's public key but signs with another key: only a verified signature stops it.
-  const forged = ssh2.utils.parseKey(ssh2.utils.generateKeyPairSync("ed25519").private);
+  const forged = ssh2.utils.parseKey(edPair().private);
   const realPub = ssh2.utils.parseKey(pair.public);
   forged.getPublicSSH = () => realPub.getPublicSSH();
   const forgedLogin = await sshTry({ port: bsrv.port, username: "alice2@target", authHandler: (_m, _p, cb) => cb({ type: "publickey", username: "alice2@target", key: forged }) });

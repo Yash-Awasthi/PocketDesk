@@ -246,7 +246,9 @@ export default function agentsHandlers(ctx) {
     // Everything installed on this machine, not only what ships a manifest.
     async apps_discover(ws, msg) {
       if (msg.refresh) appDiscovery.discover({ refresh: true });
-      send(ws, { type: "apps", items: appDiscovery.search(msg.q ?? "") });
+      // The app drawer asks for windowed apps only; mixed in with PATH tools they fell past the limit.
+      const gui = msg.kind === "gui";
+      send(ws, { type: "apps", items: appDiscovery.search(msg.q ?? "", gui ? 2000 : 200, gui ? "gui" : null) });
     },
     // ── Model selection (phone picks the model a chat runs with) ───────────
     async model_list(ws, msg) {

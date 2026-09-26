@@ -168,9 +168,9 @@ export function discover({ refresh = false } = {}) {
  * Matches for a search box. The full scan runs into the thousands on a normal
  * machine, so the phone asks for a slice rather than the whole index.
  */
-export function search(q = "", limit = 200) {
+export function search(q = "", limit = 200, kind = null) {
   const needle = String(q).trim().toLowerCase();
-  const apps = discover();
+  const apps = discover().filter((a) => !kind || a.kind === kind);
   return (needle ? apps.filter((a) => a.name.toLowerCase().includes(needle)) : apps).slice(0, limit);
 }
 

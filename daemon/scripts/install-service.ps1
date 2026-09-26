@@ -114,6 +114,16 @@ if ($needBuild) {
 # The tray spawns the daemon from this folder.
 Set-Content -Path (Join-Path $InstallDir "PocketDeskTray.ini") -Value $DaemonDir
 
+# Start Menu and desktop shortcuts: a click starts the tray, or shows the pairing page if it already runs.
+$shell = New-Object -ComObject WScript.Shell
+foreach ($dir in @([Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop"))) {
+    $lnk = $shell.CreateShortcut((Join-Path $dir "PocketDesk.lnk"))
+    $lnk.TargetPath = $exe
+    $lnk.WorkingDirectory = $InstallDir
+    $lnk.Description = "Start PocketDesk or pair a phone"
+    $lnk.Save()
+}
+
 # The per-user Run key starts the tray at logon without admin rights.
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -Value "`"$exe`""
 

@@ -51,15 +51,19 @@ async function main() {
   await d.ready;
 
   let ticket = null;
+  let sawRefresh = false;
   for (let i = 0; i < 50 && !ticket; i++) {
     const html = await fetch(`http://127.0.0.1:${PORT}/pair?k=${TOKEN}`).then((r) => r.text());
+    sawRefresh ||= html.includes('http-equiv="refresh"');
     ticket = JSON.parse(Buffer.from(html.match(/pocketdesk:\/\/pair#([\w-]+)/)[1], "base64url").toString()).i;
     if (!ticket) await new Promise((r) => setTimeout(r, 100));
   }
   check("pairing QR carries an iroh ticket", typeof ticket === "string" && ticket.length > 20);
+  if (sawRefresh) console.log("  (pair page refreshed itself while iroh was starting)");
 
   const phone = await dialAndHello(ticket, { type: "hello", token: TOKEN, name: "phone" });
   check("master token over iroh pairs and returns a device token", phone.reply?.type === "welcome" && typeof phone.reply.deviceToken === "string");
+  check("welcome tells the phone the current iroh ticket", typeof phone.reply.iroh === "string" && phone.reply.iroh.length > 20);
   await phone.bi.send.writeAll([...frame(Buffer.from(JSON.stringify({ type: "device_list" })))]);
   let list;
   do list = JSON.parse((await readMsg(phone.bi.recv)).toString()); while (list.type !== "device_list");

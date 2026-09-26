@@ -44,6 +44,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -67,8 +68,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.foundation.focusable
@@ -97,8 +98,10 @@ import com.yasha.pocketdesk.WsClient
 /**
  * Remote desktop from the phone. Touchpad mode (default): one finger moves the
  * PC cursor relatively and a tap left-clicks at it; direct mode clicks where you
- * tap. Two fingers pinch-zoom and pan in both modes. The L/R buttons click at the
- * cursor, Drag holds the left button, Apps launches anything installed on the PC.
+ * tap. Hold then move drags, a long press right-clicks. Two fingers: pinch zooms,
+ * a drag scrolls (pans when zoomed in with direct taps), a quick tap right-clicks.
+ * The L/R buttons click at the cursor, Drag holds the left button, Apps launches
+ * anything installed on the PC.
  */
 @Composable
 fun DesktopScreen(
@@ -110,8 +113,13 @@ fun DesktopScreen(
     onShowKeys: (Boolean) -> Unit,
 ) {
     val desktopError by ws._desktopError.collectAsState()
-    var touchpad by remember { mutableStateOf(true) }
+    // Input mode, quality and the shortcut bar are remembered between sessions.
+    val prefs = LocalContext.current.getSharedPreferences("pocketdesk", android.content.Context.MODE_PRIVATE)
+    remember { prefs.getString("desktop_preset", null)?.takeIf { it in PRESETS }?.let { ws.desktopPreset = it }; true }
+    var touchpad by remember { mutableStateOf(prefs.getBoolean("desktop_touchpad", true)) }
+    var shortcuts by remember { mutableStateOf(prefs.getBoolean("desktop_shortcuts", true)) }
     var dragLock by remember { mutableStateOf(false) }
+    val haptic = LocalHapticFeedback.current
     var showApps by remember { mutableStateOf(false) }
     var cursor by remember { mutableStateOf<Offset?>(null) }
     var zoom by remember { mutableFloatStateOf(1f) }
@@ -183,10 +191,12 @@ fun DesktopScreen(
         true
     }) {
         if (!fullscreen) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                // Only the title and two controls share the row; everything else lives in the menu,
+                // so the title never gets squeezed on a narrow phone.
                 Column(Modifier.weight(1f)) {
-                    Text("Desktop", style = MaterialTheme.typography.titleMedium)
+                    Text("Desktop", style = MaterialTheme.typography.titleMedium, maxLines = 1, softWrap = false)
                     Text(
                         listOfNotNull(
                             "● REC".takeIf { ws.desktopRecording && ws.desktopStreaming },
@@ -200,31 +210,42 @@ fun DesktopScreen(
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                     )
                 }
-                if (video && ws.desktopMonitors.size > 1) TextButton(onClick = {
-                    ws.desktopMonitor = (ws.desktopMonitor + 1) % ws.desktopMonitors.size
-                    ws.desktopStartVideo()
-                }) { Text("🖥 " + ws.desktopMonitors.getOrElse(ws.desktopMonitor) { "1" }.substringBefore(" ")) }
-                if (video) TextButton(onClick = {
-                    ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
-                    ws.desktopStartVideo()
-                }) { Text(ws.desktopPreset.replaceFirstChar { it.uppercase() }) }
                 TextButton(onClick = { ws.desktopViewOnly = !ws.desktopViewOnly; ws.desktopStartVideo() }) {
-                    Text(if (ws.desktopViewOnly) "👁 View" else "🖱 Control")
+                    Text(if (ws.desktopViewOnly) "View only" else "Control", maxLines = 1, softWrap = false)
                 }
-                if (!ws.desktopViewOnly) TextButton(onClick = sendFiles) { Text("📎") }
-                TextButton(onClick = { touchpad = !touchpad }) { Text(if (touchpad) "Touchpad" else "Direct tap") }
                 var more by remember { mutableStateOf(false) }
                 var power by remember { mutableStateOf<String?>(null) }
                 Box {
-                    TextButton(onClick = { more = true }) { Text("⋮") }
+                    IconButton(onClick = { more = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
                     androidx.compose.material3.DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
-                        if (!ws.desktopViewOnly) androidx.compose.material3.DropdownMenuItem(
-                            text = { Text(if (ws.desktopPrivacy) "Turn privacy mode off" else "Privacy mode (blank the PC screen)") },
-                            onClick = { more = false; ws.setDesktopPrivacy(!ws.desktopPrivacy) },
-                        )
-                        POWER_ACTIONS.forEach { (a, l) ->
-                            androidx.compose.material3.DropdownMenuItem(text = { Text(l) }, onClick = { more = false; power = a })
+                        @Composable
+                        fun Item(label: String, onClick: () -> Unit) =
+                            androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { more = false; onClick() })
+                        if (video && ws.desktopMonitors.size > 1) Item("Screen: " + ws.desktopMonitors.getOrElse(ws.desktopMonitor) { "1" } + " (switch)") {
+                            ws.desktopMonitor = (ws.desktopMonitor + 1) % ws.desktopMonitors.size
+                            ws.desktopStartVideo()
                         }
+                        if (video) Item("Quality: " + ws.desktopPreset.replaceFirstChar { it.uppercase() } + " (switch)") {
+                            ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
+                            prefs.edit().putString("desktop_preset", ws.desktopPreset).apply()
+                            ws.desktopStartVideo()
+                        }
+                        Item(if (touchpad) "Input: Touchpad (switch to direct tap)" else "Input: Direct tap (switch to touchpad)") {
+                            touchpad = !touchpad
+                            prefs.edit().putBoolean("desktop_touchpad", touchpad).apply()
+                        }
+                        Item(if (shortcuts) "Hide the shortcut bar" else "Show the shortcut bar") {
+                            shortcuts = !shortcuts
+                            prefs.edit().putBoolean("desktop_shortcuts", shortcuts).apply()
+                        }
+                        if (!ws.desktopViewOnly) {
+                            Item("Send files to the PC", sendFiles)
+                            Item(if (ws.desktopPrivacy) "Turn privacy mode off" else "Privacy mode (blank the PC screen)") {
+                                ws.setDesktopPrivacy(!ws.desktopPrivacy)
+                            }
+                        }
+                        androidx.compose.material3.HorizontalDivider()
+                        POWER_ACTIONS.forEach { (a, l) -> Item(l) { power = a } }
                     }
                 }
                 power?.let { PowerConfirmDialog(ws, it) { power = null } }
@@ -305,19 +326,50 @@ fun DesktopScreen(
                             var lastSent = 0L
                             val start = down.uptimeMillis
                             var end = start
+                            var two = TwoFinger.Undecided
+                            var pinch = 1f
+                            var travel = 0f
+                            var scrollLeft = 0f
+                            var dragging = false
                             while (true) {
                                 val ev = awaitPointerEvent()
                                 val pressed = ev.changes.filter { it.pressed }
                                 if (pressed.isEmpty()) { end = ev.changes.first().uptimeMillis; break }
                                 if (pressed.size >= 2) {
                                     multi = true
-                                    zoom = (zoom * ev.calculateZoom()).coerceIn(1f, 6f)
-                                    pan = Viewport(f, size.width.toFloat(), size.height.toFloat(), zoom, pan + ev.calculatePan()).clampedPan()
+                                    val z = ev.calculateZoom()
+                                    val p = ev.calculatePan()
+                                    if (two == TwoFinger.Undecided) {
+                                        pinch *= z
+                                        travel += p.getDistance()
+                                        two = classifyTwoFinger(pinch, travel, panWhenZoomed = zoom > 1f && !touchpad)
+                                    }
+                                    when (two) {
+                                        TwoFinger.Zoom -> {
+                                            zoom = (zoom * z).coerceIn(1f, 6f)
+                                            pan = Viewport(f, size.width.toFloat(), size.height.toFloat(), zoom, pan + p).clampedPan()
+                                        }
+                                        TwoFinger.Scroll -> {
+                                            val (notches, rest) = wheelNotches(scrollLeft + p.y)
+                                            scrollLeft = rest
+                                            if (notches != 0) ws.desktopWheel(notches * 120)
+                                        }
+                                        TwoFinger.Undecided -> {}
+                                    }
                                 } else if (!multi) {
                                     val ch = pressed.first()
                                     val delta = ch.positionChange()
+                                    val wasStill = moved <= 8f
                                     moved += delta.getDistance()
                                     val vp = Viewport(f, size.width.toFloat(), size.height.toFloat(), zoom, pan)
+                                    // Held still first, then moved: press the left button here and drag.
+                                    if (wasStill && moved > 8f && ch.uptimeMillis - start >= DRAG_HOLD_MS) {
+                                        cursor?.let { c ->
+                                            dragging = true
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            ws.desktopPress(c.x.toInt(), c.y.toInt(), true)
+                                        }
+                                    }
                                     val next = if (touchpad) vp.clampFrame((cursor ?: Offset.Zero) + delta / vp.scale)
                                     else vp.toFrame(ch.position)
                                     if (next != null && moved > 8f) {
@@ -332,9 +384,14 @@ fun DesktopScreen(
                                 }
                                 ev.changes.forEach { it.consume() }
                             }
-                            if (multi) return@awaitEachGesture
                             val c = cursor ?: return@awaitEachGesture
+                            // A quick two-finger tap that neither scrolled nor zoomed is a right click.
+                            if (multi) {
+                                if (two == TwoFinger.Undecided && end - start < 300) ws.desktopClick(c.x.toInt(), c.y.toInt(), "right")
+                                return@awaitEachGesture
+                            }
                             when {
+                                dragging -> ws.desktopPress(c.x.toInt(), c.y.toInt(), false)
                                 moved > 8f -> ws.desktopMove(c.x.toInt(), c.y.toInt())
                                 end - start >= 500 -> ws.desktopClick(c.x.toInt(), c.y.toInt(), "right")
                                 else -> ws.desktopClick(c.x.toInt(), c.y.toInt(), "left")
@@ -352,20 +409,12 @@ fun DesktopScreen(
                 }
                 cursor?.let { cur ->
                     val p = Offset(v.left + cur.x * v.scale, v.top + cur.y * v.scale)
-                    if (ws.desktopCursor?.shape == "text") {
-                        val h = 12.dp.toPx()
-                        drawLine(Color.Black, p.copy(y = p.y - h), p.copy(y = p.y + h), strokeWidth = 5f)
-                        drawLine(Color.White, p.copy(y = p.y - h), p.copy(y = p.y + h), strokeWidth = 2.5f)
-                    } else {
-                        val u = 1.dp.toPx()
-                        val arrow = Path().apply {
-                            moveTo(p.x, p.y); lineTo(p.x, p.y + 17 * u); lineTo(p.x + 4.5f * u, p.y + 13 * u)
-                            lineTo(p.x + 7.5f * u, p.y + 19.5f * u); lineTo(p.x + 10 * u, p.y + 18.5f * u)
-                            lineTo(p.x + 7 * u, p.y + 12 * u); lineTo(p.x + 12.5f * u, p.y + 12 * u); close()
-                        }
-                        drawPath(arrow, Color.White)
-                        drawPath(arrow, Color.Black, style = Stroke(width = 1.5f * u))
-                    }
+                    // A small dot centred on the exact click point: precise, and it hides almost nothing.
+                    // The white and dark rings keep it visible on any background.
+                    val u = 1.dp.toPx()
+                    drawCircle(Color.Black.copy(alpha = 0.6f), radius = 4.5f * u, center = p)
+                    drawCircle(Color.White, radius = 3.5f * u, center = p)
+                    drawCircle(if (ws.desktopCursor?.shape == "text") Color(0xFF2F81F7) else Color(0xFFE5362E), radius = 2.5f * u, center = p)
                 }
             }
             if (fullscreen) {
@@ -373,6 +422,7 @@ fun DesktopScreen(
             }
         }
 
+        if (shortcuts && !ws.desktopViewOnly) ShortcutBar(ws)
         // Mouse bar: always visible, in fullscreen too.
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val pad = PaddingValues(horizontal = 4.dp)
@@ -490,7 +540,7 @@ private val PRESETS = listOf("saver", "balanced", "quality")
 @Composable
 private fun AppLauncher(ws: WsClient, onDismiss: () -> Unit) {
     var q by remember { mutableStateOf("") }
-    LaunchedEffect(q) { ws.discoverApps(q) }
+    LaunchedEffect(q) { ws.discoverApps(q, guiOnly = true) }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
@@ -509,4 +559,35 @@ private fun AppLauncher(ws: WsClient, onDismiss: () -> Unit) {
             }
         },
     )
+}
+
+/** Key combinations used all the time, one tap each: (label, virtual key, modifiers). */
+private val SHORTCUTS = listOf(
+    Triple("Copy", 0x43, listOf("ctrl")),
+    Triple("Paste", 0x56, listOf("ctrl")),
+    Triple("Undo", 0x5A, listOf("ctrl")),
+    Triple("Save", 0x53, listOf("ctrl")),
+    Triple("Find", 0x46, listOf("ctrl")),
+    Triple("Alt+Tab", 0x09, listOf("alt")),
+    Triple("Esc", 0x1B, emptyList()),
+    Triple("Enter", 0x0D, emptyList()),
+    Triple("Win", 0x5B, emptyList()),
+    Triple("Desktop", 0x44, listOf("win")),
+    Triple("Task Manager", 0x1B, listOf("ctrl", "shift")),
+)
+
+@Composable
+private fun ShortcutBar(ws: WsClient) {
+    androidx.compose.foundation.lazy.LazyRow(
+        Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        items(SHORTCUTS.size) { i ->
+            val (label, vk, mods) = SHORTCUTS[i]
+            OutlinedButton(onClick = { ws.desktopKey(vk, mods) }, contentPadding = PaddingValues(horizontal = 10.dp), modifier = Modifier.height(34.dp)) {
+                Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
+            }
+        }
+    }
 }

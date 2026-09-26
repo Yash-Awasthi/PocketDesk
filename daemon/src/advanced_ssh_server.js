@@ -23,14 +23,26 @@ const IS_WIN = process.platform === "win32";
 const MAX_AUTH_FAILURES = 10;
 const AUTH_WINDOW_MS = 10 * 60_000;
 
-/** Host key for the listener, generated on first use and reused after. */
-function hostKey() {
-  const file = path.join(configDir, "ssh_host_ed25519");
-  if (!fs.existsSync(file)) {
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(file, utils.generateKeyPairSync("ed25519").private, { mode: 0o600 });
+/** ssh2 now and then emits an ed25519 private key its own parser rejects; draw again until one parses. */
+export function generateKeyPair(type = "ed25519", opts) {
+  for (;;) {
+    const pair = utils.generateKeyPairSync(type, opts);
+    if (!(utils.parseKey(pair.private, opts?.passphrase) instanceof Error)) return pair;
+  }
+}
+
+/** A persisted host key, replaced when missing or unreadable (an earlier bad draw). */
+export function hostKeyFile(file) {
+  if (!fs.existsSync(file) || utils.parseKey(fs.readFileSync(file)) instanceof Error) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, generateKeyPair().private, { mode: 0o600 });
   }
   return fs.readFileSync(file);
+}
+
+/** Host key for the listener, generated on first use and reused after. */
+function hostKey() {
+  return hostKeyFile(path.join(configDir, "ssh_host_ed25519"));
 }
 
 function constantTimeEquals(a, b) {
