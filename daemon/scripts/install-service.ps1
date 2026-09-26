@@ -100,10 +100,14 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 # A running tray locks its exe and owns a daemon on the port; stop both before replacing it.
 foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe'")) {
-    Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId)" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    $kids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId)")
     Stop-Process -Id $t.ProcessId -Force -ErrorAction SilentlyContinue
+    # The daemon sees its stdin close and stops its agents first; one that does not exit in time is killed.
+    foreach ($k in $kids) {
+        Wait-Process -Id $k.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+        Stop-Process -Id $k.ProcessId -Force -ErrorAction SilentlyContinue
+    }
 }
-Start-Sleep -Milliseconds 500
 
 $needBuild = -not (Test-Path $exe) -or (Get-Item $src).LastWriteTime -gt (Get-Item $exe).LastWriteTime
 if ($needBuild) {

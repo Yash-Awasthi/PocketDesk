@@ -1,7 +1,7 @@
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { spawn, execFile } from "node:child_process";
+import { spawn, execFile, execFileSync } from "node:child_process";
 
 const IS_WIN = process.platform === "win32";
 import { StringDecoder } from "node:string_decoder";
@@ -591,6 +591,16 @@ export function cancel(c) {
     pushState(c);
   }
   return true;
+}
+
+/** Shutdown: tree-kill every running agent before the daemon exits. */
+export function killAll() {
+  for (const c of chats.values()) {
+    if (!c.proc) continue;
+    if (IS_WIN && c.proc.pid) try { execFileSync("taskkill", ["/PID", String(c.proc.pid), "/T", "/F"], { stdio: "ignore", timeout: 5000, windowsHide: true }); } catch {}
+    try { c.proc.kill(); } catch {}
+    c.proc = null;
+  }
 }
 
 function pushState(c) {

@@ -43,10 +43,14 @@ try {
     $srcDaemon = Join-Path $srcRoot "daemon"
     # A running tray and daemon hold files open in the install folder.
     foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe'")) {
-        Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId)" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        $kids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId)")
         Stop-Process -Id $t.ProcessId -Force -ErrorAction SilentlyContinue
+        # The daemon sees its stdin close and stops its agents first; one that does not exit in time is killed.
+        foreach ($k in $kids) {
+            Wait-Process -Id $k.ProcessId -Timeout 10 -ErrorAction SilentlyContinue
+            Stop-Process -Id $k.ProcessId -Force -ErrorAction SilentlyContinue
+        }
     }
-    Start-Sleep -Milliseconds 500
     $daemon = Join-Path $InstallDir "app\daemon"
     if (Test-Path $daemon) { Remove-Item -Recurse -Force $daemon }
     robocopy $srcDaemon $daemon /E /XD node_modules /NFL /NDL /NJH /NJS /NP | Out-Null

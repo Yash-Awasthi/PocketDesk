@@ -1,6 +1,7 @@
 import { loadConfig, saveConfig } from "./config.js";
 import { start } from "./server.js";
 import { killAll, liveIds, stopReaper } from "./sessions.js";
+import * as chat from "./chat.js";
 
 // ── Graceful shutdown ───────────────────────────────────────────────────────
 // On SIGTERM/SIGINT: kill all live PTY sessions (no orphaned children), stop
@@ -23,6 +24,7 @@ function gracefulShutdown(signal) {
     console.log(`[shutdown] killed ${killed} PTY session(s)`);
   }
 
+  chat.killAll();
   stopReaper();
 
   console.log("[shutdown] clean exit");
@@ -31,6 +33,12 @@ function gracefulShutdown(signal) {
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+// Windows has no SIGTERM for a windowless child: the tray asks for a clean stop by closing stdin,
+// which also happens when the tray itself dies, so the daemon never outlives it.
+if (process.env.RH_STOP_ON_STDIN_EOF === "1") {
+  process.stdin.on("end", () => gracefulShutdown("stdin closed"));
+  process.stdin.resume();
+}
 
 const cfg = loadConfig();
 start(cfg, {

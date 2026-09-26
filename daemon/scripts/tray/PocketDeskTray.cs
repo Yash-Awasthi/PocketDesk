@@ -32,6 +32,7 @@ namespace PocketDeskTray
         readonly ToolStripMenuItem startItem;
         readonly ToolStripMenuItem stopItem;
         Process daemon;
+        SynchronizationContext ui;
         string port = "8765";
         string token = "";
         bool tlsEnabled;
@@ -49,6 +50,7 @@ namespace PocketDeskTray
             LoadDaemonDir();
 
             var menu = new ContextMenuStrip();
+            ui = SynchronizationContext.Current;
             // Settings change (first run writes them; the port can be edited), so read them on every open.
             menu.Opening += (s, e) => LoadConfig();
             menu.Items.Add("Pair a phone...", null, (s, e) => OpenUrl(BaseUrl() + "/pair?k=" + Uri.EscapeDataString(token)));
@@ -156,14 +158,20 @@ namespace PocketDeskTray
                     WorkingDirectory = daemonDir,
                     CreateNoWindow = true,
                     UseShellExecute = false,
+                    RedirectStandardInput = true,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                 };
                 var bundledFfmpeg = Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe");
                 if (File.Exists(bundledFfmpeg)) psi.EnvironmentVariables["FFMPEG_PATH"] = bundledFfmpeg;
+                // Closing stdin asks the daemon to stop its agents and helpers, then exit.
+                psi.EnvironmentVariables["RH_STOP_ON_STDIN_EOF"] = "1";
                 // Fresh log per start; the daemon's banner and connection lines land here.
                 var log = new StreamWriter(LogPath, false) { AutoFlush = true };
                 daemon = Process.Start(psi);
+                var started = daemon;
+                daemon.EnableRaisingEvents = true;
+                daemon.Exited += (s, e) => ui.Post(_ => { if (daemon == started) { daemon = null; SetRunning(false); ShowBalloon("daemon stopped"); } }, null);
                 DataReceivedEventHandler write = (s, e) => { if (e.Data != null) lock (log) log.WriteLine(e.Data); };
                 daemon.OutputDataReceived += write;
                 daemon.ErrorDataReceived += write;
@@ -181,14 +189,28 @@ namespace PocketDeskTray
         void StopDaemon()
         {
             if (daemon == null) return;
+            var d = daemon;
+            daemon = null;
             try
             {
-                if (!daemon.HasExited) daemon.Kill();
-                daemon.Dispose();
+                d.StandardInput.Close();
+                // A daemon that does not finish in time is tree-killed so nothing it started is left behind.
+                if (!d.WaitForExit(10000)) KillTree(d.Id);
+                d.Dispose();
             }
             catch { }
-            daemon = null;
             SetRunning(false);
+            ShowBalloon("daemon stopped");
+        }
+
+        static void KillTree(int pid)
+        {
+            try
+            {
+                var p = Process.Start(new ProcessStartInfo("taskkill", "/PID " + pid + " /T /F") { CreateNoWindow = true, UseShellExecute = false });
+                p.WaitForExit(10000);
+            }
+            catch { }
         }
 
         void SetRunning(bool running)
