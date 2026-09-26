@@ -22,7 +22,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 🖥️ **Live Terminal** | Real-time PTY streaming with extra keys (Esc, Tab, Ctrl+C/D/Z, arrows) — seq-numbered output with missed-output backfill after reconnect |
 | 💬 **AI Chat** | ChatGPT-style conversation with streaming responses and tool indicators |
 | 📊 **Dashboard** | Real-time stats, activity timeline, plugin status, connected clients |
-| 📁 **Files** | A Files tab for your home folder: open or share a file in any phone app, save it to Downloads, upload, rename, create folders, delete to the Recycle Bin, search by name, copy a path (`fs_op`, `fs_search`) |
+| 📁 **Files** | A Files tab for your home folder: open or share a file in any phone app, save it to Downloads, upload, rename, create folders, delete to the Recycle Bin, search by name, copy a path. Long press to select several files for download or delete, download a folder as a .zip, sort by name, date or size, and see thumbnails of images (`fs_op`, `fs_search`, `fs_zip`, `fs_thumb`) |
 | 🔐 **TLS + Pinning** | Self-signed cert support with SHA-256 fingerprint pinning |
 | 📦 **Auto-Install** | One-tap npm/pip install with live progress output |
 | 🪟 **IDE Launch** | Open any installed desktop IDE or GUI app on the PC from the phone, at the project folder you picked — the window opens on the PC, then the Desktop screen drives it (`gui_open`) |
@@ -32,7 +32,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📱 **Multi-PC** | Connect to multiple PCs, each with pinned certificates |
 | 🔔 **Background Notify** | Get notified when sessions end while the app is in background |
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states |
-| 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware H.264 up to 60 fps (WebCodecs in the browser), any monitor, the PC pointer drawn on the viewer as a small dot centred on the click point, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows). |
+| 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware H.264 up to 60 fps (WebCodecs in the browser), any monitor, the PC pointer drawn on the viewer as a small dot centred on the click point; touch gestures (two-finger scroll, two-finger tap for right click, hold then move to drag, pinch to zoom), a one-tap shortcut bar (Copy, Paste, Undo, Alt+Tab, Win, Task Manager…) and an app drawer of every installed program, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows). |
 | 📋 **Clipboard & file drop** | Text, images and copied files move between the PC and the viewer while the desktop is open; files sent from the phone or browser are pasted straight into the focused PC window. |
 | 👁 **Session privacy** | The PC shows who is viewing with a Disconnect button, can require Allow / View only / Deny first, and viewers can join view-only. |
 | 🎥 **Session recording** | Optional MP4 of the watched screen, asciicast of terminals, and a log of every viewer, approval and file sent. |
