@@ -100,16 +100,19 @@ New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
 # A running tray locks its exe and owns a daemon on the port; stop both before replacing it.
 foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe'")) {
-    Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId)" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    $kids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId)")
     Stop-Process -Id $t.ProcessId -Force -ErrorAction SilentlyContinue
+    # The daemon sees its stdin close and stops its agents first; one that does not exit in time is
+    # tree-killed, so its terminals go too. The held handle keeps the pid from being reused meanwhile.
+    foreach ($k in $kids) {
+        $p = Get-Process -Id $k.ProcessId -ErrorAction SilentlyContinue
+        if ($p -and -not $p.WaitForExit(10000)) { taskkill /PID $p.Id /T /F 2>&1 | Out-Null }
+    }
 }
-Start-Sleep -Milliseconds 500
 
-$needBuild = -not (Test-Path $exe) -or (Get-Item $src).LastWriteTime -gt (Get-Item $exe).LastWriteTime
-if ($needBuild) {
-    & $csc /nologo /target:winexe /out:$exe /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll $src
-    if ($LASTEXITCODE -ne 0) { throw "compile failed" }
-}
+# Always rebuilt: a release zip gives the source its commit time, often older than the previous exe.
+& $csc /nologo /target:winexe /out:$exe /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll $src
+if ($LASTEXITCODE -ne 0) { throw "compile failed" }
 
 # The tray spawns the daemon from this folder.
 Set-Content -Path (Join-Path $InstallDir "PocketDeskTray.ini") -Value $DaemonDir

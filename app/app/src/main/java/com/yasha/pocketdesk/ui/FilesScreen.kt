@@ -8,7 +8,13 @@ import android.webkit.MimeTypeMap
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,6 +71,7 @@ import java.io.File
 private data class FileRow(val path: String, val name: String, val dir: Boolean, val size: Long?, val mtime: Long?)
 
 /** Browse the PC's files: open, share, save, upload, rename, delete and search. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun FilesScreen(ws: WsClient) {
     val ctx = LocalContext.current
@@ -77,9 +84,36 @@ fun FilesScreen(ws: WsClient) {
     var renaming by remember { mutableStateOf<FileRow?>(null) }
     var deleting by remember { mutableStateOf<FileRow?>(null) }
     var creating by remember { mutableStateOf(false) }
+    val prefs = remember { ctx.getSharedPreferences("pocketdesk", Context.MODE_PRIVATE) }
+    var sort by remember { mutableStateOf(prefs.getString("files_sort", "name") ?: "name") }
+    var descending by remember { mutableStateOf(prefs.getBoolean("files_desc", false)) }
+    val selected = remember { androidx.compose.runtime.mutableStateListOf<String>() }
+    var deletingMany by remember { mutableStateOf(false) }
 
     fun refresh() { listing?.path?.let { ws.browse(it, hidden) } }
-    fun open(path: String?) { searching = false; ws.fsFound = null; ws.browse(path, hidden) }
+    fun open(path: String?) { selected.clear(); searching = false; ws.fsFound = null; ws.browse(path, hidden) }
+
+    /** Saves PC files to the phone's Downloads one after another, then reports once. */
+    fun saveAll(items: List<Pair<String, String>>, i: Int = 0) {
+        if (i == items.size) { status = "Saved ${items.size} to Downloads"; return }
+        val (path, name) = items[i]
+        saveToDownloads(ctx, name) { out, finish ->
+            ws.downloadFile(path, out::write,
+                onProgress = { n, _ -> status = "Saving $name (${i + 1}/${items.size}) · ${sizeText(n)}" },
+                onDone = { err -> finish(err); if (err != null) status = "Saving $name failed: $err" else saveAll(items, i + 1) })
+        }
+    }
+    // A folder is zipped on the PC first; the zip then downloads like any file.
+    LaunchedEffect(Unit) {
+        ws.fsZips.collect { (folder, zip, err) ->
+            val name = folder.trimEnd('\\', '/').substringAfterLast('\\').substringAfterLast('/') + ".zip"
+            if (zip == null) status = "Zipping $name failed: $err" else saveAll(listOf(zip to name))
+        }
+    }
+    fun downloadFolder(path: String) {
+        status = "Zipping ${path.substringAfterLast('\\').substringAfterLast('/')} on the PC…"
+        ws.zipFolder(path)
+    }
 
     LaunchedEffect(Unit) { ws.browse(listing?.path, hidden) }
     LaunchedEffect(Unit) {
@@ -115,14 +149,26 @@ fun FilesScreen(ws: WsClient) {
         if (uris.isNotEmpty()) next(0)
     }
 
-    val rows: List<FileRow> = if (searching) {
+    val unsorted: List<FileRow> = if (searching) {
         ws.fsFound?.items?.map { FileRow(it.path, it.name, it.dir, it.size, null) } ?: emptyList()
     } else {
         listing?.items?.map { FileRow(childPath(listing.path, it.name), it.name, it.isDir, it.size, it.mtime) } ?: emptyList()
     }
+    val rows = sortRows(unsorted, sort, descending)
 
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (selected.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { selected.clear() }) { Icon(Icons.Filled.Close, contentDescription = "Clear selection") }
+            Text("${selected.size} selected", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            TextButton(onClick = { selected.clear(); selected.addAll(rows.map { it.path }) }) { Text("All") }
+            TextButton(onClick = {
+                val picked = rows.filter { it.path in selected }
+                selected.clear()
+                picked.filter { it.dir }.forEach { downloadFolder(it.path) }
+                saveAll(picked.filter { !it.dir }.map { it.path to it.name })
+            }) { Text("Download") }
+            TextButton(onClick = { deletingMany = true }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+        } else Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { if (searching) open(listing?.path) else listing?.parent?.let { open(it) } }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Up")
             }
@@ -145,6 +191,18 @@ fun FilesScreen(ws: WsClient) {
                         more = false; hidden = !hidden; listing?.path?.let { ws.browse(it, hidden) }
                     })
                     DropdownMenuItem(text = { Text("Copy folder path") }, onClick = { more = false; listing?.path?.let { copyText(ctx, it); status = "Path copied" } })
+                    DropdownMenuItem(text = { Text("Download this folder as .zip") }, onClick = { more = false; listing?.path?.let(::downloadFolder) })
+                    HorizontalDivider()
+                    listOf("name" to "Name", "date" to "Date modified", "size" to "Size").forEach { (key, label) ->
+                        DropdownMenuItem(
+                            text = { Text("Sort by $label" + if (sort == key) (if (descending) "  ↓" else "  ↑") else "") },
+                            onClick = {
+                                more = false
+                                if (sort == key) descending = !descending else { sort = key; descending = key != "name" }
+                                prefs.edit().putString("files_sort", sort).putBoolean("files_desc", descending).apply()
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -181,14 +239,33 @@ fun FilesScreen(ws: WsClient) {
         }
         LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
             items(rows, key = { it.path }) { row ->
+                val isSelected = row.path in selected
                 Row(
                     Modifier.fillMaxWidth()
-                        .clickable { if (row.dir) open(row.path) else menuFor = row }
+                        .background(if (isSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                        // Long press starts selecting; while selecting, taps add or remove.
+                        .combinedClickable(
+                            onClick = {
+                                when {
+                                    selected.isNotEmpty() -> if (isSelected) selected.remove(row.path) else selected.add(row.path)
+                                    row.dir -> open(row.path)
+                                    else -> menuFor = row
+                                }
+                            },
+                            onLongClick = { if (isSelected) selected.remove(row.path) else selected.add(row.path) },
+                        )
                         .padding(horizontal = 16.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    Icon(if (row.dir) FolderIcon else FileIcon, contentDescription = if (row.dir) "Folder" else "File",
+                    val thumb = if (!row.dir && IMAGE_EXT.matches(row.name)) ws.thumbs[row.path] else null
+                    if (!row.dir && IMAGE_EXT.matches(row.name)) LaunchedEffect(row.path) {
+                        if (!ws.thumbs.containsKey(row.path)) ws.requestThumb(row.path, 128)
+                    }
+                    val bitmap = remember(thumb) { thumb?.takeIf { it.isNotEmpty() }?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() } }
+                    if (bitmap != null) Image(bitmap, contentDescription = null, contentScale = ContentScale.Crop,
+                        modifier = Modifier.size(40.dp).clip(RoundedCornerShape(4.dp)))
+                    else Icon(if (row.dir) FolderIcon else FileIcon, contentDescription = if (row.dir) "Folder" else "File",
                         tint = if (row.dir) Color(0xFFE3B341) else MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp))
                     Column(Modifier.weight(1f)) {
                         Text(row.name, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -237,6 +314,7 @@ fun FilesScreen(ws: WsClient) {
                         }
                     } else {
                         MenuAction("Open folder") { menuFor = null; open(row.path) }
+                        MenuAction("Download as .zip") { menuFor = null; downloadFolder(row.path) }
                     }
                     MenuAction("Copy path") { menuFor = null; copyText(ctx, row.path); status = "Path copied" }
                     MenuAction("Rename") { menuFor = null; renaming = row }
@@ -268,7 +346,38 @@ fun FilesScreen(ws: WsClient) {
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
         )
     }
+    if (deletingMany) {
+        AlertDialog(
+            onDismissRequest = { deletingMany = false },
+            title = { Text("Delete ${selected.size} items?") },
+            text = { Text("They go to the Recycle Bin on a Windows PC, and are deleted outright elsewhere.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deletingMany = false
+                    selected.toList().forEach { ws.fileOp("delete", it) }
+                    selected.clear()
+                }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = { TextButton(onClick = { deletingMany = false }) { Text("Cancel") } },
+        )
+    }
 }
+
+private val IMAGE_EXT = Regex(".*\\.(png|jpe?g|gif|bmp|webp|tiff?)$", RegexOption.IGNORE_CASE)
+
+/** Folders first, then by the chosen key; names break ties so the order is stable. */
+internal fun <T> sortFiles(rows: List<T>, isDir: (T) -> Boolean, name: (T) -> String, date: (T) -> Long?, size: (T) -> Long?, by: String, desc: Boolean): List<T> {
+    val key: Comparator<T> = when (by) {
+        "date" -> compareBy { date(it) ?: 0L }
+        "size" -> compareBy { size(it) ?: 0L }
+        else -> compareBy(String.CASE_INSENSITIVE_ORDER) { name(it) }
+    }
+    val ordered = if (desc) key.reversed() else key
+    return rows.sortedWith(compareByDescending<T> { isDir(it) }.then(ordered).thenBy(String.CASE_INSENSITIVE_ORDER) { name(it) })
+}
+
+private fun sortRows(rows: List<FileRow>, by: String, desc: Boolean) =
+    sortFiles(rows, { it.dir }, { it.name }, { it.mtime }, { it.size }, by, desc)
 
 @Composable
 private fun MenuAction(label: String, onClick: () -> Unit) {

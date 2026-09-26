@@ -66,6 +66,15 @@ function audit(ws, msg) {
   return all.sort((a, b) => (rank[a.state] ?? 9) - (rank[b.state] ?? 9));
 }
 
+let liveWss = null;
+let stopping = null;
+
+/** Shutdown: closes every client and refuses new ones, which could otherwise start work nothing will clean up. */
+export function closeClients(code, reason) {
+  stopping = { code, reason };
+  for (const ws of liveWss?.clients ?? []) try { ws.close(code, reason); } catch {}
+}
+
 export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = {}) {
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
   const page = fs.readFileSync(path.join(publicDir, "index.html"));
@@ -160,6 +169,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   // before any socket is established. Native app clients send no Origin.
   // Largest legitimate message is a clipboard image (24 MB of base64, see clipboard_set).
   const wss = new WebSocketServer({ noServer: true, maxPayload: 32 << 20 });
+  liveWss = wss;
   server.on("upgrade", (req, socket, head) => {
     const samePath = req.url === "/ws";
     let originOk = true;
@@ -184,6 +194,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   });
 
   wss.on("connection", (ws, req) => {
+    if (stopping) return ws.close(stopping.code, stopping.reason);
     // Read off `req`: the ws instance exposes the socket as `_socket`, so the
     // old `ws.socket?.remoteAddress` was always undefined and every client
     // shared one counter — five bad tokens locked out the whole LAN.

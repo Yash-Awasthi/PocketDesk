@@ -111,7 +111,7 @@ and paired phones.
 Any of these:
 
 - **Settings > Apps > Installed apps**, find **PocketDesk**, then **Uninstall**.
-- Double-click **PocketDesk-Uninstall.exe** from the [latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest); it asks before removing anything.
+- Right-click the tray icon, then **Uninstall PocketDesk**.
 - From PowerShell:
 
 ```powershell

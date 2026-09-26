@@ -29,15 +29,20 @@ namespace PocketDeskTray
     internal class TrayContext : ApplicationContext
     {
         readonly NotifyIcon icon;
-        readonly ToolStripMenuItem startItem;
-        readonly ToolStripMenuItem stopItem;
+        readonly ToolStripMenuItem pauseItem;
         Process daemon;
+        StreamWriter log;
+        DateTime startedAt;
+        int quickCrashes;
+        System.Windows.Forms.Timer restart;
+        SynchronizationContext ui;
         string port = "8765";
         string token = "";
         bool tlsEnabled;
         string fingerprint = "";
         string daemonDir;
-        static readonly string LogPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "daemon.log");
+        static readonly string DataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk");
+        static readonly string LogPath = Path.Combine(DataDir, "daemon.log");
         // The daemon checks for this file before every remote viewing session.
         static readonly string ApprovalFlag = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "ask-before-viewing");
         static readonly string RecordFlag = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "record-sessions");
@@ -45,10 +50,13 @@ namespace PocketDeskTray
 
         public TrayContext()
         {
+            // On a fresh PC the daemon has not created it yet, and the log is opened before the daemon starts.
+            try { Directory.CreateDirectory(DataDir); } catch { }
             LoadConfig();
             LoadDaemonDir();
 
             var menu = new ContextMenuStrip();
+            ui = SynchronizationContext.Current;
             // Settings change (first run writes them; the port can be edited), so read them on every open.
             menu.Opening += (s, e) => LoadConfig();
             menu.Items.Add("Pair a phone...", null, (s, e) => OpenUrl(BaseUrl() + "/pair?k=" + Uri.EscapeDataString(token)));
@@ -62,12 +70,11 @@ namespace PocketDeskTray
             menu.Items.Add(recordItem);
             menu.Items.Add("Open recordings", null, (s, e) => { try { Directory.CreateDirectory(Recordings); Process.Start("explorer.exe", Recordings); } catch { } });
             menu.Items.Add(new ToolStripSeparator());
-            startItem = new ToolStripMenuItem("Start daemon", null, (s, e) => StartDaemon());
-            stopItem = new ToolStripMenuItem("Stop daemon", null, (s, e) => StopDaemon());
-            menu.Items.Add(startItem);
-            menu.Items.Add(stopItem);
+            pauseItem = new ToolStripMenuItem("Pause", null, (s, e) => { if (daemon != null || restart != null) StopDaemon(); else { quickCrashes = 0; StartDaemon(); } });
+            menu.Items.Add(pauseItem);
+            menu.Items.Add("Exit (stop everything)", null, (s, e) => { StopDaemon(); icon.Visible = false; Application.Exit(); });
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Exit", null, (s, e) => { StopDaemon(); icon.Visible = false; Application.Exit(); });
+            menu.Items.Add("Uninstall PocketDesk", null, (s, e) => Uninstall());
 
             icon = new NotifyIcon
             {
@@ -77,6 +84,18 @@ namespace PocketDeskTray
             };
             SetRunning(false);
             StartDaemon();
+        }
+
+        void Uninstall()
+        {
+            var script = Path.Combine(ExeDir, "uninstall.ps1");
+            if (!File.Exists(script)) { ShowBalloon("uninstall.ps1 not found next to the tray"); return; }
+            // uninstall.ps1 kills this tray and deletes its folder, so it must not run from inside it.
+            Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\"")
+            {
+                WorkingDirectory = Path.GetTempPath(),
+                UseShellExecute = false,
+            });
         }
 
         void ToggleFlag(string flag)
@@ -144,6 +163,7 @@ namespace PocketDeskTray
 
         void StartDaemon()
         {
+            CancelRestart();
             if (daemon != null && !daemon.HasExited) return;
             try
             {
@@ -156,15 +176,26 @@ namespace PocketDeskTray
                     WorkingDirectory = daemonDir,
                     CreateNoWindow = true,
                     UseShellExecute = false,
+                    RedirectStandardInput = true,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                 };
                 var bundledFfmpeg = Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe");
                 if (File.Exists(bundledFfmpeg)) psi.EnvironmentVariables["FFMPEG_PATH"] = bundledFfmpeg;
-                // Fresh log per start; the daemon's banner and connection lines land here.
-                var log = new StreamWriter(LogPath, false) { AutoFlush = true };
+                // Closing stdin asks the daemon to stop its agents and helpers, then exit.
+                psi.EnvironmentVariables["RH_STOP_ON_STDIN_EOF"] = "1";
+                // Appended so a crash's reason survives the restart; started over once it passes 1 MB.
+                // The previous run's writer still holds the file open; the next start could not open it otherwise.
+                if (log != null) lock (log) log.Dispose();
+                var keep = File.Exists(LogPath) && new FileInfo(LogPath).Length < (1 << 20);
+                var w = log = new StreamWriter(LogPath, keep) { AutoFlush = true };
+                w.WriteLine("---- started " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                 daemon = Process.Start(psi);
-                DataReceivedEventHandler write = (s, e) => { if (e.Data != null) lock (log) log.WriteLine(e.Data); };
+                startedAt = DateTime.Now;
+                var started = daemon;
+                daemon.EnableRaisingEvents = true;
+                daemon.Exited += (s, e) => ui.Post(_ => { if (daemon == started) OnCrash(); }, null);
+                DataReceivedEventHandler write = (s, e) => { if (e.Data != null) lock (w) try { w.WriteLine(e.Data); } catch (ObjectDisposedException) { } };
                 daemon.OutputDataReceived += write;
                 daemon.ErrorDataReceived += write;
                 daemon.BeginOutputReadLine();
@@ -178,24 +209,65 @@ namespace PocketDeskTray
             SetRunning(daemon != null && !daemon.HasExited);
         }
 
-        void StopDaemon()
+        // StopDaemon clears the field first, so an exit that still finds it set was not asked for.
+        void OnCrash()
         {
-            if (daemon == null) return;
-            try
-            {
-                if (!daemon.HasExited) daemon.Kill();
-                daemon.Dispose();
-            }
-            catch { }
             daemon = null;
             SetRunning(false);
+            quickCrashes = (DateTime.Now - startedAt).TotalSeconds < 60 ? quickCrashes + 1 : 1;
+            if (quickCrashes >= 3)
+            {
+                ShowBalloon("PocketDesk keeps stopping. Right-click > Open daemon log to see why, then Resume.");
+                return;
+            }
+            ShowBalloon("PocketDesk stopped unexpectedly; restarting");
+            restart = new System.Windows.Forms.Timer { Interval = 3000 };
+            restart.Tick += (s, e) => StartDaemon();
+            restart.Start();
+            // Still grey, but the menu offers Pause so the restart can be called off.
+            pauseItem.Text = "Pause";
+        }
+
+        void CancelRestart()
+        {
+            if (restart == null) return;
+            restart.Dispose();
+            restart = null;
+        }
+
+        void StopDaemon()
+        {
+            // Pausing during the wait before a restart must keep it paused.
+            if (restart != null) { CancelRestart(); SetRunning(false); ShowBalloon("daemon stopped"); return; }
+            if (daemon == null) return;
+            var d = daemon;
+            daemon = null;
+            try
+            {
+                d.StandardInput.Close();
+                // A daemon that does not finish in time is tree-killed so nothing it started is left behind.
+                if (!d.WaitForExit(10000)) KillTree(d.Id);
+                d.Dispose();
+            }
+            catch { }
+            SetRunning(false);
+            ShowBalloon("daemon stopped");
+        }
+
+        static void KillTree(int pid)
+        {
+            try
+            {
+                var p = Process.Start(new ProcessStartInfo("taskkill", "/PID " + pid + " /T /F") { CreateNoWindow = true, UseShellExecute = false });
+                p.WaitForExit(10000);
+            }
+            catch { }
         }
 
         void SetRunning(bool running)
         {
             if (icon != null) icon.Icon = MakeIcon(running ? Color.FromArgb(76, 175, 80) : Color.FromArgb(158, 158, 158));
-            if (startItem != null) startItem.Enabled = !running;
-            if (stopItem != null) stopItem.Enabled = running;
+            if (pauseItem != null) pauseItem.Text = running ? "Pause" : "Resume";
         }
 
         void ShowBalloon(string message)

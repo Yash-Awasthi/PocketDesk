@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { EventEmitter } from "node:events";
 import pty from "node-pty";
@@ -219,6 +219,8 @@ export function killAll() {
   let killed = 0;
   for (const s of sessions.values()) {
     if (s.exitCode === null) {
+      // Synchronous: the daemon exits right after, and the agent's own children must not outlive it.
+      if (IS_WIN && s.pty.pid) try { execFileSync("taskkill", ["/PID", String(s.pty.pid), "/T", "/F"], { stdio: "ignore", timeout: 5000, windowsHide: true }); } catch {}
       try { s.pty.kill(); } catch {}
       s.exitCode = -1; // mark as killed by shutdown
       s.endedAt = Date.now();

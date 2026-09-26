@@ -1,5 +1,5 @@
-# Builds PocketDesk-Setup.exe and PocketDesk-Uninstall.exe: double-click wrappers around
-# install.ps1 and uninstall.ps1, made with Windows' own IExpress.
+# Builds PocketDesk-Setup.exe: a double-click wrapper around install.ps1, made with Windows' own IExpress.
+# Uninstalling is done from the tray menu or Settings > Apps, both of which run the installed uninstall.ps1.
 #
 #   powershell -ExecutionPolicy Bypass -File daemon\scripts\build-setup.ps1 [-OutDir .]
 
@@ -58,21 +58,9 @@ SourceFiles0=$work\
     }
 }
 
-# Both keep the window open at the end so the outcome can be read.
+# The window stays open only on failure, so a normal run is a single double-click.
 Pack "PocketDesk-Setup.exe" "PocketDesk Setup" "install.ps1" @'
 @echo off
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
 if errorlevel 1 (echo. & echo Setup failed. & pause)
-'@
-
-Pack "PocketDesk-Uninstall.exe" "PocketDesk Uninstall" "uninstall.ps1" @'
-@echo off
-echo This removes PocketDesk from this PC: the tray, its autostart, the shortcuts and the program.
-echo Your settings and paired phones stay in %USERPROFILE%\.pocketdesk.
-echo.
-choice /C YN /M "Remove PocketDesk"
-if errorlevel 2 exit /b 0
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall.ps1"
-echo.
-pause
 '@

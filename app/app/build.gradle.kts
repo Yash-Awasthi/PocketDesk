@@ -19,8 +19,8 @@ android {
         applicationId = "com.yasha.pocketdesk"
         minSdk = 30
         targetSdk = 36
-        versionCode = 11
-        versionName = "0.4.3"
+        versionCode = 15
+        versionName = "0.5.4"
         // iroh's native library is ~14 MB per ABI: phones are arm64, debug adds the emulator's.
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -53,7 +53,11 @@ android {
     packaging {
         resources { excludes += listOf("darwin-*/**", "win32-*/**", "linux-*/**") }
         // Our 16 KB-aligned rebuild in src/main/jniLibs replaces the AAR's; see scripts/build-iroh-android.sh.
-        jniLibs { pickFirsts += "**/libiroh_ffi.so" }
+        jniLibs {
+            pickFirsts += "**/libiroh_ffi.so"
+            // Compressed in the APK (14 MB of iroh shrinks to about 6); Android unpacks it once at install.
+            useLegacyPackaging = true
+        }
     }
 
     compileOptions {

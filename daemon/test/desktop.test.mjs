@@ -40,7 +40,7 @@ async function main() {
       const s = c.helperInput.script + c.helperCapture.script + c.helperClip.script;
       process.stdout.write(JSON.stringify({ follow: /void FollowInput/.test(s), calls: (s.match(/::FollowInput\\(\\)/g) || []).length }));
     });
-  `], { cwd: path.join(REPO, "daemon"), env: { ...process.env, ...env } }).toString());
+  `], { cwd: path.join(REPO, "daemon"), env: { ...process.env, RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT), ...env } }).toString());
   const plainScripts = probeFollow({ RH_CONSOLE: "" });
   check("no desktop-follow without RH_CONSOLE", plainScripts.follow === false && plainScripts.calls === 0);
   if (IS_WIN) {

@@ -64,6 +64,12 @@ class WsClient(
     /** Permission mode chosen on this phone per chat; absent means the PC user's own setting. */
     var chatPermission by mutableStateOf<Map<String, String>>(emptyMap())
         private set
+    /** JPEG thumbnails by PC path; an empty array marks a file the PC could not thumbnail. */
+    val thumbs = androidx.compose.runtime.mutableStateMapOf<String, ByteArray>()
+    /** (folder, zip path on the PC or null, error) once a folder is packed for download. */
+    val fsZips = MutableSharedFlow<Triple<String, String?, String?>>(extraBufferCapacity = 8)
+    fun requestThumb(path: String, size: Int): Boolean = send(Proto.fsThumb(path, size))
+    fun zipFolder(path: String): Boolean = send(Proto.fsZip(path))
     /** Mkdir, rename and delete outcomes, for the file manager to report. */
     val fsResults = MutableSharedFlow<FsResult>(extraBufferCapacity = 16)
     var lastError by mutableStateOf<String?>(null)
@@ -80,7 +86,10 @@ class WsClient(
     // ── Auto-reconnect (client-kt/krossbow backoff + cc-pocket since-reattach) ──
     private var lastToken: String? = null
     private var lastFingerprint: String? = null
-    private var userClosed = false
+    // Read by OkHttp threads; a stale false there schedules a retry after the user said stop.
+    @Volatile private var userClosed = false
+    /** Bumped by close(): a failure from an older link that reaches the main thread late is dropped. */
+    @Volatile private var linkGen = 0
     private val reconnectScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val policy = ReconnectPolicy()
     /** Last output seq seen per session, for missed-output backfill on reattach. */
@@ -314,6 +323,7 @@ class WsClient(
 
     fun close() {
         userClosed = true
+        linkGen++
         retryJob?.cancel()
         // A deliberate disconnect leaves no stale error behind; callers that fail set one after.
         lastError = null
@@ -354,7 +364,7 @@ class WsClient(
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (!socket.compareAndSet(webSocket, null)) return
-            lastError = t.message ?: "connection failed"
+            lastError = friendly(t)
             failTransfers("connection lost")
             scheduleReconnect()
         }
@@ -380,6 +390,14 @@ class WsClient(
         override fun onMessage(webSocket: WebSocket, bytes: okio.ByteString) {
             if (webSocket === socket.get()) onVideoPacket(bytes.toByteArray())
         }
+    }
+
+    private fun friendly(t: Throwable): String = when (t) {
+        is java.net.ConnectException -> "PC not reachable. Is PocketDesk running on it?"
+        is java.net.SocketTimeoutException -> "PC did not answer in time"
+        is java.net.UnknownHostException -> "PC address not found on this network"
+        is java.net.NoRouteToHostException -> "No route to the PC from this network"
+        else -> t.message ?: "connection failed"
     }
 
     private fun onVideoPacket(pkt: ByteArray) {
@@ -827,6 +845,11 @@ class WsClient(
                 Proto.parseFs(m)?.let { dirListing = it }
             }
             "fs_found" -> fsFound = Proto.parseFsFound(m)
+            "fs_thumb" -> {
+                val path = str(m, "path") ?: return
+                thumbs[path] = str(m, "jpeg")?.let { java.util.Base64.getDecoder().decode(it) } ?: ByteArray(0)
+            }
+            "fs_zip" -> fsZips.tryEmit(Triple(str(m, "path") ?: "", str(m, "zip"), str(m, "error")))
             "proposal_created" -> Proto.parseProposal(m["proposal"])?.let { p ->
                 if (proposals.none { it.id == p.id }) {
                     proposals = proposals + p
@@ -1095,6 +1118,12 @@ class WsClient(
      * without passing Disconnected, which would stop the foreground service.
      */
     private fun scheduleReconnect() {
+        // Socket threads land here; on the main thread it cannot interleave with close() or connect().
+        val gen = linkGen
+        reconnectScope.launch(kotlinx.coroutines.Dispatchers.Main) { if (gen == linkGen) scheduleReconnectOnMain() }
+    }
+
+    private fun scheduleReconnectOnMain() {
         // A LAN url that failed here is skipped on this network from now on.
         if (activeUrl != null && activeUrl == lanUrl) lanFailedOn = network.id ?: ""
         if (userClosed || route() == null || lastToken == null) {
@@ -1108,7 +1137,7 @@ class WsClient(
             return
         }
         status = Status.Reconnecting
-        retryJob = reconnectScope.launch {
+        retryJob = reconnectScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             kotlinx.coroutines.delay(delay)
             reconnectNow()
         }

@@ -11,7 +11,8 @@ fs.writeFileSync(path.join(tmpMan, "node.json"), JSON.stringify({ id: "node", na
 
 const daemon = spawn(process.execPath, ["src/index.js"], {
   cwd: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
-  env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan },
+  // Test-only state: never the real ~/.pocketdesk.
+  env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-smoketest", RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT) },
   stdio: ["ignore", "pipe", "pipe"],
 });
 daemon.stdout.on("data", (d) => process.stdout.write("[daemon] " + d));
@@ -85,7 +86,7 @@ async function run() {
   const payload = Buffer.from("pocketdesk-file-transfer-check").toString("base64");
   send({ type: "fwrite", path: path.join(os.tmpdir(), "rh-smoke.bin"), data: payload });
   const fw = await next((m) => m.type === "fwritten" || m.type === "error");
-  check("fwrite stores file", fw.type === "fwritten" && !fw.error && fw.size === 33);
+  check("fwrite stores file", fw.type === "fwritten" && !fw.error && fw.size === Buffer.from(payload, "base64").length);
   send({ type: "fread", path: fw.path, offset: 0 });
   const fr = await next((m) => m.type === "fchunk" || m.type === "error");
   check("fread returns identical bytes", fr.data === payload && fr.eof === true);

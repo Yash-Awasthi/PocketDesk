@@ -69,3 +69,25 @@ jobs:
           name: PocketDesk-debug-apk
           path: app/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 14
+      # The signing key exists only in these secrets, so every release APK is built here.
+      - name: Signed release APK
+        if: github.event_name != 'pull_request'
+        working-directory: app
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > pocketdesk.keystore
+          printf 'storeFile=pocketdesk.keystore\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" > keystore.properties
+          ./gradlew assembleRelease --no-daemon
+          rm pocketdesk.keystore keystore.properties
+      - name: Upload release APK
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketDesk-release-apk
+          path: app/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
