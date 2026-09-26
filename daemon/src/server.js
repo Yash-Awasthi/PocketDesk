@@ -255,8 +255,10 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     if (msg.type !== "hello" || typeof msg.token !== "string") return null;
     const t = msg.token;
     if (t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token))) {
-      const id = String(msg.clientId || crypto.randomUUID());
+      let id = String(msg.clientId || crypto.randomUUID());
       if (devices.isRevoked(id)) return null;
+      // Claiming a paired device's id would replace its token and take over its identity.
+      if (devices.hasToken(id)) id = crypto.randomUUID();
       return { id, pairing: true };
     }
     const d = devices.byToken(t);

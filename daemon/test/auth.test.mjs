@@ -31,6 +31,13 @@ async function main() {
   const again = await hello({ token: deviceToken });
   check("device token authenticates as the same device", again.first.clientId === phone.first.clientId && !again.first.deviceToken);
 
+  const thief = await hello({ token: TOKEN, clientId: phone.first.clientId, name: "thief" });
+  check("pairing cannot claim a paired device's id", thief.first.clientId !== phone.first.clientId);
+  await thief.c.close();
+  const stillMine = await hello({ token: deviceToken });
+  check("paired device keeps its token after a claim attempt", stillMine.first.clientId === phone.first.clientId);
+  await stillMine.c.close();
+
   admin.send({ type: "device_revoke", clientId: phone.first.clientId });
   const rev = await admin.next((m) => m.type === "device_revoked");
   check("revoke acks with a fresh pairing token", rev.ok === true && typeof rev.pairingToken === "string" && rev.pairingToken !== TOKEN);

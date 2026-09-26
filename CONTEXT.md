@@ -145,7 +145,7 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
 
 - ANDROID_HOME set, SDK platforms 36/37, JDK17 at Eclipse Adoptium, node v24.
 - No gradle on PATH; wrapper generated from local dist (9.3.1).
-- openssl only via Git (`C:\Program Files\Git\usr\bin\openssl.exe`); csc.exe available
+- TLS certs are generated in pure Node (no openssl needed); csc.exe available
   (.NET Framework 4) — used to compile tray app.
 - adb not on PATH: `$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe`.
 - Build cmd: `cd app; .\gradlew.bat assembleDebug` (~3 min first time).

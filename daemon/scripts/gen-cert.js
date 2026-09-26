@@ -9,7 +9,7 @@ import { generateSelfSignedCert } from "../src/tls-gen.js";
 const cfg = loadConfig();
 
 if (!generateSelfSignedCert(cfg.tls, configDir)) {
-  console.error("certificate generation failed: openssl.exe not found; install Git for Windows or add openssl to PATH");
+  console.error("certificate generation failed");
   process.exit(1);
 }
 

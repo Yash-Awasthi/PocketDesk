@@ -85,6 +85,10 @@ export function byToken(t) {
   return null;
 }
 
+export function hasToken(clientId) {
+  return Boolean(devices.get(String(clientId))?.tokenHash);
+}
+
 export function isRevoked(clientId) {
   const d = devices.get(String(clientId));
   return Boolean(d?.revoked);

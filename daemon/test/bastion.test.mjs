@@ -126,6 +126,18 @@ async function main() {
   const se = await c.next((m) => m.type === "sshserver_session_ended");
   check("sshserver session ends", se.ok === true);
 
+  c.send({ type: "sshserver_user_add", username: "dave", password: "pw", allowedCommands: ["git status", "git log"] });
+  await c.next((m) => m.type === "sshserver_user_added");
+  c.send({ type: "sshserver_session_create", username: "dave", method: "password", credential: "pw" });
+  const dave = (await c.next((m) => m.type === "sshserver_session_created")).session.id;
+  for (const [command, want] of [["git status -s", true], ["git log", true], ["git -c core.pager=x status", false], ["git push", false], ["git statusx", false]]) {
+    c.send({ type: "sshserver_exec", sessionId: dave, command });
+    check(`argument rule: ${command} -> ${want}`, (await c.next((m) => m.type === "sshserver_exec_ok")).ok === want);
+  }
+  c.send({ type: "sshserver_session_end", sessionId: dave });
+  await c.next((m) => m.type === "sshserver_session_ended");
+
+
   // ── Real SSH round trip: the daemon's own listener, dialled by its own client ─
   c.send({ type: "sshserver_start", port: 0, host: "127.0.0.1" });
   const srv = await c.next((m) => m.type === "sshserver_started", 20000);
