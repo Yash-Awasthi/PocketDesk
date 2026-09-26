@@ -20,6 +20,11 @@ $repo = "Yash-Awasthi/PocketDesk"
 
 function Step($message) { Write-Host "==> $message" -ForegroundColor Cyan }
 function Download($url, $file) { Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file }
+# These binaries run with the user's rights (and SYSTEM's with -Console): refuse any that fail the publisher's checksum.
+function Verify($file, $expected) {
+    $actual = (Get-FileHash -Algorithm SHA256 $file).Hash
+    if (-not $expected -or $actual -ne $expected.Trim()) { throw "checksum mismatch for $(Split-Path -Leaf $file): got $actual, expected $expected" }
+}
 
 $tmp = Join-Path $env:TEMP ("rh-install-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $InstallDir, $tmp | Out-Null
@@ -56,6 +61,9 @@ try {
     if ($have -ne $want) {
         Step "Downloading Node.js $want"
         Download "https://nodejs.org/dist/$want/node-$want-win-x64.zip" "$tmp\node.zip"
+        Download "https://nodejs.org/dist/$want/SHASUMS256.txt" "$tmp\node.sha256"
+        $sums = Get-Content -Raw "$tmp\node.sha256"
+        Verify "$tmp\node.zip" ([regex]::Match($sums, "(?m)^([0-9a-f]{64})\s+node-$([regex]::Escape($want))-win-x64\.zip$").Groups[1].Value)
         Expand-Archive "$tmp\node.zip" "$tmp\node"
         if (Test-Path $nodeDir) { Remove-Item -Recurse -Force $nodeDir }
         Move-Item (Get-ChildItem "$tmp\node" -Directory | Select-Object -First 1).FullName $nodeDir
@@ -66,6 +74,8 @@ try {
     if (-not (Test-Path "$ffDir\ffmpeg.exe")) {
         Step "Downloading ffmpeg (about 110 MB, once)"
         Download "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" "$tmp\ffmpeg.zip"
+        Download "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256" "$tmp\ffmpeg.sha256"
+        Verify "$tmp\ffmpeg.zip" ((Get-Content -Raw "$tmp\ffmpeg.sha256") -split '\s+')[0]
         Expand-Archive "$tmp\ffmpeg.zip" "$tmp\ffmpeg"
         New-Item -ItemType Directory -Force $ffDir | Out-Null
         Copy-Item (Get-ChildItem "$tmp\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName $ffDir

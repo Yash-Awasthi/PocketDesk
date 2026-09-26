@@ -2,6 +2,7 @@ package com.yasha.pocketdesk.ui
 
 import android.annotation.SuppressLint
 import android.webkit.JavascriptInterface
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Arrangement
@@ -158,6 +159,10 @@ fun TerminalScreen(ws: WsClient, sessionId: String, onClose: () -> Unit) {
                             "Android",
                         )
                         webViewClient = object : WebViewClient() {
+                            // Any other page would inherit the Android bridge and could type into the PC shell.
+                            override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                                !request.url.toString().startsWith("file:///android_asset/")
+
                             override fun onPageFinished(view: WebView, url: String) {
                                 holder[0] = view
                                 val flush: List<String>

@@ -1455,7 +1455,7 @@ function renderTodos() {
   if (!items.length) { panel.style.display = "none"; return; }
   panel.style.display = "";
   document.getElementById("todoItems").innerHTML = items.map(t =>
-    `<div class="todo-row" onclick="todoCycle('${esc(t.id)}')">${t.status === "completed" ? "☑" : t.status === "in_progress" ? "◐" : "☐"} ${esc(t.content)}</div>`
+    `<div class="todo-row" onclick="todoCycle(${jsArg(t.id)})">${t.status === "completed" ? "☑" : t.status === "in_progress" ? "◐" : "☐"} ${esc(t.content)}</div>`
   ).join("");
 }
 function todoCycle(tid) {
@@ -1606,6 +1606,8 @@ function bytesToB64(u8) { let s = ""; for (const b of u8) s += String.fromCharCo
 // Quotes too: esc() output lands inside single-quoted onclick="..." attributes,
 // where a bare ' in a client-supplied id would break out into script.
 function esc(s) { const d = document.createElement("div"); d.textContent = s; return d.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;"); }
+// Inline handlers decode entities before JS parses them, so esc() alone cannot keep a quote inside the string.
+function jsArg(s) { return esc(JSON.stringify(String(s))); }
 
 // ── Proposals ──
 function renderProposals() {
@@ -1627,8 +1629,8 @@ function renderProposals() {
       <div class="proposal-summary">${esc(p.summary)}</div>
       ${p.detail ? `<div class="proposal-detail">${esc(JSON.stringify(p.detail).slice(0, 200))}</div>` : ""}
       <div class="proposal-actions">
-        <button class="btn-approve" onclick="approveProposal('${esc(p.id)}')">✓ Approve</button>
-        <button class="btn-reject" onclick="rejectProposal('${esc(p.id)}')">✕ Reject</button>
+        <button class="btn-approve" onclick="approveProposal(${jsArg(p.id)})">✓ Approve</button>
+        <button class="btn-reject" onclick="rejectProposal(${jsArg(p.id)})">✕ Reject</button>
       </div>
     `;
     list.appendChild(card);
@@ -1676,7 +1678,7 @@ function renderDashboard() {
   // Timeline
   const tl = document.getElementById('dTimeline');
   tl.innerHTML = dashActivity.map(a =>
-    `<div class="timeline-item"><div class="timeline-dot ${a.color}"></div><span class="timeline-time">${a.ts}</span><span class="timeline-text">${a.type}</span></div>`
+    `<div class="timeline-item"><div class="timeline-dot ${a.color}"></div><span class="timeline-time">${a.ts}</span><span class="timeline-text">${esc(a.type)}</span></div>`
   ).join('');
 }
 
@@ -1699,8 +1701,8 @@ function renderDevices(m) {
     `<tr><td>${esc(d.name)}${d.id === myClientId ? ' <span style="color:#58a6ff">(this device)</span>' : ""}${d.online ? ' <span style="color:#3fb950">●</span>' : ""}</td>` +
     `<td>${esc(d.platform)}</td><td>${esc(d.lastIp || "—")}</td><td>${new Date(d.lastSeen).toLocaleTimeString()}</td>` +
     `<td>${d.revoked
-      ? `<button class="btn" onclick="deviceAllow('${esc(d.id)}')">Allow</button>`
-      : `<button class="btn danger" onclick="deviceRevoke('${esc(d.id)}')">Revoke</button>`}</td></tr>`
+      ? `<button class="btn" onclick="deviceAllow(${jsArg(d.id)})">Allow</button>`
+      : `<button class="btn danger" onclick="deviceRevoke(${jsArg(d.id)})">Revoke</button>`}</td></tr>`
   ).join("") || `<tr><td colspan="5" style="color:#8b949e">no devices seen</td></tr>`;
 }
 function deviceRevoke(id) {
@@ -1732,9 +1734,9 @@ function renderSchedules(m) {
     return `<tr><td>${esc(j.chatId.slice(0, 10))}</td><td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(j.text)}</td>` +
       `<td>${j.kind === "count" ? kind + " ×" + j.maxRuns : kind}</td><td>${nextIn}</td><td>${runs}</td>` +
       `<td>${j.paused
-        ? `<button class="btn" onclick="schedResume('${esc(j.id)}')">Resume</button>`
-        : `<button class="btn" onclick="schedPause('${esc(j.id)}')">Pause</button>`}
-         <button class="btn danger" onclick="schedCancel('${esc(j.id)}')">✕</button></td></tr>`;
+        ? `<button class="btn" onclick="schedResume(${jsArg(j.id)})">Resume</button>`
+        : `<button class="btn" onclick="schedPause(${jsArg(j.id)})">Pause</button>`}
+         <button class="btn danger" onclick="schedCancel(${jsArg(j.id)})">✕</button></td></tr>`;
   }).join("") || `<tr><td colspan="6" style="color:#8b949e">no scheduled runs</td></tr>`;
 }
 function fmtIn(ms) { if (ms <= 0) return "now"; const s = Math.round(ms / 1000); return s < 90 ? s + "s" : Math.round(s / 60) + "m"; }
@@ -1762,7 +1764,7 @@ function renderPromptQueue(m) {
   bar.style.display = "";
   bar.innerHTML = `<span style="font-size:11px;color:#8b949e;flex-shrink:0">⏭ queued (${queued[m.id].length}):</span>` +
     queued[m.id].map(q =>
-      `<span class="queue-chip">${esc(q.text.length > 38 ? q.text.slice(0, 38) + "…" : q.text)} <a onclick="promptRemove('${esc(q.id)}')" style="cursor:pointer;color:#f85149">✕</a></span>`
+      `<span class="queue-chip">${esc(q.text.length > 38 ? q.text.slice(0, 38) + "…" : q.text)} <a onclick="promptRemove(${jsArg(q.id)})" style="cursor:pointer;color:#f85149">✕</a></span>`
     ).join("");
 }
 function promptRemove(pid) { if (activeChatId) send({ type: "prompt_remove", id: activeChatId, promptId: pid }); }

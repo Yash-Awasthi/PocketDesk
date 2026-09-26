@@ -15,7 +15,7 @@
  *     normalization (multi-monitor), clicks, wheel, virtual-key taps with
  *     ctrl/alt/shift, Unicode text via scan codes.
  * Helpers are DPI-aware and stay warm, so a click costs microseconds instead
- * of a 1-2s process spawn. Scripts are written to temp .ps1 files once and
+ * of a 1-2s process spawn. Scripts are written to .ps1 files in the config dir and
  * run with -ExecutionPolicy Bypass -File (deterministic quoting).
  *
  * Capture runs on a ~300ms loop ONLY while at least one rd client is
@@ -24,11 +24,11 @@
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
-// fs/os/path still used: helper scripts are written to temp .ps1 files once
-// (deterministic for AV scanners, no shell-quoting issues).
+import { configDir } from "./config.js";
+// Helper scripts live in the private config dir: in a shared temp dir another user could
+// swap one in before it runs, as SYSTEM for the console endpoint.
 
 const IS_WIN = process.platform === "win32";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -338,7 +338,7 @@ export class PsHelper {
     this.file = null;
   }
 
-  /** Write the script to a temp .ps1 once (AV-deterministic, no quoting issues). */
+  /** Write the script to a private .ps1 once (AV-deterministic, no quoting issues). */
   ensureFile() {
     if (this.file) {
       try {
@@ -346,7 +346,8 @@ export class PsHelper {
         return this.file;
       } catch { /* rewrite below */ }
     }
-    this.file = path.join(os.tmpdir(), `pocketdesk-${this.name}.ps1`);
+    fs.mkdirSync(path.join(configDir, "helpers"), { recursive: true, mode: 0o700 });
+    this.file = path.join(configDir, "helpers", `${this.name}.ps1`);
     fs.writeFileSync(this.file, this.script, { encoding: "utf8" });
     return this.file;
   }

@@ -84,6 +84,11 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   }
 
   const requestHandler = (req, res) => {
+    // No page here may be framed or content-sniffed; the pair page also carries a secret.
+    res.setHeader("x-frame-options", "DENY");
+    res.setHeader("content-security-policy", "frame-ancestors 'none'");
+    res.setHeader("x-content-type-options", "nosniff");
+    res.setHeader("referrer-policy", "no-referrer");
     if (req.method !== "GET") {
       res.writeHead(405).end();
       return;
@@ -99,7 +104,9 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     // /pair carries the pairing token and is only ever served to the local machine.
     // Windows dual-stack sockets present IPv4 clients as ::ffff:127.0.0.1.
     const remoteAddr = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
-    const loopback = remoteAddr === "127.0.0.1" || remoteAddr === "::1" || remoteAddr === "[::1]";
+    // Host must be loopback too: DNS rebinding delivers a web page's requests from 127.0.0.1 under its own name.
+    const loopback = (remoteAddr === "127.0.0.1" || remoteAddr === "::1" || remoteAddr === "[::1]") &&
+      /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(req.headers.host || "");
     if (req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ status: "healthy", service: "pocketdesk", sessions: allSessions().length }));
@@ -109,7 +116,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
       // The ticket carries current addresses and relay, which change with the network.
       const t = irohEp?.ticket();
       if (t && t !== irohTicket) { irohTicket = t; buildPairPage(useTls); }
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       res.end(pairPage);
       return;
     }

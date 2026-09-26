@@ -27,8 +27,8 @@ function load() {
 
 function save() {
   try {
-    fs.mkdirSync(path.dirname(STORE), { recursive: true });
-    fs.writeFileSync(STORE, JSON.stringify([...devices.values()], null, 2));
+    fs.mkdirSync(path.dirname(STORE), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(STORE, JSON.stringify([...devices.values()], null, 2), { mode: 0o600 });
   } catch {}
 }
 

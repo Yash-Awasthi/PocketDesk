@@ -11,7 +11,9 @@ const dir = process.env.RH_HOME || path.join(os.homedir(), ".pocketdesk");
 const file = path.join(dir, "config.json");
 
 export function loadConfig() {
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  // Holds tokens, keys, transcripts and recordings; mkdir's mode is ignored when the dir already exists.
+  if (process.platform !== "win32") try { fs.chmodSync(dir, 0o700); } catch { /* not ours to change */ }
   // The console endpoint's token opens a SYSTEM daemon, so only Administrators (S-1-5-32-544)
   // and SYSTEM (S-1-5-18) may read its folder. Well-known SIDs keep this locale-independent.
   if (process.env.RH_CONSOLE && process.platform === "win32") {
