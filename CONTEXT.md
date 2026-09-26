@@ -59,6 +59,12 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
   `WTSGetActiveConsoleSessionId`, moves a duplicated SYSTEM token into that session
   (`SetTokenInformation(TokenSessionId)`), and `CreateProcessAsUser`-launches node on
   `winsta0\default`, relaunching across session/logon changes and on child exit.
+- LPE fix (security review): the SYSTEM task must not execute code from a user-writable path.
+  The install copies the launcher, Node, and the daemon tree into `%ProgramData%\PocketDesk\bin`,
+  ACL-locked to Administrators + SYSTEM before the copy, and the task runs the exe from there. The
+  launcher refuses to spawn unless its own dir, its node, and the ini-supplied daemon dir all
+  resolve under `%ProgramData%\PocketDesk` and the node/`src\index.js` exist (no bare-`node`
+  PATH fallback). Teardown removes `bin` always; the token dir stays unless `-Purge`/`-RemoveData`.
 - Env that drives it: `RH_CONSOLE=1`, `RH_HOME`, `RH_PORT=8766`, `RH_LABEL="PC (console)"`.
   `config.js` under `RH_CONSOLE` icacls-locks the dir to Admins+SYSTEM and refuses to start
   without TLS. The capture/input helpers gain `SetThreadDesktop(OpenInputDesktop())` before

@@ -17,6 +17,10 @@ Get-Process PocketDeskConsole -ErrorAction SilentlyContinue | Stop-Process -Forc
 Get-NetTCPConnection -State Listen -LocalPort 8766 -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 
+# The protected bin (launcher + node + daemon copy) holds no secrets — always remove it.
+$consoleBin = Join-Path $env:ProgramData "PocketDesk\bin"
+if (Test-Path $consoleBin) { Remove-Item -Recurse -Force $consoleBin -ErrorAction SilentlyContinue }
+
 $consoleHome = Join-Path $env:ProgramData "PocketDesk\console"
 if ($Purge -and (Test-Path $consoleHome)) {
     Remove-Item -Recurse -Force $consoleHome -ErrorAction SilentlyContinue

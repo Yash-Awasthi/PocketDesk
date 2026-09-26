@@ -113,6 +113,7 @@ system task. The console pairing token in `%ProgramData%\PocketDesk` is kept unl
 | `%USERPROFILE%\.pocketdesk\daemon.log` | Output of the last daemon start. |
 | `%USERPROFILE%\.pocketdesk\recordings\` | Session recordings and `sessions.log`. |
 | `%USERPROFILE%\Downloads\PocketDesk\` | Files sent from a phone or browser into a desktop session. |
+| `%ProgramData%\PocketDesk\bin\` | Console endpoint's launcher, its own copy of Node and the daemon, run as the system account. Write-locked to administrators. Present only with console access. |
 | `%ProgramData%\PocketDesk\console\` | Console endpoint's own config, token and iroh key (system-only; port 8766). Present only with console access. |
 
 While anyone views the desktop, a bar at the top of the PC screen names them and has a

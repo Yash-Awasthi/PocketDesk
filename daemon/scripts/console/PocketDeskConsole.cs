@@ -53,24 +53,46 @@ namespace PocketDeskConsole
 
         static string ExeDir { get { return AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\'); } }
 
+        // Only Administrators + SYSTEM can write here; anything this SYSTEM process executes must
+        // live under it, or an unprivileged user could swap in code that then runs as SYSTEM.
+        static string ProtectedRoot
+        {
+            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "PocketDesk"); }
+        }
+
+        static bool Under(string root, string p)
+        {
+            try {
+                string r = Path.GetFullPath(root).TrimEnd('\\') + "\\";
+                return Path.GetFullPath(p).StartsWith(r, StringComparison.OrdinalIgnoreCase);
+            } catch { return false; }
+        }
+
         static string DaemonDir()
         {
             try {
                 var ini = Path.Combine(ExeDir, "PocketDeskConsole.ini");
                 if (File.Exists(ini)) return File.ReadAllText(ini).Trim().TrimEnd('\\');
             } catch { }
-            return Path.Combine(ExeDir, "app", "daemon");
+            return Path.Combine(ExeDir, "daemon");
         }
 
         static void Main()
         {
             string daemonDir = DaemonDir();
             string node = Path.Combine(ExeDir, "node", "node.exe");
-            if (!File.Exists(node)) node = "node";
             string ffmpeg = Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe");
             string consoleHome = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
                 "PocketDesk", "console");
+
+            // Refuse to spawn as SYSTEM from any path a non-admin could have written. Exit (task
+            // shows failure) rather than launch attacker-controlled code. No bare-"node" PATH
+            // fallback: the executable must be the ACL-locked copy.
+            string root = ProtectedRoot;
+            if (!Under(root, ExeDir) || !Under(root, node) || !Under(root, daemonDir)
+                || !File.Exists(node) || !File.Exists(Path.Combine(daemonDir, "src", "index.js")))
+                Environment.Exit(2);
 
             IntPtr child = IntPtr.Zero;
             uint childSess = INVALID_SESSION;

@@ -24,27 +24,42 @@ if ($Console) {
     }
 
     $consoleSrc = Join-Path $PSScriptRoot "console\PocketDeskConsole.cs"
-    $consoleExe = Join-Path $InstallDir "PocketDeskConsole.exe"
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+    # Everything the SYSTEM task executes lives here, where only Administrators + SYSTEM may write.
+    # The per-user install dir is writable by the user, so running SYSTEM code from it would be a
+    # local privilege-escalation path, hence a separate, locked copy under ProgramData.
+    $root        = Join-Path $env:ProgramData "PocketDesk\bin"
+    $consoleHome = Join-Path $env:ProgramData "PocketDesk\console"
+    $consoleExe  = Join-Path $root "PocketDeskConsole.exe"
 
-    # Stop a running launcher + its console daemon before replacing the exe.
+    $srcNode = Join-Path $InstallDir "node"
+    if (-not (Test-Path (Join-Path $srcNode "node.exe"))) { throw "bundled node not found at $srcNode - run the normal install first, then -Console." }
+
+    # Stop a running launcher + its console daemon before replacing the protected copy.
     schtasks /End /TN "PocketDeskConsole" 2>$null | Out-Null
     Get-Process PocketDeskConsole -ErrorAction SilentlyContinue | Stop-Process -Force
     Get-NetTCPConnection -State Listen -LocalPort 8766 -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 500
 
-    $needBuild = -not (Test-Path $consoleExe) -or (Get-Item $consoleSrc).LastWriteTime -gt (Get-Item $consoleExe).LastWriteTime
-    if ($needBuild) {
-        & $csc /nologo /target:exe /out:$consoleExe /r:System.dll $consoleSrc
-        if ($LASTEXITCODE -ne 0) { throw "console launcher compile failed" }
-    }
+    # Create + lock the protected root BEFORE copying, so all contents inherit the locked ACL.
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    icacls $root /inheritance:r /grant "*S-1-5-32-544:(OI)(CI)F" /grant "*S-1-5-18:(OI)(CI)F" | Out-Null
 
-    # The launcher reads its daemon dir from this ini, exactly like the tray.
-    Set-Content -Path (Join-Path $InstallDir "PocketDeskConsole.ini") -Value $DaemonDir
+    # The executed chain: node, the daemon tree (incl node_modules), and ffmpeg, all copied in.
+    robocopy $srcNode (Join-Path $root "node") /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    robocopy $DaemonDir (Join-Path $root "daemon") /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "copying the daemon into the protected root failed (robocopy $LASTEXITCODE)" }
+    $srcFfmpeg = Join-Path $InstallDir "ffmpeg"
+    if (Test-Path (Join-Path $srcFfmpeg "ffmpeg.exe")) { robocopy $srcFfmpeg (Join-Path $root "ffmpeg") /MIR /NFL /NDL /NJH /NJS /NP | Out-Null }
+
+    # Compile the launcher directly into the protected root.
+    & $csc /nologo /target:exe /out:$consoleExe /r:System.dll $consoleSrc
+    if ($LASTEXITCODE -ne 0) { throw "console launcher compile failed" }
+
+    # The launcher reads its daemon dir from this ini; point it at the protected copy.
+    Set-Content -Path (Join-Path $root "PocketDeskConsole.ini") -Value (Join-Path $root "daemon")
 
     # SYSTEM-only config dir: the token that lands here opens a SYSTEM daemon.
-    $consoleHome = Join-Path $env:ProgramData "PocketDesk\console"
     New-Item -ItemType Directory -Force -Path $consoleHome | Out-Null
     icacls $consoleHome /inheritance:r /grant "*S-1-5-32-544:(OI)(CI)F" /grant "*S-1-5-18:(OI)(CI)F" | Out-Null
 

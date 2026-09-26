@@ -24,6 +24,9 @@ try { Unregister-ScheduledTask -TaskName "PocketDeskConsole" -Confirm:$false -Er
 Get-Process PocketDeskConsole -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Get-NetTCPConnection -State Listen -LocalPort 8766 -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+# The protected bin holds no secrets; the console token dir is kept unless -RemoveData (below).
+$consoleBin = Join-Path $env:ProgramData "PocketDesk\bin"
+if (Test-Path $consoleBin) { Remove-Item -Recurse -Force $consoleBin -ErrorAction SilentlyContinue }
 
 if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
 if ($RemoveData) {
