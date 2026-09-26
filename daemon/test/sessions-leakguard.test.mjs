@@ -23,8 +23,8 @@ fs.writeFileSync(
 
 const daemon = spawn(process.execPath, ["src/index.js"], {
   cwd: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
-  env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-test", RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT) },
-  stdio: ["ignore", "pipe", "pipe"],
+  env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-test", RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT), RH_STOP_ON_STDIN_EOF: "1" },
+  stdio: ["pipe", "pipe", "pipe"],
 });
 daemon.stderr.on("data", (d) => process.stderr.write("[daemon!] " + d));
 
@@ -92,6 +92,10 @@ async function run() {
     console.error("LEAKGUARD ERROR:", e.message);
     failures.push(e.message);
   } finally {
+    // A hard kill leaves the live REPL sessions running; the tray's clean stop takes them down.
+    const exited = new Promise((r) => daemon.on("exit", r));
+    daemon.stdin.end();
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 15000))]);
     daemon.kill();
   }
 }
