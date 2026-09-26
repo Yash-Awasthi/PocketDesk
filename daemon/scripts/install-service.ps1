@@ -109,11 +109,9 @@ foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe
     }
 }
 
-$needBuild = -not (Test-Path $exe) -or (Get-Item $src).LastWriteTime -gt (Get-Item $exe).LastWriteTime
-if ($needBuild) {
-    & $csc /nologo /target:winexe /out:$exe /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll $src
-    if ($LASTEXITCODE -ne 0) { throw "compile failed" }
-}
+# Always rebuilt: a release zip gives the source its commit time, often older than the previous exe.
+& $csc /nologo /target:winexe /out:$exe /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll $src
+if ($LASTEXITCODE -ne 0) { throw "compile failed" }
 
 # The tray spawns the daemon from this folder.
 Set-Content -Path (Join-Path $InstallDir "PocketDeskTray.ini") -Value $DaemonDir
