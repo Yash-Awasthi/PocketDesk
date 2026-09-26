@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import { check, finish } from "./helpers.mjs";
 import { listDir, fileOp, searchFiles } from "../src/fs_ops.js";
+import { zipFolder, thumbnail, dispose } from "../src/file_extras.js";
+import { execFileSync } from "node:child_process";
 
 process.env.RH_FS_NO_TRASH = "1";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rh-fsops-"));
@@ -49,6 +51,22 @@ try {
   check("paths outside home are refused", !r.ok && /traversal/.test(r.error));
   r = await fileOp({ op: "chmod", path: at("b.txt") });
   check("unknown ops are refused", !r.ok);
+
+  fs.mkdirSync(at("pack", "sub"), { recursive: true });
+  fs.writeFileSync(at("pack", "sub", "x.txt"), "zip me");
+  const z = await zipFolder(at("pack"));
+  check("a folder zips into a readable archive", z.ok && z.size > 0 && fs.readFileSync(z.zip).subarray(0, 2).toString() === "PK");
+  if (z.zip) fs.rmSync(z.zip, { force: true });
+  check("zipping a file is refused", !(await zipFolder(at("b.txt"))).ok);
+  if (process.platform === "win32") {
+    const png = at("pic.png");
+    execFileSync("powershell.exe", ["-NoProfile", "-Command", `Add-Type -A System.Drawing; (New-Object System.Drawing.Bitmap 640,480).Save('${png}')`]);
+    const t = await thumbnail(png, 100);
+    check("an image gets a JPEG thumbnail", t.ok && Buffer.from(t.jpeg, "base64")[0] === 0xff);
+    check("the image is not left locked", (() => { try { fs.rmSync(png); return true; } catch { return false; } })());
+    check("non-images get no thumbnail", !(await thumbnail(at("b.txt"))).ok);
+    dispose();
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }

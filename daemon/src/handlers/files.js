@@ -2,6 +2,7 @@ import * as sessions from "../sessions.js";
 import { gitStatus, gitDiff, gitLog, gitBranches } from "../gitpanel.js";
 import * as mentions from "../mentions.js";
 import { listDir, readFileChunk, writeFileChunk, resolvePath, fileOp, searchFiles } from "../fs_ops.js";
+import { zipFolder, thumbnail } from "../file_extras.js";
 
 export default function filesHandlers(ctx) {
   const { send } = ctx;
@@ -20,6 +21,12 @@ export default function filesHandlers(ctx) {
     },
     async fs_search(ws, msg) {
       send(ws, await searchFiles(msg.path, msg.q));
+    },
+    async fs_zip(ws, msg) {
+      send(ws, await zipFolder(msg.path));
+    },
+    async fs_thumb(ws, msg) {
+      send(ws, await thumbnail(msg.path, msg.size));
     },
     // ── Git panel (ccpocket/vibego: read-only repo inspection) ──
     async git_status(ws, msg) {

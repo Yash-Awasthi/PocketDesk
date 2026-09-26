@@ -292,6 +292,8 @@ object Proto {
     fun pcPower(action: String) = obj { put("type", "pc_power"); put("action", action) }
     fun totp(op: String, code: String? = null) = obj { put("type", "totp_$op"); code?.let { put("code", it) } }
     fun chatPermission(id: String, mode: String) = obj { put("type", "chat_permission"); put("id", id); put("mode", mode) }
+    fun fsZip(path: String) = obj { put("type", "fs_zip"); put("path", path) }
+    fun fsThumb(path: String, size: Int) = obj { put("type", "fs_thumb"); put("path", path); put("size", size) }
     fun fsSearch(path: String, query: String) = obj { put("type", "fs_search"); put("path", path); put("q", query) }
     fun fread(path: String, offset: Long) = obj {
         put("type", "fread"); put("path", path); put("offset", offset)

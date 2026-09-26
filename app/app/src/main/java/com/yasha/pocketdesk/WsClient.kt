@@ -64,6 +64,12 @@ class WsClient(
     /** Permission mode chosen on this phone per chat; absent means the PC user's own setting. */
     var chatPermission by mutableStateOf<Map<String, String>>(emptyMap())
         private set
+    /** JPEG thumbnails by PC path; an empty array marks a file the PC could not thumbnail. */
+    val thumbs = androidx.compose.runtime.mutableStateMapOf<String, ByteArray>()
+    /** (folder, zip path on the PC or null, error) once a folder is packed for download. */
+    val fsZips = MutableSharedFlow<Triple<String, String?, String?>>(extraBufferCapacity = 8)
+    fun requestThumb(path: String, size: Int): Boolean = send(Proto.fsThumb(path, size))
+    fun zipFolder(path: String): Boolean = send(Proto.fsZip(path))
     /** Mkdir, rename and delete outcomes, for the file manager to report. */
     val fsResults = MutableSharedFlow<FsResult>(extraBufferCapacity = 16)
     var lastError by mutableStateOf<String?>(null)
@@ -827,6 +833,11 @@ class WsClient(
                 Proto.parseFs(m)?.let { dirListing = it }
             }
             "fs_found" -> fsFound = Proto.parseFsFound(m)
+            "fs_thumb" -> {
+                val path = str(m, "path") ?: return
+                thumbs[path] = str(m, "jpeg")?.let { java.util.Base64.getDecoder().decode(it) } ?: ByteArray(0)
+            }
+            "fs_zip" -> fsZips.tryEmit(Triple(str(m, "path") ?: "", str(m, "zip"), str(m, "error")))
             "proposal_created" -> Proto.parseProposal(m["proposal"])?.let { p ->
                 if (proposals.none { it.id == p.id }) {
                     proposals = proposals + p
