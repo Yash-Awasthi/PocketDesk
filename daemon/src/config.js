@@ -45,18 +45,17 @@ export function loadConfig() {
     cert: cfg.tls?.cert || path.join(tlsDir, "cert.pem"),
     key: cfg.tls?.key || path.join(tlsDir, "key.pem"),
   };
-  // Token crosses the LAN in the clear until TLS is on. Try to stand up a
-  // self-signed cert on first run so wss:// is the default; if openssl isn't
-  // around, stay on plaintext and warn loudly instead of silently exposing it.
+  // Token crosses the LAN in the clear until TLS is on, so a self-signed cert
+  // is made on first run; only a failed write leaves plaintext, and warns.
   if (!envDriven && !cfg.tls.enabled && !fs.existsSync(cfg.tls.cert)) {
     if (generateSelfSignedCert(cfg.tls, dir)) {
       cfg.tls.enabled = true;
       saveConfig(cfg);
     } else if (process.env.RH_CONSOLE) {
-      throw new Error("console endpoint needs TLS: its token opens a SYSTEM daemon. Install Git for Windows (for openssl) and restart.");
+      throw new Error("console endpoint needs TLS: its token opens a SYSTEM daemon. Certificate generation failed; see the warning above.");
     } else {
       console.warn("[pocketdesk] TLS not enabled and no certificate found — the pairing token is crossing the LAN in plaintext.");
-      console.warn("[pocketdesk] install openssl and restart, or run `npm run setup-tls`, to fix this.");
+      console.warn("[pocketdesk] run `npm run setup-tls` to fix this.");
     }
   }
   // iroh: reach this PC by key from any network. RH_IROH=0 disables, RH_IROH=local

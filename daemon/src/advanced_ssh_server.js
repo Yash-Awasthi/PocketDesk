@@ -161,8 +161,9 @@ export class AdvancedSSHServerManager extends EventEmitter {
     if (user.allowedCommands.length > 0) {
       // The command runs through a shell, so chaining or substitution would smuggle in an unlisted one.
       if ((IS_WIN ? /[&|<>^%\r\n]/ : /[;&|<>`$()\r\n]/).test(command)) return false;
-      const cmd = command.split(/\s+/)[0];
-      if (!user.allowedCommands.includes(cmd)) return false;
+      // A rule's words must lead the command: "git" allows any git, "git status" only that subcommand.
+      const argv = command.trim().split(/\s+/);
+      if (!user.allowedCommands.some((rule) => String(rule).trim().split(/\s+/).every((w, i) => argv[i] === w))) return false;
     }
 
     const actualCommand = this.config.forceCommand || command;
