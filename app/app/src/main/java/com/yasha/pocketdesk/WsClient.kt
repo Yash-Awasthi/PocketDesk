@@ -88,6 +88,8 @@ class WsClient(
     private var lastFingerprint: String? = null
     // Read by OkHttp threads; a stale false there schedules a retry after the user said stop.
     @Volatile private var userClosed = false
+    /** Bumped by close(): a failure from an older link that reaches the main thread late is dropped. */
+    @Volatile private var linkGen = 0
     private val reconnectScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val policy = ReconnectPolicy()
     /** Last output seq seen per session, for missed-output backfill on reattach. */
@@ -321,6 +323,7 @@ class WsClient(
 
     fun close() {
         userClosed = true
+        linkGen++
         retryJob?.cancel()
         // A deliberate disconnect leaves no stale error behind; callers that fail set one after.
         lastError = null
@@ -1115,6 +1118,12 @@ class WsClient(
      * without passing Disconnected, which would stop the foreground service.
      */
     private fun scheduleReconnect() {
+        // Socket threads land here; on the main thread it cannot interleave with close() or connect().
+        val gen = linkGen
+        reconnectScope.launch(kotlinx.coroutines.Dispatchers.Main) { if (gen == linkGen) scheduleReconnectOnMain() }
+    }
+
+    private fun scheduleReconnectOnMain() {
         // A LAN url that failed here is skipped on this network from now on.
         if (activeUrl != null && activeUrl == lanUrl) lanFailedOn = network.id ?: ""
         if (userClosed || route() == null || lastToken == null) {
@@ -1128,7 +1137,6 @@ class WsClient(
             return
         }
         status = Status.Reconnecting
-        // On the main thread, like close(): a cancelled retry can then never open a link after it.
         retryJob = reconnectScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             kotlinx.coroutines.delay(delay)
             reconnectNow()

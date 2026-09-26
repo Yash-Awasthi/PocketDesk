@@ -60,6 +60,11 @@ object Notifier {
         (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(id, APPROVAL_ID)
     }
 
+    fun approvalsGone(ctx: Context) {
+        val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        for (n in mgr.activeNotifications) if (n.id == APPROVAL_ID) mgr.cancel(n.tag, n.id)
+    }
+
     private const val APPROVAL_ID = 7
 
     private const val LINK_LOST_ID = 8

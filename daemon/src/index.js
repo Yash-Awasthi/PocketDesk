@@ -34,6 +34,9 @@ function gracefulShutdown(signal) {
   setTimeout(() => process.exit(0), 500);
 }
 
+// A crash skips gracefulShutdown; "exit" still runs, and both kills are synchronous and idempotent.
+process.on("exit", () => { killAll(); chat.killAll(); });
+
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 // Windows has no SIGTERM for a windowless child: the tray asks for a clean stop by closing stdin,

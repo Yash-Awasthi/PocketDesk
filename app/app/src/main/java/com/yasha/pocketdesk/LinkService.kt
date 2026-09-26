@@ -43,8 +43,10 @@ object Link {
             client.statusFlow.collect { now ->
                 LinkService.sync(app, now)
                 // close() clears lastError, so an error here means the link ended without the user asking.
-                if (now == Status.Disconnected && was != Status.Disconnected && !MainActivity.foreground) {
-                    client.lastError?.let { Notifier.linkLost(app, it) }
+                if (now == Status.Disconnected && was != Status.Disconnected) {
+                    // Allow and Deny cannot reach the PC now; the list comes back on reconnect.
+                    Notifier.approvalsGone(app)
+                    if (!MainActivity.foreground) client.lastError?.let { Notifier.linkLost(app, it) }
                 }
                 if (now == Status.Connected) Notifier.linkLostGone(app)
                 was = now
@@ -94,10 +96,16 @@ class LinkService : Service() {
         // startForeground must come even when the link already ended, or Android kills the app for it.
         val status = Link.client.status
         val n = notification(this, status)
-        if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(ID, n)
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else {
+                startForeground(ID, n)
+            }
+        } catch (_: IllegalStateException) {
+            // Refused from the background on newer Android: the link runs on without the service.
+            stopSelf()
+            return START_NOT_STICKY
         }
         running = true
         if (status == Status.Disconnected) stopSelf()

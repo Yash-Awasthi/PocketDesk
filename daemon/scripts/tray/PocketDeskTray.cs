@@ -34,6 +34,7 @@ namespace PocketDeskTray
         StreamWriter log;
         DateTime startedAt;
         int quickCrashes;
+        System.Windows.Forms.Timer restart;
         SynchronizationContext ui;
         string port = "8765";
         string token = "";
@@ -69,7 +70,7 @@ namespace PocketDeskTray
             menu.Items.Add(recordItem);
             menu.Items.Add("Open recordings", null, (s, e) => { try { Directory.CreateDirectory(Recordings); Process.Start("explorer.exe", Recordings); } catch { } });
             menu.Items.Add(new ToolStripSeparator());
-            pauseItem = new ToolStripMenuItem("Pause", null, (s, e) => { if (daemon != null) StopDaemon(); else StartDaemon(); });
+            pauseItem = new ToolStripMenuItem("Pause", null, (s, e) => { if (daemon != null || restart != null) StopDaemon(); else { quickCrashes = 0; StartDaemon(); } });
             menu.Items.Add(pauseItem);
             menu.Items.Add("Exit (stop everything)", null, (s, e) => { StopDaemon(); icon.Visible = false; Application.Exit(); });
             menu.Items.Add(new ToolStripSeparator());
@@ -160,8 +161,9 @@ namespace PocketDeskTray
             return json.Substring(start, numEnd - start);
         }
 
-        void StartDaemon(bool keepLog = false)
+        void StartDaemon()
         {
+            CancelRestart();
             if (daemon != null && !daemon.HasExited) return;
             try
             {
@@ -182,10 +184,12 @@ namespace PocketDeskTray
                 if (File.Exists(bundledFfmpeg)) psi.EnvironmentVariables["FFMPEG_PATH"] = bundledFfmpeg;
                 // Closing stdin asks the daemon to stop its agents and helpers, then exit.
                 psi.EnvironmentVariables["RH_STOP_ON_STDIN_EOF"] = "1";
-                // Fresh log per start, except after a crash, whose reason must stay readable.
+                // Appended so a crash's reason survives the restart; started over once it passes 1 MB.
                 // The previous run's writer still holds the file open; the next start could not open it otherwise.
                 if (log != null) lock (log) log.Dispose();
-                var w = log = new StreamWriter(LogPath, keepLog) { AutoFlush = true };
+                var keep = File.Exists(LogPath) && new FileInfo(LogPath).Length < (1 << 20);
+                var w = log = new StreamWriter(LogPath, keep) { AutoFlush = true };
+                w.WriteLine("---- started " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                 daemon = Process.Start(psi);
                 startedAt = DateTime.Now;
                 var started = daemon;
@@ -217,13 +221,24 @@ namespace PocketDeskTray
                 return;
             }
             ShowBalloon("PocketDesk stopped unexpectedly; restarting");
-            var t = new System.Windows.Forms.Timer { Interval = 3000 };
-            t.Tick += (s, e) => { t.Dispose(); if (daemon == null) StartDaemon(true); };
-            t.Start();
+            restart = new System.Windows.Forms.Timer { Interval = 3000 };
+            restart.Tick += (s, e) => StartDaemon();
+            restart.Start();
+            // Still grey, but the menu offers Pause so the restart can be called off.
+            pauseItem.Text = "Pause";
+        }
+
+        void CancelRestart()
+        {
+            if (restart == null) return;
+            restart.Dispose();
+            restart = null;
         }
 
         void StopDaemon()
         {
+            // Pausing during the wait before a restart must keep it paused.
+            if (restart != null) { CancelRestart(); SetRunning(false); ShowBalloon("daemon stopped"); return; }
             if (daemon == null) return;
             var d = daemon;
             daemon = null;
