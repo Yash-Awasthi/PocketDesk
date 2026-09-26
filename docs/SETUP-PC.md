@@ -190,7 +190,7 @@ Edit `%USERPROFILE%\.pocketdesk\config.json`, then **Stop** and **Start** the da
 
 | Problem | What to check |
 |---|---|
-| The phone can't connect from outside | Open the daemon log: an `iroh <id>` line should appear at start. Check that the phone's entry shows "anywhere" (pair again if not). |
+| The phone can't connect from outside | Open the daemon log: an `iroh <id>` line should appear at start. Connect once on the PC's Wi-Fi: the PC sends its iroh address and the phone's entry then shows "anywhere". On mobile data the Desktop status line shows `iroh relayed` or `direct`. |
 | The desktop is slow or shows still frames | The Desktop header shows no fps figure when ffmpeg is missing and the daemon falls back to still frames. Run the install command again to restore it. |
 | The desktop freezes on mobile data | The log shows `relayed` and `video link too slow` lines: the link is weak and quality drops automatically. A relay near you helps ([RELAY.md](RELAY.md)). |
 | Windows asks whether Node.js may use the network | Allow it on private networks, so phones on the same Wi-Fi connect directly. |

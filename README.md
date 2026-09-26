@@ -32,7 +32,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📱 **Multi-PC** | Connect to multiple PCs, each with pinned certificates |
 | 🔔 **Background Notify** | Get notified when sessions end while the app is in background |
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states |
-| 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware H.264 up to 60 fps (WebCodecs in the browser), any monitor, the PC pointer drawn on the viewer, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows). |
+| 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware H.264 up to 60 fps (WebCodecs in the browser), any monitor, the PC pointer drawn on the viewer as a small dot centred on the click point, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows). |
 | 📋 **Clipboard & file drop** | Text, images and copied files move between the PC and the viewer while the desktop is open; files sent from the phone or browser are pasted straight into the focused PC window. |
 | 👁 **Session privacy** | The PC shows who is viewing with a Disconnect button, can require Allow / View only / Deny first, and viewers can join view-only. |
 | 🎥 **Session recording** | Optional MP4 of the watched screen, asciicast of terminals, and a log of every viewer, approval and file sent. |
