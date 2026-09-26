@@ -43,15 +43,18 @@ async function main() {
   check("revoke acks with a fresh pairing token", rev.ok === true && typeof rev.pairingToken === "string" && rev.pairingToken !== TOKEN);
   check("revoked device's live socket is closed", (await again.closed) === 4003);
 
-  const pairHtml = await fetch(`http://127.0.0.1:${PORT}/pair`).then((r) => r.text());
+  check("pair page refuses a request without the pairing key", (await fetch(`http://127.0.0.1:${PORT}/pair`)).status === 403);
+  check("pair page refuses a stale pairing key", (await fetch(`http://127.0.0.1:${PORT}/pair?k=${TOKEN}`)).status === 403);
+  const pairHtml = await fetch(`http://127.0.0.1:${PORT}/pair?k=${rev.pairingToken}`).then((r) => r.text());
   const pairPayload = JSON.parse(Buffer.from(pairHtml.match(/pocketdesk:\/\/pair#([\w-]+)/)[1], "base64url").toString());
   check("pairing QR carries the rotated token", pairPayload.t === rev.pairingToken);
   // DNS rebinding: a web page's request reaches 127.0.0.1 but still names its own host.
-  const rebound = await new Promise((res) => http.get({ host: "127.0.0.1", port: PORT, path: "/pair", headers: { host: `evil.example:${PORT}` } }, (r) => { r.resume(); res(r.statusCode); }));
+  const rebound = await new Promise((res) => http.get({ host: "127.0.0.1", port: PORT, path: `/pair?k=${rev.pairingToken}`, headers: { host: `evil.example:${PORT}` } }, (r) => { r.resume(); res(r.statusCode); }));
   check("pair page refuses a non-loopback Host", rebound === 403);
-  const cliStatus = (host) => new Promise((res) => http.get({ host: "127.0.0.1", port: CLI_PORT, path: "/status", headers: { host } }, (r) => { r.resume(); res(r.statusCode); }));
+  const cliStatus = (host, token = rev.pairingToken) => new Promise((res) => http.get({ host: "127.0.0.1", port: CLI_PORT, path: "/status", headers: { host, authorization: `Bearer ${token}` } }, (r) => { r.resume(); res(r.statusCode); }));
   check("CLI endpoint serves loopback hosts", (await cliStatus(`localhost:${CLI_PORT}`)) === 200);
   check("CLI endpoint refuses a non-loopback Host", (await cliStatus(`evil.example:${CLI_PORT}`)) === 403);
+  check("CLI endpoint refuses a missing or stale token", (await cliStatus(`localhost:${CLI_PORT}`, "")) === 401 && (await cliStatus(`localhost:${CLI_PORT}`, TOKEN)) === 401);
 
   const big = await hello({ token: "x".repeat(20_000) });
   check("oversized pre-auth message closes the socket", big.first === 1009);

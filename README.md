@@ -114,7 +114,8 @@ auth token (also persisted to `~/.pocketdesk/config.json` —
 
 ### Step 3 — Pair
 
-1. **QR pairing (easiest)** — on the PC, open `http://localhost:8765/pair` and
+1. **QR pairing (easiest)** — on the PC, open the pairing link from the banner
+   (`http://localhost:8765/pair?k=<token>`; the tray's **Pair a phone...** opens it too) and
    scan the QR **with the PocketDesk app** (tap **＋ → Scan QR**). The app
    receives the URL, token and (with TLS) the cert fingerprint automatically.
    > Note: the QR page is loopback-only by design — open it on the PC itself,
@@ -217,7 +218,7 @@ Authentication is always the same: the app sends the token once at connect
 | **Port-forward** | `wss://your.domain:8765/ws` (TLS!) | You control the router | Forwarded port + TLS cert |
 
 **LAN (same Wi-Fi) — default.** Start the daemon, scan the QR at
-`http://localhost:8765/pair`, done.
+`http://localhost:8765/pair?k=<token>`, done.
 
 **Anywhere — iroh.** The same QR also stores an iroh ticket with the entry;
 when the LAN address does not answer, the app retries over iroh, so one saved
@@ -453,7 +454,7 @@ for byte, then reports the VNC framebuffer geometry the server announced.
 | `RH_APPROVAL_TIMEOUT_MS` | `120000` | Auto-deny an agent stuck waiting for approval (0 disables) |
 | `RH_QUIET_MS` | `20000` | Silence before a session counts as *quiet*  |
 | `RH_IDLE_KILL_MINUTES` | off | Kill live sessions idle longer than N minutes |
-| `RH_CLI_PORT` | `4679` | Local CLI status endpoint (`/sessions /status /query`) |
+| `RH_CLI_PORT` | `4679` | Local CLI status endpoint (`/sessions /status /query`), needs `Authorization: Bearer <token>` |
 | `POCKETDESK_DATA` | `.pocketdesk` | Data dir (chat history, devices) |
 
 ---

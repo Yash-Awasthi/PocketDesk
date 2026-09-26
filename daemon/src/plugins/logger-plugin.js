@@ -4,6 +4,7 @@
  * Useful for debugging and audit trails.
  */
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const NOISY = new Set(["video_ack", "desktop_mouse", "desktop_key", "desktop_type"]);
@@ -17,13 +18,14 @@ export default {
   _dir: null,
 
   init(ctx) {
-    this._dir = path.join(ctx.config?.dataDir || ".pocketdesk", "logs");
-    if (!fs.existsSync(this._dir)) fs.mkdirSync(this._dir, { recursive: true });
+    // Under the profile like every other data file; cwd-relative landed logs inside the install dir.
+    this._dir = path.join(os.homedir(), ctx.config?.dataDir || ".pocketdesk", "logs");
+    fs.mkdirSync(this._dir, { recursive: true, mode: 0o700 });
   },
 
   start(ctx) {
     const logFile = path.join(this._dir, `daemon-${new Date().toISOString().slice(0, 10)}.log`);
-    this._stream = fs.createWriteStream(logFile, { flags: "a" });
+    this._stream = fs.createWriteStream(logFile, { flags: "a", mode: 0o600 });
     this._log("start", { port: ctx.config?.port });
   },
 

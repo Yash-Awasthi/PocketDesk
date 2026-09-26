@@ -20,6 +20,8 @@ import { configDir } from "./config.js";
 
 const { Server, utils } = ssh2;
 const IS_WIN = process.platform === "win32";
+const MAX_AUTH_FAILURES = 10;
+const AUTH_WINDOW_MS = 10 * 60_000;
 
 /** Host key for the listener, generated on first use and reused after. */
 function hostKey() {
@@ -61,7 +63,7 @@ export class AdvancedSSHServerManager extends EventEmitter {
     super();
     this.config = {
       port: config.port || 2222,
-      host: config.host || "0.0.0.0",
+      host: config.host || "127.0.0.1",
       maxSessions: config.maxSessions || 10,
       idleTimeout: config.idleTimeout || 300000,
       allowTcpForwarding: config.allowTcpForwarding ?? true,
@@ -71,6 +73,7 @@ export class AdvancedSSHServerManager extends EventEmitter {
     this.sessions = new Map();
     this.users = new Map();
     this.recordings = new Map();
+    this.authFailures = new Map();
     this.server = null;
   }
 
@@ -251,18 +254,31 @@ export class AdvancedSSHServerManager extends EventEmitter {
     const clientIp = info?.ip || "unknown";
 
     client.on("authentication", (ctx) => {
+      const now = Date.now();
+      const rec = this.authFailures.get(clientIp);
+      const failures = rec && now - rec.at < AUTH_WINDOW_MS ? rec.n : 0;
+      if (failures >= MAX_AUTH_FAILURES) return ctx.reject();
+      // Unsigned publickey probes are how clients pick among their keys, so only real attempts count.
+      const fail = () => {
+        if (ctx.method === "password" || ctx.signature) {
+          for (const [ip, r] of this.authFailures) if (now - r.at > AUTH_WINDOW_MS) this.authFailures.delete(ip);
+          this.authFailures.set(clientIp, { n: failures + 1, at: now });
+        }
+        return ctx.reject(["password", "publickey"]);
+      };
       const credential = ctx.method === "password" ? ctx.password
         : ctx.method === "publickey" ? ctx.key?.data?.toString("base64")
         : undefined;
       const user = this.users.get(ctx.username);
       // Credential-less users exist for phone-side bookkeeping only, never for network logins.
-      if (!user || (!user.passwordHash && !user.publicKey)) return ctx.reject(["password", "publickey"]);
-      if (!this.authenticate(ctx.username, ctx.method, credential)) return ctx.reject(["password", "publickey"]);
+      if (!user || (!user.passwordHash && !user.publicKey)) return fail();
+      if (!this.authenticate(ctx.username, ctx.method, credential)) return fail();
       // A publickey probe carries no signature yet: accept it so the client
       // proceeds to the signed attempt, but do not open a session for it.
       if (ctx.method === "publickey" && !ctx.signature) return ctx.accept();
       // ssh2 leaves signature checks to the server; without one, knowing the public key is enough.
-      if (ctx.method === "publickey" && !verifySignature(user.publicKey, ctx)) return ctx.reject(["password", "publickey"]);
+      if (ctx.method === "publickey" && !verifySignature(user.publicKey, ctx)) return fail();
+      this.authFailures.delete(clientIp);
       session = this.createSession(ctx.username, clientIp, ctx.method);
       if (!session) return ctx.reject();
       session.client = client;

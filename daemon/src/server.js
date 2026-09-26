@@ -42,6 +42,20 @@ const HELLO_TIMEOUT = 10_000;
 const MAX_AUTH_ATTEMPTS = 5;
 const authAttempts = new Map();
 const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
+const CONSOLE = Boolean(process.env.RH_CONSOLE);
+const AUDIT_LOG = path.join(configDir, "console-audit.log");
+// Input, pointer and video traffic arrive many times a second and say nothing about intent.
+const AUDIT_SKIP = new Set(["in", "resize", "video_ack", "desktop_ping", "desktop_frame", "desktop_mouse", "desktop_key", "desktop_type"]);
+
+/** One line per action on the SYSTEM endpoint, in its admin-only directory. */
+function audit(ws, msg) {
+  if (AUDIT_SKIP.has(msg.type) || ((msg.type === "fread" || msg.type === "fwrite") && (msg.offset || msg.append))) return;
+  const pick = (k) => (typeof msg[k] === "string" ? msg[k].slice(0, 500) : undefined);
+  try {
+    if (fs.statSync(AUDIT_LOG, { throwIfNoEntry: false })?.size > 5 << 20) fs.renameSync(AUDIT_LOG, AUDIT_LOG + ".1");
+    fs.appendFileSync(AUDIT_LOG, JSON.stringify({ at: new Date().toISOString(), device: ws._clientId, type: msg.type, harness: pick("harness"), path: pick("path"), cwd: pick("cwd") }) + "\n", { mode: 0o600 });
+  } catch { /* auditing must never block the action */ }
+}
 
   function allSessions() {
   // Attention-first ordering (c9watch): permission-waiting and running
@@ -113,7 +127,11 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
       res.end(JSON.stringify({ status: "healthy", service: "pocketdesk", sessions: loopback ? allSessions().length : undefined }));
       return;
     }
-    if (req.url === "/pair" && loopback) {
+    // Loopback alone admits every local account, and the console endpoint's token is SYSTEM;
+    // the key is the token itself, so only whoever can read the config dir can open the page.
+    const key = new URL(req.url, "http://x").searchParams.get("k") || "";
+    const keyOk = key.length === token.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(token));
+    if (req.url.startsWith("/pair?") && loopback && keyOk) {
       // The ticket carries current addresses and relay, which change with the network.
       const t = irohEp?.ticket();
       if (t && t !== irohTicket) { irohTicket = t; buildPairPage(useTls); }
@@ -215,6 +233,9 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
             clearTimeout(timer);
             ws._clientId = auth.id;
             send(ws, hi);
+            // The console token opens a SYSTEM daemon: once a phone holds its own token, the
+            // master token (on screen, in a QR photo, in browser history) stops working.
+            if (CONSOLE && auth.pairing) rotateToken();
           } else {
             ws.close(4003, "bad token");
           }
@@ -280,6 +301,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   async function handle(ws, msg) {
     const h = Object.hasOwn(handlers, msg.type) ? handlers[msg.type] : null;
     if (!h) return send(ws, { type: "error", message: `unknown type: ${msg.type}` });
+    if (CONSOLE) audit(ws, msg);
     await h(ws, msg);
   }
 
@@ -489,15 +511,17 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     console.log("  PocketDesk daemon");
     console.log(`  local     http${useTls ? "s" : ""}://localhost:${port}`);
     console.log(`  websocket ${scheme}://<this-pc>:${port}/ws`);
-    // The token is a pairing credential for the user's own devices: the full
-    // token prints in dev only (never in production). /pair is loopback-gated.
-    if (process.env.NODE_ENV !== 'production') {
+    // Only to an interactive console: the tray and service capture stdout into log files.
+    if (process.env.NODE_ENV !== 'production' && process.stdout.isTTY) {
       console.log(`  token     ${token}`);
     }
     if (useTls) {
       console.log(`  tls       enabled, cert fingerprint ${fp}`);
     }
-    console.log(`  pairing   http${useTls ? "s" : ""}://localhost:${port}/pair  (open on THIS PC, scan the QR from the app)`);
+    const pairUrl = `http${useTls ? "s" : ""}://localhost:${port}/pair`;
+    console.log(process.stdout.isTTY
+      ? `  pairing   ${pairUrl}?k=${token}  (open on THIS PC, scan the QR from the app)`
+      : `  pairing   tray icon > Pair a phone, or ${pairUrl}?k=<token from config.json>`);
     console.log("  config    %USERPROFILE%\\.pocketdesk\\config.json");
     console.log("");
     // iroh sockets join wss.clients so broadcast and revoke reach them like /ws sockets.
@@ -525,7 +549,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
       }).catch((e) => console.log(`  iroh      failed to start: ${e?.message || e}`));
     }
     sessionStore.init();
-    cliServer.start();
+    cliServer.start(() => token);
     proposals.init(broadcast);
     await registry.scanAll(broadcast);
     console.log("  registry scanned");

@@ -136,7 +136,7 @@ async function main() {
   }
   c.send({ type: "sshserver_session_end", sessionId: dave });
   await c.next((m) => m.type === "sshserver_session_ended");
-
+
 
   // ── Real SSH round trip: the daemon's own listener, dialled by its own client ─
   c.send({ type: "sshserver_start", port: 0, host: "127.0.0.1" });
@@ -275,6 +275,9 @@ async function main() {
     cl.connect({ host: "127.0.0.1", port: target.port, username: "tester", password: "s3cret" });
   });
   check("allowlisted user gets no interactive shell", shellOut === "denied");
+
+  for (let i = 0; i < 10; i++) await sshTry({ port: target.port, username: "tester", password: "guess" + i });
+  check("ssh server locks out an address after repeated bad passwords", (await sshTry({ port: target.port, username: "tester", password: "s3cret" })) !== "ready");
 
   c.send({ type: "bastion_start", port: 0 });
   const twice = await c.next((m) => m.type === "bastion_started");
