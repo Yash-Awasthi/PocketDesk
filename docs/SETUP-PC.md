@@ -62,6 +62,11 @@ Scan that QR to add the "PC (console)" entry. Use that entry when you need the
 lock screen, a UAC prompt, or the machine before you have signed in; use the
 normal entry for everything else.
 
+The console pairing token works once: after a phone pairs, it is replaced and that phone
+keeps its own token. To pair another phone, open the pairing page again (with the new token
+from `config.json`). Every action taken through the console entry is written to
+`%ProgramData%\PocketDesk\console\console-audit.log`, readable by administrators only.
+
 What to understand before turning it on: the console entry runs with full system
 rights, so anything done through it — including approving a UAC prompt — has
 those rights. It has its own token that only administrators can read, on its own

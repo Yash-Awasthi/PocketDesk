@@ -42,6 +42,20 @@ const HELLO_TIMEOUT = 10_000;
 const MAX_AUTH_ATTEMPTS = 5;
 const authAttempts = new Map();
 const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
+const CONSOLE = Boolean(process.env.RH_CONSOLE);
+const AUDIT_LOG = path.join(configDir, "console-audit.log");
+// Input, pointer and video traffic arrive many times a second and say nothing about intent.
+const AUDIT_SKIP = new Set(["in", "resize", "video_ack", "desktop_ping", "desktop_frame", "desktop_mouse", "desktop_key", "desktop_type"]);
+
+/** One line per action on the SYSTEM endpoint, in its admin-only directory. */
+function audit(ws, msg) {
+  if (AUDIT_SKIP.has(msg.type) || ((msg.type === "fread" || msg.type === "fwrite") && (msg.offset || msg.append))) return;
+  const pick = (k) => (typeof msg[k] === "string" ? msg[k].slice(0, 500) : undefined);
+  try {
+    if (fs.statSync(AUDIT_LOG, { throwIfNoEntry: false })?.size > 5 << 20) fs.renameSync(AUDIT_LOG, AUDIT_LOG + ".1");
+    fs.appendFileSync(AUDIT_LOG, JSON.stringify({ at: new Date().toISOString(), device: ws._clientId, type: msg.type, harness: pick("harness"), path: pick("path"), cwd: pick("cwd") }) + "\n", { mode: 0o600 });
+  } catch { /* auditing must never block the action */ }
+}
 
   function allSessions() {
   // Attention-first ordering (c9watch): permission-waiting and running
@@ -219,6 +233,9 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
             clearTimeout(timer);
             ws._clientId = auth.id;
             send(ws, hi);
+            // The console token opens a SYSTEM daemon: once a phone holds its own token, the
+            // master token (on screen, in a QR photo, in browser history) stops working.
+            if (CONSOLE && auth.pairing) rotateToken();
           } else {
             ws.close(4003, "bad token");
           }
@@ -284,6 +301,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   async function handle(ws, msg) {
     const h = Object.hasOwn(handlers, msg.type) ? handlers[msg.type] : null;
     if (!h) return send(ws, { type: "error", message: `unknown type: ${msg.type}` });
+    if (CONSOLE) audit(ws, msg);
     await h(ws, msg);
   }
 
