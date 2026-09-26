@@ -190,8 +190,8 @@ object Proto {
         put("type", "create"); put("path", path); put("cwd", cwd)
     }
 
-    fun appsDiscover(q: String, refresh: Boolean) = obj {
-        put("type", "apps_discover"); put("q", q); put("refresh", refresh)
+    fun appsDiscover(q: String, refresh: Boolean, guiOnly: Boolean = false) = obj {
+        put("type", "apps_discover"); put("q", q); put("refresh", refresh); if (guiOnly) put("kind", "gui")
     }
 
     fun attach(id: String) = obj { put("type", "attach"); put("id", id) }

@@ -486,7 +486,7 @@ private val PRESETS = listOf("saver", "balanced", "quality")
 @Composable
 private fun AppLauncher(ws: WsClient, onDismiss: () -> Unit) {
     var q by remember { mutableStateOf("") }
-    LaunchedEffect(q) { ws.discoverApps(q) }
+    LaunchedEffect(q) { ws.discoverApps(q, guiOnly = true) }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },

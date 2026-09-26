@@ -525,7 +525,7 @@ class WsClient(
     fun guiOpenPath(path: String, cwd: String = ""): Boolean = send(Proto.guiOpenPath(path, cwd))
     fun createSession(harness: String, cwd: String): Boolean = send(Proto.create(harness, cwd))
     fun createSessionAt(path: String, cwd: String): Boolean = send(Proto.createPath(path, cwd))
-    fun discoverApps(q: String, refresh: Boolean = false): Boolean = send(Proto.appsDiscover(q, refresh))
+    fun discoverApps(q: String, refresh: Boolean = false, guiOnly: Boolean = false): Boolean = send(Proto.appsDiscover(q, refresh, guiOnly))
     fun attach(id: String): Boolean {
         attachedSessions.add(id)
         val since = lastSeq[id]
