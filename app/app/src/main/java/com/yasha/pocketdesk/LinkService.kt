@@ -132,10 +132,10 @@ class LinkService : Service() {
                 ctx, 1, Intent(ctx, LinkService::class.java).setAction(ACTION_DISCONNECT), PendingIntent.FLAG_IMMUTABLE,
             )
             val (title, text) = when (status) {
-                Status.Connected -> "Connected to your PC" to (Link.client.activeUrl ?: "")
+                Status.Connected -> "Connected to your PC" to Link.client.route
                 Status.Reconnecting -> "Connection lost, retrying" to (Link.client.lastError ?: "")
                 Status.AwaitingTrust -> "Waiting for you to trust the PC" to "Open the app to confirm"
-                else -> "Connecting to your PC" to (Link.client.activeUrl ?: "")
+                else -> "Connecting to your PC" to ""
             }
             return NotificationCompat.Builder(ctx, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_sys_upload_done)

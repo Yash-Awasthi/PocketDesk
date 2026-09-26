@@ -86,7 +86,7 @@ class WsClient(
     // ── Auto-reconnect (client-kt/krossbow backoff + cc-pocket since-reattach) ──
     private var lastToken: String? = null
     private var lastFingerprint: String? = null
-    // Read by OkHttp and retry threads; a stale false there reconnects after the user said stop.
+    // Read by OkHttp threads; a stale false there schedules a retry after the user said stop.
     @Volatile private var userClosed = false
     private val reconnectScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
     private val policy = ReconnectPolicy()
@@ -343,7 +343,6 @@ class WsClient(
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             if (webSocket !== socket.get()) return
-            if (userClosed) { webSocket.close(1000, "bye"); return }
             val tm = collectingTm
             if (tm != null) {
                 val fp = tm.seen
@@ -1129,7 +1128,8 @@ class WsClient(
             return
         }
         status = Status.Reconnecting
-        retryJob = reconnectScope.launch {
+        // On the main thread, like close(): a cancelled retry can then never open a link after it.
+        retryJob = reconnectScope.launch(kotlinx.coroutines.Dispatchers.Main) {
             kotlinx.coroutines.delay(delay)
             reconnectNow()
         }

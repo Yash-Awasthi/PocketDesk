@@ -67,8 +67,11 @@ function audit(ws, msg) {
 }
 
 let liveWss = null;
+let stopping = null;
 
+/** Shutdown: closes every client and refuses new ones, which could otherwise start work nothing will clean up. */
 export function closeClients(code, reason) {
+  stopping = { code, reason };
   for (const ws of liveWss?.clients ?? []) try { ws.close(code, reason); } catch {}
 }
 
@@ -191,6 +194,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   });
 
   wss.on("connection", (ws, req) => {
+    if (stopping) return ws.close(stopping.code, stopping.reason);
     // Read off `req`: the ws instance exposes the socket as `_socket`, so the
     // old `ws.socket?.remoteAddress` was always undefined and every client
     // shared one counter — five bad tokens locked out the whole LAN.

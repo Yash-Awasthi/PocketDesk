@@ -52,10 +52,15 @@ try {
   const closed = new Promise((r) => c.ws.on("close", (code, reason) => r([code, String(reason)])));
   const exited = new Promise((r) => d.on("exit", r));
   d.stdin.end();
+  await closed;
+  // A phone that reconnects while the daemon is winding down must be turned away, not served.
+  const late = connect(PORT);
+  const lateClose = new Promise((r) => { late.ws.on("close", (code) => r(code)); late.ws.on("error", () => {}); });
   const code = await Promise.race([exited, new Promise((r) => setTimeout(() => r("timeout"), 15000))]);
   check("daemon exits when stdin closes", code !== "timeout");
   const [closeCode, closeReason] = await closed;
   check(`phone is told the PC stopped (${closeCode} ${closeReason})`, closeCode === 4100);
+  check("a phone connecting during shutdown is refused", (await lateClose) === 4100);
   await new Promise((r) => setTimeout(r, 500));
   check("agent's child process is gone", !alive(grandchild));
 } catch (e) {
