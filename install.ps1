@@ -42,11 +42,33 @@ try {
     }
     $srcDaemon = Join-Path $srcRoot "daemon"
     # A running tray and daemon hold files open in the install folder.
-    foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe'")) {
+    # PocketDesk is the name before PocketDesk: its tray goes too, and its install is replaced below.
+    foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe' OR Name='PocketDeskTray.exe'")) {
         Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId)" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
         Stop-Process -Id $t.ProcessId -Force -ErrorAction SilentlyContinue
     }
     Start-Sleep -Milliseconds 500
+
+    # Carry settings and paired phones over from PocketDesk, then remove its program and entries.
+    $oldData = Join-Path $env:USERPROFILE ".pocketdesk"
+    $newData = Join-Path $env:USERPROFILE ".pocketdesk"
+    if ((Test-Path "$oldData\config.json") -and -not (Test-Path "$newData\config.json")) {
+        Step "Moving PocketDesk settings to $newData"
+        if (Test-Path $newData) { Copy-Item "$oldData\*" $newData -Recurse -Force } else { Move-Item $oldData $newData }
+        # config.json holds absolute certificate paths under the old folder.
+        $cfg = Join-Path $newData "config.json"
+        [IO.File]::WriteAllText($cfg, ([IO.File]::ReadAllText($cfg) -replace '\\\\\.pocketdesk\\\\', '\\.pocketdesk\\'))
+    }
+    $oldDir = Join-Path $env:LOCALAPPDATA "PocketDesk"
+    if (Test-Path $oldDir) {
+        Step "Removing the old PocketDesk install"
+        Remove-Item -Recurse -Force $oldDir -ErrorAction SilentlyContinue
+    }
+    Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -ErrorAction SilentlyContinue
+    Remove-Item "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PocketDesk" -Recurse -ErrorAction SilentlyContinue
+    foreach ($dir in @([Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop"))) {
+        Remove-Item (Join-Path $dir "PocketDesk.lnk") -ErrorAction SilentlyContinue
+    }
     $daemon = Join-Path $InstallDir "app\daemon"
     if (Test-Path $daemon) { Remove-Item -Recurse -Force $daemon }
     robocopy $srcDaemon $daemon /E /XD node_modules /NFL /NDL /NJH /NJS /NP | Out-Null

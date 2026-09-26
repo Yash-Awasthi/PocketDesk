@@ -42,7 +42,7 @@ fs.writeFileSync(path.join(tmp, "fakechat.json"), JSON.stringify({
 }));
 
 const daemon = spawn(process.execPath, ["src/index.js"], {
-  env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmp },
+  env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmp, POCKETDESK_DATA: ".pocketdesk-test", RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT) },
   stdio: ["ignore", "pipe", "pipe"],
 });
 daemon.stderr.on("data", (d) => process.stderr.write("[daemon!] " + d));

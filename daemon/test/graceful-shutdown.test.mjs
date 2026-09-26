@@ -56,7 +56,7 @@ function send(ws, o) { ws.send(JSON.stringify(o)); }
 async function run() {
   const daemon = spawn(process.execPath, ["src/index.js"], {
     cwd: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
-    env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan },
+    env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-test", RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   daemon.stderr.on("data", () => {});

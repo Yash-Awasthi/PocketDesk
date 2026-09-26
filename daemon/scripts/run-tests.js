@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
@@ -10,7 +11,9 @@ const files = fs.readdirSync(testDir)
 
 for (const f of files) {
   console.log(`\n--- ${f} ---`);
-  const r = spawnSync(process.execPath, [path.join(testDir, f)], { stdio: "inherit" });
+  // A throwaway home: modules that read the config at import must never touch the real profile.
+  const env = { ...process.env, RH_HOME: process.env.RH_HOME || path.join(os.tmpdir(), "pocketdesk-test-home") };
+  const r = spawnSync(process.execPath, [path.join(testDir, f)], { stdio: "inherit", env });
   if (r.status !== 0) {
     console.error(`\nFAILED: ${f}`);
     process.exit(r.status ?? 1);
