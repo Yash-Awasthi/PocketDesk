@@ -531,7 +531,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
       }).catch((e) => console.log(`  iroh      failed to start: ${e?.message || e}`));
     }
     sessionStore.init();
-    cliServer.start();
+    cliServer.start(() => token);
     proposals.init(broadcast);
     await registry.scanAll(broadcast);
     console.log("  registry scanned");

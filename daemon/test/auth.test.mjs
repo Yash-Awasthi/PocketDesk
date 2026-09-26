@@ -51,9 +51,10 @@ async function main() {
   // DNS rebinding: a web page's request reaches 127.0.0.1 but still names its own host.
   const rebound = await new Promise((res) => http.get({ host: "127.0.0.1", port: PORT, path: `/pair?k=${rev.pairingToken}`, headers: { host: `evil.example:${PORT}` } }, (r) => { r.resume(); res(r.statusCode); }));
   check("pair page refuses a non-loopback Host", rebound === 403);
-  const cliStatus = (host) => new Promise((res) => http.get({ host: "127.0.0.1", port: CLI_PORT, path: "/status", headers: { host } }, (r) => { r.resume(); res(r.statusCode); }));
+  const cliStatus = (host, token = rev.pairingToken) => new Promise((res) => http.get({ host: "127.0.0.1", port: CLI_PORT, path: "/status", headers: { host, authorization: `Bearer ${token}` } }, (r) => { r.resume(); res(r.statusCode); }));
   check("CLI endpoint serves loopback hosts", (await cliStatus(`localhost:${CLI_PORT}`)) === 200);
   check("CLI endpoint refuses a non-loopback Host", (await cliStatus(`evil.example:${CLI_PORT}`)) === 403);
+  check("CLI endpoint refuses a missing or stale token", (await cliStatus(`localhost:${CLI_PORT}`, "")) === 401 && (await cliStatus(`localhost:${CLI_PORT}`, TOKEN)) === 401);
 
   const big = await hello({ token: "x".repeat(20_000) });
   check("oversized pre-auth message closes the socket", big.first === 1009);

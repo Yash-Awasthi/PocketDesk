@@ -1,4 +1,5 @@
 import http from "node:http";
+import crypto from "node:crypto";
 import * as sessions from "./sessions.js";
 import * as chat from "./chat.js";
 
@@ -8,11 +9,18 @@ function allSessions() {
 
 let cliServer = null;
 
-export function start(port = Number(process.env.RH_CLI_PORT) || 4679) {
+export function start(getToken, port = Number(process.env.RH_CLI_PORT) || 4679) {
   cliServer = http.createServer((req, res) => {
-    // No auth here, so a DNS-rebound web page (which reaches 127.0.0.1 under its own Host) must not read it.
+    // A DNS-rebound web page reaches 127.0.0.1 under its own Host.
     if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(req.headers.host || "")) {
       res.writeHead(403).end(JSON.stringify({ error: "forbidden" }));
+      return;
+    }
+    // Loopback admits every local account, so the master token is required too.
+    const given = Buffer.from(String(req.headers.authorization || "").replace(/^Bearer /i, ""));
+    const want = Buffer.from(getToken());
+    if (given.length !== want.length || !crypto.timingSafeEqual(given, want)) {
+      res.writeHead(401).end(JSON.stringify({ error: "unauthorized" }));
       return;
     }
     if (req.method !== "GET" && req.method !== "POST") {
@@ -21,7 +29,10 @@ export function start(port = Number(process.env.RH_CLI_PORT) || 4679) {
     }
 
     let body = "";
-    req.on("data", (d) => (body += d));
+    req.on("data", (d) => {
+      body += d;
+      if (body.length > 64 << 10) req.destroy();
+    });
     req.on("end", () => {
       const url = new URL(req.url, `http://localhost:${port}`);
       const path = url.pathname;

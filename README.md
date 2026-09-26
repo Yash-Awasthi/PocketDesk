@@ -454,7 +454,7 @@ for byte, then reports the VNC framebuffer geometry the server announced.
 | `RH_APPROVAL_TIMEOUT_MS` | `120000` | Auto-deny an agent stuck waiting for approval (0 disables) |
 | `RH_QUIET_MS` | `20000` | Silence before a session counts as *quiet*  |
 | `RH_IDLE_KILL_MINUTES` | off | Kill live sessions idle longer than N minutes |
-| `RH_CLI_PORT` | `4679` | Local CLI status endpoint (`/sessions /status /query`) |
+| `RH_CLI_PORT` | `4679` | Local CLI status endpoint (`/sessions /status /query`), needs `Authorization: Bearer <token>` |
 | `POCKETDESK_DATA` | `.pocketdesk` | Data dir (chat history, devices) |
 
 ---
