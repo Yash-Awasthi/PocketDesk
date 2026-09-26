@@ -11,6 +11,16 @@ const PORT = 8826;
 const CLI_PORT = 46826;
 const TOKEN = "bastiontoken";
 
+/** "ready" when the login succeeds, otherwise the error it failed with. */
+function sshTry(opts) {
+  return new Promise((resolve) => {
+    const cl = new ssh2.Client();
+    cl.on("ready", () => { cl.end(); resolve("ready"); });
+    cl.on("error", (e) => resolve(e.message));
+    cl.connect({ host: "127.0.0.1", readyTimeout: 15000, ...opts });
+  });
+}
+
 async function main() {
   const d = startDaemon(PORT, CLI_PORT, { token: TOKEN, manifests: tmp });
   await d.ready;
@@ -102,6 +112,11 @@ async function main() {
   c.send({ type: "sshserver_exec", sessionId: ss.session.id, command: "rm -rf /" });
   const badExec = await c.next((m) => m.type === "sshserver_exec_ok");
   check("disallowed command rejected", badExec.ok === false);
+
+  for (const command of IS_WIN ? ["git status & whoami", "git status | more", "git %PATH%"] : ["git status; id", "git $(id)", "git `id`", "git status | sh"]) {
+    c.send({ type: "sshserver_exec", sessionId: ss.session.id, command });
+    check(`allowlist cannot be chained: ${command}`, (await c.next((m) => m.type === "sshserver_exec_ok")).ok === false);
+  }
 
   c.send({ type: "sshserver_stats" });
   const sstats = await c.next((m) => m.type === "sshserver_stats");
@@ -229,6 +244,25 @@ async function main() {
   const jsess = await c.next((m) => m.type === "bastion_sessions");
   const proxied = jsess.items.find((x) => x.hostId === jh.host.id) || jsess.items[0];
   check("proxied traffic is accounted", !!proxied && proxied.outputBytes > 0 && proxied.commandCount === 1);
+
+  // Offers alice2's public key but signs with another key: only a verified signature stops it.
+  const forged = ssh2.utils.parseKey(ssh2.utils.generateKeyPairSync("ed25519").private);
+  const realPub = ssh2.utils.parseKey(pair.public);
+  forged.getPublicSSH = () => realPub.getPublicSSH();
+  const forgedLogin = await sshTry({ port: bsrv.port, username: "alice2@target", authHandler: (_m, _p, cb) => cb({ type: "publickey", username: "alice2@target", key: forged }) });
+  check("bastion refuses a public key with a forged signature", forgedLogin !== "ready");
+
+  c.send({ type: "sshserver_user_add", username: "nocred" });
+  await c.next((m) => m.type === "sshserver_user_added");
+  check("credential-less user cannot log in over the network", (await sshTry({ port: target.port, username: "nocred", password: "" })) !== "ready");
+
+  const shellOut = await new Promise((resolve) => {
+    const cl = new ssh2.Client();
+    cl.on("ready", () => cl.shell((err) => { cl.end(); resolve(err ? "denied" : "opened"); }));
+    cl.on("error", (e) => resolve(`error: ${e.message}`));
+    cl.connect({ host: "127.0.0.1", port: target.port, username: "tester", password: "s3cret" });
+  });
+  check("allowlisted user gets no interactive shell", shellOut === "denied");
 
   c.send({ type: "bastion_start", port: 0 });
   const twice = await c.next((m) => m.type === "bastion_started");

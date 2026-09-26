@@ -37,6 +37,12 @@ function constantTimeEquals(a, b) {
   return x.length === y.length && timingSafeEqual(x, y);
 }
 
+/** True when a signed publickey attempt was signed by the registered key. */
+export function verifySignature(publicKey, ctx) {
+  const key = utils.parseKey(publicKey);
+  return !(key instanceof Error) && key.verify(ctx.blob, ctx.signature, ctx.hashAlgo) === true;
+}
+
 function hashPassword(password) {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(String(password), salt, 64).toString("hex");
@@ -153,6 +159,8 @@ export class AdvancedSSHServerManager extends EventEmitter {
     if (!user) return false;
 
     if (user.allowedCommands.length > 0) {
+      // The command runs through a shell, so chaining or substitution would smuggle in an unlisted one.
+      if ((IS_WIN ? /[&|<>^%\r\n]/ : /[;&|<>`$()\r\n]/).test(command)) return false;
       const cmd = command.split(/\s+/)[0];
       if (!user.allowedCommands.includes(cmd)) return false;
     }
@@ -245,10 +253,15 @@ export class AdvancedSSHServerManager extends EventEmitter {
       const credential = ctx.method === "password" ? ctx.password
         : ctx.method === "publickey" ? ctx.key?.data?.toString("base64")
         : undefined;
+      const user = this.users.get(ctx.username);
+      // Credential-less users exist for phone-side bookkeeping only, never for network logins.
+      if (!user || (!user.passwordHash && !user.publicKey)) return ctx.reject(["password", "publickey"]);
       if (!this.authenticate(ctx.username, ctx.method, credential)) return ctx.reject(["password", "publickey"]);
       // A publickey probe carries no signature yet: accept it so the client
       // proceeds to the signed attempt, but do not open a session for it.
       if (ctx.method === "publickey" && !ctx.signature) return ctx.accept();
+      // ssh2 leaves signature checks to the server; without one, knowing the public key is enough.
+      if (ctx.method === "publickey" && !verifySignature(user.publicKey, ctx)) return ctx.reject(["password", "publickey"]);
       session = this.createSession(ctx.username, clientIp, ctx.method);
       if (!session) return ctx.reject();
       session.client = client;
@@ -268,7 +281,9 @@ export class AdvancedSSHServerManager extends EventEmitter {
           proc.on("close", (code) => { stream.exit(code ?? 0); stream.end(); });
           proc.on("error", (err) => { stream.stderr.write(String(err.message)); stream.exit(127); stream.end(); });
         });
-        chan.on("shell", (acc) => {
+        chan.on("shell", (acc, rej) => {
+          // An interactive shell would bypass the per-user command allowlist.
+          if (this.users.get(session.username)?.allowedCommands.length) return rej();
           const stream = acc();
           const shell = IS_WIN ? "powershell.exe" : process.env.SHELL || "bash";
           const term = pty.spawn(shell, [], { name: "xterm-256color", cols: 100, rows: 30, cwd: process.env.HOME || process.cwd(), env: process.env });

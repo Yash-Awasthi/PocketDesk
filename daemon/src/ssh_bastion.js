@@ -14,6 +14,7 @@ import fs from "node:fs";
 import path from "node:path";
 import ssh2 from "ssh2";
 import { configDir } from "./config.js";
+import { verifySignature } from "./advanced_ssh_server.js";
 
 const { Server, Client, utils } = ssh2;
 
@@ -266,6 +267,8 @@ export class SSHBastion extends EventEmitter {
       if (!expected || expected !== ctx.key?.data?.toString("base64")) return ctx.reject();
       if (!this.canAccess(route.user.id, route.host.id).allowed) return ctx.reject();
       if (!ctx.signature) return ctx.accept(); // unsigned probe; the signed attempt follows
+      // ssh2 leaves signature checks to the server; without one, knowing the public key is enough.
+      if (!verifySignature(route.user.publicKey, ctx)) return ctx.reject();
       session = this.startSession(route.user.id, route.host.id, info?.ip || "unknown");
       if (!session) return ctx.reject();
       ctx.accept();

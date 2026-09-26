@@ -1,4 +1,5 @@
 // Per-device tokens and real revocation.
+import http from "node:http";
 import { check, connect, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
 
 const tmp = makeTmp("rh-auth-");
@@ -38,6 +39,9 @@ async function main() {
   const pairHtml = await fetch(`http://127.0.0.1:${PORT}/pair`).then((r) => r.text());
   const pairPayload = JSON.parse(Buffer.from(pairHtml.match(/pocketdesk:\/\/pair#([\w-]+)/)[1], "base64url").toString());
   check("pairing QR carries the rotated token", pairPayload.t === rev.pairingToken);
+  // DNS rebinding: a web page's request reaches 127.0.0.1 but still names its own host.
+  const rebound = await new Promise((res) => http.get({ host: "127.0.0.1", port: PORT, path: "/pair", headers: { host: `evil.example:${PORT}` } }, (r) => { r.resume(); res(r.statusCode); }));
+  check("pair page refuses a non-loopback Host", rebound === 403);
   const byDevice = await hello({ token: deviceToken });
   check("revoked device token is refused", byDevice.first === 4003);
   const byOldMaster = await hello({ token: TOKEN });

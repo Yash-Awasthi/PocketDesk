@@ -9,7 +9,8 @@ param(
     [string]$Ref = "",                                   # release tag; the latest release when empty
     [string]$Source = "",                                # install from a local checkout instead of downloading
     [string]$InstallDir = "$env:LOCALAPPDATA\PocketDesk",
-    [switch]$NoStart
+    [switch]$NoStart,
+    [switch]$Console                                     # also install the SYSTEM console endpoint (one UAC prompt)
 )
 $ErrorActionPreference = "Stop"
 # The progress bar makes Invoke-WebRequest many times slower on Windows PowerShell 5.
@@ -19,6 +20,11 @@ $repo = "Yash-Awasthi/PocketDesk"
 
 function Step($message) { Write-Host "==> $message" -ForegroundColor Cyan }
 function Download($url, $file) { Invoke-WebRequest -UseBasicParsing -Uri $url -OutFile $file }
+# These binaries run with the user's rights (and SYSTEM's with -Console): refuse any that fail the publisher's checksum.
+function Verify($file, $expected) {
+    $actual = (Get-FileHash -Algorithm SHA256 $file).Hash
+    if (-not $expected -or $actual -ne $expected.Trim()) { throw "checksum mismatch for $(Split-Path -Leaf $file): got $actual, expected $expected" }
+}
 
 $tmp = Join-Path $env:TEMP ("rh-install-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Force -Path $InstallDir, $tmp | Out-Null
@@ -55,6 +61,9 @@ try {
     if ($have -ne $want) {
         Step "Downloading Node.js $want"
         Download "https://nodejs.org/dist/$want/node-$want-win-x64.zip" "$tmp\node.zip"
+        Download "https://nodejs.org/dist/$want/SHASUMS256.txt" "$tmp\node.sha256"
+        $sums = Get-Content -Raw "$tmp\node.sha256"
+        Verify "$tmp\node.zip" ([regex]::Match($sums, "(?m)^([0-9a-f]{64})\s+node-$([regex]::Escape($want))-win-x64\.zip$").Groups[1].Value)
         Expand-Archive "$tmp\node.zip" "$tmp\node"
         if (Test-Path $nodeDir) { Remove-Item -Recurse -Force $nodeDir }
         Move-Item (Get-ChildItem "$tmp\node" -Directory | Select-Object -First 1).FullName $nodeDir
@@ -65,6 +74,8 @@ try {
     if (-not (Test-Path "$ffDir\ffmpeg.exe")) {
         Step "Downloading ffmpeg (about 110 MB, once)"
         Download "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" "$tmp\ffmpeg.zip"
+        Download "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip.sha256" "$tmp\ffmpeg.sha256"
+        Verify "$tmp\ffmpeg.zip" ((Get-Content -Raw "$tmp\ffmpeg.sha256") -split '\s+')[0]
         Expand-Archive "$tmp\ffmpeg.zip" "$tmp\ffmpeg"
         New-Item -ItemType Directory -Force $ffDir | Out-Null
         Copy-Item (Get-ChildItem "$tmp\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName $ffDir
@@ -82,6 +93,15 @@ try {
     # 5. The tray: starts at logon and runs the daemon.
     Step "Installing the tray"
     & "$daemon\scripts\install-service.ps1" -DaemonDir $daemon -InstallDir $InstallDir -NoStart:$NoStart
+
+    # 5b. Console endpoint (opt-in): the SYSTEM secure-desktop entry. Needs one elevation.
+    if ($Console) {
+        Step "Installing the console endpoint (elevation required)"
+        $consoleArgs = @('-ExecutionPolicy','Bypass','-File',"$daemon\scripts\install-service.ps1",
+                         '-Console','-DaemonDir',$daemon,'-InstallDir',$InstallDir)
+        if ($NoStart) { $consoleArgs += '-NoStart' }
+        Start-Process powershell -Verb RunAs -Wait -ArgumentList $consoleArgs
+    }
 
     # 6. Pairing: the daemon writes its settings on first start; then the QR page opens.
     if (-not $NoStart) {
@@ -102,6 +122,7 @@ try {
     Write-Host ""
     Write-Host "PocketDesk is installed in $InstallDir" -ForegroundColor Green
     Write-Host "Scan the QR code with the PocketDesk app. Later: tray icon > Pair a phone."
+    if (-not $Console) { Write-Host "Lock screen / UAC / before-login from the phone? Re-run with -Console (one UAC prompt)." }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }

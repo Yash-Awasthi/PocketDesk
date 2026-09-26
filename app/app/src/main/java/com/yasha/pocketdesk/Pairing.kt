@@ -6,9 +6,9 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
 /**
- * The daemon's pairing link, `pocketdesk://pair#<base64url JSON {u,t,f,i}>`:
- * LAN url, master token, TLS fingerprint, and optionally an iroh ticket that
- * reaches the PC from any network (the entry's fallback).
+ * The daemon's pairing link, `pocketdesk://pair#<base64url JSON {u,t,f,i,n}>`:
+ * LAN url, master token, TLS fingerprint, optionally an iroh ticket that reaches
+ * the PC from any network (the entry's fallback), and optionally the entry's name.
  */
 object Pairing {
     const val SCHEME = "pocketdesk"
@@ -23,7 +23,7 @@ object Pairing {
         val token = s("t") ?: return emptyList()
         val host = url.substringAfter("://").substringBefore('/').substringBefore(':')
         // The iroh ticket rides along as the fallback, so one entry works at home and away.
-        return listOf(ServerEntry(host, url, token, fingerprint(s("f")), s("i")?.let { "iroh://$it" }))
+        return listOf(ServerEntry(s("n") ?: host, url, token, fingerprint(s("f")), s("i")?.let { "iroh://$it" }))
     }
 
     /** The daemon prints `AB:CD:…`; [Tls.sha256] compares lowercase hex without separators. */

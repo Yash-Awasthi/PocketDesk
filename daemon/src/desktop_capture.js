@@ -15,7 +15,7 @@
  *     normalization (multi-monitor), clicks, wheel, virtual-key taps with
  *     ctrl/alt/shift, Unicode text via scan codes.
  * Helpers are DPI-aware and stay warm, so a click costs microseconds instead
- * of a 1-2s process spawn. Scripts are written to temp .ps1 files once and
+ * of a 1-2s process spawn. Scripts are written to .ps1 files in the config dir and
  * run with -ExecutionPolicy Bypass -File (deterministic quoting).
  *
  * Capture runs on a ~300ms loop ONLY while at least one rd client is
@@ -24,11 +24,11 @@
  */
 import { spawn } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { EventEmitter } from "node:events";
-// fs/os/path still used: helper scripts are written to temp .ps1 files once
-// (deterministic for AV scanners, no shell-quoting issues).
+import { configDir } from "./config.js";
+// Helper scripts live in the private config dir: in a shared temp dir another user could
+// swap one in before it runs, as SYSTEM for the console endpoint.
 
 const IS_WIN = process.platform === "win32";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -41,6 +41,23 @@ function wireLine(obj) {
 const COMMON_PRELUDE = `
 $ErrorActionPreference = 'Stop'
 `;
+
+// The console endpoint runs as SYSTEM in the console session, which may attach to the
+// secure desktop (UAC, lock screen). Only it gets this, so the user daemon's scripts stay unchanged.
+const IS_CONSOLE = IS_WIN && !!process.env.RH_CONSOLE;
+const DESK_MEMBERS = IS_CONSOLE ? `
+  [DllImport("user32.dll", SetLastError=true)] static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
+  [DllImport("user32.dll", SetLastError=true)] static extern bool SetThreadDesktop(IntPtr h);
+  [DllImport("user32.dll", SetLastError=true)] static extern bool CloseDesktop(IntPtr h);
+  static IntPtr cur = IntPtr.Zero;
+  /** Moves this thread onto whichever desktop has input now, keeping exactly one handle open. */
+  public static void FollowInput() {
+    IntPtr d = OpenInputDesktop(0, false, 0x02000000);
+    if (d == IntPtr.Zero) return;
+    if (SetThreadDesktop(d)) { if (cur != IntPtr.Zero && cur != d) CloseDesktop(cur); cur = d; } else CloseDesktop(d);
+  }
+` : "";
+const followInput = (cls) => (IS_CONSOLE ? `[${cls}]::FollowInput()\n  ` : "");
 
 const INPUT_SCRIPT = COMMON_PRELUDE + `
 Add-Type -AssemblyName System.Windows.Forms
@@ -84,7 +101,7 @@ public static class RHI {
     var i = new INPUT { type = 1 };
     i.u.ki = new KEYBDINPUT { wVk = 0, wScan = scan, dwFlags = flags };
     return SendInput(1, new INPUT[]{ i }, Marshal.SizeOf(typeof(INPUT)));
-  }
+  }${DESK_MEMBERS}
 }
 '@
 [RHI]::SetProcessDPIAware() | Out-Null
@@ -95,7 +112,7 @@ while ($true) {
   try { $cmd = $line | ConvertFrom-Json } catch { [Console]::Out.WriteLine('{"ok":false,"error":"badjson"}'); continue }
   $op = $cmd.op
   if ($op -eq 'ping') { [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}'); continue }
-  if ($op -eq 'mouse') {
+  ${followInput("RHI")}if ($op -eq 'mouse') {
     try {
       $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
       # x/y are relative to the virtual screen's top-left, the same origin as a captured frame.
@@ -197,7 +214,7 @@ public static class RHD {
       }
     }
     return string.Join(",", list);
-  }
+  }${DESK_MEMBERS}
 }
 '@
 [RHD]::SetProcessDPIAware() | Out-Null
@@ -215,7 +232,7 @@ while ($true) {
   }
   if ($op -eq 'capture') {
     try {
-      $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+      ${followInput("RHD")}$vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
       $s = [double]$cmd.s
       if ($s -le 0 -or $s -gt 1) { $s = 1 }
       $w = [int]($vs.Width * $s); $h = [int]($vs.Height * $s)
@@ -321,7 +338,7 @@ export class PsHelper {
     this.file = null;
   }
 
-  /** Write the script to a temp .ps1 once (AV-deterministic, no quoting issues). */
+  /** Write the script to a private .ps1 once (AV-deterministic, no quoting issues). */
   ensureFile() {
     if (this.file) {
       try {
@@ -329,7 +346,8 @@ export class PsHelper {
         return this.file;
       } catch { /* rewrite below */ }
     }
-    this.file = path.join(os.tmpdir(), `pocketdesk-${this.name}.ps1`);
+    fs.mkdirSync(path.join(configDir, "helpers"), { recursive: true, mode: 0o700 });
+    this.file = path.join(configDir, "helpers", `${this.name}.ps1`);
     fs.writeFileSync(this.file, this.script, { encoding: "utf8" });
     return this.file;
   }

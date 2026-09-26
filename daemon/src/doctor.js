@@ -10,6 +10,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import https from "node:https";
 import { execSync, spawn } from "node:child_process";
 import { wakeArmedAdapters } from "./wake.js";
 
@@ -111,6 +112,35 @@ export async function diagnose({ tls, manifests } = {}) {
       ok: armed.length > 0,
       detail: armed.length ? `can wake the PC: ${armed.join(", ")}` : "no network adapter is allowed to wake this PC",
       hint: armed.length ? undefined : "Device Manager > network adapter > Power Management: allow it to wake the computer, only with a magic packet; enable Wake-on-LAN in the BIOS for a wired port",
+    });
+  }
+
+  // Console endpoint (optional SYSTEM secure-desktop daemon on 8766).
+  if (process.platform === "win32") {
+    const task = tryExec('schtasks /query /TN "PocketDeskConsole" /fo LIST');
+    const registered = task.ok && !/Disabled/i.test(task.out);
+    let reachable = false;
+    if (registered) {
+      reachable = await new Promise((resolve) => {
+        const req = https.request(
+          { host: "127.0.0.1", port: 8766, path: "/health", method: "GET", rejectUnauthorized: false, timeout: 2000 },
+          (res) => { res.resume(); resolve(res.statusCode === 200); },
+        );
+        req.on("error", () => resolve(false));
+        req.on("timeout", () => { req.destroy(); resolve(false); });
+        req.end();
+      });
+    }
+    checks.push({
+      name: "console_endpoint",
+      // Absent is fine (optional feature); only registered-but-dead is a problem.
+      ok: !registered || reachable,
+      detail: registered
+        ? (reachable ? "SYSTEM console daemon reachable on 8766" : "task registered but 8766 not answering")
+        : "not installed (optional)",
+      hint: registered && !reachable
+        ? "the PocketDeskConsole task is registered but its daemon is down — check %ProgramData%\\PocketDesk\\console"
+        : (registered ? undefined : "for lock-screen / UAC / before-login access, run install-service.ps1 -Console elevated"),
     });
   }
 

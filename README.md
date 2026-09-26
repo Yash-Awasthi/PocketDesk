@@ -32,7 +32,11 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📱 **Multi-PC** | Connect to multiple PCs, each with pinned certificates |
 | 🔔 **Background Notify** | Get notified when sessions end while the app is in background |
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states |
-| 🖨️ **Desktop Control** | Watch the whole PC screen live (~3 fps) and drive it — from the **browser AND the Android app** (tap = click, long-press = right-click, drag = move, scroll, type, keys) (`desktop_*`; Windows, PowerShell-powered). |
+| 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware H.264 up to 60 fps (WebCodecs in the browser), any monitor, the PC pointer drawn on the viewer, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows). |
+| 📋 **Clipboard & file drop** | Text, images and copied files move between the PC and the viewer while the desktop is open; files sent from the phone or browser are pasted straight into the focused PC window. |
+| 👁 **Session privacy** | The PC shows who is viewing with a Disconnect button, can require Allow / View only / Deny first, and viewers can join view-only. |
+| 🎥 **Session recording** | Optional MP4 of the watched screen, asciicast of terminals, and a log of every viewer, approval and file sent. |
+| ⏰ **Wake-on-LAN** | Wake a sleeping PC from the phone on the same network. |
 | 🛡️ **SSH Bastion** | A real jump host: log in as `user@host` with your registered key, the access rule is checked, and the channel is proxied to the target with byte accounting (`bastion_*`) |
 | 🔒 **SSH Server Control** | A real SSH listener on the PC: per-user password/public-key auth, command allowlists enforced before a command runs, PTY shells, session recording (`sshserver_*`) |
 | 📇 **Connection Profiles** | Real SSH, SFTP and VNC connections from saved profiles, host-key trust-on-first-use, OpenSSH key generation kept out of the protocol (`profile_*`/`hostkey_*`/`sshkey_*`) |
