@@ -68,8 +68,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.foundation.focusable
@@ -358,20 +356,12 @@ fun DesktopScreen(
                 }
                 cursor?.let { cur ->
                     val p = Offset(v.left + cur.x * v.scale, v.top + cur.y * v.scale)
-                    if (ws.desktopCursor?.shape == "text") {
-                        val h = 12.dp.toPx()
-                        drawLine(Color.Black, p.copy(y = p.y - h), p.copy(y = p.y + h), strokeWidth = 5f)
-                        drawLine(Color.White, p.copy(y = p.y - h), p.copy(y = p.y + h), strokeWidth = 2.5f)
-                    } else {
-                        val u = 1.dp.toPx()
-                        val arrow = Path().apply {
-                            moveTo(p.x, p.y); lineTo(p.x, p.y + 17 * u); lineTo(p.x + 4.5f * u, p.y + 13 * u)
-                            lineTo(p.x + 7.5f * u, p.y + 19.5f * u); lineTo(p.x + 10 * u, p.y + 18.5f * u)
-                            lineTo(p.x + 7 * u, p.y + 12 * u); lineTo(p.x + 12.5f * u, p.y + 12 * u); close()
-                        }
-                        drawPath(arrow, Color.White)
-                        drawPath(arrow, Color.Black, style = Stroke(width = 1.5f * u))
-                    }
+                    // A small dot centred on the exact click point: precise, and it hides almost nothing.
+                    // The white and dark rings keep it visible on any background.
+                    val u = 1.dp.toPx()
+                    drawCircle(Color.Black.copy(alpha = 0.6f), radius = 4.5f * u, center = p)
+                    drawCircle(Color.White, radius = 3.5f * u, center = p)
+                    drawCircle(if (ws.desktopCursor?.shape == "text") Color(0xFF2F81F7) else Color(0xFFE5362E), radius = 2.5f * u, center = p)
                 }
             }
             if (fullscreen) {

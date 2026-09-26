@@ -83,6 +83,8 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   let pairFp = "";
   let irohTicket = "";
   let irohEp = null;
+  // True while iroh is still starting: a QR shown now would carry no way to reach the PC from outside.
+  let irohStarting = false;
   // Rebuilt on token rotation, so the QR never shows a dead token.
   function buildPairPage(useTls, fingerprint = pairFp) {
     pairFp = fingerprint;
@@ -137,7 +139,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
       const t = irohEp?.ticket();
       if (t && t !== irohTicket) { irohTicket = t; buildPairPage(useTls); }
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-      res.end(pairPage);
+      res.end(irohStarting ? pairPage.replace("</head>", '<meta http-equiv="refresh" content="2"></head>') : pairPage);
       return;
     }
     if (req.url.startsWith("/pair")) {
@@ -272,7 +274,9 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   function welcome(auth, hello, ip) {
     devices.register(auth.id, { name: hello.name, platform: hello.platform, ip });
     const deviceToken = auth.pairing ? devices.issueToken(auth.id) : undefined;
-    return { type: "welcome", version: 1, clientId: auth.id, deviceToken, sessions: allSessions(), manifests: registry.list(), wake };
+    // The phone keeps the current iroh address, which also repairs an entry paired from a QR without one.
+    const iroh = irohEp?.ticket() || undefined;
+    return { type: "welcome", version: 1, clientId: auth.id, deviceToken, sessions: allSessions(), manifests: registry.list(), wake, iroh };
   }
 
   function disconnectDevice(clientId) {
@@ -532,6 +536,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     console.log("");
     // iroh sockets join wss.clients so broadcast and revoke reach them like /ws sockets.
     if (irohCfg?.enabled) {
+      irohStarting = true;
       startIroh({
         dir: configDir,
         relays: irohCfg.relays,
@@ -547,12 +552,13 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
           wss.emit("connection", sock, { socket: { remoteAddress: `iroh:${remoteId}` } });
         },
       }).then((ep) => {
+        irohStarting = false;
         if (!ep) return console.log("  iroh      unavailable (optional @number0/iroh not installed)");
         irohEp = ep;
         irohTicket = ep.ticket();
         buildPairPage(useTls);
         console.log(`  iroh      ${ep.id}`);
-      }).catch((e) => console.log(`  iroh      failed to start: ${e?.message || e}`));
+      }).catch((e) => { irohStarting = false; console.log(`  iroh      failed to start: ${e?.message || e}`); });
     }
     sessionStore.init();
     cliServer.start(() => token);

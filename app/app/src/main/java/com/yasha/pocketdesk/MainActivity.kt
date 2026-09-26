@@ -122,6 +122,11 @@ class MainActivity : ComponentActivity() {
             val book = ServerBook(applicationContext)
             book.save(book.load().map { if (it.url == url || it.fallback == url) it.copy(token = token) else it })
         }
+        LaunchedEffect(client.irohUpdate) {
+            val (url, fallback) = client.irohUpdate ?: return@LaunchedEffect
+            val book = ServerBook(applicationContext)
+            book.save(book.load().map { if (it.url == url) it.copy(fallback = fallback) else it })
+        }
         LaunchedEffect(client) {
             client.events.collect { ev ->
                 if (ev is RhEvent.PowerDone) android.widget.Toast.makeText(

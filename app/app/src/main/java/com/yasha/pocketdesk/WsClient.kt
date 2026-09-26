@@ -73,6 +73,9 @@ class WsClient(
     /** (url, token) the daemon issued this device on pairing; saved in place of the master token. */
     var issuedToken by mutableStateOf<Pair<String, String>?>(null)
         private set
+    /** (entry url, iroh://ticket) when the PC reports an iroh address the saved entry lacks or has stale. */
+    var irohUpdate by mutableStateOf<Pair<String, String>?>(null)
+        private set
 
     // ── Auto-reconnect (client-kt/krossbow backoff + cc-pocket since-reattach) ──
     private var lastToken: String? = null
@@ -694,7 +697,12 @@ class WsClient(
                 str(m, "deviceToken")?.let { t ->
                     lastToken = t
                     hello = Proto.hello(t)
-                    activeUrl?.let { issuedToken = it to t }
+                    // Keyed by the entry's own url: the iroh fallback below may change in the same welcome.
+                    (lanUrl ?: activeUrl)?.let { issuedToken = it to t }
+                }
+                str(m, "iroh")?.let { "iroh://$it" }?.takeIf { it != fallbackUrl }?.let { fb ->
+                    fallbackUrl = fb
+                    lanUrl?.let { irohUpdate = it to fb }
                 }
                 (m["wake"] as? JsonObject)?.let { w ->
                     val macs = (w["macs"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.let { o -> str(o, "mac") } } ?: emptyList()
