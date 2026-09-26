@@ -14,19 +14,14 @@ import fs from "node:fs";
 import path from "node:path";
 import ssh2 from "ssh2";
 import { configDir } from "./config.js";
-import { verifySignature } from "./advanced_ssh_server.js";
+import { verifySignature, hostKeyFile } from "./advanced_ssh_server.js";
 
 const { Server, Client, utils } = ssh2;
 const INVITE_TTL_MS = 7 * 24 * 3600_000;
 
 /** Host key for the bastion listener, generated once and reused after. */
 function hostKey() {
-  const file = path.join(configDir, "bastion_host_ed25519");
-  if (!fs.existsSync(file)) {
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(file, utils.generateKeyPairSync("ed25519").private, { mode: 0o600 });
-  }
-  return fs.readFileSync(file);
+  return hostKeyFile(path.join(configDir, "bastion_host_ed25519"));
 }
 
 /** Wire blob of a public key in any accepted form, for comparison. */

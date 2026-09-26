@@ -16,6 +16,7 @@ import net from "node:net";
 import path from "node:path";
 import ssh2 from "ssh2";
 import { configDir } from "./config.js";
+import { generateKeyPair } from "./advanced_ssh_server.js";
 
 const { Client, utils } = ssh2;
 
@@ -406,7 +407,7 @@ export class MultiProtocolClient extends EventEmitter {
   generateKey(type = "ed25519", name = "", { bits, passphrase } = {}) {
     const opts = type === "rsa" ? { bits: Number(bits) || 3072 } : {};
     if (passphrase) Object.assign(opts, { passphrase, cipher: "aes256-cbc" });
-    const pair = utils.generateKeyPairSync(type === "rsa" ? "rsa" : type === "ecdsa" ? "ecdsa" : "ed25519", opts);
+    const pair = generateKeyPair(type === "rsa" ? "rsa" : type === "ecdsa" ? "ecdsa" : "ed25519", opts);
 
     const id = crypto.randomUUID();
     fs.mkdirSync(KEY_DIR, { recursive: true, mode: 0o700 });
