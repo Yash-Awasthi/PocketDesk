@@ -22,14 +22,15 @@ That's all: the PC now starts PocketDesk at every logon, and the phone reaches i
 What the installer does, with nothing installed beforehand:
 
 1. Downloads the latest release of the daemon.
-2. Downloads a private copy of Node.js and of ffmpeg (for the fast H.264 desktop stream).
-   Nothing is added to your PATH and no other program is affected.
+2. Uses Node.js 20 or newer and ffmpeg (for the fast H.264 desktop stream) if they are already on
+   your PATH. Whatever is missing is downloaded as a private copy; nothing is added to your PATH and
+   no other program is affected. Console access always uses a private Node.js.
 3. Installs the daemon's dependencies.
 4. Installs the tray icon, registers it to start at logon, and adds a **PocketDesk** shortcut to
    the Start Menu and the desktop.
 5. Starts everything and opens the pairing page.
 
-The first install downloads about 150 MB and takes a few minutes. Your browser may warn that the
+The first install downloads up to about 150 MB (much less when Node.js and ffmpeg are already there). Your browser may warn that the
 pairing page's certificate is not trusted; that is expected, because the daemon makes its own
 certificate. Choose **Advanced**, then **Continue to localhost**.
 
