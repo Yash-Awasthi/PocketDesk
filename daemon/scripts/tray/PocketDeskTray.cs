@@ -29,8 +29,7 @@ namespace PocketDeskTray
     internal class TrayContext : ApplicationContext
     {
         readonly NotifyIcon icon;
-        readonly ToolStripMenuItem startItem;
-        readonly ToolStripMenuItem stopItem;
+        readonly ToolStripMenuItem pauseItem;
         Process daemon;
         SynchronizationContext ui;
         string port = "8765";
@@ -38,7 +37,8 @@ namespace PocketDeskTray
         bool tlsEnabled;
         string fingerprint = "";
         string daemonDir;
-        static readonly string LogPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "daemon.log");
+        static readonly string DataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk");
+        static readonly string LogPath = Path.Combine(DataDir, "daemon.log");
         // The daemon checks for this file before every remote viewing session.
         static readonly string ApprovalFlag = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "ask-before-viewing");
         static readonly string RecordFlag = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk", "record-sessions");
@@ -46,6 +46,8 @@ namespace PocketDeskTray
 
         public TrayContext()
         {
+            // On a fresh PC the daemon has not created it yet, and the log is opened before the daemon starts.
+            try { Directory.CreateDirectory(DataDir); } catch { }
             LoadConfig();
             LoadDaemonDir();
 
@@ -64,12 +66,11 @@ namespace PocketDeskTray
             menu.Items.Add(recordItem);
             menu.Items.Add("Open recordings", null, (s, e) => { try { Directory.CreateDirectory(Recordings); Process.Start("explorer.exe", Recordings); } catch { } });
             menu.Items.Add(new ToolStripSeparator());
-            startItem = new ToolStripMenuItem("Start daemon", null, (s, e) => StartDaemon());
-            stopItem = new ToolStripMenuItem("Stop daemon", null, (s, e) => StopDaemon());
-            menu.Items.Add(startItem);
-            menu.Items.Add(stopItem);
+            pauseItem = new ToolStripMenuItem("Pause", null, (s, e) => { if (daemon != null) StopDaemon(); else StartDaemon(); });
+            menu.Items.Add(pauseItem);
+            menu.Items.Add("Exit (stop everything)", null, (s, e) => { StopDaemon(); icon.Visible = false; Application.Exit(); });
             menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("Exit", null, (s, e) => { StopDaemon(); icon.Visible = false; Application.Exit(); });
+            menu.Items.Add("Uninstall PocketDesk", null, (s, e) => Uninstall());
 
             icon = new NotifyIcon
             {
@@ -79,6 +80,18 @@ namespace PocketDeskTray
             };
             SetRunning(false);
             StartDaemon();
+        }
+
+        void Uninstall()
+        {
+            var script = Path.Combine(ExeDir, "uninstall.ps1");
+            if (!File.Exists(script)) { ShowBalloon("uninstall.ps1 not found next to the tray"); return; }
+            // uninstall.ps1 kills this tray and deletes its folder, so it must not run from inside it.
+            Process.Start(new ProcessStartInfo("powershell.exe", "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\"")
+            {
+                WorkingDirectory = Path.GetTempPath(),
+                UseShellExecute = false,
+            });
         }
 
         void ToggleFlag(string flag)
@@ -216,8 +229,7 @@ namespace PocketDeskTray
         void SetRunning(bool running)
         {
             if (icon != null) icon.Icon = MakeIcon(running ? Color.FromArgb(76, 175, 80) : Color.FromArgb(158, 158, 158));
-            if (startItem != null) startItem.Enabled = !running;
-            if (stopItem != null) stopItem.Enabled = running;
+            if (pauseItem != null) pauseItem.Text = running ? "Pause" : "Resume";
         }
 
         void ShowBalloon(string message)

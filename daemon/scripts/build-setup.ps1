@@ -58,7 +58,7 @@ SourceFiles0=$work\
     }
 }
 
-# Both keep the window open at the end so the outcome can be read.
+# Both keep the window open only on failure, so a normal run is a single double-click.
 Pack "PocketDesk-Setup.exe" "PocketDesk Setup" "install.ps1" @'
 @echo off
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0install.ps1"
@@ -67,12 +67,6 @@ if errorlevel 1 (echo. & echo Setup failed. & pause)
 
 Pack "PocketDesk-Uninstall.exe" "PocketDesk Uninstall" "uninstall.ps1" @'
 @echo off
-echo This removes PocketDesk from this PC: the tray, its autostart, the shortcuts and the program.
-echo Your settings and paired phones stay in %USERPROFILE%\.pocketdesk.
-echo.
-choice /C YN /M "Remove PocketDesk"
-if errorlevel 2 exit /b 0
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0uninstall.ps1"
-echo.
-pause
+if errorlevel 1 (echo. & echo Uninstall failed. & pause)
 '@

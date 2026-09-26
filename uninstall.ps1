@@ -11,7 +11,7 @@ $ErrorActionPreference = "Stop"
 
 # The tray owns the daemon; stop the daemon first so its port and files are released.
 foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe'")) {
-    $kids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId)")
+    $kids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId) AND ProcessId<>$PID")
     Stop-Process -Id $t.ProcessId -Force -ErrorAction SilentlyContinue
     # The daemon sees its stdin close and stops its agents first; one that does not exit in time is killed.
     foreach ($k in $kids) {
