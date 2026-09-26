@@ -108,6 +108,24 @@ try {
     Step "Installing the tray"
     & "$daemon\scripts\install-service.ps1" -DaemonDir $daemon -InstallDir $InstallDir -NoStart:$NoStart
 
+    # Listed under Settings > Apps > Installed apps, whose Uninstall button runs uninstall.ps1.
+    $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PocketDesk"
+    New-Item -Path $key -Force | Out-Null
+    $size = [int]((Get-ChildItem $InstallDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1KB)
+    $entry = @{
+        DisplayName     = "PocketDesk"
+        DisplayVersion  = if ($Ref) { $Ref.TrimStart("v") } else { "dev" }
+        Publisher       = "PocketDesk"
+        InstallLocation = $InstallDir
+        DisplayIcon     = Join-Path $InstallDir "PocketDeskTray.exe"
+        UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`""
+        URLInfoAbout    = "https://github.com/$repo"
+    }
+    foreach ($name in $entry.Keys) { Set-ItemProperty -Path $key -Name $name -Value $entry[$name] }
+    foreach ($name in "NoModify", "NoRepair", "EstimatedSize") {
+        New-ItemProperty -Path $key -Name $name -PropertyType DWord -Value $(if ($name -eq "EstimatedSize") { $size } else { 1 }) -Force | Out-Null
+    }
+
     # 5b. Console endpoint (opt-in): the SYSTEM secure-desktop entry. Needs one elevation.
     if ($Console) {
         Step "Installing the console endpoint (elevation required)"

@@ -74,6 +74,8 @@ It downloads the daemon with its own Node.js and ffmpeg, installs a tray icon th
 starts it at logon, adds a **PocketDesk** shortcut to the Start Menu and the desktop, and opens the
 pairing QR. Scan it with the app and you are done. Clicking the shortcut later starts PocketDesk,
 or shows the pairing QR again if it is already running.
+To remove it: **Settings > Apps > Installed apps > PocketDesk > Uninstall**, or run
+**PocketDesk-Uninstall.exe** from the same release.
 Full guide, updating and uninstalling: [docs/SETUP-PC.md](docs/SETUP-PC.md).
 
 **macOS / Linux:**

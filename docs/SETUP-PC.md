@@ -108,6 +108,12 @@ and paired phones.
 
 ## Uninstall
 
+Any of these:
+
+- **Settings > Apps > Installed apps**, find **PocketDesk**, then **Uninstall**.
+- Double-click **PocketDesk-Uninstall.exe** from the [latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest); it asks before removing anything.
+- From PowerShell:
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PocketDesk\uninstall.ps1"
 ```

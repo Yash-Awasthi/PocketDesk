@@ -19,8 +19,8 @@ android {
         applicationId = "com.yasha.pocketdesk"
         minSdk = 30
         targetSdk = 36
-        versionCode = 9
-        versionName = "0.4.1"
+        versionCode = 10
+        versionName = "0.4.2"
         // iroh's native library is ~14 MB per ABI: phones are arm64, debug adds the emulator's.
         ndk { abiFilters += "arm64-v8a" }
     }

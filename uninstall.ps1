@@ -19,6 +19,7 @@ Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" 
 foreach ($dir in @([Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop"))) {
     Remove-Item (Join-Path $dir "PocketDesk.lnk") -ErrorAction SilentlyContinue
 }
+Remove-Item "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PocketDesk" -Recurse -ErrorAction SilentlyContinue
 
 # Console endpoint (only present if it was ever installed with -Console). Unregistering a
 # SYSTEM task needs elevation; run this uninstall as administrator to remove it fully.
