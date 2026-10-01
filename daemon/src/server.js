@@ -17,7 +17,6 @@ import { PowerManager, normalizeAwakeMode } from "./power_manager.js";
 import { createActivityMonitor } from "./activity.js";
 import { StreamJsonParser } from "./stream_json_parser.js";
 import { DesktopController } from "./desktop_capture.js";
-import { DesktopPresence } from "./desktop_presence.js";
 import { createAccess } from "./access.js";
 import { wakeTargets } from "./wake.js";
 import { Recorder } from "./recorder.js";
@@ -197,6 +196,8 @@ export function start(config, { onTokenRotated } = {}) {
   const server = useTls
     ? https.createServer({ cert: fs.readFileSync(tls.cert), key: fs.readFileSync(tls.key) }, requestHandler)
     : http.createServer(requestHandler);
+  // Plaintext would put the token and every byte on the LAN in the clear, so without TLS only this machine may connect.
+  if (!useTls) server.on("connection", (s) => { if (!/^(::ffff:)?127\.|^::1$/.test(s.remoteAddress || "")) s.destroy(); });
 
   // WebSocket upgrade with origin check (ttyd/gotty pattern): browsers always
   // send Origin — cross-origin upgrades are rejected at the HTTP level (403)
@@ -395,7 +396,6 @@ export function start(config, { onTokenRotated } = {}) {
   // ~200-300 KB each, too heavy for the broadcast fan-out) and the capture
   // loop runs only while at least one watcher is attached.
   const desktop = new DesktopController();
-  const presence = new DesktopPresence();
   const access = createAccess(config);
   const recorder = new Recorder();
   const desktopWatchers = new Set();
@@ -500,7 +500,6 @@ export function start(config, { onTokenRotated } = {}) {
     video.stop();
     scheduler.stop();
     desktop.dispose();
-    presence.dispose();
     recorder.dispose();
     mpc.dispose();
     sshSrv.stop();
@@ -555,7 +554,7 @@ export function start(config, { onTokenRotated } = {}) {
 
   const ctx = {
     send, broadcast, allSessions, plugins, power,
-    desktop, desktopWatchers, video, videoWatchers, presence, recorder, access, bastion, sshSrv, mpc, streamParser,
+    desktop, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
     activity, tls, rotateToken, disconnectDevice,
   };
   const handlers = {
@@ -580,6 +579,8 @@ export function start(config, { onTokenRotated } = {}) {
     }
     if (useTls) {
       console.log(`  tls       enabled, cert fingerprint ${fp}`);
+    } else {
+      console.warn("  tls       OFF: only connections from this machine are accepted (phones need wss)");
     }
     const pairUrl = `http${useTls ? "s" : ""}://localhost:${port}/pair`;
     console.log(process.stdout.isTTY

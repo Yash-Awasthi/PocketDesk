@@ -77,16 +77,6 @@ async function main() {
     check("watchers get the pointer position", Number.isFinite(cur.x) && typeof cur.shape === "string");
     const pushed = await c.next((m) => m.type === "desktop_frame", 20000);
     check("desktop_frame pushed while streaming", Buffer.from(pushed.base64, "base64")[0] === 0xff);
-    c.send({ type: "desktop_privacy", on: true });
-    const pv = await c.next((m) => m.type === "desktop_privacy", 20000);
-    check("privacy mode turns on for a controlling viewer", pv.ok && pv.on);
-    // A still desktop pushes no new frames, so ask for one.
-    c.send({ type: "desktop_frame" });
-    const hidden = await c.next((m) => m.type === "desktop_frame", 20000);
-    check("the viewer still sees the desktop under privacy mode", Buffer.from(hidden.base64, "base64").length > 10_000);
-    c.send({ type: "desktop_privacy", on: false });
-    const off = await c.next((m) => m.type === "desktop_privacy" && m.on === false, 20000).catch(() => ({ on: "timeout" }));
-    check("privacy mode turns off", off.on === false);
     // Input round-trips while watching (no throw; real effect not asserted — CI safety).
     c.send({ type: "desktop_key", key: 65 });
     const ik = await c.next((m) => m.type === "desktop_input_ok", 15000);

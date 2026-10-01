@@ -289,7 +289,6 @@ object Proto {
     fun approve(id: String, all: Boolean) = obj { put("type", "approve"); put("id", id); if (all) put("all", true) }
     fun reject(id: String) = obj { put("type", "reject"); put("id", id) }
     fun proposalList() = obj { put("type", "proposal_list") }
-    fun desktopPrivacy(on: Boolean) = obj { put("type", "desktop_privacy"); put("on", on) }
     fun pcPower(action: String) = obj { put("type", "pc_power"); put("action", action) }
     fun totp(op: String, code: String? = null) = obj { put("type", "totp_$op"); code?.let { put("code", it) } }
     fun chatPermission(id: String, mode: String) = obj { put("type", "chat_permission"); put("id", id); put("mode", mode) }

@@ -18,6 +18,8 @@ import { verifySignature, hostKeyFile } from "./advanced_ssh_server.js";
 
 const { Server, Client, utils } = ssh2;
 const INVITE_TTL_MS = 7 * 24 * 3600_000;
+const MAX_AUTH_FAILURES = 10;
+const AUTH_WINDOW_MS = 10 * 60_000;
 
 /** Host key for the bastion listener, generated once and reused after. */
 function hostKey() {
@@ -40,6 +42,7 @@ export class SSHBastion extends EventEmitter {
     this.invites = new Map();
     this.server = null;
     this.port = null;
+    this.authFailures = new Map();
   }
 
   /**
@@ -255,17 +258,31 @@ export class SSHBastion extends EventEmitter {
     let session = null;
     let route = null;
 
+    const clientIp = info?.ip || "unknown";
     client.on("authentication", (ctx) => {
+      const now = Date.now();
+      const rec = this.authFailures.get(clientIp);
+      const failures = rec && now - rec.at < AUTH_WINDOW_MS ? rec.n : 0;
+      if (failures >= MAX_AUTH_FAILURES) return ctx.reject();
+      // Unsigned publickey probes are how clients pick among their keys, so only real attempts count.
+      const fail = () => {
+        if (ctx.signature) {
+          for (const [ip, r] of this.authFailures) if (now - r.at > AUTH_WINDOW_MS) this.authFailures.delete(ip);
+          this.authFailures.set(clientIp, { n: failures + 1, at: now });
+        }
+        return ctx.reject();
+      };
       route = this._route(ctx.username);
-      if (!route.user || !route.host) return ctx.reject();
+      if (!route.user || !route.host) return fail();
       if (ctx.method !== "publickey") return ctx.reject(["publickey"]);
       const expected = keyBlob(route.user.publicKey);
-      if (!expected || expected !== ctx.key?.data?.toString("base64")) return ctx.reject();
-      if (!this.canAccess(route.user.id, route.host.id).allowed) return ctx.reject();
+      if (!expected || expected !== ctx.key?.data?.toString("base64")) return fail();
+      if (!this.canAccess(route.user.id, route.host.id).allowed) return fail();
       if (!ctx.signature) return ctx.accept(); // unsigned probe; the signed attempt follows
       // ssh2 leaves signature checks to the server; without one, knowing the public key is enough.
-      if (!verifySignature(route.user.publicKey, ctx)) return ctx.reject();
-      session = this.startSession(route.user.id, route.host.id, info?.ip || "unknown");
+      if (!verifySignature(route.user.publicKey, ctx)) return fail();
+      this.authFailures.delete(clientIp);
+      session = this.startSession(route.user.id, route.host.id, clientIp);
       if (!session) return ctx.reject();
       ctx.accept();
     });

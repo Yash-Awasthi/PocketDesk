@@ -339,7 +339,6 @@ the messages that tab sends. Full suite: 30 files, all pass.
 | Feature | Reference | Status |
 |---|---|---|
 | File manager | AnyDesk File Manager | ✅ Files tab: open, share, save, upload, rename, mkdir, delete to Recycle Bin, search (`fs_op`, `fs_search`) |
-| Privacy mode (blank screen, block local input) | AnyDesk Privacy Mode, RustDesk privacy mode 2 | ✅ capture-excluded cover + low-level hooks that pass injected input (`desktop_privacy`) |
 | Screen frame while connected | AnyDesk Screen Frame | ✅ red edge per monitor, excluded from capture |
 | Session requests | AnyDesk Session Requests | ⚙️ Allow / View only / Deny; buttons armed after 1.5 s |
 | Two-factor authentication | AnyDesk 2FA | ✅ TOTP on pairing |
@@ -347,5 +346,5 @@ the messages that tab sends. Full suite: 30 files, all pass.
 | Wake on LAN | AnyDesk | ⚙️ |
 | Screen recording | AnyDesk | ⚙️ |
 | Unattended access | AnyDesk | ⚙️ tray at logon; console task at boot |
-| One-click installer | AnyDesk, RustDesk | ✅ `PocketDesk-Setup.exe` (IExpress around `install.ps1`) and Start Menu shortcut |
+| One-click installer | AnyDesk, RustDesk | ✅ `PocketDesk-Install.exe` / `PocketDesk-Uninstall.exe` (IExpress around `install.ps1` / `uninstall.ps1`) and Start Menu shortcut |
 | Audio, whiteboard, remote printing, address book sync, group policies, REST API for admins | AnyDesk | ➖ out of scope: personal use, no sound |

@@ -17,6 +17,10 @@ const STORE = path.join(os.homedir(), DATA_DIR, "devices.json");
 
 const devices = new Map(); // clientId -> { id, name, platform, firstSeen, lastSeen, lastIp, revoked }
 let dirty = 0;
+// A device token never expires while the device keeps connecting (every hello touches lastSeen),
+// so an active pairing is never disrupted — only a token nobody has used in this long goes dead,
+// which caps how long a stolen-but-unused token stays a standing credential.
+const IDLE_EXPIRE_MS = 90 * 24 * 3600_000;
 
 function load() {
   try {
@@ -80,7 +84,10 @@ export function byToken(t) {
   if (typeof t !== "string" || !t) return null;
   const h = Buffer.from(hash(t));
   for (const d of devices.values()) {
-    if (!d.revoked && d.tokenHash && crypto.timingSafeEqual(Buffer.from(d.tokenHash), h)) return d;
+    if (!d.revoked && d.tokenHash && crypto.timingSafeEqual(Buffer.from(d.tokenHash), h)) {
+      if (Date.now() - d.lastSeen > IDLE_EXPIRE_MS) { d.revoked = true; delete d.tokenHash; save(); return null; }
+      return d;
+    }
   }
   return null;
 }

@@ -1,9 +1,25 @@
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
+// A ws client can ask the SSH listeners to bind elsewhere; only loopback is honored; anything
+// else (0.0.0.0, a LAN IP) would turn an already-authed phone session into a standing backdoor
+// reachable from off the PC, so it is silently dropped back to the server's own default.
+function safeHost(h) {
+  return typeof h === "string" && LOOPBACK_HOSTS.has(h) ? h : undefined;
+}
+
 export default function sshHandlers(ctx) {
-  const { send, bastion, sshSrv, mpc } = ctx;
+  const { send, bastion, sshSrv, mpc, access } = ctx;
+  // These create standing backdoor capability (a listener, or a login credential) on the PC, so
+  // they respect the same "pause control" switch the desktop/remote surface already honors.
+  function controlOk(ws, type) {
+    if (access.controlAllowed) return true;
+    send(ws, { type, ok: false, error: "control paused" });
+    return false;
+  }
   return {
     // ── SSH bastion (sshportal/bifroest: users, hosts, access rules) ─────
     async bastion_user_add(ws, msg) {
+      if (!controlOk(ws, "bastion_user_added")) return;
       const user = bastion.registerUser(String(msg.username ?? ""), String(msg.publicKey ?? ""), String(msg.accessLevel ?? "limited"), msg.email ? String(msg.email) : undefined);
       send(ws, { type: "bastion_user_added", ok: true, user });
     },
@@ -16,8 +32,9 @@ export default function sshHandlers(ctx) {
       send(ws, { type: "bastion_host_added", ok: true, host: safe });
     },
     async bastion_start(ws, msg) {
+      if (!controlOk(ws, "bastion_started")) return;
       try {
-        const r = await bastion.start({ port: msg.port, host: msg.host });
+        const r = await bastion.start({ port: msg.port, host: safeHost(msg.host) });
         send(ws, { type: "bastion_started", ...r });
       } catch (e) {
         send(ws, { type: "bastion_started", ok: false, error: e.message });
@@ -62,6 +79,7 @@ export default function sshHandlers(ctx) {
     },
     // ── Advanced SSH server (bifroest/sshwifty: auth + command control) ──
     async sshserver_user_add(ws, msg) {
+      if (!controlOk(ws, "sshserver_user_added")) return;
       const user = sshSrv.registerUser(String(msg.username ?? ""), { password: msg.password ? String(msg.password) : undefined, publicKey: msg.publicKey ? String(msg.publicKey) : undefined, allowedCommands: Array.isArray(msg.allowedCommands) ? msg.allowedCommands.map(String) : [], maxSessions: Number(msg.maxSessions) || 3, isAdmin: !!msg.isAdmin });
       send(ws, { type: "sshserver_user_added", ok: true, user });
     },
@@ -91,8 +109,9 @@ export default function sshHandlers(ctx) {
       send(ws, { type: "sshserver_session_ended", ok });
     },
     async sshserver_start(ws, msg) {
+      if (!controlOk(ws, "sshserver_started")) return;
       try {
-        const r = await sshSrv.start({ port: msg.port, host: msg.host });
+        const r = await sshSrv.start({ port: msg.port, host: safeHost(msg.host) });
         send(ws, { type: "sshserver_started", ...r });
       } catch (e) {
         send(ws, { type: "sshserver_started", ok: false, error: e.message });

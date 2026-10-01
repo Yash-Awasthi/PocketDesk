@@ -8,7 +8,7 @@ using System.Net.Sockets;
 //                                       already running, then open the pairing page in the browser.
 //   PocketDeskLauncher.exe --daemon   — the logon autostart: start the daemon hidden, then exit.
 // The daemon is spawned detached, so it keeps running after this process exits and is stopped only
-// from Task Manager (end "node.exe"). No tray icon, no window, no on-screen indicator.
+// from Task Manager (end "PocketDesk.exe") or by the uninstaller. No tray icon, no window, no on-screen indicator.
 namespace PocketDeskLauncher
 {
     internal static class Program
@@ -70,10 +70,12 @@ namespace PocketDeskLauncher
         {
             try
             {
+                // PocketDesk.exe is a copy of node.exe, so Task Manager lists the daemon by name.
+                var named = Path.Combine(ExeDir, "PocketDesk.exe");
                 var bundledNode = Path.Combine(ExeDir, "node", "node.exe");
                 var psi = new ProcessStartInfo
                 {
-                    FileName = File.Exists(bundledNode) ? bundledNode : "node",
+                    FileName = File.Exists(named) ? named : File.Exists(bundledNode) ? bundledNode : "node",
                     Arguments = "src\\index.js",
                     WorkingDirectory = DaemonDir(),
                     CreateNoWindow = true,
@@ -82,7 +84,7 @@ namespace PocketDeskLauncher
                 var bundledFfmpeg = Path.Combine(ExeDir, "ffmpeg.exe");
                 if (File.Exists(bundledFfmpeg)) psi.EnvironmentVariables["FFMPEG_PATH"] = bundledFfmpeg;
                 // Not a child of this launcher: no stdin pipe, and never stop on stdin EOF, so the
-                // daemon outlives this process and is ended only from Task Manager.
+                // daemon outlives this process.
                 Process.Start(psi);
             }
             catch { }

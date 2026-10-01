@@ -19,21 +19,26 @@ class PairingTest {
     }
 
     @Test
-    fun `plain ws pairing without tls or relay gives one unpinned entry`() {
-        val entries = Pairing.parse(link("""{"u":"ws://10.0.0.2:8765/ws","t":"x","f":""}"""))
-        assertEquals(listOf(ServerEntry("10.0.0.2", "ws://10.0.0.2:8765/ws", "x", null)), entries)
+    fun `plain ws pairing without an iroh ticket is refused`() {
+        assertTrue(Pairing.parse(link("""{"u":"ws://10.0.0.2:8765/ws","t":"x","f":""}""")).isEmpty())
     }
 
     @Test
-    fun `an iroh ticket becomes the LAN entry's fallback`() {
+    fun `plain ws pairing with an iroh ticket reaches the PC over iroh only`() {
         val entries = Pairing.parse(link("""{"u":"ws://10.0.0.2:8765/ws","t":"x","f":"","i":"endpointabc"}"""))
-        assertEquals(listOf(ServerEntry("10.0.0.2", "ws://10.0.0.2:8765/ws", "x", null, "iroh://endpointabc")), entries)
+        assertEquals(listOf(ServerEntry("10.0.0.2", "iroh://endpointabc", "x", null)), entries)
+    }
+
+    @Test
+    fun `an iroh ticket becomes the wss entry's fallback`() {
+        val entries = Pairing.parse(link("""{"u":"wss://10.0.0.2:8765/ws","t":"x","f":"","i":"endpointabc"}"""))
+        assertEquals(listOf(ServerEntry("10.0.0.2", "wss://10.0.0.2:8765/ws", "x", null, "iroh://endpointabc")), entries)
     }
 
     @Test
     fun `the pair payload name becomes the entry name`() {
-        val entries = Pairing.parse(link("""{"u":"ws://10.0.0.2:8766/ws","t":"x","f":"","n":"PC (console)"}"""))
-        assertEquals(listOf(ServerEntry("PC (console)", "ws://10.0.0.2:8766/ws", "x", null)), entries)
+        val entries = Pairing.parse(link("""{"u":"wss://10.0.0.2:8766/ws","t":"x","f":"","n":"PC (console)"}"""))
+        assertEquals(listOf(ServerEntry("PC (console)", "wss://10.0.0.2:8766/ws", "x", null)), entries)
     }
 
     @Test
