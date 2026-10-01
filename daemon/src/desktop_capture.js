@@ -512,6 +512,84 @@ func capture(_ scale: Double, _ index: Int) -> [String: Any] {
   return ["ok": true, "b64": jpeg.base64EncodedString(), "w": w, "h": h]
 }
 
+// Windows virtual-key codes (what the phone and web client send) to macOS CGKeyCodes.
+let VK: [Int: CGKeyCode] = [
+  0x08: 51, 0x09: 48, 0x0D: 36, 0x1B: 53, 0x20: 49, 0x2E: 117, 0x24: 115, 0x23: 119,
+  0x21: 116, 0x22: 121, 0x25: 123, 0x26: 126, 0x27: 124, 0x28: 125,
+  0x30: 29, 0x31: 18, 0x32: 19, 0x33: 20, 0x34: 21, 0x35: 23, 0x36: 22, 0x37: 26, 0x38: 28, 0x39: 25,
+  0x41: 0, 0x42: 11, 0x43: 8, 0x44: 2, 0x45: 14, 0x46: 3, 0x47: 5, 0x48: 4, 0x49: 34, 0x4A: 38,
+  0x4B: 40, 0x4C: 37, 0x4D: 46, 0x4E: 45, 0x4F: 31, 0x50: 35, 0x51: 12, 0x52: 15, 0x53: 1, 0x54: 17,
+  0x55: 32, 0x56: 9, 0x57: 13, 0x58: 7, 0x59: 16, 0x5A: 6,
+  0x70: 122, 0x71: 120, 0x72: 99, 0x73: 118, 0x74: 96, 0x75: 97, 0x76: 98, 0x77: 100,
+]
+
+// The capture is in pixels; CGEvent works in points. On Retina that ratio is 2, so incoming
+// pixel coordinates (already mapped to full-capture pixels by the server) convert to points here.
+func pointScale() -> Double {
+  let id = CGMainDisplayID()
+  let px = Double(CGDisplayPixelsWide(id))
+  let pt = Double(CGDisplayBounds(id).width)
+  return px > 0 ? pt / px : 1.0
+}
+
+func flags(_ mods: [String]) -> CGEventFlags {
+  var f = CGEventFlags()
+  if mods.contains("ctrl") { f.insert(.maskControl) }
+  if mods.contains("alt") { f.insert(.maskAlternate) }
+  if mods.contains("shift") { f.insert(.maskShift) }
+  if mods.contains("win") { f.insert(.maskCommand) }
+  return f
+}
+
+func postMouse(_ cmd: [String: Any]) -> [String: Any] {
+  let sc = pointScale()
+  let loc = CGEvent(source: nil)?.location ?? .zero
+  let x = cmd["x"] != nil ? Double(cmd["x"] as? Int ?? 0) * sc : Double(loc.x)
+  let y = cmd["y"] != nil ? Double(cmd["y"] as? Int ?? 0) * sc : Double(loc.y)
+  let p = CGPoint(x: x, y: y)
+  let btn = cmd["button"] as? String ?? "left"
+  let down: CGEventType = btn == "right" ? .rightMouseDown : btn == "middle" ? .otherMouseDown : .leftMouseDown
+  let up: CGEventType = btn == "right" ? .rightMouseUp : btn == "middle" ? .otherMouseUp : .leftMouseUp
+  let cgBtn: CGMouseButton = btn == "right" ? .right : btn == "middle" ? .center : .left
+  func ev(_ t: CGEventType) { CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: cgBtn)?.post(tap: .cghidEventTap) }
+  if cmd["x"] != nil || cmd["y"] != nil { ev(.mouseMoved) }
+  if let click = cmd["click"] as? String {
+    let d: CGEventType = click == "right" ? .rightMouseDown : click == "middle" ? .otherMouseDown : .leftMouseDown
+    let u: CGEventType = click == "right" ? .rightMouseUp : click == "middle" ? .otherMouseUp : .leftMouseUp
+    ev(d); ev(u); if click == "double" { ev(d); ev(u) }
+  }
+  if let press = cmd["press"] as? String { ev(press == "down" ? down : up) }
+  if let wheel = cmd["wheel"] as? Int, wheel != 0 {
+    CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: Int32(wheel), wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+  }
+  return ["ok": true]
+}
+
+func postKey(_ cmd: [String: Any]) -> [String: Any] {
+  guard let vk = cmd["key"] as? Int, let code = VK[vk] else { return ["ok": false, "error": "unmapped_key"] }
+  let f = flags(cmd["mods"] as? [String] ?? [])
+  func ev(_ down: Bool) { let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down); e?.flags = f; e?.post(tap: .cghidEventTap) }
+  switch cmd["press"] as? String {
+  case "down": ev(true)
+  case "up": ev(false)
+  default: ev(true); ev(false)
+  }
+  return ["ok": true]
+}
+
+func postType(_ text: String) -> [String: Any] {
+  for ch in text.unicodeScalars {
+    let e = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
+    var u = [UniChar(ch.value & 0xffff)]
+    e?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &u)
+    e?.post(tap: .cghidEventTap)
+    let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
+    up?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &u)
+    up?.post(tap: .cghidEventTap)
+  }
+  return ["ok": true]
+}
+
 while let line = readLine(strippingNewline: true) {
   guard let data = line.data(using: .utf8),
         let cmd = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
@@ -522,6 +600,9 @@ while let line = readLine(strippingNewline: true) {
   case "ping": out = ["ok": true]
   case "monitors": out = ["ok": true, "monitors": monitors()]
   case "capture": out = capture(cmd["s"] as? Double ?? 1.0, cmd["index"] as? Int ?? -1)
+  case "mouse": out = postMouse(cmd)
+  case "key": out = postKey(cmd)
+  case "type": out = postType(cmd["text"] as? String ?? "")
   default: out = ["ok": false, "error": "unknown_op"]
   }
   if let id = id { out["id"] = id }
@@ -669,27 +750,29 @@ export class DesktopController extends EventEmitter {
   }
 
   /** x/y: virtual-screen pixels from its top-left (omit to act at the cursor); click: left|right|middle|double; press: down|up of button. */
+  get _input() { return IS_MAC ? this.helperCapture : this.helperInput; }
+
   async inputMouse({ x, y, click, press, button, wheel }) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
-    await this.helperInput.ensure();
-    const r = await this.helperInput.cmd({ op: "mouse", x, y, click, press, button, wheel }, 8000);
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
+    await this._input.ensure();
+    const r = await this._input.cmd({ op: "mouse", x, y, click, press, button, wheel }, 8000);
     return { ok: !!r?.ok, error: r?.error };
   }
 
   /** press: down|up sends only that half, for held keys; without it the key is tapped with modifiers. */
   async inputKey({ key, modifiers = [], press }) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     const vk = Number(key);
     if (!Number.isFinite(vk) || vk <= 0 || vk > 254) return { ok: false, error: "bad_vk" };
-    await this.helperInput.ensure();
-    const r = await this.helperInput.cmd({ op: "key", key: vk, press, mods: Array.isArray(modifiers) ? modifiers : [] }, 8000);
+    await this._input.ensure();
+    const r = await this._input.cmd({ op: "key", key: vk, press, mods: Array.isArray(modifiers) ? modifiers : [] }, 8000);
     return { ok: !!r?.ok, error: r?.error };
   }
 
   async inputType(text) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
-    await this.helperInput.ensure();
-    const r = await this.helperInput.cmd({ op: "type", text: String(text).slice(0, 512) }, 10000);
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
+    await this._input.ensure();
+    const r = await this._input.cmd({ op: "type", text: String(text).slice(0, 512) }, 10000);
     return { ok: !!r?.ok, error: r?.error };
   }
 
