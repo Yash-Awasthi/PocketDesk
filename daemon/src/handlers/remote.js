@@ -86,7 +86,8 @@ export default function remoteHandlers(ctx) {
         });
       }
       syncCursor();
-      send(ws, { type: "desktop_started", ...r, viewOnly: ws._viewOnly, recording: recorder.recordingScreen });
+      // No h264 here (relay, or a non-Windows host): the client renders the pushed JPEG frames.
+      send(ws, { type: "desktop_started", mode: "jpeg", ...r, viewOnly: ws._viewOnly, recording: recorder.recordingScreen });
     },
     // Viewers align their clock with the daemon's to turn frame stamps into delays.
     async desktop_ping(ws, msg) {
