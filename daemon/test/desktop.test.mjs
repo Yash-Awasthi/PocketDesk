@@ -87,11 +87,7 @@ async function main() {
     c.send({ type: "desktop_privacy", on: false });
     const off = await c.next((m) => m.type === "desktop_privacy" && m.on === false, 20000).catch(() => ({ on: "timeout" }));
     check("privacy mode turns off", off.on === false);
-    c.send({ type: "desktop_stop" });
-    const sp = await c.next((m) => m.type === "desktop_stopped", 10000);
-    check("desktop_stop ok", sp.ok === true);
-
-    // Input round-trips (no throw; real effect not asserted — CI safety).
+    // Input round-trips while watching (no throw; real effect not asserted — CI safety).
     c.send({ type: "desktop_key", key: 65 });
     const ik = await c.next((m) => m.type === "desktop_input_ok", 15000);
     check("desktop_key ok", ik.ok === true);
@@ -150,6 +146,14 @@ async function main() {
     c.send({ type: "clipboard_set", text: saved.kind === "text" ? saved.text : "" });
     await c.next((m) => m.type === "clipboard_set_ok", 20000);
 
+    // Stopping the stream drops control: input after a stop is refused, not silently accepted.
+    c.send({ type: "desktop_stop" });
+    const sp = await c.next((m) => m.type === "desktop_stopped", 10000);
+    check("desktop_stop ok", sp.ok === true);
+    c.send({ type: "desktop_key", key: 65 });
+    const afterStop = await c.next((m) => m.type === "desktop_input_ok", 10000);
+    check("input after a stop is refused", afterStop.ok === false && afterStop.error === "view only");
+
     // View only: the socket sees the screen but cannot touch it.
     const vo = await openAndHello(PORT, TOKEN);
     vo.send({ type: "desktop_start", quality: 30, viewOnly: true });
@@ -203,8 +207,10 @@ async function main() {
     fs.rmSync(path.join(home, "record-sessions"), { force: true });
     await r1.close();
 
-    // Held key: F24 goes down, and dropping the socket releases it.
+    // Held key: F24 goes down, and dropping the socket releases it. A watcher may control.
     const h = await openAndHello(PORT, TOKEN);
+    h.send({ type: "desktop_start", quality: 30 });
+    await h.next((m) => m.type === "desktop_started", 20000);
     h.send({ type: "desktop_key", key: 0x87, press: "down" });
     await h.next((m) => m.type === "desktop_input_ok", 15000);
     check("held key is down", keyDown(0x87));

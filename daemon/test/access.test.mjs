@@ -47,6 +47,14 @@ try {
 
   const code = await fetch(`${base}/access`).then((r) => r.status).catch(() => 0);
   check("/access without the token is forbidden", code === 403);
+
+  // A socket that is not watching the desktop cannot drive it: a stopped or never-started
+  // stream leaves no control behind. This is the refusal path, so it needs no display.
+  const idle = await openAndHello(PORT, TOKEN);
+  idle.send({ type: "desktop_key", key: 65 });
+  const r = await idle.next((m) => m.type === "desktop_input_ok", 8000);
+  check("input without an open desktop is refused", r.ok === false && r.error === "view only");
+  await idle.close();
 } finally {
   await teardown(home);
 }
