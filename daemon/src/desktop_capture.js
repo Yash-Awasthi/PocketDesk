@@ -591,6 +591,50 @@ func postKey(_ cmd: [String: Any]) -> [String: Any] {
   return ["ok": true]
 }
 
+func cursor() -> [String: Any] {
+  let sc = pointScale()  // points per pixel
+  let p = NSEvent.mouseLocation  // points, bottom-left origin
+  let h = CGDisplayBounds(CGMainDisplayID()).height  // points
+  let xPx = sc > 0 ? Double(p.x) / sc : Double(p.x)
+  let yPx = sc > 0 ? (Double(h) - Double(p.y)) / sc : (Double(h) - Double(p.y))
+  return ["ok": true, "x": Int(xPx), "y": Int(yPx), "shape": "default", "visible": true]
+}
+
+func clipSeq() -> [String: Any] { return ["ok": true, "seq": NSPasteboard.general.changeCount] }
+
+func clipRead(_ maxImage: Int) -> [String: Any] {
+  let pb = NSPasteboard.general
+  let seq = pb.changeCount
+  if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+    let files = urls.map { u -> [String: Any] in
+      let attrs = try? FileManager.default.attributesOfItem(atPath: u.path)
+      let size = (attrs?[.size] as? Int) ?? 0
+      return ["name": u.lastPathComponent, "size": size, "path": u.path]
+    }
+    return ["ok": true, "kind": "files", "files": files, "seq": seq]
+  }
+  if let img = NSImage(pasteboard: pb), let tiff = img.tiffRepresentation,
+     let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
+    if png.count > maxImage { return ["ok": true, "kind": "image", "w": rep.pixelsWide, "h": rep.pixelsHigh, "seq": seq] }
+    return ["ok": true, "kind": "image", "png": png.base64EncodedString(), "w": rep.pixelsWide, "h": rep.pixelsHigh, "seq": seq]
+  }
+  if let s = pb.string(forType: .string) { return ["ok": true, "kind": "text", "text": s, "seq": seq] }
+  return ["ok": true, "kind": "empty", "seq": seq]
+}
+
+func clipSet(_ cmd: [String: Any]) -> [String: Any] {
+  let pb = NSPasteboard.general
+  pb.clearContents()
+  if let files = cmd["files"] as? [String], !files.isEmpty {
+    pb.writeObjects(files.map { URL(fileURLToPath: $0) as NSURL })
+  } else if let b64 = cmd["png"] as? String, let data = Data(base64Encoded: b64) {
+    pb.setData(data, forType: .png)
+  } else if let text = cmd["text"] as? String {
+    pb.setString(text, forType: .string)
+  }
+  return ["ok": true, "seq": pb.changeCount]
+}
+
 func postType(_ text: String) -> [String: Any] {
   for ch in text.unicodeScalars {
     let e = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
@@ -619,6 +663,10 @@ while let line = readLine(strippingNewline: true) {
   case "mouse": out = postMouse(cmd)
   case "key": out = postKey(cmd)
   case "type": out = postType(cmd["text"] as? String ?? "")
+  case "cursor": out = cursor()
+  case "seq": out = clipSeq()
+  case "read": out = clipRead(cmd["maxImage"] as? Int ?? (12 << 20))
+  case "set": out = clipSet(cmd)
   default: out = ["ok": false, "error": "unknown_op"]
   }
   if let id = id { out["id"] = id }
@@ -639,15 +687,25 @@ export class MacHelper extends PsHelper {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
     const src = path.join(dir, `${this.name}.swift`);
     this.bin = path.join(dir, this.name);
+    this.file = this.bin;
+    const binExists = () => { try { fs.accessSync(this.bin); return true; } catch { return false; } };
     const stale = () => {
       try { return fs.statSync(this.bin).mtimeMs < fs.statSync(src).mtimeMs; } catch { return true; }
     };
-    fs.writeFileSync(src, this.script, { encoding: "utf8" });
-    if (stale()) {
-      // swiftc ships with the Xcode command-line tools; a missing compiler throws → caller degrades.
-      execFileSync("swiftc", ["-O", src, "-o", this.bin], { stdio: "ignore", timeout: 60000 });
+    if (binExists() && !stale()) return this.bin;
+    // A missing or broken swiftc would otherwise be retried on every poll (cursor runs at 33ms).
+    // After a failure, don't attempt another compile for a minute.
+    if (this._compileFailedAt && Date.now() - this._compileFailedAt < 60_000) {
+      throw new Error("swift helper compile unavailable");
     }
-    this.file = this.bin;
+    try {
+      fs.writeFileSync(src, this.script, { encoding: "utf8" });
+      execFileSync("swiftc", ["-O", src, "-o", this.bin], { stdio: "ignore", timeout: 60000 });
+      this._compileFailedAt = 0;
+    } catch (e) {
+      this._compileFailedAt = Date.now();
+      throw e;
+    }
     return this.bin;
   }
 
@@ -771,6 +829,7 @@ export class DesktopController extends EventEmitter {
 
   /** x/y: virtual-screen pixels from its top-left (omit to act at the cursor); click: left|right|middle|double; press: down|up of button. */
   get _input() { return IS_MAC ? this.helperCapture : this.helperInput; }
+  get _clip() { return IS_MAC ? this.helperCapture : this.helperClip; }
 
   async inputMouse({ x, y, click, press, button, wheel }) {
     if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
@@ -816,7 +875,7 @@ export class DesktopController extends EventEmitter {
 
   /** Polls the pointer while anyone watches and emits "cursor" when it moves or changes shape. */
   watchCursor(on) {
-    if (!on || !IS_WIN) { clearInterval(this.cursorTimer); this.cursorTimer = null; return; }
+    if (!on || (!IS_WIN && !IS_MAC)) { clearInterval(this.cursorTimer); this.cursorTimer = null; return; }
     if (this.cursorTimer) return;
     let busy = false;
     let last = "";
@@ -824,8 +883,8 @@ export class DesktopController extends EventEmitter {
       if (busy) return;
       busy = true;
       try {
-        await this.helperInput.ensure();
-        const r = await this.helperInput.cmd({ op: "cursor" }, 2000);
+        await this._input.ensure();
+        const r = await this._input.cmd({ op: "cursor" }, 2000);
         const c = r?.ok ? { x: r.x, y: r.y, shape: r.shape, visible: r.visible } : null;
         const key = JSON.stringify(c);
         if (c && key !== last) { last = key; this.cursor = c; this.emit("cursor", c); }
@@ -835,18 +894,18 @@ export class DesktopController extends EventEmitter {
 
   /** { kind: text|image|files|empty, ... }; images above maxImage bytes come back without png. */
   async clipboardRead(maxImage = 12 << 20) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
-    await this.helperClip.ensure();
-    const r = await this.helperClip.cmd({ op: "read", maxImage }, 15000);
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
+    await this._clip.ensure();
+    const r = await this._clip.cmd({ op: "read", maxImage }, 15000);
     if (r?.ok) this.clipSeq = r.seq;
     return r?.ok ? r : { ok: false, error: r?.error || "clipboard_failed" };
   }
 
   /** Any of text, png (base64) and files (absolute paths) in one clipboard entry. */
   async clipboardSet({ text, png, files }) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
-    await this.helperClip.ensure();
-    const r = await this.helperClip.cmd({ op: "set", text, png, files }, 15000);
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
+    await this._clip.ensure();
+    const r = await this._clip.cmd({ op: "set", text, png, files }, 15000);
     // Our own write must not come back to the viewer as a PC-side change.
     if (r?.ok) this.clipSeq = r.seq;
     return { ok: !!r?.ok, error: r?.error };
@@ -854,15 +913,15 @@ export class DesktopController extends EventEmitter {
 
   /** While on, emits "clipboard" with the new content whenever something on the PC copies. */
   watchClipboard(on) {
-    if (!on || !IS_WIN) { clearInterval(this.clipTimer); this.clipTimer = null; return; }
+    if (!on || (!IS_WIN && !IS_MAC)) { clearInterval(this.clipTimer); this.clipTimer = null; return; }
     if (this.clipTimer) return;
     let busy = false;
     this.clipTimer = setInterval(async () => {
       if (busy) return;
       busy = true;
       try {
-        await this.helperClip.ensure();
-        const r = await this.helperClip.cmd({ op: "seq" }, 5000);
+        await this._clip.ensure();
+        const r = await this._clip.cmd({ op: "seq" }, 5000);
         if (!r?.ok) return;
         if (this.clipSeq == null) { this.clipSeq = r.seq; return; }
         if (r.seq === this.clipSeq) return;
