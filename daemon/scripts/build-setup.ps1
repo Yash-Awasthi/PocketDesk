@@ -1,5 +1,5 @@
 # Builds PocketDesk-Setup.exe: a double-click wrapper around install.ps1, made with Windows' own IExpress.
-# Uninstalling is done from the tray menu or Settings > Apps, both of which run the installed uninstall.ps1.
+# Uninstalling is done from Settings > Apps or the Start-menu uninstall, both of which run the installed uninstall.ps1.
 #
 #   powershell -ExecutionPolicy Bypass -File daemon\scripts\build-setup.ps1 [-OutDir .]
 

@@ -41,17 +41,13 @@ try {
         $srcRoot = (Get-ChildItem "$tmp\src" -Directory | Select-Object -First 1).FullName
     }
     $srcDaemon = Join-Path $srcRoot "daemon"
-    # A running tray and daemon hold files open in the install folder.
-    foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe'")) {
-        $kids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId)")
-        Stop-Process -Id $t.ProcessId -Force -ErrorAction SilentlyContinue
-        # The daemon sees its stdin close and stops its agents first; one that does not exit in time is
-        # tree-killed, so its terminals go too. The held handle keeps the pid from being reused meanwhile.
-        foreach ($k in $kids) {
-            $p = Get-Process -Id $k.ProcessId -ErrorAction SilentlyContinue
-            if ($p -and -not $p.WaitForExit(10000)) { taskkill /PID $p.Id /T /F 2>&1 | Out-Null }
-        }
-    }
+    # A running daemon holds files open in the install folder; stop it by its listening port.
+    $uport = 8765
+    try { $uc = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json; if ($uc.port) { $uport = [int]$uc.port } } catch {}
+    Get-Process PocketDeskTray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Get-NetTCPConnection -State Listen -LocalPort $uport -ErrorAction SilentlyContinue |
+        ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Milliseconds 300
     $daemon = Join-Path $InstallDir "app\daemon"
     if (Test-Path $daemon) { Remove-Item -Recurse -Force $daemon }
     robocopy $srcDaemon $daemon /E /XD node_modules /NFL /NDL /NJH /NJS /NP | Out-Null
@@ -109,8 +105,8 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
     } finally { Pop-Location }
 
-    # 5. The tray: starts at logon and runs the daemon.
-    Step "Installing the tray"
+    # 5. The hidden daemon: starts at logon in the background.
+    Step "Installing the hidden daemon"
     & "$daemon\scripts\install-service.ps1" -DaemonDir $daemon -InstallDir $InstallDir -NoStart:$NoStart
 
     # Listed under Settings > Apps > Installed apps, whose Uninstall button runs uninstall.ps1.
@@ -122,7 +118,7 @@ try {
         DisplayVersion  = if ($Ref) { $Ref.TrimStart("v") } else { "dev" }
         Publisher       = "PocketDesk"
         InstallLocation = $InstallDir
-        DisplayIcon     = Join-Path $InstallDir "PocketDeskTray.exe"
+        DisplayIcon     = Join-Path $InstallDir "PocketDeskLauncher.exe"
         UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`""
         URLInfoAbout    = "https://github.com/$repo"
     }
@@ -158,7 +154,7 @@ try {
     }
     Write-Host ""
     Write-Host "PocketDesk is installed in $InstallDir" -ForegroundColor Green
-    Write-Host "Scan the QR code with the PocketDesk app. Later: tray icon > Pair a phone."
+    Write-Host "Scan the QR code with the PocketDesk app. Later: open the Start-menu PocketDesk to pair."
     if (-not $Console) { Write-Host "Lock screen / UAC / before-login from the phone? Re-run with -Console (one UAC prompt)." }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue

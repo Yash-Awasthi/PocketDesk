@@ -1,5 +1,6 @@
-# Installs the PocketDesk tray app and registers it to start at logon.
-# The tray owns the daemon lifecycle: green icon = daemon running.
+# Installs the hidden PocketDesk daemon and registers it to start at logon.
+# There is no tray or window: the daemon runs in the background and is stopped from Task Manager.
+# A Start-menu/desktop launcher starts it if needed and opens the pairing page.
 #
 # From a checkout (development): powershell -File daemon\scripts\install-service.ps1
 # install.ps1 at the repo root calls this with -DaemonDir/-InstallDir for a normal install.
@@ -89,46 +90,47 @@ if ($Console) {
     return
 }
 
-$exe = Join-Path $InstallDir "PocketDeskTray.exe"
-$src = Join-Path $PSScriptRoot "tray\PocketDeskTray.cs"
+$exe = Join-Path $InstallDir "PocketDeskLauncher.exe"
+$src = Join-Path $PSScriptRoot "PocketDeskLauncher.cs"
 
-# The tray prefers a node.exe next to it (install.ps1 puts one there), then PATH.
+# The launcher prefers a node.exe next to it (install.ps1 puts one there), then PATH.
 $bundledNode = Join-Path $InstallDir "node\node.exe"
 if (-not (Test-Path $bundledNode) -and -not (Get-Command node -ErrorAction SilentlyContinue)) { throw "node.exe not found on PATH" }
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-# A running tray locks its exe and owns a daemon on the port; stop both before replacing it.
-foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe'")) {
-    $kids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId)")
-    Stop-Process -Id $t.ProcessId -Force -ErrorAction SilentlyContinue
-    # The daemon sees its stdin close and stops its agents first; one that does not exit in time is
-    # tree-killed, so its terminals go too. The held handle keeps the pid from being reused meanwhile.
-    foreach ($k in $kids) {
-        $p = Get-Process -Id $k.ProcessId -ErrorAction SilentlyContinue
-        if ($p -and -not $p.WaitForExit(10000)) { taskkill /PID $p.Id /T /F 2>&1 | Out-Null }
-    }
-}
+# Stop a previous install's running daemon (the detached node on the user port) and any old tray,
+# so its port and the launcher exe are free to replace.
+$port = 8765
+try {
+    $cfg = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json
+    if ($cfg.port) { $port = [int]$cfg.port }
+} catch {}
+Get-Process PocketDeskTray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
+    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+Start-Sleep -Milliseconds 300
 
 # Always rebuilt: a release zip gives the source its commit time, often older than the previous exe.
-& $csc /nologo /target:winexe /out:$exe /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll $src
+& $csc /nologo /target:winexe /out:$exe /r:System.dll $src
 if ($LASTEXITCODE -ne 0) { throw "compile failed" }
 
-# The tray spawns the daemon from this folder.
-Set-Content -Path (Join-Path $InstallDir "PocketDeskTray.ini") -Value $DaemonDir
+# The launcher spawns the daemon from this folder.
+Set-Content -Path (Join-Path $InstallDir "PocketDesk.ini") -Value $DaemonDir
 
-# Start Menu and desktop shortcuts: a click starts the tray, or shows the pairing page if it already runs.
+# Start Menu and desktop launcher: a click starts the daemon if needed and opens the pairing page.
 $shell = New-Object -ComObject WScript.Shell
 foreach ($dir in @([Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop"))) {
     $lnk = $shell.CreateShortcut((Join-Path $dir "PocketDesk.lnk"))
     $lnk.TargetPath = $exe
     $lnk.WorkingDirectory = $InstallDir
-    $lnk.Description = "Start PocketDesk or pair a phone"
+    $lnk.Description = "Open PocketDesk pairing"
     $lnk.Save()
 }
 
-# The per-user Run key starts the tray at logon without admin rights.
-Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -Value "`"$exe`""
+# The per-user Run key starts the hidden daemon at logon without admin rights; --daemon opens no page.
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -Value "`"$exe`" --daemon"
 
-if (-not $NoStart) { Start-Process $exe }
-Write-Host "  tray installed; it starts at logon. settings: $env:USERPROFILE\.pocketdesk\config.json"
+if (-not $NoStart) { Start-Process $exe "--daemon" }
+Write-Host "  hidden daemon installed; it starts at logon. Open the Start-menu 'PocketDesk' to pair."
+Write-Host "  stop it from Task Manager (end node.exe). settings: $env:USERPROFILE\.pocketdesk\config.json"
