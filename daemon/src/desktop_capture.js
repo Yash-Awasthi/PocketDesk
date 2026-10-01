@@ -22,7 +22,7 @@
  * attached; zero clients → loop fully stops. Non-Windows degrades cleanly
  * ({ ok:false, reason:"unsupported_platform" }), like tmux on Windows.
  */
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
@@ -31,6 +31,7 @@ import { configDir } from "./config.js";
 // swap one in before it runs, as SYSTEM for the console endpoint.
 
 const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** JSON-safe, ASCII-only wire line (PS 5.1 stdin is happiest with ASCII). */
@@ -365,15 +366,20 @@ export class PsHelper {
     return this.file;
   }
 
+  /** Spawn the helper process. Overridden per platform (PowerShell on Windows). */
+  _launch() {
+    const file = this.ensureFile();
+    return spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file], {
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  }
+
   async ensure() {
     if (this.proc && this.proc.exitCode === null) return;
     if (this.starting) return this.starting;
     this.starting = (async () => {
-      const file = this.ensureFile();
-      this.proc = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file], {
-        windowsHide: true,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      this.proc = this._launch();
       this.buf = "";
       this.proc.stdout.setEncoding("utf8");
       this.proc.stdout.on("data", (d) => {
@@ -450,9 +456,117 @@ export class PsHelper {
   }
 }
 
+// macOS screen helper (Phase 2.1: view only). Same JSON-line protocol as the PowerShell helpers:
+// one request object per line in, one reply per line out. CoreGraphics captures the display;
+// without Screen Recording permission CGDisplayCreateImage returns null, reported as a clear error.
+const MAC_CAP_SWIFT = `
+import Foundation
+import CoreGraphics
+import AppKit
+
+func reply(_ o: [String: Any]) {
+  if let d = try? JSONSerialization.data(withJSONObject: o), let s = String(data: d, encoding: .utf8) {
+    print(s)
+  }
+  fflush(stdout)
+}
+
+func monitors() -> [[String: Any]] {
+  var count: UInt32 = 0
+  CGGetActiveDisplayList(0, nil, &count)
+  var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+  CGGetActiveDisplayList(count, &ids, &count)
+  let main = CGMainDisplayID()
+  var out: [[String: Any]] = []
+  for (i, id) in ids.enumerated() {
+    let b = CGDisplayBounds(id)
+    out.append(["index": i, "id": Int(id), "x": Int(b.origin.x), "y": Int(b.origin.y),
+                "w": Int(b.width), "h": Int(b.height), "primary": id == main])
+  }
+  return out
+}
+
+func capture(_ scale: Double, _ index: Int) -> [String: Any] {
+  var count: UInt32 = 0
+  CGGetActiveDisplayList(0, nil, &count)
+  var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+  CGGetActiveDisplayList(count, &ids, &count)
+  let id = (index >= 0 && index < ids.count) ? ids[index] : CGMainDisplayID()
+  guard let img = CGDisplayCreateImage(id) else {
+    return ["ok": false, "error": "screen_permission"]  // no Screen Recording grant, or display gone
+  }
+  let s = max(0.2, min(1.0, scale))
+  let w = max(1, Int(Double(img.width) * s)), h = max(1, Int(Double(img.height) * s))
+  let cs = CGColorSpaceCreateDeviceRGB()
+  guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+      space: cs, bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue) else {
+    return ["ok": false, "error": "context"]
+  }
+  ctx.interpolationQuality = .low
+  ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+  guard let scaled = ctx.makeImage() else { return ["ok": false, "error": "scale"] }
+  let rep = NSBitmapImageRep(cgImage: scaled)
+  guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.6]) else {
+    return ["ok": false, "error": "encode"]
+  }
+  return ["ok": true, "b64": jpeg.base64EncodedString(), "w": w, "h": h]
+}
+
+while let line = readLine(strippingNewline: true) {
+  guard let data = line.data(using: .utf8),
+        let cmd = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+  let id = cmd["id"]
+  let op = cmd["op"] as? String ?? ""
+  var out: [String: Any]
+  switch op {
+  case "ping": out = ["ok": true]
+  case "monitors": out = ["ok": true, "monitors": monitors()]
+  case "capture": out = capture(cmd["s"] as? Double ?? 1.0, cmd["index"] as? Int ?? -1)
+  default: out = ["ok": false, "error": "unknown_op"]
+  }
+  if let id = id { out["id"] = id }
+  reply(out)
+}
+`;
+
+/** Helper backed by a compiled Swift binary (macOS). Same wire protocol as PsHelper. */
+export class MacHelper extends PsHelper {
+  constructor(name, source) {
+    super(name, source);
+    this.bin = null;
+  }
+
+  /** Write the Swift source and compile it once (cached by mtime); return the binary path. */
+  ensureFile() {
+    const dir = path.join(configDir, "helpers");
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const src = path.join(dir, `${this.name}.swift`);
+    this.bin = path.join(dir, this.name);
+    const stale = () => {
+      try { return fs.statSync(this.bin).mtimeMs < fs.statSync(src).mtimeMs; } catch { return true; }
+    };
+    fs.writeFileSync(src, this.script, { encoding: "utf8" });
+    if (stale()) {
+      // swiftc ships with the Xcode command-line tools; a missing compiler throws → caller degrades.
+      execFileSync("swiftc", ["-O", src, "-o", this.bin], { stdio: "ignore", timeout: 60000 });
+    }
+    this.file = this.bin;
+    return this.bin;
+  }
+
+  _launch() {
+    return spawn(this.ensureFile(), [], { stdio: ["pipe", "pipe", "pipe"] });
+  }
+
+  kill() {
+    if (this.proc) { try { this.proc.kill(); } catch { /* gone */ } this.proc = null; }
+    // Keep the compiled binary; recompiled only when the source changes.
+  }
+}
+
 export class DesktopController extends EventEmitter {
   static get supported() {
-    return IS_WIN;
+    return IS_WIN || IS_MAC;
   }
 
   constructor() {
@@ -465,13 +579,13 @@ export class DesktopController extends EventEmitter {
     this.lastFrame = null; // { base64, width, height, ts, seq }
     this.stats = { framesSent: 0, capturesFailed: 0, lastCaptureMs: 0 };
     this.helperInput = new PsHelper("input", INPUT_SCRIPT);
-    this.helperCapture = new PsHelper("capture", CAPTURE_SCRIPT);
+    this.helperCapture = IS_MAC ? new MacHelper("pdcap", MAC_CAP_SWIFT) : new PsHelper("capture", CAPTURE_SCRIPT);
     this.helperClip = new PsHelper("clipboard", CLIP_SCRIPT);
   }
 
   /** Stream frames for `clientId` (server keeps the ws mapping). */
   async startFrameStream(clientId, quality) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     if (quality) this.quality = Math.min(95, Math.max(10, Number(quality) || 60));
     this.clients.add(clientId);
     this._ensureLoop();
@@ -495,13 +609,13 @@ export class DesktopController extends EventEmitter {
 
   /** Latest frame, capturing one first if we have none yet. */
   async getFrame() {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     if (!this.lastFrame) {
       // captureOnce is a no-op while the stream loop has one in flight, so
       // wait for that frame rather than reporting a failure that never was.
       if (this.capturing) await this._nextFrame(15000);
       else await this.captureOnce();
-      if (!this.lastFrame) return { ok: false, reason: "capture_failed" };
+      if (!this.lastFrame) return { ok: false, reason: this._lastCaptureError || "capture_failed" };
     }
     return { ok: true, ...this.lastFrame };
   }
@@ -515,7 +629,7 @@ export class DesktopController extends EventEmitter {
   }
 
   _ensureLoop() {
-    if (this.captureTimer || !IS_WIN) return;
+    if (this.captureTimer || (!IS_WIN && !IS_MAC)) return;
     this.captureOnce();
     this.captureTimer = setInterval(() => {
       if (!this.capturing) this.captureOnce();
@@ -528,7 +642,7 @@ export class DesktopController extends EventEmitter {
   }
 
   async captureOnce() {
-    if (this.capturing || !IS_WIN) return;
+    if (this.capturing || (!IS_WIN && !IS_MAC)) return;
     this.capturing = true;
     const t0 = Date.now();
     try {
@@ -544,6 +658,8 @@ export class DesktopController extends EventEmitter {
         this.emit("frame", this.lastFrame);
       } else {
         this.stats.capturesFailed++;
+        // "screen_permission" means macOS Screen Recording is not granted yet (Phase 2.4 surfaces it).
+        this._lastCaptureError = r?.error || "capture_failed";
       }
     } catch {
       this.stats.capturesFailed++;
@@ -582,7 +698,7 @@ export class DesktopController extends EventEmitter {
    * virtual screen's top-left, the origin input coordinates use.
    */
   async monitors() {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     await this.helperCapture.ensure();
     const r = await this.helperCapture.cmd({ op: "monitors" }, 10000);
     if (!r?.ok) return { ok: false, error: r?.error || "monitors_failed" };

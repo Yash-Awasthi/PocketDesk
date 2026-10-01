@@ -143,6 +143,8 @@ export class DesktopVideo extends EventEmitter {
 
   /** Resolves with the encoder in use, or null when none can start. */
   start() {
+    // ddagrab is Windows-only; elsewhere the caller falls back to the JPEG frame stream.
+    if (process.platform !== "win32") return Promise.resolve(null);
     if (this.proc) return Promise.resolve(this.encoder);
     if (this._starting) return this._starting;
     const gen = this.gen;
