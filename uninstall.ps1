@@ -9,17 +9,15 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
-# The tray owns the daemon; stop the daemon first so its port and files are released.
-foreach ($t in @(Get-CimInstance Win32_Process -Filter "Name='PocketDeskTray.exe'")) {
-    $kids = @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($t.ProcessId) AND ProcessId<>$PID")
-    Stop-Process -Id $t.ProcessId -Force -ErrorAction SilentlyContinue
-    # The daemon sees its stdin close and stops its agents first; one that does not exit in time is
-    # tree-killed, so its terminals go too. The held handle keeps the pid from being reused meanwhile.
-    foreach ($k in $kids) {
-        $p = Get-Process -Id $k.ProcessId -ErrorAction SilentlyContinue
-        if ($p -and -not $p.WaitForExit(10000)) { taskkill /PID $p.Id /T /F 2>&1 | Out-Null }
-    }
-}
+# Stop the hidden daemon (the detached node on the user port) and any old tray, so its files release.
+$port = 8765
+try {
+    $cfg = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json
+    if ($cfg.port) { $port = [int]$cfg.port }
+} catch {}
+Get-Process PocketDeskTray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
+    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -ErrorAction SilentlyContinue
 foreach ($dir in @([Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop"))) {
     Remove-Item (Join-Path $dir "PocketDesk.lnk") -ErrorAction SilentlyContinue

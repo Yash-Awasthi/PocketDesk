@@ -12,6 +12,19 @@
   code { background: #1f2937; padding: 6px 10px; border-radius: 6px; font-size: 13px; max-width: 90vw;
          overflow-wrap: anywhere; display: block; text-align: center; }
   p { margin: 0; color: #9ca3af; font-size: 13px; max-width: 480px; text-align: center; }
+  .card { background: #1f2937; border-radius: 12px; padding: 16px 18px; width: min(90vw, 420px);
+          display: flex; flex-direction: column; gap: 12px; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .card h2 { font-size: 15px; margin: 0; color: #e5e7eb; }
+  .card label { font-size: 13px; color: #cbd5e1; }
+  input[type=password] { flex: 1; background: #111827; border: 1px solid #374151; color: #e5e7eb;
+          border-radius: 6px; padding: 8px 10px; font-size: 14px; }
+  button { background: #2563eb; color: #fff; border: 0; border-radius: 6px; padding: 8px 14px;
+          font-size: 14px; cursor: pointer; }
+  button.ghost { background: #374151; }
+  .hint { font-size: 12px; color: #9ca3af; }
+  .ok { color: #4ade80; }
+  input[type=checkbox] { width: 20px; height: 20px; }
 </style>
 </head>
 <body>
@@ -21,6 +34,21 @@
 <code>__RH_URL__</code>
 <code>token: __RH_TOKEN__</code>
 <code>cert sha-256: __RH_FP__</code>
+
+<div class="card">
+  <h2>Security</h2>
+  <div class="row">
+    <label for="ctrl">Allow this phone to control the PC</label>
+    <input type="checkbox" id="ctrl" />
+  </div>
+  <p class="hint">Off = the phone can watch the screen but not click or type.</p>
+  <div class="row">
+    <input type="password" id="pw" placeholder="Connection password (blank = none)" autocomplete="new-password" />
+    <button id="save">Save</button>
+  </div>
+  <p class="hint">Asked on the phone every time it connects, even with a valid pairing QR. <span id="pwstate"></span></p>
+</div>
+
 <script src="/vendor/qrcode.min.js"></script>
 <script>
 const payload = "__RH_PAYLOAD__";
@@ -28,6 +56,25 @@ const qr = qrcode(0, "M");
 qr.addData(payload);
 qr.make();
 document.getElementById("qr").innerHTML = qr.createSvgTag({ cellSize: 5, margin: 0 });
+
+const k = new URLSearchParams(location.search).get("k") || "";
+const ctrl = document.getElementById("ctrl");
+const pwState = document.getElementById("pwstate");
+function paint(s) {
+  ctrl.checked = s.controlAllowed !== false;
+  pwState.textContent = s.hasPassword ? "A password is set." : "No password set.";
+  pwState.className = s.hasPassword ? "ok" : "";
+}
+fetch("/access?k=" + encodeURIComponent(k)).then((r) => r.json()).then(paint).catch(() => {});
+ctrl.addEventListener("change", () => {
+  fetch("/access/control?k=" + encodeURIComponent(k), { method: "POST", body: JSON.stringify({ allowed: ctrl.checked }) })
+    .then((r) => r.json()).then(paint).catch(() => {});
+});
+document.getElementById("save").addEventListener("click", () => {
+  const pw = document.getElementById("pw");
+  fetch("/access/password?k=" + encodeURIComponent(k), { method: "POST", body: JSON.stringify({ password: pw.value }) })
+    .then((r) => r.json()).then((s) => { pw.value = ""; paint(s); }).catch(() => {});
+});
 </script>
 </body>
 </html>

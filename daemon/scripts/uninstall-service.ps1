@@ -1,10 +1,17 @@
-# Stops and unregisters the PocketDesk tray/daemon autostart.
+# Stops and unregisters the hidden PocketDesk daemon autostart.
 # -Purge also deletes the console endpoint's paired token (kept by default, so
 # the phone stays paired across a reinstall).
 
 param([switch]$Purge)
 $ErrorActionPreference = "Stop"
-Get-Process PocketDeskTray -ErrorAction SilentlyContinue | Stop-Process -Force
+$port = 8765
+try {
+    $cfg = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json
+    if ($cfg.port) { $port = [int]$cfg.port }
+} catch {}
+Get-Process PocketDeskTray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
+    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -ErrorAction SilentlyContinue
 # Older installs registered a scheduled task instead.
 try { schtasks /Delete /F /TN "PocketDesk" 2>$null | Out-Null } catch {}

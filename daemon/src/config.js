@@ -67,6 +67,9 @@ export function loadConfig() {
       : "RH_IROH_RELAYS" in process.env ? process.env.RH_IROH_RELAYS.split(",").map((s) => s.trim()).filter(Boolean)
       : Array.isArray(cfg.iroh?.relays) ? cfg.iroh.relays : [],
   };
+  // Per-connection password (scrypt record) and the control gate survive restarts.
+  cfg.connPassword = cfg.connPassword ?? null;
+  cfg.controlAllowed = cfg.controlAllowed !== false;
   if (!persisted && !fromEnv("RH_PORT") && !fromEnv("RH_TOKEN")) saveConfig(cfg);
   return cfg;
 }
@@ -80,6 +83,8 @@ export function saveConfig(cfg) {
       token: cfg.token,
       tls: { enabled: cfg.tls.enabled, cert: cfg.tls.cert, key: cfg.tls.key },
       iroh: { enabled: cfg.iroh?.enabled !== false, relays: Array.isArray(cfg.iroh?.relays) ? cfg.iroh.relays : [] },
+      connPassword: cfg.connPassword ?? null,
+      controlAllowed: cfg.controlAllowed !== false,
     }, null, 2),
     { mode: 0o600 },
   );

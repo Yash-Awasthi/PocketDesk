@@ -164,8 +164,9 @@ object Proto {
     private fun obj(build: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit) =
         buildJsonObject(build).toString()
 
-    fun hello(token: String, totp: String? = null) = obj {
+    fun hello(token: String, totp: String? = null, password: String? = null) = obj {
         put("type", "hello"); put("token", token); totp?.let { put("totp", it) }
+        password?.takeIf { it.isNotEmpty() }?.let { put("password", it) }
         put("name", android.os.Build.MODEL); put("platform", "android")
     }
     fun detect() = obj { put("type", "detect") }

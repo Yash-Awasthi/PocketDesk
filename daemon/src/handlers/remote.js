@@ -2,11 +2,12 @@ import { resolvePath } from "../fs_ops.js";
 import * as devices from "../devices.js";
 
 export default function remoteHandlers(ctx) {
-  const { send, desktop, desktopWatchers, video, videoWatchers, presence, recorder } = ctx;
-  // Sockets that took a single snapshot stay on the PC's viewer bar for a few seconds.
+  const { send, desktop, desktopWatchers, video, videoWatchers, presence, recorder, access } = ctx;
+  // Sockets that took a single snapshot stay on the viewer set for a few seconds.
   const snapshots = new Map();
   const deviceName = (ws) => devices.list().find((d) => d.id === ws._clientId)?.name || "A remote device";
-  /** Pointer and clipboard follow the PC only while someone is viewing it, and the bar says who. */
+  const watching = (ws) => videoWatchers.has(ws) || desktopWatchers.has(ws);
+  /** Pointer and clipboard follow the PC only while someone is viewing it. */
   function syncCursor() {
     const on = videoWatchers.size + desktopWatchers.size > 0;
     desktop.watchCursor(on);
@@ -17,30 +18,24 @@ export default function remoteHandlers(ctx) {
     for (const w of logged) if (!viewers.has(w)) recorder.log("viewer_left", { device: deviceName(w) });
     logged = viewers;
     recorder.screenWatched(on, { label: viewers.size ? deviceName([...viewers][0]) : "", monitor: video.monitor });
-    presence.update([...viewers].map((w) => ({ name: deviceName(w), viewOnly: !!w._viewOnly })), recorder.recordingScreen);
     // Nobody left to drive the PC: hand the screen and input back to whoever sits at it.
     if (!on && presence.privacyOn) presence.setPrivacy(false);
   }
   let logged = new Set();
-  /** With approval on, the person at the PC answers before a socket sees or touches anything. */
-  async function approved(ws, wantsControl) {
-    if (ws._desktopApproved || !presence.approvalRequired) return true;
-    if (ws._asking) return false;
-    ws._asking = true;
-    send(ws, { type: "desktop_pending" });
-    try {
-      const answer = await presence.ask(`${deviceName(ws)} wants to ${wantsControl ? "view and control" : "view"} this PC.`);
-      recorder.log(answer === "deny" ? "denied" : "approved", { device: deviceName(ws), answer });
-      if (answer === "deny") return false;
-      if (answer === "view") ws._viewOnly = ws._viewOnlyForced = true;
-      ws._desktopApproved = true;
-      return true;
-    } finally { ws._asking = false; }
-  }
-  /** Input and clipboard writes: never from a view-only socket, never before approval. */
+  /** Input and clipboard writes: never view-only, never when the PC owner has paused control,
+   *  and never from a socket that is not currently watching (a stopped stream keeps no control). */
   function mayControl(ws) {
-    return !ws._viewOnly && (ws._desktopApproved || !presence.approvalRequired);
+    return access.controlAllowed && !ws._viewOnly && watching(ws);
   }
+  // The PC owner flipping "allow control" off drops every live controller to view-only at once.
+  if (access) access.onControlChange = (on) => {
+    for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
+      if (!on) w._viewOnly = true;
+      else if (!w._viewOnlyForced) w._viewOnly = false;
+      send(w, { type: "control_allowed", allowed: on, viewOnly: !!w._viewOnly });
+    }
+    if (!on && presence.privacyOn) presence.setPrivacy(false);
+  };
   if (presence) presence.onPrivacyChange = (on) => {
     for (const w of new Set([...videoWatchers, ...desktopWatchers])) send(w, { type: "desktop_privacy", ok: true, on });
   };
@@ -49,7 +44,6 @@ export default function remoteHandlers(ctx) {
       videoWatchers.delete(w);
       desktopWatchers.delete(w);
       desktop.stopFrameStream(w._clientId || "anon");
-      w._desktopApproved = false;
       send(w, { type: "desktop_stopped", ok: true, reason: "ended on the PC" });
     }
     recorder.log("ended_on_pc");
@@ -87,8 +81,7 @@ export default function remoteHandlers(ctx) {
       send(ws, { type: "desktop_privacy", ...r });
     },
     async desktop_start(ws, msg) {
-      ws._viewOnly = !!msg.viewOnly || !!ws._viewOnlyForced;
-      if (!(await approved(ws, !ws._viewOnly))) return send(ws, { type: "desktop_started", ok: false, reason: "denied on the PC" });
+      ws._viewOnly = !!msg.viewOnly || !!ws._viewOnlyForced || !access.controlAllowed;
       // Binary frames need a real socket; relay shims fall back to JPEG.
       if (msg.video && typeof ws.bufferedAmount === "number") {
         videoWatchers.add(ws);
@@ -142,7 +135,6 @@ export default function remoteHandlers(ctx) {
     },
     async desktop_frame(ws, msg) {
       // On-demand single frame (thumbnail / refresh) without starting the loop.
-      if (!(await approved(ws, false))) return send(ws, { type: "desktop_frame_error", reason: "denied on the PC" });
       clearTimeout(snapshots.get(ws));
       snapshots.set(ws, setTimeout(() => { snapshots.delete(ws); syncCursor(); }, 5000));
       syncCursor();
@@ -179,7 +171,7 @@ export default function remoteHandlers(ctx) {
       send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
     },
     async clipboard_get(ws, msg) {
-      if (!ws._desktopApproved && presence.approvalRequired) return send(ws, { type: "clipboard", ok: false, error: "not approved on the PC" });
+      if (!watching(ws)) return send(ws, { type: "clipboard", ok: false, error: "open the desktop first" });
       send(ws, { type: "clipboard", ...(await desktop.clipboardRead()) });
     },
     /** text, png (base64) or files (paths on the PC, e.g. just uploaded); paste presses Ctrl+V after. */

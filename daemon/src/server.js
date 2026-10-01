@@ -18,6 +18,7 @@ import { createActivityMonitor } from "./activity.js";
 import { StreamJsonParser } from "./stream_json_parser.js";
 import { DesktopController } from "./desktop_capture.js";
 import { DesktopPresence } from "./desktop_presence.js";
+import { createAccess } from "./access.js";
 import { wakeTargets } from "./wake.js";
 import { Recorder } from "./recorder.js";
 import { DesktopVideo } from "./desktop_video.js";
@@ -75,7 +76,9 @@ export function closeClients(code, reason) {
   for (const ws of liveWss?.clients ?? []) try { ws.close(code, reason); } catch {}
 }
 
-export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = {}) {
+export function start(config, { onTokenRotated } = {}) {
+  const { port, token: _token, tls, iroh: irohCfg } = config;
+  let token = _token;
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
   const page = fs.readFileSync(path.join(publicDir, "index.html"));
   const pairTemplate = fs.readFileSync(path.join(publicDir, "pair.html"), "utf8");
@@ -115,7 +118,8 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     res.setHeader("content-security-policy", "frame-ancestors 'none'");
     res.setHeader("x-content-type-options", "nosniff");
     res.setHeader("referrer-policy", "no-referrer");
-    if (req.method !== "GET") {
+    // /access changes local settings, so it alone may POST; everything else is read-only GET.
+    if (req.method !== "GET" && !(req.method === "POST" && req.url.startsWith("/access"))) {
       res.writeHead(405).end();
       return;
     }
@@ -143,6 +147,36 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
     // the key is the token itself, so only whoever can read the config dir can open the page.
     const key = new URL(req.url, "http://x").searchParams.get("k") || "";
     const keyOk = key.length === token.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(token));
+    // Local, token-gated controls the pair page drives: the connection password and the control gate.
+    if (req.url.startsWith("/access") && loopback && keyOk) {
+      const path0 = req.url.split("?")[0];
+      if (req.method === "GET" && path0 === "/access") {
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify({ hasPassword: access.hasPassword, controlAllowed: access.controlAllowed }));
+        return;
+      }
+      let body = "";
+      req.on("data", (d) => { body += d; if (body.length > 4096) req.destroy(); });
+      req.on("end", () => {
+        try {
+          let msg = {};
+          try { msg = JSON.parse(body || "{}"); } catch { /* empty */ }
+          if (path0 === "/access/control") access.setControlAllowed(msg.allowed !== false);
+          else if (path0 === "/access/password") access.setPassword(typeof msg.password === "string" ? msg.password : "");
+          else { res.writeHead(404).end(); return; }
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: true, hasPassword: access.hasPassword, controlAllowed: access.controlAllowed }));
+        } catch (e) {
+          res.writeHead(500, { "content-type": "application/json" });
+          res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }));
+        }
+      });
+      return;
+    }
+    if (req.url.startsWith("/access")) {
+      res.writeHead(403).end();
+      return;
+    }
     if (req.url.startsWith("/pair?") && loopback && keyOk) {
       // The ticket carries current addresses and relay, which change with the network.
       const t = irohEp?.ticket();
@@ -238,6 +272,10 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
             ws.close(4011, "two-factor code required");
             return;
           }
+          if (auth?.passwordRequired) {
+            ws.close(4012, "connection password required");
+            return;
+          }
           if (auth) {
             // Checked before welcome(), which would re-issue a pairing device's token.
             if (ws._irohId && !devices.claimEndpoint(auth.id, ws._irohId)) {
@@ -299,6 +337,9 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   function authenticate(msg) {
     if (msg.type !== "hello" || typeof msg.token !== "string") return null;
     const t = msg.token;
+    // A correct token or pairing QR is not enough: the connection password is proven on every
+    // hello, so a leaked token cannot open a session on its own.
+    if (access.hasPassword && !access.verifyPassword(msg.password)) return { passwordRequired: true };
     if (t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token))) {
       let id = String(msg.clientId || crypto.randomUUID());
       if (devices.isRevoked(id)) return null;
@@ -355,6 +396,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
   // loop runs only while at least one watcher is attached.
   const desktop = new DesktopController();
   const presence = new DesktopPresence();
+  const access = createAccess(config);
   const recorder = new Recorder();
   const desktopWatchers = new Set();
   desktop.on("frame", (frame) => {
@@ -513,7 +555,7 @@ export function start({ port, token, tls, iroh: irohCfg }, { onTokenRotated } = 
 
   const ctx = {
     send, broadcast, allSessions, plugins, power,
-    desktop, desktopWatchers, video, videoWatchers, presence, recorder, bastion, sshSrv, mpc, streamParser,
+    desktop, desktopWatchers, video, videoWatchers, presence, recorder, access, bastion, sshSrv, mpc, streamParser,
     activity, tls, rotateToken, disconnectDevice,
   };
   const handlers = {
