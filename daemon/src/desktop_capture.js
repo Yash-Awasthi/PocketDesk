@@ -22,7 +22,7 @@
  * attached; zero clients → loop fully stops. Non-Windows degrades cleanly
  * ({ ok:false, reason:"unsupported_platform" }), like tmux on Windows.
  */
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
@@ -31,6 +31,7 @@ import { configDir } from "./config.js";
 // swap one in before it runs, as SYSTEM for the console endpoint.
 
 const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /** JSON-safe, ASCII-only wire line (PS 5.1 stdin is happiest with ASCII). */
@@ -365,15 +366,20 @@ export class PsHelper {
     return this.file;
   }
 
+  /** Spawn the helper process. Overridden per platform (PowerShell on Windows). */
+  _launch() {
+    const file = this.ensureFile();
+    return spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file], {
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  }
+
   async ensure() {
     if (this.proc && this.proc.exitCode === null) return;
     if (this.starting) return this.starting;
     this.starting = (async () => {
-      const file = this.ensureFile();
-      this.proc = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file], {
-        windowsHide: true,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
+      this.proc = this._launch();
       this.buf = "";
       this.proc.stdout.setEncoding("utf8");
       this.proc.stdout.on("data", (d) => {
@@ -450,9 +456,272 @@ export class PsHelper {
   }
 }
 
+// macOS screen helper (Phase 2.1: view only). Same JSON-line protocol as the PowerShell helpers:
+// one request object per line in, one reply per line out. CoreGraphics captures the display;
+// without Screen Recording permission CGDisplayCreateImage returns null, reported as a clear error.
+const MAC_CAP_SWIFT = `
+import Foundation
+import CoreGraphics
+import AppKit
+import ApplicationServices
+
+// Screen Recording and Accessibility are separate macOS grants; without them capture returns
+// nothing and input is silently dropped. "perms" reports them, "request" shows the system prompts.
+func perms() -> [String: Any] {
+  return ["ok": true, "screen": CGPreflightScreenCaptureAccess(), "accessibility": AXIsProcessTrusted()]
+}
+
+func requestPerms() -> [String: Any] {
+  if !CGPreflightScreenCaptureAccess() { CGRequestScreenCaptureAccess() }
+  let opt = ["AXTrustedCheckOptionPrompt" as CFString: true] as CFDictionary
+  _ = AXIsProcessTrustedWithOptions(opt)
+  return perms()
+}
+
+func reply(_ o: [String: Any]) {
+  if let d = try? JSONSerialization.data(withJSONObject: o), let s = String(data: d, encoding: .utf8) {
+    print(s)
+  }
+  fflush(stdout)
+}
+
+func monitors() -> [[String: Any]] {
+  var count: UInt32 = 0
+  CGGetActiveDisplayList(0, nil, &count)
+  var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+  CGGetActiveDisplayList(count, &ids, &count)
+  let main = CGMainDisplayID()
+  var out: [[String: Any]] = []
+  for (i, id) in ids.enumerated() {
+    let b = CGDisplayBounds(id)
+    out.append(["index": i, "id": Int(id), "x": Int(b.origin.x), "y": Int(b.origin.y),
+                "w": Int(b.width), "h": Int(b.height), "primary": id == main])
+  }
+  return out
+}
+
+func capture(_ scale: Double, _ index: Int) -> [String: Any] {
+  var count: UInt32 = 0
+  CGGetActiveDisplayList(0, nil, &count)
+  var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+  CGGetActiveDisplayList(count, &ids, &count)
+  let id = (index >= 0 && index < ids.count) ? ids[index] : CGMainDisplayID()
+  guard let img = CGDisplayCreateImage(id) else {
+    return ["ok": false, "error": "screen_permission"]  // no Screen Recording grant, or display gone
+  }
+  let s = max(0.2, min(1.0, scale))
+  let w = max(1, Int(Double(img.width) * s)), h = max(1, Int(Double(img.height) * s))
+  let cs = CGColorSpaceCreateDeviceRGB()
+  guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+      space: cs, bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue) else {
+    return ["ok": false, "error": "context"]
+  }
+  ctx.interpolationQuality = .low
+  ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
+  guard let scaled = ctx.makeImage() else { return ["ok": false, "error": "scale"] }
+  let rep = NSBitmapImageRep(cgImage: scaled)
+  guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.6]) else {
+    return ["ok": false, "error": "encode"]
+  }
+  return ["ok": true, "b64": jpeg.base64EncodedString(), "w": w, "h": h]
+}
+
+// Windows virtual-key codes (what the phone and web client send) to macOS CGKeyCodes.
+let VK: [Int: CGKeyCode] = [
+  0x08: 51, 0x09: 48, 0x0D: 36, 0x1B: 53, 0x20: 49, 0x2E: 117, 0x24: 115, 0x23: 119,
+  0x21: 116, 0x22: 121, 0x25: 123, 0x26: 126, 0x27: 124, 0x28: 125,
+  0x30: 29, 0x31: 18, 0x32: 19, 0x33: 20, 0x34: 21, 0x35: 23, 0x36: 22, 0x37: 26, 0x38: 28, 0x39: 25,
+  0x41: 0, 0x42: 11, 0x43: 8, 0x44: 2, 0x45: 14, 0x46: 3, 0x47: 5, 0x48: 4, 0x49: 34, 0x4A: 38,
+  0x4B: 40, 0x4C: 37, 0x4D: 46, 0x4E: 45, 0x4F: 31, 0x50: 35, 0x51: 12, 0x52: 15, 0x53: 1, 0x54: 17,
+  0x55: 32, 0x56: 9, 0x57: 13, 0x58: 7, 0x59: 16, 0x5A: 6,
+  0x70: 122, 0x71: 120, 0x72: 99, 0x73: 118, 0x74: 96, 0x75: 97, 0x76: 98, 0x77: 100,
+]
+
+// The capture is in pixels; CGEvent works in points. On Retina that ratio is 2, so incoming
+// pixel coordinates (already mapped to full-capture pixels by the server) convert to points here.
+func pointScale() -> Double {
+  let id = CGMainDisplayID()
+  let px = Double(CGDisplayPixelsWide(id))
+  let pt = Double(CGDisplayBounds(id).width)
+  return px > 0 ? pt / px : 1.0
+}
+
+func flags(_ mods: [String]) -> CGEventFlags {
+  var f = CGEventFlags()
+  if mods.contains("ctrl") { f.insert(.maskControl) }
+  if mods.contains("alt") { f.insert(.maskAlternate) }
+  if mods.contains("shift") { f.insert(.maskShift) }
+  if mods.contains("win") { f.insert(.maskCommand) }
+  return f
+}
+
+func postMouse(_ cmd: [String: Any]) -> [String: Any] {
+  let sc = pointScale()
+  let loc = CGEvent(source: nil)?.location ?? .zero
+  let x = cmd["x"] != nil ? Double(cmd["x"] as? Int ?? 0) * sc : Double(loc.x)
+  let y = cmd["y"] != nil ? Double(cmd["y"] as? Int ?? 0) * sc : Double(loc.y)
+  let p = CGPoint(x: x, y: y)
+  let btn = cmd["button"] as? String ?? "left"
+  let down: CGEventType = btn == "right" ? .rightMouseDown : btn == "middle" ? .otherMouseDown : .leftMouseDown
+  let up: CGEventType = btn == "right" ? .rightMouseUp : btn == "middle" ? .otherMouseUp : .leftMouseUp
+  let cgBtn: CGMouseButton = btn == "right" ? .right : btn == "middle" ? .center : .left
+  func ev(_ t: CGEventType) { CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: cgBtn)?.post(tap: .cghidEventTap) }
+  if cmd["x"] != nil || cmd["y"] != nil { ev(.mouseMoved) }
+  if let click = cmd["click"] as? String {
+    let d: CGEventType = click == "right" ? .rightMouseDown : click == "middle" ? .otherMouseDown : .leftMouseDown
+    let u: CGEventType = click == "right" ? .rightMouseUp : click == "middle" ? .otherMouseUp : .leftMouseUp
+    ev(d); ev(u); if click == "double" { ev(d); ev(u) }
+  }
+  if let press = cmd["press"] as? String { ev(press == "down" ? down : up) }
+  if let wheel = cmd["wheel"] as? Int, wheel != 0 {
+    CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: Int32(wheel), wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+  }
+  return ["ok": true]
+}
+
+func postKey(_ cmd: [String: Any]) -> [String: Any] {
+  guard let vk = cmd["key"] as? Int, let code = VK[vk] else { return ["ok": false, "error": "unmapped_key"] }
+  let f = flags(cmd["mods"] as? [String] ?? [])
+  func ev(_ down: Bool) { let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down); e?.flags = f; e?.post(tap: .cghidEventTap) }
+  switch cmd["press"] as? String {
+  case "down": ev(true)
+  case "up": ev(false)
+  default: ev(true); ev(false)
+  }
+  return ["ok": true]
+}
+
+func cursor() -> [String: Any] {
+  let sc = pointScale()  // points per pixel
+  let p = NSEvent.mouseLocation  // points, bottom-left origin
+  let h = CGDisplayBounds(CGMainDisplayID()).height  // points
+  let xPx = sc > 0 ? Double(p.x) / sc : Double(p.x)
+  let yPx = sc > 0 ? (Double(h) - Double(p.y)) / sc : (Double(h) - Double(p.y))
+  return ["ok": true, "x": Int(xPx), "y": Int(yPx), "shape": "default", "visible": true]
+}
+
+func clipSeq() -> [String: Any] { return ["ok": true, "seq": NSPasteboard.general.changeCount] }
+
+func clipRead(_ maxImage: Int) -> [String: Any] {
+  let pb = NSPasteboard.general
+  let seq = pb.changeCount
+  if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+    let files = urls.map { u -> [String: Any] in
+      let attrs = try? FileManager.default.attributesOfItem(atPath: u.path)
+      let size = (attrs?[.size] as? Int) ?? 0
+      return ["name": u.lastPathComponent, "size": size, "path": u.path]
+    }
+    return ["ok": true, "kind": "files", "files": files, "seq": seq]
+  }
+  if let img = NSImage(pasteboard: pb), let tiff = img.tiffRepresentation,
+     let rep = NSBitmapImageRep(data: tiff), let png = rep.representation(using: .png, properties: [:]) {
+    if png.count > maxImage { return ["ok": true, "kind": "image", "w": rep.pixelsWide, "h": rep.pixelsHigh, "seq": seq] }
+    return ["ok": true, "kind": "image", "png": png.base64EncodedString(), "w": rep.pixelsWide, "h": rep.pixelsHigh, "seq": seq]
+  }
+  if let s = pb.string(forType: .string) { return ["ok": true, "kind": "text", "text": s, "seq": seq] }
+  return ["ok": true, "kind": "empty", "seq": seq]
+}
+
+func clipSet(_ cmd: [String: Any]) -> [String: Any] {
+  let pb = NSPasteboard.general
+  pb.clearContents()
+  if let files = cmd["files"] as? [String], !files.isEmpty {
+    pb.writeObjects(files.map { URL(fileURLToPath: $0) as NSURL })
+  } else if let b64 = cmd["png"] as? String, let data = Data(base64Encoded: b64) {
+    pb.setData(data, forType: .png)
+  } else if let text = cmd["text"] as? String {
+    pb.setString(text, forType: .string)
+  }
+  return ["ok": true, "seq": pb.changeCount]
+}
+
+func postType(_ text: String) -> [String: Any] {
+  for ch in text.unicodeScalars {
+    let e = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
+    var u = [UniChar(ch.value & 0xffff)]
+    e?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &u)
+    e?.post(tap: .cghidEventTap)
+    let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
+    up?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &u)
+    up?.post(tap: .cghidEventTap)
+  }
+  return ["ok": true]
+}
+
+while let line = readLine(strippingNewline: true) {
+  guard let data = line.data(using: .utf8),
+        let cmd = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+  let id = cmd["id"]
+  let op = cmd["op"] as? String ?? ""
+  var out: [String: Any]
+  switch op {
+  case "ping": out = ["ok": true]
+  case "monitors": out = ["ok": true, "monitors": monitors()]
+  case "capture": out = capture(cmd["s"] as? Double ?? 1.0, cmd["index"] as? Int ?? -1)
+  case "perms": out = perms()
+  case "request": out = requestPerms()
+  case "mouse": out = postMouse(cmd)
+  case "key": out = postKey(cmd)
+  case "type": out = postType(cmd["text"] as? String ?? "")
+  case "cursor": out = cursor()
+  case "seq": out = clipSeq()
+  case "read": out = clipRead(cmd["maxImage"] as? Int ?? (12 << 20))
+  case "set": out = clipSet(cmd)
+  default: out = ["ok": false, "error": "unknown_op"]
+  }
+  if let id = id { out["id"] = id }
+  reply(out)
+}
+`;
+
+/** Helper backed by a compiled Swift binary (macOS). Same wire protocol as PsHelper. */
+export class MacHelper extends PsHelper {
+  constructor(name, source) {
+    super(name, source);
+    this.bin = null;
+  }
+
+  /** Write the Swift source and compile it once (cached by mtime); return the binary path. */
+  ensureFile() {
+    const dir = path.join(configDir, "helpers");
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const src = path.join(dir, `${this.name}.swift`);
+    this.bin = path.join(dir, this.name);
+    this.file = this.bin;
+    const binExists = () => { try { fs.accessSync(this.bin); return true; } catch { return false; } };
+    const stale = () => {
+      try { return fs.statSync(this.bin).mtimeMs < fs.statSync(src).mtimeMs; } catch { return true; }
+    };
+    if (binExists() && !stale()) return this.bin;
+    // A missing or broken swiftc would otherwise be retried on every poll (cursor runs at 33ms).
+    // After a failure, don't attempt another compile for a minute.
+    if (this._compileFailedAt && Date.now() - this._compileFailedAt < 60_000) {
+      throw new Error("swift helper compile unavailable");
+    }
+    try {
+      fs.writeFileSync(src, this.script, { encoding: "utf8" });
+      execFileSync("swiftc", ["-O", src, "-o", this.bin], { stdio: "ignore", timeout: 60000 });
+      this._compileFailedAt = 0;
+    } catch (e) {
+      this._compileFailedAt = Date.now();
+      throw e;
+    }
+    return this.bin;
+  }
+
+  _launch() {
+    return spawn(this.ensureFile(), [], { stdio: ["pipe", "pipe", "pipe"] });
+  }
+
+  kill() {
+    if (this.proc) { try { this.proc.kill(); } catch { /* gone */ } this.proc = null; }
+    // Keep the compiled binary; recompiled only when the source changes.
+  }
+}
+
 export class DesktopController extends EventEmitter {
   static get supported() {
-    return IS_WIN;
+    return IS_WIN || IS_MAC;
   }
 
   constructor() {
@@ -465,13 +734,13 @@ export class DesktopController extends EventEmitter {
     this.lastFrame = null; // { base64, width, height, ts, seq }
     this.stats = { framesSent: 0, capturesFailed: 0, lastCaptureMs: 0 };
     this.helperInput = new PsHelper("input", INPUT_SCRIPT);
-    this.helperCapture = new PsHelper("capture", CAPTURE_SCRIPT);
+    this.helperCapture = IS_MAC ? new MacHelper("pdcap", MAC_CAP_SWIFT) : new PsHelper("capture", CAPTURE_SCRIPT);
     this.helperClip = new PsHelper("clipboard", CLIP_SCRIPT);
   }
 
   /** Stream frames for `clientId` (server keeps the ws mapping). */
   async startFrameStream(clientId, quality) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     if (quality) this.quality = Math.min(95, Math.max(10, Number(quality) || 60));
     this.clients.add(clientId);
     this._ensureLoop();
@@ -495,13 +764,13 @@ export class DesktopController extends EventEmitter {
 
   /** Latest frame, capturing one first if we have none yet. */
   async getFrame() {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     if (!this.lastFrame) {
       // captureOnce is a no-op while the stream loop has one in flight, so
       // wait for that frame rather than reporting a failure that never was.
       if (this.capturing) await this._nextFrame(15000);
       else await this.captureOnce();
-      if (!this.lastFrame) return { ok: false, reason: "capture_failed" };
+      if (!this.lastFrame) return { ok: false, reason: this._lastCaptureError || "capture_failed" };
     }
     return { ok: true, ...this.lastFrame };
   }
@@ -515,7 +784,7 @@ export class DesktopController extends EventEmitter {
   }
 
   _ensureLoop() {
-    if (this.captureTimer || !IS_WIN) return;
+    if (this.captureTimer || (!IS_WIN && !IS_MAC)) return;
     this.captureOnce();
     this.captureTimer = setInterval(() => {
       if (!this.capturing) this.captureOnce();
@@ -528,7 +797,7 @@ export class DesktopController extends EventEmitter {
   }
 
   async captureOnce() {
-    if (this.capturing || !IS_WIN) return;
+    if (this.capturing || (!IS_WIN && !IS_MAC)) return;
     this.capturing = true;
     const t0 = Date.now();
     try {
@@ -544,6 +813,12 @@ export class DesktopController extends EventEmitter {
         this.emit("frame", this.lastFrame);
       } else {
         this.stats.capturesFailed++;
+        this._lastCaptureError = r?.error || "capture_failed";
+        // Blocked on macOS Screen Recording: show the system prompt once so the user can grant it.
+        if (r?.error === "screen_permission" && !this._permRequested) {
+          this._permRequested = true;
+          this.requestPermissions().catch(() => {});
+        }
       }
     } catch {
       this.stats.capturesFailed++;
@@ -553,27 +828,30 @@ export class DesktopController extends EventEmitter {
   }
 
   /** x/y: virtual-screen pixels from its top-left (omit to act at the cursor); click: left|right|middle|double; press: down|up of button. */
+  get _input() { return IS_MAC ? this.helperCapture : this.helperInput; }
+  get _clip() { return IS_MAC ? this.helperCapture : this.helperClip; }
+
   async inputMouse({ x, y, click, press, button, wheel }) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
-    await this.helperInput.ensure();
-    const r = await this.helperInput.cmd({ op: "mouse", x, y, click, press, button, wheel }, 8000);
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
+    await this._input.ensure();
+    const r = await this._input.cmd({ op: "mouse", x, y, click, press, button, wheel }, 8000);
     return { ok: !!r?.ok, error: r?.error };
   }
 
   /** press: down|up sends only that half, for held keys; without it the key is tapped with modifiers. */
   async inputKey({ key, modifiers = [], press }) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     const vk = Number(key);
     if (!Number.isFinite(vk) || vk <= 0 || vk > 254) return { ok: false, error: "bad_vk" };
-    await this.helperInput.ensure();
-    const r = await this.helperInput.cmd({ op: "key", key: vk, press, mods: Array.isArray(modifiers) ? modifiers : [] }, 8000);
+    await this._input.ensure();
+    const r = await this._input.cmd({ op: "key", key: vk, press, mods: Array.isArray(modifiers) ? modifiers : [] }, 8000);
     return { ok: !!r?.ok, error: r?.error };
   }
 
   async inputType(text) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
-    await this.helperInput.ensure();
-    const r = await this.helperInput.cmd({ op: "type", text: String(text).slice(0, 512) }, 10000);
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
+    await this._input.ensure();
+    const r = await this._input.cmd({ op: "type", text: String(text).slice(0, 512) }, 10000);
     return { ok: !!r?.ok, error: r?.error };
   }
 
@@ -582,7 +860,7 @@ export class DesktopController extends EventEmitter {
    * virtual screen's top-left, the origin input coordinates use.
    */
   async monitors() {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     await this.helperCapture.ensure();
     const r = await this.helperCapture.cmd({ op: "monitors" }, 10000);
     if (!r?.ok) return { ok: false, error: r?.error || "monitors_failed" };
@@ -597,7 +875,7 @@ export class DesktopController extends EventEmitter {
 
   /** Polls the pointer while anyone watches and emits "cursor" when it moves or changes shape. */
   watchCursor(on) {
-    if (!on || !IS_WIN) { clearInterval(this.cursorTimer); this.cursorTimer = null; return; }
+    if (!on || (!IS_WIN && !IS_MAC)) { clearInterval(this.cursorTimer); this.cursorTimer = null; return; }
     if (this.cursorTimer) return;
     let busy = false;
     let last = "";
@@ -605,8 +883,8 @@ export class DesktopController extends EventEmitter {
       if (busy) return;
       busy = true;
       try {
-        await this.helperInput.ensure();
-        const r = await this.helperInput.cmd({ op: "cursor" }, 2000);
+        await this._input.ensure();
+        const r = await this._input.cmd({ op: "cursor" }, 2000);
         const c = r?.ok ? { x: r.x, y: r.y, shape: r.shape, visible: r.visible } : null;
         const key = JSON.stringify(c);
         if (c && key !== last) { last = key; this.cursor = c; this.emit("cursor", c); }
@@ -616,18 +894,18 @@ export class DesktopController extends EventEmitter {
 
   /** { kind: text|image|files|empty, ... }; images above maxImage bytes come back without png. */
   async clipboardRead(maxImage = 12 << 20) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
-    await this.helperClip.ensure();
-    const r = await this.helperClip.cmd({ op: "read", maxImage }, 15000);
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
+    await this._clip.ensure();
+    const r = await this._clip.cmd({ op: "read", maxImage }, 15000);
     if (r?.ok) this.clipSeq = r.seq;
     return r?.ok ? r : { ok: false, error: r?.error || "clipboard_failed" };
   }
 
   /** Any of text, png (base64) and files (absolute paths) in one clipboard entry. */
   async clipboardSet({ text, png, files }) {
-    if (!IS_WIN) return { ok: false, reason: "unsupported_platform" };
-    await this.helperClip.ensure();
-    const r = await this.helperClip.cmd({ op: "set", text, png, files }, 15000);
+    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
+    await this._clip.ensure();
+    const r = await this._clip.cmd({ op: "set", text, png, files }, 15000);
     // Our own write must not come back to the viewer as a PC-side change.
     if (r?.ok) this.clipSeq = r.seq;
     return { ok: !!r?.ok, error: r?.error };
@@ -635,15 +913,15 @@ export class DesktopController extends EventEmitter {
 
   /** While on, emits "clipboard" with the new content whenever something on the PC copies. */
   watchClipboard(on) {
-    if (!on || !IS_WIN) { clearInterval(this.clipTimer); this.clipTimer = null; return; }
+    if (!on || (!IS_WIN && !IS_MAC)) { clearInterval(this.clipTimer); this.clipTimer = null; return; }
     if (this.clipTimer) return;
     let busy = false;
     this.clipTimer = setInterval(async () => {
       if (busy) return;
       busy = true;
       try {
-        await this.helperClip.ensure();
-        const r = await this.helperClip.cmd({ op: "seq" }, 5000);
+        await this._clip.ensure();
+        const r = await this._clip.cmd({ op: "seq" }, 5000);
         if (!r?.ok) return;
         if (this.clipSeq == null) { this.clipSeq = r.seq; return; }
         if (r.seq === this.clipSeq) return;
@@ -653,9 +931,23 @@ export class DesktopController extends EventEmitter {
     }, 500);
   }
 
+  /** macOS Screen-Recording / Accessibility grants; { ok:false } off macOS or without the helper. */
+  async permissions() {
+    if (!IS_MAC) return { ok: false, screen: IS_WIN, accessibility: IS_WIN };
+    await this.helperCapture.ensure();
+    return this.helperCapture.cmd({ op: "perms" }, 8000);
+  }
+
+  /** Trigger the macOS permission prompts (first run); returns the resulting grant state. */
+  async requestPermissions() {
+    if (!IS_MAC) return { ok: false };
+    await this.helperCapture.ensure();
+    return this.helperCapture.cmd({ op: "request" }, 8000);
+  }
+
   getStatus() {
     return {
-      supported: IS_WIN,
+      supported: IS_WIN || IS_MAC,
       streaming: !!this.captureTimer,
       clients: this.clients.size,
       quality: this.quality,

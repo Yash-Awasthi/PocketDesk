@@ -196,5 +196,10 @@ export default function remoteHandlers(ctx) {
     async desktop_status(ws, msg) {
       send(ws, { type: "desktop_status", ...desktop.getStatus() });
     },
+    // macOS grants: { request:true } shows the system prompts, otherwise just reports the state.
+    async desktop_permissions(ws, msg) {
+      const r = msg.request ? await desktop.requestPermissions() : await desktop.permissions();
+      send(ws, { type: "desktop_permissions", ...r });
+    },
   };
 }

@@ -1,0 +1,6 @@
+# Shell scripts and Unix service files must stay LF, or they break on macOS/Linux.
+*.sh text eol=lf
+*.service text eol=lf
+*.plist text eol=lf
+*.swift text eol=lf
+daemon/scripts/unix/pocketdesk text eol=lf
