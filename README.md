@@ -2,6 +2,8 @@
 
 > **Run AI coding agents on your PC, control them from your phone.**
 
+[![CI](https://github.com/Yash-Awasthi/PocketDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/Yash-Awasthi/PocketDesk/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/Yash-Awasthi/PocketDesk)](https://github.com/Yash-Awasthi/PocketDesk/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-≥20-brightgreen.svg)](https://nodejs.org)
 [![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-orange.svg)](#protocol-v1)
