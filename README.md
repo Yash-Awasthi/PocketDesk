@@ -83,8 +83,10 @@ curl -fsSL https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/inst
 ```
 The daemon runs in the background (a login item on macOS, a systemd user service on Linux)
 and serves terminals, files, chat and agent control. Manage it with `pocketdesk`
-(`pair`, `status`, `stop`) — on macOS also from the menu-bar tray. Screen sharing and
-remote input are Windows-only for now.
+(`pair`, `status`, `stop`) — on macOS also from the menu-bar tray. On macOS, screen sharing
+and remote control also work once you grant **Screen Recording** and **Accessibility** to the
+daemon (System Settings → Privacy & Security; prompted on first use). Linux screen sharing is
+not available yet.
 
 **Manual:**
 ```bash

@@ -463,6 +463,20 @@ const MAC_CAP_SWIFT = `
 import Foundation
 import CoreGraphics
 import AppKit
+import ApplicationServices
+
+// Screen Recording and Accessibility are separate macOS grants; without them capture returns
+// nothing and input is silently dropped. "perms" reports them, "request" shows the system prompts.
+func perms() -> [String: Any] {
+  return ["ok": true, "screen": CGPreflightScreenCaptureAccess(), "accessibility": AXIsProcessTrusted()]
+}
+
+func requestPerms() -> [String: Any] {
+  if !CGPreflightScreenCaptureAccess() { CGRequestScreenCaptureAccess() }
+  let opt = ["AXTrustedCheckOptionPrompt" as CFString: true] as CFDictionary
+  _ = AXIsProcessTrustedWithOptions(opt)
+  return perms()
+}
 
 func reply(_ o: [String: Any]) {
   if let d = try? JSONSerialization.data(withJSONObject: o), let s = String(data: d, encoding: .utf8) {
@@ -600,6 +614,8 @@ while let line = readLine(strippingNewline: true) {
   case "ping": out = ["ok": true]
   case "monitors": out = ["ok": true, "monitors": monitors()]
   case "capture": out = capture(cmd["s"] as? Double ?? 1.0, cmd["index"] as? Int ?? -1)
+  case "perms": out = perms()
+  case "request": out = requestPerms()
   case "mouse": out = postMouse(cmd)
   case "key": out = postKey(cmd)
   case "type": out = postType(cmd["text"] as? String ?? "")
@@ -739,8 +755,12 @@ export class DesktopController extends EventEmitter {
         this.emit("frame", this.lastFrame);
       } else {
         this.stats.capturesFailed++;
-        // "screen_permission" means macOS Screen Recording is not granted yet (Phase 2.4 surfaces it).
         this._lastCaptureError = r?.error || "capture_failed";
+        // Blocked on macOS Screen Recording: show the system prompt once so the user can grant it.
+        if (r?.error === "screen_permission" && !this._permRequested) {
+          this._permRequested = true;
+          this.requestPermissions().catch(() => {});
+        }
       }
     } catch {
       this.stats.capturesFailed++;
@@ -852,9 +872,23 @@ export class DesktopController extends EventEmitter {
     }, 500);
   }
 
+  /** macOS Screen-Recording / Accessibility grants; { ok:false } off macOS or without the helper. */
+  async permissions() {
+    if (!IS_MAC) return { ok: false, screen: IS_WIN, accessibility: IS_WIN };
+    await this.helperCapture.ensure();
+    return this.helperCapture.cmd({ op: "perms" }, 8000);
+  }
+
+  /** Trigger the macOS permission prompts (first run); returns the resulting grant state. */
+  async requestPermissions() {
+    if (!IS_MAC) return { ok: false };
+    await this.helperCapture.ensure();
+    return this.helperCapture.cmd({ op: "request" }, 8000);
+  }
+
   getStatus() {
     return {
-      supported: IS_WIN,
+      supported: IS_WIN || IS_MAC,
       streaming: !!this.captureTimer,
       clients: this.clients.size,
       quality: this.quality,
