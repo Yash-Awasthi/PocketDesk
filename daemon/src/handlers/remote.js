@@ -2,7 +2,7 @@ import { resolvePath } from "../fs_ops.js";
 import * as devices from "../devices.js";
 
 export default function remoteHandlers(ctx) {
-  const { send, desktop, desktopWatchers, video, videoWatchers, presence, recorder, access } = ctx;
+  const { send, desktop, desktopWatchers, video, videoWatchers, recorder, access } = ctx;
   // Sockets that took a single snapshot stay on the viewer set for a few seconds.
   const snapshots = new Map();
   const deviceName = (ws) => devices.list().find((d) => d.id === ws._clientId)?.name || "A remote device";
@@ -18,8 +18,6 @@ export default function remoteHandlers(ctx) {
     for (const w of logged) if (!viewers.has(w)) recorder.log("viewer_left", { device: deviceName(w) });
     logged = viewers;
     recorder.screenWatched(on, { label: viewers.size ? deviceName([...viewers][0]) : "", monitor: video.monitor });
-    // Nobody left to drive the PC: hand the screen and input back to whoever sits at it.
-    if (!on && presence.privacyOn) presence.setPrivacy(false);
   }
   let logged = new Set();
   /** Input and clipboard writes: never view-only, never when the PC owner has paused control,
@@ -34,21 +32,6 @@ export default function remoteHandlers(ctx) {
       else if (!w._viewOnlyForced) w._viewOnly = false;
       send(w, { type: "control_allowed", allowed: on, viewOnly: !!w._viewOnly });
     }
-    if (!on && presence.privacyOn) presence.setPrivacy(false);
-  };
-  if (presence) presence.onPrivacyChange = (on) => {
-    for (const w of new Set([...videoWatchers, ...desktopWatchers])) send(w, { type: "desktop_privacy", ok: true, on });
-  };
-  if (presence) presence.onDisconnect = () => {
-    for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
-      videoWatchers.delete(w);
-      desktopWatchers.delete(w);
-      desktop.stopFrameStream(w._clientId || "anon");
-      send(w, { type: "desktop_stopped", ok: true, reason: "ended on the PC" });
-    }
-    recorder.log("ended_on_pc");
-    video.stop();
-    syncCursor();
   };
   let monitorList = null;
   async function monitorAt(index) {
@@ -72,14 +55,6 @@ export default function remoteHandlers(ctx) {
   }
   return {
     // ── Real desktop control (AnyDesk-style: watch + full input) ─────────
-    async desktop_privacy(ws, msg) {
-      if (!mayControl(ws) || !(videoWatchers.has(ws) || desktopWatchers.has(ws))) {
-        return send(ws, { type: "desktop_privacy", ok: false, on: presence.privacyOn, error: "open the desktop with control first" });
-      }
-      const r = await presence.setPrivacy(msg.on === true);
-      recorder.log(r.on ? "privacy_on" : "privacy_off", { device: deviceName(ws) });
-      send(ws, { type: "desktop_privacy", ...r });
-    },
     async desktop_start(ws, msg) {
       ws._viewOnly = !!msg.viewOnly || !!ws._viewOnlyForced || !access.controlAllowed;
       // Binary frames need a real socket; relay shims fall back to JPEG.

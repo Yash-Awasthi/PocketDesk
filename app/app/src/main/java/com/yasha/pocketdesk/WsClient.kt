@@ -473,10 +473,6 @@ class WsClient(
     /** The PC keeps a recording of this session (its owner turned that on). */
     var desktopRecording by mutableStateOf(false)
         private set
-    /** The PC's own monitors are blanked and its local input ignored. */
-    var desktopPrivacy by mutableStateOf(false)
-        private set
-    fun setDesktopPrivacy(on: Boolean): Boolean = send(Proto.desktopPrivacy(on))
     fun pcPower(action: String): Boolean = send(Proto.pcPower(action))
 
     /** Two-factor pairing on the PC: null until asked. */
@@ -1022,10 +1018,6 @@ class WsClient(
                 bool(m, "viewOnly")?.let { desktopViewOnly = it }
                 desktopNotice = if (bool(m, "allowed") == false) "The PC owner paused control. You can watch only." else ""
             }
-            "desktop_privacy" -> {
-                desktopPrivacy = bool(m, "on") == true
-                str(m, "error")?.let { _desktopError.value = it }
-            }
             "pc_power" -> events.tryEmit(RhEvent.PowerDone(str(m, "action") ?: "", bool(m, "ok") == true, str(m, "error")))
             "totp_status" -> {
                 totpEnabled = bool(m, "enabled")
@@ -1034,7 +1026,6 @@ class WsClient(
             }
             "totp_setup" -> totpOffer = (str(m, "secret") ?: return) to (str(m, "uri") ?: "")
             "desktop_stopped" -> {
-                desktopPrivacy = false
                 desktopStreaming = false
                 str(m, "reason")?.let { desktopResume = null; _desktopError.value = "Session $it" }
             }

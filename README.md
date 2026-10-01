@@ -34,10 +34,9 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states |
 | 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware H.264 up to 60 fps (WebCodecs in the browser), any monitor, the PC pointer drawn on the viewer as a small dot centred on the click point; touch gestures (two-finger scroll, two-finger tap for right click, hold then move to drag, pinch to zoom), a one-tap shortcut bar (Copy, Paste, Undo, Alt+Tab, Win, Task Manager…) and an app drawer of every installed program, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows). |
 | 📋 **Clipboard & file drop** | Text, images and copied files move between the PC and the viewer while the desktop is open; files sent from the phone or browser are pasted straight into the focused PC window. |
-| 👁 **Session privacy** | The PC shows who is viewing with a Disconnect button, can require Allow / View only / Deny first, and viewers can join view-only. |
+| 👁 **Access control** | A connection password is required on every connect; the PC owner can pause control (view-only) from the pairing page, and viewers can join view-only. |
 | 🎥 **Session recording** | Optional MP4 of the watched screen, asciicast of terminals, and a log of every viewer, approval and file sent. |
 | ⏰ **Wake-on-LAN** | Wake a sleeping PC from the phone on the same network. |
-| 🕶️ **Privacy mode** | Blank the PC's own monitors and ignore its local keyboard and mouse while you work from the phone; the phone still sees the desktop. Three Esc presses at the PC take it back (`desktop_privacy`; Windows) |
 | 🟥 **Viewing frame** | A red edge around every monitor while someone is connected, seen only at the PC |
 | 🔌 **PC power** | Lock, sign out, sleep, restart or shut down the PC from the phone (`pc_power`) |
 | 🔑 **Two-factor pairing** | Optionally require a code from an authenticator app before a new device may pair (`totp_*`) |
@@ -423,7 +422,7 @@ Proposals auto-expire after 5 minutes.
 JSON frames; binary payloads are base64.
 
 **Client → Server:**
-`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `fs_op {op: mkdir|rename|delete}` · `fs_search {path, q}` · `propose` · `approve {id, all?}` · `reject` · `proposal_list` · `desktop_privacy {on}` · `pc_power {action}` · `totp_status` · `totp_setup` · `totp_enable {code}` · `totp_disable {code}` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
+`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `fs_op {op: mkdir|rename|delete}` · `fs_search {path, q}` · `propose` · `approve {id, all?}` · `reject` · `proposal_list` · `pc_power {action}` · `totp_status` · `totp_setup` · `totp_enable {code}` · `totp_disable {code}` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
 <details>
 <summary>Absorbed-feature messages</summary>
 
@@ -442,7 +441,7 @@ JSON frames; binary payloads are base64.
 </details>
 
 **Server → Client:**
-`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `fs_result` · `fs_found` · `chatreplay` · `chatuser` · `chatdelta` · `chartool` · `chatstate` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `proposal_expired` · `desktop_privacy` · `pc_power` · `totp_status` · `totp_setup` · `activity` · `gui_opened` · `apps` · `error`
+`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `fs_result` · `fs_found` · `chatreplay` · `chatuser` · `chatdelta` · `chartool` · `chatstate` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `proposal_expired` · `pc_power` · `totp_status` · `totp_setup` · `activity` · `gui_opened` · `apps` · `error`
 
 Every `out` frame carries a monotonic `seq`; on reconnect send `attach {id, since: <last seq>}` and the daemon replays only what you missed.
 

@@ -146,13 +146,6 @@ so they never cover what the phone sees.
 With **Ask before someone views this PC** on, the Allow / View only / Deny buttons stay disabled for
 the first 1.5 seconds, so a key you were already typing cannot answer the prompt.
 
-## Privacy mode
-
-From the phone's Desktop screen (⋮ menu), **Privacy mode** blanks the PC's monitors and ignores the
-PC's own keyboard and mouse while you work remotely. The phone keeps seeing and controlling the real
-desktop. It ends when you turn it off, when the last viewer disconnects, or when someone at the PC
-presses **Esc** three times within two seconds. Ctrl+Alt+Del always works.
-
 ## Two-factor pairing
 
 On the phone: **Tools > Two-factor pairing > Set up**. Add the key to an authenticator app

@@ -17,7 +17,6 @@ import { PowerManager, normalizeAwakeMode } from "./power_manager.js";
 import { createActivityMonitor } from "./activity.js";
 import { StreamJsonParser } from "./stream_json_parser.js";
 import { DesktopController } from "./desktop_capture.js";
-import { DesktopPresence } from "./desktop_presence.js";
 import { createAccess } from "./access.js";
 import { wakeTargets } from "./wake.js";
 import { Recorder } from "./recorder.js";
@@ -395,7 +394,6 @@ export function start(config, { onTokenRotated } = {}) {
   // ~200-300 KB each, too heavy for the broadcast fan-out) and the capture
   // loop runs only while at least one watcher is attached.
   const desktop = new DesktopController();
-  const presence = new DesktopPresence();
   const access = createAccess(config);
   const recorder = new Recorder();
   const desktopWatchers = new Set();
@@ -500,7 +498,6 @@ export function start(config, { onTokenRotated } = {}) {
     video.stop();
     scheduler.stop();
     desktop.dispose();
-    presence.dispose();
     recorder.dispose();
     mpc.dispose();
     sshSrv.stop();
@@ -555,7 +552,7 @@ export function start(config, { onTokenRotated } = {}) {
 
   const ctx = {
     send, broadcast, allSessions, plugins, power,
-    desktop, desktopWatchers, video, videoWatchers, presence, recorder, access, bastion, sshSrv, mpc, streamParser,
+    desktop, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
     activity, tls, rotateToken, disconnectDevice,
   };
   const handlers = {

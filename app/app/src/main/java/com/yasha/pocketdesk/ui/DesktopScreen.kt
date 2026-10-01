@@ -202,7 +202,6 @@ fun DesktopScreen(
                     Text(
                         listOfNotNull(
                             "● REC".takeIf { ws.desktopRecording && ws.desktopStreaming },
-                            "privacy on".takeIf { ws.desktopPrivacy },
                             if (!ws.desktopStreaming) "paused" else rate.takeIf { video && it.isNotEmpty() } ?: "live",
                             ws.route.takeIf { it.isNotEmpty() },
                         ).joinToString(" · "),
@@ -242,9 +241,6 @@ fun DesktopScreen(
                         }
                         if (!ws.desktopViewOnly) {
                             Item("Send files to the PC", sendFiles)
-                            Item(if (ws.desktopPrivacy) "Turn privacy mode off" else "Privacy mode (blank the PC screen)") {
-                                ws.setDesktopPrivacy(!ws.desktopPrivacy)
-                            }
                         }
                         androidx.compose.material3.HorizontalDivider()
                         POWER_ACTIONS.forEach { (a, l) -> Item(l) { power = a } }
