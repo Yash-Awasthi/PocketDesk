@@ -24,6 +24,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.yasha.pocketdesk.WsClient
 
@@ -116,6 +117,29 @@ fun TwoFactorSection(ws: WsClient) {
             ws.totpEnabled == false -> Button(onClick = { ws.totp("setup") }) { Text("Set up") }
         }
     }
+}
+
+/** Shown when the PC requires a connection password before it will accept this device. */
+@Composable
+fun ConnectionPasswordDialog(ws: WsClient) {
+    if (!ws.passwordNeeded) return
+    var pw by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Connection password") },
+        text = {
+            OutlinedTextField(
+                value = pw,
+                onValueChange = { pw = it },
+                label = { Text("Password set on the PC") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            )
+        },
+        confirmButton = { TextButton(onClick = { ws.submitConnectionPassword(pw) }, enabled = pw.isNotEmpty()) { Text("Connect") } },
+        dismissButton = { TextButton(onClick = { ws.dismissPassword() }) { Text("Cancel") } },
+    )
 }
 
 /** Shown when the PC refused to pair this device without an authenticator code. */

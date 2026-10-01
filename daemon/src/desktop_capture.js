@@ -79,6 +79,12 @@ public static class RHI {
     i.u.mi = new MOUSEINPUT { dx = x, dy = y, mouseData = unchecked((uint)wheel), dwFlags = flags };
     return SendInput(1, new INPUT[]{ i }, Marshal.SizeOf(typeof(INPUT)));
   }
+  // One SendInput batch with the position on every event, so a click can never land before its move.
+  public static uint Batch(int x, int y, uint pos, uint[] flags) {
+    var a = new INPUT[flags.Length];
+    for (int k = 0; k < flags.Length; k++) { a[k].type = 0; a[k].u.mi = new MOUSEINPUT { dx = x, dy = y, dwFlags = flags[k] | pos }; }
+    return SendInput((uint)a.Length, a, Marshal.SizeOf(typeof(INPUT)));
+  }
   public static uint Key(ushort vk, uint flags) {
     var i = new INPUT { type = 1 };
     i.u.ki = new KEYBDINPUT { wVk = vk, wScan = 0, dwFlags = flags };
@@ -115,23 +121,30 @@ while ($true) {
   ${followInput("RHI")}if ($op -eq 'mouse') {
     try {
       $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
+      $pos = [uint32]0; $cx = 0; $cy = 0
       # x/y are relative to the virtual screen's top-left, the same origin as a captured frame.
       if ($null -ne $cmd.x) {
         $cx = [int][Math]::Round(([double]$cmd.x / [Math]::Max(1,$vs.Width - 1)) * 65535)
         $cy = [int][Math]::Round(([double]$cmd.y / [Math]::Max(1,$vs.Height - 1)) * 65535)
         if ($cx -lt 0) {$cx=0}; if ($cx -gt 65535) {$cx=65535}
         if ($cy -lt 0) {$cy=0}; if ($cy -gt 65535) {$cy=65535}
-        [RHI]::Mouse($cx, $cy, ([RHI]::MOVE -bor [RHI]::ABSOLUTE -bor [RHI]::VIRTUALDESK), 0) | Out-Null
+        $pos = [RHI]::MOVE -bor [RHI]::ABSOLUTE -bor [RHI]::VIRTUALDESK
       }
-      if ($cmd.click -eq 'left' -or $cmd.click -eq 'double') { [RHI]::Mouse(0,0,[RHI]::LEFTDOWN,0) | Out-Null;  [RHI]::Mouse(0,0,[RHI]::LEFTUP,0) | Out-Null }
-      if ($cmd.click -eq 'double'){ [RHI]::Mouse(0,0,[RHI]::LEFTDOWN,0) | Out-Null;  [RHI]::Mouse(0,0,[RHI]::LEFTUP,0) | Out-Null }
-      if ($cmd.click -eq 'right') { [RHI]::Mouse(0,0,[RHI]::RIGHTDOWN,0) | Out-Null; [RHI]::Mouse(0,0,[RHI]::RIGHTUP,0) | Out-Null }
-      if ($cmd.click -eq 'middle'){ [RHI]::Mouse(0,0,[RHI]::MIDDLEDOWN,0) | Out-Null;[RHI]::Mouse(0,0,[RHI]::MIDDLEUP,0) | Out-Null }
+      $b = @{ left = @([RHI]::LEFTDOWN, [RHI]::LEFTUP); right = @([RHI]::RIGHTDOWN, [RHI]::RIGHTUP); middle = @([RHI]::MIDDLEDOWN, [RHI]::MIDDLEUP) }
+      $f = New-Object System.Collections.Generic.List[uint32]
+      if ($pos) { $f.Add(0) }
+      $clickBtn = if ($cmd.click -eq 'double') { 'left' } else { [string]$cmd.click }
+      if ($b.ContainsKey($clickBtn)) {
+        $f.Add($b[$clickBtn][0]); $f.Add($b[$clickBtn][1])
+        if ($cmd.click -eq 'double') { $f.Add($b.left[0]); $f.Add($b.left[1]) }
+      }
       if ($cmd.press) {
-        $b = @{ left = @([RHI]::LEFTDOWN, [RHI]::LEFTUP); right = @([RHI]::RIGHTDOWN, [RHI]::RIGHTUP); middle = @([RHI]::MIDDLEDOWN, [RHI]::MIDDLEUP) }[[string]$cmd.button]
-        if ($null -eq $b) { $b = @([RHI]::LEFTDOWN, [RHI]::LEFTUP) }
-        if ($cmd.press -eq 'down') { [RHI]::Mouse(0,0,$b[0],0) | Out-Null }
-        if ($cmd.press -eq 'up')   { [RHI]::Mouse(0,0,$b[1],0) | Out-Null }
+        $pb = $b[[string]$cmd.button]; if ($null -eq $pb) { $pb = $b.left }
+        if ($cmd.press -eq 'down') { $f.Add($pb[0]) }
+        if ($cmd.press -eq 'up')   { $f.Add($pb[1]) }
+      }
+      if ($f.Count -gt 0 -and [RHI]::Batch($cx, $cy, $pos, $f.ToArray()) -ne $f.Count) {
+        [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":false,"error":"input_blocked"}'); continue
       }
       if ($cmd.wheel) { [RHI]::Mouse(0,0,[RHI]::WHEEL,[int]$cmd.wheel) | Out-Null }
       [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}')

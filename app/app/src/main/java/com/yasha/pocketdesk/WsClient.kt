@@ -242,7 +242,7 @@ class WsClient(
         lastError = null
         lastToken = token
         lastFingerprint = pinnedFingerprint
-        hello = Proto.hello(token)
+        hello = Proto.hello(token, password = connPassword)
         val first = route() ?: url
         activeUrl = first
         open(first)
@@ -282,6 +282,7 @@ class WsClient(
                         if (code != null) {
                             lastError = reason.ifEmpty { "refused by server ($code)" }
                             totpNeeded = code == 4011
+                            passwordNeeded = code == 4012
                             status = Status.Disconnected
                         } else {
                             lastError = reason
@@ -377,6 +378,7 @@ class WsClient(
             if (code >= 4000) {
                 lastError = reason.ifEmpty { "refused by server ($code)" }
                 totpNeeded = code == 4011
+                passwordNeeded = code == 4012
                 status = Status.Disconnected
                 return
             }
@@ -491,10 +493,24 @@ class WsClient(
     var totpNeeded by mutableStateOf(false)
         private set
     fun dismissPairCode() { totpNeeded = false }
+
+    /** The PC requires a connection password; held only for this session unless the user connects again. */
+    var passwordNeeded by mutableStateOf(false)
+        private set
+    private var connPassword: String? = null
+    fun dismissPassword() { passwordNeeded = false }
+    fun submitConnectionPassword(password: String) {
+        val token = lastToken ?: return
+        connPassword = password
+        passwordNeeded = false
+        hello = Proto.hello(token, password = password)
+        status = Status.Connecting
+        open(activeUrl ?: lanUrl ?: return)
+    }
     fun pairWithCode(code: String) {
         val token = lastToken ?: return
         totpNeeded = false
-        hello = Proto.hello(token, code)
+        hello = Proto.hello(token, code, connPassword)
         status = Status.Connecting
         open(activeUrl ?: lanUrl ?: return)
     }
@@ -714,7 +730,7 @@ class WsClient(
             "welcome" -> {
                 str(m, "deviceToken")?.let { t ->
                     lastToken = t
-                    hello = Proto.hello(t)
+                    hello = Proto.hello(t, password = connPassword)
                     // Keyed by the entry's own url: the iroh fallback below may change in the same welcome.
                     (lanUrl ?: activeUrl)?.let { issuedToken = it to t }
                 }
@@ -1002,7 +1018,10 @@ class WsClient(
                     clockOffset = server - (t + rtt / 2)
                 }
             }
-            "desktop_pending" -> desktopNotice = "Waiting for someone at the PC to allow this…"
+            "control_allowed" -> {
+                bool(m, "viewOnly")?.let { desktopViewOnly = it }
+                desktopNotice = if (bool(m, "allowed") == false) "The PC owner paused control. You can watch only." else ""
+            }
             "desktop_privacy" -> {
                 desktopPrivacy = bool(m, "on") == true
                 str(m, "error")?.let { _desktopError.value = it }
@@ -1149,7 +1168,7 @@ class WsClient(
         if (userClosed) return
         activeUrl = url
         status = Status.Connecting
-        hello = Proto.hello(token)
+        hello = Proto.hello(token, password = connPassword)
         open(url)
     }
 }

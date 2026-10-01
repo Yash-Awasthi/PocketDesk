@@ -22,7 +22,6 @@ const TOKEN = "desktoken";
 
 async function main() {
   // A run that died mid-way can leave the approval flag behind in the test home.
-  fs.rmSync(path.join(os.tmpdir(), "rh-home-" + PORT, "ask-before-viewing"), { force: true });
   const d = startDaemon(PORT, CLI_PORT, { token: TOKEN, manifests: tmp });
   await d.ready;
   const c = await openAndHello(PORT, TOKEN);
@@ -160,44 +159,17 @@ async function main() {
     check("view-only viewer cannot send input", vos.viewOnly === true && vok.ok === false && vok.error === "view only");
     await vo.close();
 
-    // Approval: the prompt on the PC is answered by clicking Allow or Deny.
-    const flag = path.join(os.tmpdir(), "rh-home-" + PORT, "ask-before-viewing");
-    fs.writeFileSync(flag, "");
-    // Clicks the prompt's button through UI Automation: no keystrokes, so nothing can reach
-    // another window (Alt+F4 once closed a terminal whose title also said PocketDesk).
-    const answer = (button) => execFileSync("powershell.exe", ["-NoProfile", "-Command",
-      `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
-       Add-Type -Name W -Namespace Rh -MemberDefinition '[DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h, uint m, IntPtr w, IntPtr l);'
-       $helper = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like '*-File*rh-home-${PORT}*presence.ps1' } | Select-Object -First 1
-       if (-not $helper) { exit 2 }
-       $root = [System.Windows.Automation.AutomationElement]::RootElement
-       $byPid = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$helper.ProcessId)
-       $byName = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, '${button}')
-       for ($i = 0; $i -lt 40; $i++) {
-         $btn = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $byPid) | ForEach-Object { $_.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $byName) } | Where-Object { $_ } | Select-Object -First 1
-         if ($btn -and $btn.Current.IsEnabled) { [void][Rh.W]::SendMessage([IntPtr]$btn.Current.NativeWindowHandle, 0xF5, [IntPtr]::Zero, [IntPtr]::Zero); exit 0 }
-         Start-Sleep -Milliseconds 250
-       }
-       $root.FindAll([System.Windows.Automation.TreeScope]::Children, $byPid) | ForEach-Object { [Console]::Error.WriteLine('window: ' + $_.Current.Name) }
-       exit 1`], { stdio: ["ignore", "pipe", "inherit"] });
-    const a1 = await openAndHello(PORT, TOKEN);
-    a1.send({ type: "desktop_key", key: 0x87 });
-    const blocked = await a1.next((m) => m.type === "desktop_input_ok", 10000);
-    check("input before approval is refused", blocked.ok === false);
-    a1.send({ type: "desktop_start", quality: 30 });
-    await a1.next((m) => m.type === "desktop_pending", 10000);
-    answer("Deny");
-    const denied = await a1.next((m) => m.type === "desktop_started", 20000);
-    check("denied on the PC", denied.ok === false && denied.reason === "denied on the PC");
-    a1.send({ type: "desktop_start", quality: 30 });
-    await a1.next((m) => m.type === "desktop_pending", 10000);
-    answer("Allow");
-    const allowed = await a1.next((m) => m.type === "desktop_started", 20000);
-    a1.send({ type: "desktop_key", key: 0x87 });
-    const afterOk = await a1.next((m) => m.type === "desktop_input_ok", 10000);
-    check("allowed on the PC, then input works", allowed.ok === true && allowed.viewOnly === false && afterOk.ok === true);
-    await a1.close();
-    fs.rmSync(flag, { force: true });
+    // Control gate: when the PC owner pauses control, a live viewer is forced to view-only.
+    const accessPost = (p, body) => fetch(`http://127.0.0.1:${PORT}${p}?k=${TOKEN}`, { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
+    await accessPost("/access/control", { allowed: false });
+    const g = await openAndHello(PORT, TOKEN);
+    g.send({ type: "desktop_start", quality: 30 });
+    const gs = await g.next((m) => m.type === "desktop_started", 20000);
+    g.send({ type: "desktop_key", key: 0x87 });
+    const gk = await g.next((m) => m.type === "desktop_input_ok", 10000);
+    check("control paused forces view-only", gs.viewOnly === true && gk.ok === false && gk.error === "view only");
+    await g.close();
+    await accessPost("/access/control", { allowed: true });
 
     // Recording: with the flag on, a watched screen becomes an MP4 and a terminal an asciicast.
     const home = path.join(os.tmpdir(), "rh-home-" + PORT);
