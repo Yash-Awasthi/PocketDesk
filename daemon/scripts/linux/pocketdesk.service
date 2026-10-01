@@ -1,0 +1,17 @@
+# PocketDesk daemon as a systemd user service (Linux has no Task Manager tray by default;
+# `pocketdesk stop` or `systemctl --user stop pocketdesk` stops it). __NODE__ and __DAEMON__
+# are replaced by install.sh.
+[Unit]
+Description=PocketDesk daemon
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=__DAEMON__
+Environment=RH_STOP_ON_STDIN_EOF=0
+ExecStart=__NODE__ src/index.js
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

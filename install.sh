@@ -126,44 +126,63 @@ EOCONF
   ok "Token generated and saved"
 fi
 
-# ── Step 5: Start daemon ─────────────────────────────────────────────────────
-step "Starting daemon"
+# ── Step 5: Autostart + control CLI (hidden daemon, like the Windows build) ───
+step "Setting up background start and controls"
 
 PORT=$(node -e "try{console.log(JSON.parse(require('fs').readFileSync('$TOKEN_FILE','utf8')).port||8765)}catch(e){console.log(8765)}" 2>/dev/null || echo 8765)
+BIN_DIR="$INSTALL_DIR/bin"
+mkdir -p "$BIN_DIR"
 
-# Kill existing daemon on this port
-if command -v lsof &>/dev/null; then
-  EXISTING=$(lsof -ti :"$PORT" 2>/dev/null || true)
-  if [ -n "$EXISTING" ]; then
-    warn "Port $PORT in use — killing existing process"
-    kill "$EXISTING" 2>/dev/null || true
-    sleep 1
-  fi
-fi
+# The control CLI is the stop mechanism where there is no Task Manager.
+install -m 755 "$DAEMON_DIR/scripts/unix/pocketdesk" "$BIN_DIR/pocketdesk"
+# Put it on PATH without sudo.
+USER_BIN="$HOME/.local/bin"; mkdir -p "$USER_BIN"
+ln -sf "$BIN_DIR/pocketdesk" "$USER_BIN/pocketdesk"
+
+"$BIN_DIR/pocketdesk" stop >/dev/null 2>&1 || true
+
+case "$(uname -s)" in
+  Darwin)
+    # A menu-bar tray (no Task Manager on macOS): start/stop/pair from the status bar.
+    if command -v swiftc &>/dev/null; then
+      swiftc -O "$DAEMON_DIR/scripts/mac/PocketDeskTray.swift" -o "$BIN_DIR/PocketDeskTray" 2>/dev/null \
+        && ok "Menu-bar tray built" || warn "Tray build failed — use the 'pocketdesk' command to start/stop"
+    else
+      warn "swiftc not found (install Xcode command-line tools) — tray skipped; use 'pocketdesk' to start/stop"
+    fi
+    AGENTS="$HOME/Library/LaunchAgents"; mkdir -p "$AGENTS"
+    if [ -x "$BIN_DIR/PocketDeskTray" ]; then
+      sed "s#__TRAY__#$BIN_DIR/PocketDeskTray#" "$DAEMON_DIR/scripts/mac/com.pocketdesk.tray.plist" > "$AGENTS/com.pocketdesk.tray.plist"
+      launchctl unload "$AGENTS/com.pocketdesk.tray.plist" 2>/dev/null || true
+      launchctl load "$AGENTS/com.pocketdesk.tray.plist" 2>/dev/null || true
+      ok "Tray starts at login; it runs the hidden daemon"
+    else
+      "$BIN_DIR/pocketdesk" start || true
+    fi
+    ;;
+  Linux)
+    UNIT_DIR="$HOME/.config/systemd/user"; mkdir -p "$UNIT_DIR"
+    sed -e "s#__NODE__#$(command -v node)#" -e "s#__DAEMON__#$DAEMON_DIR#" \
+      "$DAEMON_DIR/scripts/linux/pocketdesk.service" > "$UNIT_DIR/pocketdesk.service"
+    if command -v systemctl &>/dev/null; then
+      systemctl --user daemon-reload 2>/dev/null || true
+      systemctl --user enable --now pocketdesk 2>/dev/null && ok "Daemon runs now and at login (systemd user service)" \
+        || { warn "systemd --user unavailable — starting directly"; "$BIN_DIR/pocketdesk" start || true; }
+    else
+      "$BIN_DIR/pocketdesk" start || true
+    fi
+    ;;
+  *) "$BIN_DIR/pocketdesk" start || true ;;
+esac
 
 echo ""
-echo -e "  ${GREEN}${BOLD}═══════════════════════════════════════${NC}"
-echo -e "  ${GREEN}${BOLD}  PocketDesk is ready! 🔧${NC}"
-echo -e "  ${GREEN}${BOLD}═══════════════════════════════════════${NC}"
-echo ""
-echo -e "  ${BOLD}Daemon:${NC}  $DAEMON_DIR"
-echo -e "  ${BOLD}Token:${NC}   ${TOKEN:0:8}..."
-echo -e "  ${BOLD}Port:${NC}    $PORT"
-echo ""
-echo -e "  ${CYAN}To start:${NC}"
-echo -e "    cd $DAEMON_DIR && npm start"
-echo ""
-echo -e "  ${CYAN}Then connect from the Android app:${NC}"
-echo -e "    ws://<your-pc-ip>:$PORT/ws"
-echo -e "    Token: $TOKEN"
+echo -e "  ${GREEN}${BOLD}  PocketDesk is ready.${NC}"
+echo -e "  ${BOLD}Pair a phone:${NC}  pocketdesk pair     ${BOLD}Stop:${NC}  pocketdesk stop   (macOS: menu-bar ◆ → Stop)"
+echo -e "  ${BOLD}Status:${NC}        pocketdesk status   ${BOLD}Port:${NC}  $PORT   ${BOLD}Token:${NC} ${TOKEN:0:8}…"
+[ -d "$USER_BIN" ] && case ":$PATH:" in *":$USER_BIN:"*) ;; *) echo -e "  ${YELLOW}Add to PATH:${NC}  export PATH=\"\$HOME/.local/bin:\$PATH\"";; esac
 echo ""
 
 if $DEV_MODE; then
-  echo -e "  ${YELLOW}Dev mode:${NC} Running tests..."
   cd "$DAEMON_DIR"
   node test/proposals.test.mjs 2>/dev/null && ok "Proposal tests pass" || warn "Proposal tests skipped"
-  echo ""
 fi
-
-echo -e "  ${BOLD}Docs:${NC}    $INSTALL_DIR/README.md"
-echo ""

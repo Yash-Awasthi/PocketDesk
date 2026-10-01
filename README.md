@@ -81,6 +81,10 @@ Full guide, updating and uninstalling: [docs/SETUP-PC.md](docs/SETUP-PC.md).
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.sh | bash
 ```
+The daemon runs in the background (a login item on macOS, a systemd user service on Linux)
+and serves terminals, files, chat and agent control. Manage it with `pocketdesk`
+(`pair`, `status`, `stop`) — on macOS also from the menu-bar tray. Screen sharing and
+remote input are Windows-only for now.
 
 **Manual:**
 ```bash
