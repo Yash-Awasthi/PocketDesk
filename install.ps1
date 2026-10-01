@@ -44,9 +44,10 @@ try {
     # A running daemon holds files open in the install folder; stop it by its listening port.
     $uport = 8765
     try { $uc = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json; if ($uc.port) { $uport = [int]$uc.port } } catch {}
-    Get-Process PocketDeskTray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Get-NetTCPConnection -State Listen -LocalPort $uport -ErrorAction SilentlyContinue |
-        ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+    # Whole trees, so the daemon's PowerShell and ffmpeg helpers go with it.
+    $running = @(Get-Process PocketDesk, PocketDeskTray -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) +
+               @(Get-NetTCPConnection -State Listen -LocalPort $uport -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess })
+    foreach ($id in $running | Sort-Object -Unique) { taskkill /T /F /PID $id 2>$null | Out-Null }
     Start-Sleep -Milliseconds 300
     $daemon = Join-Path $InstallDir "app\daemon"
     if (Test-Path $daemon) { Remove-Item -Recurse -Force $daemon }

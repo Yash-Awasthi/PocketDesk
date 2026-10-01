@@ -5,7 +5,7 @@ This page covers the PC. It takes one download (or one command) and one QR scan.
 
 ## Install (Windows 10/11)
 
-Download **PocketDesk-Setup.exe** from the
+Download **PocketDesk-Install.exe** from the
 [latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest) and double-click it.
 No admin rights are needed. The file is not code-signed, so Windows SmartScreen may say it protected
 your PC: choose **More info**, then **Run anyway**. A console window shows the progress.
@@ -110,6 +110,7 @@ and paired phones.
 
 Any of these:
 
+- Double-click **PocketDesk-Uninstall.exe** from the [latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest).
 - **Settings > Apps > Installed apps**, find **PocketDesk**, then **Uninstall**.
 - Right-click the tray icon, then **Uninstall PocketDesk**.
 - From PowerShell:
@@ -118,11 +119,12 @@ Any of these:
 powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PocketDesk\uninstall.ps1"
 ```
 
-Or run `uninstall.ps1` from a checkout. It removes the tray, the autostart, the shortcuts and the program files.
+Or run `uninstall.ps1` from a checkout. It stops every PocketDesk process (the daemon, which runs as `PocketDesk.exe`, and all its helpers),
+then removes the autostart, the shortcuts and the program files.
 Your settings and paired phones stay in `%USERPROFILE%\.pocketdesk`; add `-RemoveData` to delete them too.
 
-If you installed console access, run the uninstall **as administrator** so it can also remove the
-system task. The console pairing token in `%ProgramData%\PocketDesk` is kept unless you pass
+If you installed console access, the uninstall asks for administrator rights once so it can also remove
+the system task. The console pairing token in `%ProgramData%\PocketDesk` is kept unless you pass
 `-RemoveData` (or run `install-service.ps1 -Console`'s counterpart, `uninstall-service.ps1 -Purge`).
 
 ## Where things live

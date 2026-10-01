@@ -346,5 +346,5 @@ the messages that tab sends. Full suite: 30 files, all pass.
 | Wake on LAN | AnyDesk | ⚙️ |
 | Screen recording | AnyDesk | ⚙️ |
 | Unattended access | AnyDesk | ⚙️ tray at logon; console task at boot |
-| One-click installer | AnyDesk, RustDesk | ✅ `PocketDesk-Setup.exe` (IExpress around `install.ps1`) and Start Menu shortcut |
+| One-click installer | AnyDesk, RustDesk | ✅ `PocketDesk-Install.exe` / `PocketDesk-Uninstall.exe` (IExpress around `install.ps1` / `uninstall.ps1`) and Start Menu shortcut |
 | Audio, whiteboard, remote printing, address book sync, group policies, REST API for admins | AnyDesk | ➖ out of scope: personal use, no sound |

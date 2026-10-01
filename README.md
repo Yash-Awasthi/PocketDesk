@@ -61,10 +61,11 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 
 ## ⚡ Quick Install
 
-**Windows:** download **PocketDesk-Setup.exe** from the
+**Windows:** download **PocketDesk-Install.exe** from the
 [latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest) and double-click it.
 No admin rights and nothing to install first. Windows may say it protected your PC, because the file
 is not code-signed: choose **More info**, then **Run anyway**.
+**PocketDesk-Uninstall.exe** from the same release removes it and stops every PocketDesk process.
 
 Or the same installer from PowerShell:
 ```powershell
@@ -522,7 +523,7 @@ PocketDesk/
 ├── docs/SETUP-PC.md              # PC install, tray, update, uninstall
 ├── install.sh                    # One-liner installer (Linux/Mac)
 ├── install.ps1                   # One-liner installer (Windows)
-│                                 # daemon/scripts/build-setup.ps1 wraps it as PocketDesk-Setup.exe
+│                                 # daemon/scripts/build-setup.ps1 wraps it as PocketDesk-Install.exe
 ├── uninstall.ps1                 # Removes the Windows install
 └── README.md
 ```

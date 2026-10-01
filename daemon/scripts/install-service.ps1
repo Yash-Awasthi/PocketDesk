@@ -106,10 +106,15 @@ try {
     $cfg = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json
     if ($cfg.port) { $port = [int]$cfg.port }
 } catch {}
-Get-Process PocketDeskTray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
-    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
+# Whole trees, so the daemon's PowerShell and ffmpeg helpers go with it.
+$running = @(Get-Process PocketDesk, PocketDeskTray -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) +
+           @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess })
+foreach ($id in $running | Sort-Object -Unique) { taskkill /T /F /PID $id 2>$null | Out-Null }
 Start-Sleep -Milliseconds 300
+
+# The daemon runs as PocketDesk.exe, a copy of node.exe, so Task Manager shows it by name.
+$nodeExe = if (Test-Path $bundledNode) { $bundledNode } else { (Get-Command node).Source }
+Copy-Item $nodeExe (Join-Path $InstallDir "PocketDesk.exe") -Force
 
 # Always rebuilt: a release zip gives the source its commit time, often older than the previous exe.
 & $csc /nologo /target:winexe /out:$exe /r:System.dll $src
@@ -133,4 +138,4 @@ Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Na
 
 if (-not $NoStart) { Start-Process $exe "--daemon" }
 Write-Host "  hidden daemon installed; it starts at logon. Open the Start-menu 'PocketDesk' to pair."
-Write-Host "  stop it from Task Manager (end node.exe). settings: $env:USERPROFILE\.pocketdesk\config.json"
+Write-Host "  stop it from Task Manager (end PocketDesk.exe). settings: $env:USERPROFILE\.pocketdesk\config.json"
