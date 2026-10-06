@@ -96,12 +96,14 @@ export default function agentsHandlers(ctx) {
       if (!c) return send(ws, { type: "error", message: `no such chat: ${msg.id}` });
       if (c.state === "running") return send(ws, { type: "error", message: "still working on the previous prompt" });
       chat.attach(msg.id, ws);
-      const text = String(msg.text || "");
-      const result = slashCommands.handle(text, msg.id);
+      let text = String(msg.text || "");
+      const result = text ? slashCommands.handle(text, msg.id) : null;
       if (result !== null) {
         send(ws, { type: "chatdelta", id: msg.id, text: result + "\n" });
         return;
       }
+      const imagePaths = chat.saveAttachments(msg.id, msg.images);
+      if (imagePaths.length) text = `${text}\n\nAttached image(s): ${imagePaths.join(", ")}`.trim();
       chat.sendUserMessage(c, text);
       broadcast({ type: "sessions", items: allSessions() });
     },
@@ -266,7 +268,9 @@ export default function agentsHandlers(ctx) {
     // ── Prompt queue (1code/ccpocket/oc-remote: queued follow-ups) ───────
     async prompt_enqueue(ws, msg) {
       const chatId = String(msg.id ?? "");
-      const text = String(msg.text ?? "").trim();
+      let text = String(msg.text ?? "").trim();
+      const imagePaths = chat.saveAttachments(chatId, msg.images);
+      if (imagePaths.length) text = `${text}\n\nAttached image(s): ${imagePaths.join(", ")}`.trim();
       if (!text) return send(ws, { type: "prompt_queued", ok: false, error: "empty prompt" });
       const r = promptQueue.enqueue(chatId, text);
       if (r.ok) send(ws, { type: "prompt_queued", ok: true, id: chatId, queue: promptQueue.list(chatId), position: promptQueue.list(chatId).length });

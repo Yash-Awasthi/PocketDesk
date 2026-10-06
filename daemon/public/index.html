@@ -194,7 +194,10 @@
             <h4>☑ Todo board <span style="color:#8b949e;text-transform:none">(click to cycle)</span></h4>
             <div id="todoItems"></div>
           </div>
+          <div id="chatImagePreview" style="display:none;gap:6px;padding:8px 16px 0;background:#161b22;flex-wrap:wrap"></div>
           <div class="chat-input-bar">
+            <input type="file" id="chatImageInput" accept="image/*" multiple style="display:none" onchange="pickChatImages(this.files)" />
+            <button class="btn" onclick="document.getElementById('chatImageInput').click()" title="Attach image">📷</button>
             <input id="chatInput" placeholder="Type a message..." disabled onkeydown="if(event.key==='Enter')sendChat()" />
             <button class="btn primary" onclick="sendChat()" id="chatSendBtn" disabled>Send</button>
             <button class="btn danger" onclick="cancelChat()" id="chatCancelBtn" style="display:none">Stop</button>
@@ -1562,14 +1565,48 @@ function updateChatUI() {
   document.getElementById("chatCancelBtn").style.display = running ? "" : "none";
 }
 
+// Images picked for the next message: { name, mime, data (base64) }.
+let pendingChatImages = [];
+const MAX_CHAT_IMAGES = 4;
+const MAX_CHAT_IMAGE_BYTES = 8 * 1024 * 1024;
+
+function pickChatImages(files) {
+  for (const f of files) {
+    if (pendingChatImages.length >= MAX_CHAT_IMAGES) break;
+    if (f.size > MAX_CHAT_IMAGE_BYTES) { alert(`${f.name} is over 8 MB`); continue; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      pendingChatImages.push({ name: f.name, mime: f.type || "image/png", data: reader.result.split(",")[1] });
+      renderChatImagePreview();
+    };
+    reader.readAsDataURL(f);
+  }
+  document.getElementById("chatImageInput").value = "";
+}
+
+function removeChatImage(i) { pendingChatImages.splice(i, 1); renderChatImagePreview(); }
+
+function renderChatImagePreview() {
+  const bar = document.getElementById("chatImagePreview");
+  bar.style.display = pendingChatImages.length ? "flex" : "none";
+  bar.innerHTML = pendingChatImages.map((img, i) =>
+    `<span style="position:relative;display:inline-block">
+       <img src="data:${img.mime};base64,${img.data}" style="height:48px;border-radius:6px;border:1px solid #30363d" />
+       <button onclick="removeChatImage(${i})" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;border:none;background:#da3633;color:#fff;cursor:pointer;line-height:1;font-size:12px">×</button>
+     </span>`).join("");
+}
+
 function sendChat() {
   const input = document.getElementById("chatInput");
   const text = input.value.trim();
-  if (!text || !activeChatId) return;
+  const images = pendingChatImages;
+  if ((!text && !images.length) || !activeChatId) return;
   // Busy → queue the follow-up (drains automatically when the turn ends).
-  if (chatStates[activeChatId] === "running") send({ type: "prompt_enqueue", id: activeChatId, text });
-  else send({ type: "chatmsg", id: activeChatId, text });
+  if (chatStates[activeChatId] === "running") send({ type: "prompt_enqueue", id: activeChatId, text, images });
+  else send({ type: "chatmsg", id: activeChatId, text, images });
   input.value = "";
+  pendingChatImages = [];
+  renderChatImagePreview();
 }
 
 function cancelChat() {

@@ -28,6 +28,33 @@ function saveHistory(c) {
   } catch {}
 }
 
+const ATTACH_DIR = path.join(os.homedir(), DATA_DIR, "attachments");
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGES = 4;
+const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+
+/**
+ * Decode phone/browser-attached images to disk so the CLI agent's own file-read
+ * tool can view them (agents here take a text prompt, not image blocks).
+ * Returns the absolute paths written; silently skips anything invalid/oversized.
+ */
+export function saveAttachments(chatId, images) {
+  if (!Array.isArray(images) || !images.length) return [];
+  fs.mkdirSync(path.join(ATTACH_DIR, chatId), { recursive: true });
+  const paths = [];
+  for (const img of images.slice(0, MAX_IMAGES)) {
+    const ext = IMAGE_EXT[img?.mime];
+    if (!ext || typeof img.data !== "string") continue;
+    let buf;
+    try { buf = Buffer.from(img.data, "base64"); } catch { continue; }
+    if (!buf.length || buf.length > MAX_IMAGE_BYTES) continue;
+    const file = path.join(ATTACH_DIR, chatId, `${Date.now()}-${paths.length}.${ext}`);
+    fs.writeFileSync(file, buf);
+    paths.push(file);
+  }
+  return paths;
+}
+
 export function listHistory() {
   try {
     ensureHistoryDir();
