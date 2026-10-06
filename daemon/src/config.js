@@ -70,6 +70,12 @@ export function loadConfig() {
   // Per-connection password (scrypt record) and the control gate survive restarts.
   cfg.connPassword = cfg.connPassword ?? null;
   cfg.controlAllowed = cfg.controlAllowed !== false;
+  // No password means the pairing token alone is full remote control forever: worth a loud nudge
+  // every start, since nothing else in the flow forces one (the pair page can set it, see /access).
+  if (!envDriven && !cfg.connPassword) {
+    console.warn("[pocketdesk] no connection password set — anyone with the pairing token (QR, console, token file) gets full control.");
+    console.warn("[pocketdesk] set one from the pairing page (the lock icon) or POST /access/password.");
+  }
   if (!persisted && !fromEnv("RH_PORT") && !fromEnv("RH_TOKEN")) saveConfig(cfg);
   return cfg;
 }
