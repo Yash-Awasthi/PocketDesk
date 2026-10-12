@@ -150,10 +150,19 @@ the first 1.5 seconds, so a key you were already typing cannot answer the prompt
 
 ## Two-factor pairing
 
-On the phone: **Tools > Two-factor pairing > Set up**. Add the key to an authenticator app
-(Google Authenticator, Aegis, 1Password and so on), enter the 6-digit code, and tap **Turn on**.
+On the PC, open the settings page (the **PocketDesk** Start Menu shortcut) and use
+**Two-factor pairing > Set up**. Scan the QR or add the key to an authenticator app
+(Google Authenticator, Aegis, 1Password and so on), enter the 6-digit code, and click **Turn on**.
 From then on, pairing a new device with the QR also asks for a current code. Phones that are already
 paired keep working without one. Turning it off needs a code as well.
+
+## Devices
+
+The same settings page lists every device that has connected. **Revoke** disconnects a device at
+once, refuses its token from then on, and changes the pairing QR, so the old QR stops working too.
+Phones that are still paired keep their own tokens. Device and two-factor settings are only on
+this page, which only the PC itself can open: a lost phone can still use the PC until revoked, but
+it cannot revoke other devices or turn two-factor off.
 
 ## Power
 

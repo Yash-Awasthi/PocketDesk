@@ -41,7 +41,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | ⏰ **Wake-on-LAN** | Wake a sleeping PC from the phone on the same network. |
 | 🟥 **Viewing frame** | A red edge around every monitor while someone is connected, seen only at the PC |
 | 🔌 **PC power** | Lock, sign out, sleep, restart or shut down the PC from the phone (`pc_power`) |
-| 🔑 **Two-factor pairing** | Optionally require a code from an authenticator app before a new device may pair (`totp_*`) |
+| 🔑 **Two-factor pairing** | Optionally require a code from an authenticator app before a new device may pair; set up on the PC's settings page (`/access/totp/*`) |
 | 🛡️ **SSH Bastion** | A real jump host: log in as `user@host` with your registered key, the access rule is checked, and the channel is proxied to the target with byte accounting (`bastion_*`) |
 | 🔒 **SSH Server Control** | A real SSH listener on the PC: per-user password/public-key auth, command allowlists enforced before a command runs, PTY shells, session recording (`sshserver_*`) |
 | 📇 **Connection Profiles** | Real SSH, SFTP and VNC connections from saved profiles, host-key trust-on-first-use, OpenSSH key generation kept out of the protocol (`profile_*`/`hostkey_*`/`sshkey_*`) |
@@ -141,7 +141,7 @@ auth token (also persisted to `~/.pocketdesk/config.json` —
    > Note: the QR page is loopback-only by design — open it on the PC itself,
    not on the phone.
 2. **Manual entry** — in the app tap **＋**, then enter
-   `ws://<pc-ip>:8765/ws` (find the PC's IP with `ipconfig` / `ip a`) and the
+   `wss://<pc-ip>:8765/ws` (find the PC's IP with `ipconfig` / `ip a`) and the
    token from the banner or `config.json`.
 3. **Browser smoke test** — open `http://localhost:8765` on the PC, paste the
    token, hit **Connect**, then **＋ New Chat** → pick an installed agent →

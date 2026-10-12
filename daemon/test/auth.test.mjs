@@ -38,8 +38,16 @@ async function main() {
   check("paired device keeps its token after a claim attempt", stillMine.first.clientId === phone.first.clientId);
   await stillMine.c.close();
 
-  admin.send({ type: "device_revoke", clientId: phone.first.clientId });
-  const rev = await admin.next((m) => m.type === "device_revoked");
+  const listed = await fetch(`http://127.0.0.1:${PORT}/access/devices?k=${TOKEN}`).then((r) => r.json());
+  check("settings page lists the paired device", listed.items.some((x) => x.id === phone.first.clientId && !("tokenHash" in x)));
+  const revokeAt = (host) => new Promise((res) => {
+    const req = http.request({ host: "127.0.0.1", port: PORT, method: "POST", path: `/access/devices/revoke?k=${TOKEN}`, headers: { host } }, (r) => {
+      let b = ""; r.on("data", (d) => { b += d; }); r.on("end", () => res({ status: r.statusCode, body: b }));
+    });
+    req.end(JSON.stringify({ clientId: phone.first.clientId }));
+  });
+  check("revoke refuses a non-loopback Host", (await revokeAt(`evil.example:${PORT}`)).status === 403);
+  const rev = JSON.parse((await revokeAt(`127.0.0.1:${PORT}`)).body);
   check("revoke acks with a fresh pairing token", rev.ok === true && typeof rev.pairingToken === "string" && rev.pairingToken !== TOKEN);
   check("revoked device's live socket is closed", (await again.closed) === 4003);
 
