@@ -379,7 +379,8 @@ export class PsHelper {
     if (this.proc && this.proc.exitCode === null) return;
     if (this.starting) return this.starting;
     this.starting = (async () => {
-      this.proc = this._launch();
+      // A helper that cannot start (no swiftc, a failed compile) leaves cmd() answering helper_not_running.
+      try { this.proc = this._launch(); } catch { this.proc = null; return; }
       this.buf = "";
       this.proc.stdout.setEncoding("utf8");
       this.proc.stdout.on("data", (d) => {
@@ -701,10 +702,11 @@ export class MacHelper extends PsHelper {
     }
     try {
       fs.writeFileSync(src, this.script, { encoding: "utf8" });
-      execFileSync("swiftc", ["-O", src, "-o", this.bin], { stdio: "ignore", timeout: 60000 });
+      execFileSync("swiftc", ["-O", src, "-o", this.bin], { stdio: ["ignore", "ignore", "pipe"], timeout: 120000 });
       this._compileFailedAt = 0;
     } catch (e) {
       this._compileFailedAt = Date.now();
+      console.warn(`[desktop] ${this.name} helper failed to compile: ${String(e.stderr || e.message).slice(-1500)}`);
       throw e;
     }
     return this.bin;

@@ -52,6 +52,7 @@ async function main() {
     // CI Macs grant no Screen Recording, so a frame may be refused; either way the daemon answers.
     c.send({ type: "desktop_frame" });
     const fr = await c.next((m) => m.type === "desktop_frame" || m.type === "desktop_frame_error", 120000);
+    console.log("macOS frame reply:", fr.type, fr.reason || "");
     check("macOS frame request answers with a frame or a reason",
       fr.type === "desktop_frame" ? fr.width > 0 : typeof fr.reason === "string" && fr.reason !== "unsupported_platform");
     c.send({ type: "desktop_monitors" });
