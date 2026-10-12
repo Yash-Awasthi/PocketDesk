@@ -48,6 +48,8 @@ if ($Console) {
 
     # The executed chain: node, the daemon tree (incl node_modules), and ffmpeg, all copied in.
     robocopy $srcNode (Join-Path $root "node") /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    # Task Manager lists the SYSTEM daemon by this name instead of node.exe.
+    Copy-Item (Join-Path $root "node\node.exe") (Join-Path $root "node\PocketDeskConsoleDaemon.exe") -Force
     robocopy $DaemonDir (Join-Path $root "daemon") /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "copying the daemon into the protected root failed (robocopy $LASTEXITCODE)" }
     $srcFfmpeg = Join-Path $InstallDir "ffmpeg"
@@ -123,15 +125,16 @@ if ($LASTEXITCODE -ne 0) { throw "compile failed" }
 # The launcher spawns the daemon from this folder.
 Set-Content -Path (Join-Path $InstallDir "PocketDesk.ini") -Value $DaemonDir
 
-# Start Menu and desktop launcher: a click starts the daemon if needed and opens the pairing page.
+# Start Menu only: a click starts the daemon if needed and opens the pairing and settings page.
+# No desktop icon, so outside Task Manager the daemon leaves nothing on screen.
 $shell = New-Object -ComObject WScript.Shell
-foreach ($dir in @([Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop"))) {
-    $lnk = $shell.CreateShortcut((Join-Path $dir "PocketDesk.lnk"))
-    $lnk.TargetPath = $exe
-    $lnk.WorkingDirectory = $InstallDir
-    $lnk.Description = "Open PocketDesk pairing"
-    $lnk.Save()
-}
+$lnk = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath("Programs")) "PocketDesk.lnk"))
+$lnk.TargetPath = $exe
+$lnk.WorkingDirectory = $InstallDir
+$lnk.Description = "Open PocketDesk pairing and settings"
+$lnk.Save()
+# Earlier installs also put one on the desktop.
+Remove-Item (Join-Path ([Environment]::GetFolderPath("Desktop")) "PocketDesk.lnk") -ErrorAction SilentlyContinue
 
 # The per-user Run key starts the hidden daemon at logon without admin rights; --daemon opens no page.
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -Value "`"$exe`" --daemon"

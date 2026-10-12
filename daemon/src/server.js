@@ -19,7 +19,7 @@ import { StreamJsonParser } from "./stream_json_parser.js";
 import { DesktopController } from "./desktop_capture.js";
 import { createAccess } from "./access.js";
 import { wakeTargets } from "./wake.js";
-import { Recorder } from "./recorder.js";
+import { Recorder, RECORD_FLAG } from "./recorder.js";
 import { DesktopVideo } from "./desktop_video.js";
 import { AdvancedSSHServerManager } from "./advanced_ssh_server.js";
 import { SSHBastion } from "./ssh_bastion.js";
@@ -154,7 +154,7 @@ export function start(config, { onTokenRotated } = {}) {
         res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
         res.end(JSON.stringify(obj));
       };
-      const status = () => ({ hasPassword: access.hasPassword, controlAllowed: access.controlAllowed, totpEnabled: totp.enabled() });
+      const status = () => ({ hasPassword: access.hasPassword, controlAllowed: access.controlAllowed, totpEnabled: totp.enabled(), recording: recorder.enabled });
       if (req.method === "GET") {
         if (path0 === "/access") return reply(200, status());
         if (path0 === "/access/devices") return reply(200, { items: devices.list() });
@@ -169,6 +169,10 @@ export function start(config, { onTokenRotated } = {}) {
           const id = String(msg.clientId ?? "");
           if (path0 === "/access/control") access.setControlAllowed(msg.allowed !== false);
           else if (path0 === "/access/password") access.setPassword(typeof msg.password === "string" ? msg.password : "");
+          else if (path0 === "/access/record") {
+            if (msg.on) fs.writeFileSync(RECORD_FLAG, "");
+            else fs.rmSync(RECORD_FLAG, { force: true });
+          }
           else if (path0 === "/access/devices/revoke") {
             const r = devices.revoke(id);
             if (!r.ok) return reply(404, r);

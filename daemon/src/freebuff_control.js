@@ -75,6 +75,7 @@ function isRunning(exeName = appBasename()) {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 5000,
+        windowsHide: true,
       });
       return new RegExp(exeName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i").test(out);
     }
@@ -337,7 +338,7 @@ export function appOpen() {
 export function appQuit() {
   try {
     if (process.platform === "win32") {
-      execSync(`taskkill /IM ${appBasename()} /T`, { stdio: "ignore", timeout: 10000 });
+      execSync(`taskkill /IM ${appBasename()} /T`, { stdio: "ignore", timeout: 10000, windowsHide: true });
     } else {
       execSync(`pkill -f ${JSON.stringify(appBasename())} || true`, { stdio: "ignore", timeout: 10000 });
     }

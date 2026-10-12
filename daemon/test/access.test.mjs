@@ -45,6 +45,11 @@ try {
   await post("/access/password", { password: "" });
   check("password cleared", (await status()).hasPassword === false);
 
+  await post("/access/record", { on: true });
+  check("recording toggle turns on", (await status()).recording === true);
+  await post("/access/record", { on: false });
+  check("recording toggle turns off", (await status()).recording === false);
+
   const code = await fetch(`${base}/access`).then((r) => r.status).catch(() => 0);
   check("/access without the token is forbidden", code === 403);
 

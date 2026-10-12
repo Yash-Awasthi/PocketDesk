@@ -26,8 +26,8 @@ What the installer does, with nothing installed beforehand:
    your PATH. Whatever is missing is downloaded as a private copy; nothing is added to your PATH and
    no other program is affected. Console access always uses a private Node.js.
 3. Installs the daemon's dependencies.
-4. Installs the tray icon, registers it to start at logon, and adds a **PocketDesk** shortcut to
-   the Start Menu and the desktop.
+4. Registers the hidden daemon to start at logon and adds a **PocketDesk** shortcut to the Start
+   Menu.
 5. Starts everything and opens the pairing page.
 
 The first install downloads up to about 150 MB (much less when Node.js and ffmpeg are already there). Your browser may warn that the
@@ -36,7 +36,7 @@ certificate. Choose **Advanced**, then **Continue to localhost**.
 
 ## Pair a phone
 
-- **At home:** scan the QR from the pairing page (tray icon > **Pair a phone...**).
+- **At home:** scan the QR from the pairing page (the **PocketDesk** Start Menu shortcut).
 - **Later, from anywhere:** the same saved PC works on any network. The app uses your Wi-Fi when the
   phone is on the PC's network and connects over iroh (direct or through a relay) otherwise.
 - **Another phone:** open the pairing page again and scan it with that phone.
@@ -81,25 +81,26 @@ port (8766), separate from the everyday connection. Keeping it separate is the
 point: it means the everyday connection, and any program running as you, cannot
 silently approve UAC on your behalf. Remove it any time (see Uninstall).
 
-## Daily use: the tray icon
+## Daily use
 
-The **PocketDesk** shortcut in the Start Menu or on the desktop starts the tray if it is not
-running. If it already runs, the shortcut opens the pairing page instead.
+PocketDesk has no window and no tray icon. The daemon starts at logon and runs in the background as
+**PocketDesk.exe**. Task Manager is the only place it shows: under Processes, and under Startup
+apps, where it can be turned off. End **PocketDesk.exe** there to stop it until the next logon.
 
-A dot in the notification area shows the daemon's state: **green** running, **grey** stopped.
-Right-click it for:
+The **PocketDesk** shortcut in the Start Menu starts the daemon if it is not running and opens the
+pairing and settings page in the browser. That page only opens on the PC itself, and it holds every
+setting:
 
-| Menu item | What it does |
+| Setting | What it does |
 |---|---|
-| Pair a phone... | Opens the QR page to pair a phone. |
-| Open web UI | The browser dashboard: sessions, schedules, prompt queue, usage, devices. |
-| Copy pairing info | Copies the address and token, for pairing by hand. |
-| Open daemon log | The daemon's output, including how each phone connected (`direct` or `relayed`). |
-| Ask before someone views this PC | Each desktop session, snapshot or input first shows Allow / View only / Deny on the PC; no answer in 30 s denies. |
-| Record remote sessions | Records the screen while anyone watches (MP4) and every terminal session (asciicast). |
-| Open recordings | The folder with recordings and `sessions.log`, which lists every viewer, approval and file sent. |
-| Start / Stop daemon | Starts or stops the daemon without closing the tray. |
-| Exit | Stops the daemon and closes the tray until the next logon. |
+| Pairing QR | Scan it with the app to pair a phone. The address, token and certificate fingerprint are shown for pairing by hand. |
+| Allow this phone to control the PC | Off means phones can watch the screen but not click or type. |
+| Record remote sessions | Records the screen while anyone watches (MP4) and every terminal session (asciicast) into `.pocketdesk\recordings`, next to `sessions.log`, which lists every viewer, approval and file sent. |
+| Connection password | Asked on the phone every time it connects, even with a valid pairing QR. |
+| Two-factor pairing | See below. |
+| Devices | See below. |
+
+The daemon's output goes to `%USERPROFILE%\.pocketdesk\daemon.log`.
 
 ## Update
 
@@ -112,7 +113,6 @@ Any of these:
 
 - Double-click **PocketDesk-Uninstall.exe** from the [latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest).
 - **Settings > Apps > Installed apps**, find **PocketDesk**, then **Uninstall**.
-- Right-click the tray icon, then **Uninstall PocketDesk**.
 - From PowerShell:
 
 ```powershell
@@ -131,7 +131,7 @@ the system task. The console pairing token in `%ProgramData%\PocketDesk` is kept
 
 | Path | Contents |
 |---|---|
-| `%LOCALAPPDATA%\PocketDesk` | The program: `app\daemon`, `node`, `ffmpeg`, the tray and `uninstall.ps1`. |
+| `%LOCALAPPDATA%\PocketDesk` | The program: `app\daemon`, `node`, `ffmpeg`, the launcher and `uninstall.ps1`. |
 | `%USERPROFILE%\.pocketdesk\config.json` | Settings: port, token, TLS, iroh. |
 | `%USERPROFILE%\.pocketdesk\iroh.key` | This PC's iroh identity. Keep it: paired phones find the PC by it. |
 | `%USERPROFILE%\.pocketdesk\tls\` | The daemon's certificate. |
@@ -180,7 +180,7 @@ the BIOS. The browser's **Doctor** reports whether any adapter is allowed to wak
 
 ## Settings
 
-Edit `%USERPROFILE%\.pocketdesk\config.json`, then **Stop** and **Start** the daemon from the tray.
+Edit `%USERPROFILE%\.pocketdesk\config.json`, then end **PocketDesk.exe** in Task Manager and click the **PocketDesk** Start Menu shortcut to start it again.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -198,7 +198,7 @@ Edit `%USERPROFILE%\.pocketdesk\config.json`, then **Stop** and **Start** the da
 | The desktop is slow or shows still frames | The Desktop header shows no fps figure when ffmpeg is missing and the daemon falls back to still frames. Run the install command again to restore it. |
 | The desktop freezes on mobile data | The log shows `relayed` and `video link too slow` lines: the link is weak and quality drops automatically. A relay near you helps ([RELAY.md](RELAY.md)). |
 | Windows asks whether Node.js may use the network | Allow it on private networks, so phones on the same Wi-Fi connect directly. |
-| The tray icon is grey | Right-click it > **Start daemon**, then open the daemon log for the error. |
+| The settings page does not open | Click the **PocketDesk** Start Menu shortcut again; if **PocketDesk.exe** is still missing from Task Manager, read `daemon.log` for the error. |
 | Antivirus flags the desktop helper | The daemon sends mouse and keyboard input on your behalf; allow it in your antivirus. |
 
 ## Running from a checkout (development)

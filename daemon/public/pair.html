@@ -48,6 +48,11 @@
   </div>
   <p class="hint">Off = the phone can watch the screen but not click or type.</p>
   <div class="row">
+    <label for="rec">Record remote sessions</label>
+    <input type="checkbox" id="rec" />
+  </div>
+  <p class="hint">Records the screen while anyone watches (MP4) and every terminal session, into <code>.pocketdesk/recordings</code> with <code>sessions.log</code>.</p>
+  <div class="row">
     <input type="password" id="pw" placeholder="Connection password (blank = none)" autocomplete="new-password" />
     <button id="save">Save</button>
   </div>
@@ -85,8 +90,14 @@ document.getElementById("qr").innerHTML = qr.createSvgTag({ cellSize: 5, margin:
 const k = new URLSearchParams(location.search).get("k") || "";
 const ctrl = document.getElementById("ctrl");
 const pwState = document.getElementById("pwstate");
+const rec = document.getElementById("rec");
+rec.addEventListener("change", () => {
+  fetch("/access/record?k=" + encodeURIComponent(k), { method: "POST", body: JSON.stringify({ on: rec.checked }) })
+    .then((r) => r.json()).then(paint).catch(() => {});
+});
 function paint(s) {
   ctrl.checked = s.controlAllowed !== false;
+  rec.checked = !!s.recording;
   pwState.textContent = s.hasPassword ? "A password is set." : "No password set.";
   pwState.className = s.hasPassword ? "ok" : "";
 }
