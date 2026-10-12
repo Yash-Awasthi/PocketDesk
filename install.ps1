@@ -137,8 +137,9 @@ try {
     # 5b. Console endpoint (opt-in): the SYSTEM secure-desktop entry. Needs one elevation.
     if ($Console) {
         Step "Installing the console endpoint (elevation required)"
-        $consoleArgs = @('-ExecutionPolicy','Bypass','-File',"$daemon\scripts\install-service.ps1",
-                         '-Console','-DaemonDir',$daemon,'-InstallDir',$InstallDir)
+        # Start-Process joins these with spaces, so paths under a profile like "C:\Users\Jane Doe" need their own quotes.
+        $consoleArgs = @('-ExecutionPolicy','Bypass','-File',"`"$daemon\scripts\install-service.ps1`"",
+                         '-Console','-DaemonDir',"`"$daemon`"",'-InstallDir',"`"$InstallDir`"")
         if ($NoStart) { $consoleArgs += '-NoStart' }
         Start-Process powershell -Verb RunAs -Wait -ArgumentList $consoleArgs
     }
@@ -151,8 +152,9 @@ try {
             if (Test-Path $cfgFile) {
                 $cfg = Get-Content $cfgFile -Raw | ConvertFrom-Json
                 if (Get-NetTCPConnection -State Listen -LocalPort $cfg.port -ErrorAction SilentlyContinue) {
-                    $scheme = if ($cfg.tls.enabled) { "https" } else { "http" }
-                    Start-Process "${scheme}://localhost:$($cfg.port)/pair?k=$([uri]::EscapeDataString($cfg.token))"
+                    # The launcher checks the listener's certificate before handing the token to a browser.
+                    $launcher = Join-Path $env:ProgramFiles ("PocketDesk\" + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value + "\PocketDeskLauncher.exe")
+                    Start-Process $launcher
                     break
                 }
             }

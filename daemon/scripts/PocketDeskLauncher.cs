@@ -2,7 +2,10 @@ using System;
 using System.Diagnostics;
 using System.ComponentModel;
 using System.IO;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Authentication;
+using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 
 // Windowless launcher for the hidden daemon. Three uses:
@@ -20,6 +23,8 @@ namespace PocketDeskLauncher
     {
         static readonly string DataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk");
+
+        static string CertFile = "";
 
         static string ExeDir { get { return AppDomain.CurrentDomain.BaseDirectory; } }
 
@@ -43,6 +48,9 @@ namespace PocketDeskLauncher
                 // Give a just-started daemon a moment to bind before the page loads.
                 for (int i = 0; i < 40 && !DaemonRunning(port); i++) System.Threading.Thread.Sleep(100);
                 LoadConfig(ref port, ref token, ref tls);
+                // The URL carries the master token; a program squatting the port must not receive it.
+                // shortcut: a plaintext daemon cannot be told apart from a squatter; it only exists when TLS setup failed.
+                if (tls && !IsOurDaemon(port)) return;
                 string url = (tls ? "https" : "http") + "://localhost:" + port + "/pair?k=" + Uri.EscapeDataString(token);
                 try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
             }
@@ -83,6 +91,22 @@ namespace PocketDeskLauncher
                     bool ok = r.AsyncWaitHandle.WaitOne(300) && c.Connected;
                     if (ok) c.EndConnect(r);
                     return ok;
+                }
+            }
+            catch { return false; }
+        }
+
+        /** True when the listener on the port presents this install's own certificate. */
+        static bool IsOurDaemon(string port)
+        {
+            try
+            {
+                string want = new X509Certificate2(CertFile).GetCertHashString();
+                using (var c = new TcpClient("127.0.0.1", int.Parse(port)))
+                using (var s = new SslStream(c.GetStream(), false, (o, cert, chain, errors) => cert != null && new X509Certificate2(cert).GetCertHashString() == want))
+                {
+                    s.AuthenticateAsClient("localhost", null, SslProtocols.Tls12, false);
+                    return true;
                 }
             }
             catch { return false; }
@@ -137,6 +161,7 @@ namespace PocketDeskLauncher
                 port = ExtractString(json, "port") ?? port;
                 token = ExtractString(json, "token") ?? token;
                 tls = json.Contains("\"enabled\": true") || json.Contains("\"enabled\":true");
+                CertFile = (ExtractString(json, "cert") ?? Path.Combine(DataDir, "tls", "cert.pem")).Replace("\\\\", "\\");
             }
             catch { }
         }

@@ -34,6 +34,16 @@ try {
 
   await post("/access/control", { allowed: false });
   check("control toggle persists", (await status()).controlAllowed === false);
+  // Paused control leaves the phone able to look but not act, through any handler, not only the desktop.
+  const paused = await openAndHello(PORT, TOKEN);
+  const target = path.join(os.tmpdir(), `rh-paused-${PORT}.txt`);
+  fs.rmSync(target, { force: true });
+  paused.send({ type: "fwrite", path: target, data: "aGk=" });
+  const refused = await paused.next((m) => m.type === "error" || m.type === "fwritten", 8000);
+  check("paused control refuses a file write", refused.type === "error" && /paused/.test(refused.message) && !fs.existsSync(target));
+  paused.send({ type: "fs", path: os.tmpdir() });
+  check("paused control still lists files", !(await paused.next((m) => m.type === "fs" || m.type === "error", 8000)).error);
+  await paused.close();
   await post("/access/control", { allowed: true });
   check("control toggle restores", (await status()).controlAllowed === true);
 
@@ -51,6 +61,13 @@ try {
   check("recording toggle turns on", (await status()).recording === true);
   await post("/access/record", { on: false });
   check("recording toggle turns off", (await status()).recording === false);
+
+  const early = await new Promise((resolve) => {
+    const c = connect(PORT, TOKEN);
+    c.ws.on("open", () => c.send({ type: "sessions" }));
+    c.ws.on("close", (code) => resolve(code));
+  });
+  check("a message before hello closes the socket", early === 4003);
 
   const code = await fetch(`${base}/access`).then((r) => r.status).catch(() => 0);
   check("/access without the token is forbidden", code === 403);
