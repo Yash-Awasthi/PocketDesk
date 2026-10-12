@@ -55,10 +55,10 @@ test("congestion steps the preset down, and recovery never goes above what was a
 });
 
 test("a monitor picks its output, and one on another GPU gets that GPU's device", () => {
-  const first = ffmpegArgs("libx264", "balanced", null);
+  const first = ffmpegArgs("libx264", "balanced", null, "win32");
   assert.ok(!first.includes("-init_hw_device"));
   assert.match(first[first.indexOf("-filter_complex") + 1], /ddagrab=output_idx=0:.*draw_mouse=0/);
-  const second = ffmpegArgs("libx264", "balanced", { adapter: 1, output: 2 });
+  const second = ffmpegArgs("libx264", "balanced", { adapter: 1, output: 2 }, "win32");
   assert.deepEqual(second.slice(3, 7), ["-init_hw_device", "d3d11va=rh:1", "-filter_hw_device", "rh"]);
   assert.match(second[second.indexOf("-filter_complex") + 1], /ddagrab=output_idx=2:/);
 });

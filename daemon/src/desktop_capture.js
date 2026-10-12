@@ -628,7 +628,7 @@ func clipSet(_ cmd: [String: Any]) -> [String: Any] {
   let pb = NSPasteboard.general
   pb.clearContents()
   if let files = cmd["files"] as? [String], !files.isEmpty {
-    pb.writeObjects(files.map { URL(fileURLToPath: $0) as NSURL })
+    pb.writeObjects(files.map { URL(fileURLWithPath: $0) as NSURL })
   } else if let b64 = cmd["png"] as? String, let data = Data(base64Encoded: b64) {
     pb.setData(data, forType: .png)
   } else if let text = cmd["text"] as? String {
@@ -702,7 +702,10 @@ export class MacHelper extends PsHelper {
     }
     try {
       fs.writeFileSync(src, this.script, { encoding: "utf8" });
-      execFileSync("swiftc", ["-O", src, "-o", this.bin], { stdio: ["ignore", "ignore", "pipe"], timeout: 120000 });
+      // shortcut: the macOS 15 SDK drops CGDisplayCreateImage, so build for 14, where it still links and runs;
+      // move capture to ScreenCaptureKit before Apple removes the symbol itself.
+      const target = `${process.arch === "arm64" ? "arm64" : "x86_64"}-apple-macos14.0`;
+      execFileSync("swiftc", ["-O", "-target", target, src, "-o", this.bin], { stdio: ["ignore", "ignore", "pipe"], timeout: 120000 });
       this._compileFailedAt = 0;
     } catch (e) {
       this._compileFailedAt = Date.now();
