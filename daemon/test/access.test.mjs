@@ -41,7 +41,7 @@ try {
   paused.send({ type: "fwrite", path: target, data: "aGk=" });
   const refused = await paused.next((m) => m.type === "error" || m.type === "fwritten", 8000);
   check("paused control refuses a file write", refused.type === "error" && /paused/.test(refused.message) && !fs.existsSync(target));
-  paused.send({ type: "fs", path: os.tmpdir() });
+  paused.send({ type: "fs" });
   check("paused control still lists files", !(await paused.next((m) => m.type === "fs" || m.type === "error", 8000)).error);
   await paused.close();
   await post("/access/control", { allowed: true });
