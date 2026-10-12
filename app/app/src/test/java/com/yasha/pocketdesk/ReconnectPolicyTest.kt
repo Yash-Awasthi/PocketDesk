@@ -61,7 +61,7 @@ class ReconnectPolicyTest {
     }
 
     @Test
-    fun `never waits longer than 20% above the cap`() {
+    fun `never waits longer than a fifth above the cap`() {
         val policy = ReconnectPolicy(maxAttempts = 12, baseMs = 5_000, maxMs = 30_000)
         repeat(12) {
             val delay = policy.next()!!

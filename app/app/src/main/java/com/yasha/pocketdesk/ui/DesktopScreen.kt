@@ -7,8 +7,6 @@ import android.graphics.SurfaceTexture
 import android.view.Surface
 import android.view.TextureView
 import android.widget.Toast
-import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView

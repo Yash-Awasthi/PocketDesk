@@ -31,7 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
@@ -97,7 +97,8 @@ fun DesktopKeyboard(ws: WsClient) {
     var latches by remember { mutableStateOf(Mod.entries.associateWith { Latch.Off }) }
     var typing by remember { mutableStateOf(false) }
     var text by remember { mutableStateOf("") }
-    val clipboard = LocalClipboardManager.current
+    val clipboard = LocalClipboard.current
+    val clipScope = rememberCoroutineScope()
 
     fun active(m: Mod) = latches.getValue(m) != Latch.Off
     fun send(vk: Int, extraShift: Boolean = false) {
@@ -116,7 +117,10 @@ fun DesktopKeyboard(ws: WsClient) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Key("✎", Modifier.width(52.dp), height = 44.dp, special = true, highlight = typing) { typing = !typing }
             Key("Paste", Modifier.width(64.dp), height = 44.dp, special = true) {
-                clipboard.getText()?.text?.let { ws.clipboardSet(it, paste = true) }
+                clipScope.launch {
+                    val clip = clipboard.getClipEntry()?.clipData?.takeIf { it.itemCount > 0 } ?: return@launch
+                    clip.getItemAt(0).text?.toString()?.let { ws.clipboardSet(it, paste = true) }
+                }
             }
             Key("Copy", Modifier.width(60.dp), height = 44.dp, special = true) { ws.clipboardGet() }
             NAV_KEYS.forEach { (label, vk) -> Key(label, Modifier.width(56.dp), height = 44.dp, special = true, repeat = vk in REPEATING) { send(vk) } }

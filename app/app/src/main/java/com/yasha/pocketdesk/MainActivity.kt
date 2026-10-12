@@ -47,7 +47,11 @@ import com.yasha.pocketdesk.ui.SessionsScreen
 import com.yasha.pocketdesk.ui.SshScreen
 import com.yasha.pocketdesk.ui.TerminalScreen
 import com.yasha.pocketdesk.ui.ToolsScreen
+import androidx.savedstate.serialization.SavedStateConfiguration
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.modules.SerializersModule
+import kotlinx.serialization.modules.polymorphic
 
 @Serializable
 sealed interface Screen : NavKey {
@@ -61,6 +65,14 @@ sealed interface Screen : NavKey {
     @Serializable data object Ssh : Screen
     @Serializable data class Terminal(val sessionId: String) : Screen
 }
+
+// Generated serializers per subclass, so a saved back stack survives R8 renaming without reflection.
+@OptIn(ExperimentalSerializationApi::class)
+val ScreenSerializers = SerializersModule {
+    polymorphic(NavKey::class) { subclassesOfSealed<Screen>() }
+}
+
+private val NavConfig = SavedStateConfiguration { serializersModule = ScreenSerializers }
 
 private object NoMotion : androidx.compose.ui.MotionDurationScale {
     override val scaleFactor = 0f
@@ -133,7 +145,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         // Declared before the lock gate so a re-lock keeps navigation.
-        val backStack = rememberNavBackStack(Screen.Connect)
+        val backStack = rememberNavBackStack(NavConfig, Screen.Connect)
         val screen = backStack.lastOrNull() ?: Screen.Connect
         // Sessions and Chats are roots, so back from them leaves the app; other tabs return to Sessions.
         fun showTab(tab: Screen) {

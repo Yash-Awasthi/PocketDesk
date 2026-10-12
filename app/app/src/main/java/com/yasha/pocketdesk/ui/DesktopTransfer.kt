@@ -159,7 +159,7 @@ fun DesktopTransferBar(ws: WsClient, transfer: DesktopTransfer) {
                             if (err != null) transfer.status = "Saving ${f.name} failed: $err" else next(i + 1)
                         },
                     )
-                }
+                }?.let { transfer.status = "Saving ${f.name} failed: $it" }
             }
             next(0)
         }) { Text("Save to phone") }

@@ -4,9 +4,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -16,7 +18,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.yasha.pocketdesk.WsClient
 
@@ -68,21 +69,18 @@ fun PowerRow(ws: WsClient) {
 @Composable
 fun ConnectionPasswordDialog(ws: WsClient) {
     if (!ws.passwordNeeded) return
-    var pw by remember { mutableStateOf("") }
+    val pw = rememberTextFieldState()
     AlertDialog(
         onDismissRequest = {},
         title = { Text("Connection password") },
         text = {
-            OutlinedTextField(
-                value = pw,
-                onValueChange = { pw = it },
+            OutlinedSecureTextField(
+                state = pw,
                 label = { Text("Password set on the PC") },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             )
         },
-        confirmButton = { TextButton(onClick = { ws.submitConnectionPassword(pw) }, enabled = pw.isNotEmpty()) { Text("Connect") } },
+        confirmButton = { TextButton(onClick = { ws.submitConnectionPassword(pw.text.toString()) }, enabled = pw.text.isNotEmpty()) { Text("Connect") } },
         dismissButton = { TextButton(onClick = { ws.dismissPassword() }) { Text("Cancel") } },
     )
 }
