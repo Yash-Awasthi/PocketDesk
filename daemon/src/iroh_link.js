@@ -15,6 +15,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
+import { writeFileAtomic } from "./atomic_write.js";
 
 export const ALPN = "pocketdesk/1";
 const LAG_LIMIT = 1_500_000; // same backlog limit as the ws video path
@@ -41,7 +42,7 @@ export async function startIroh({ dir, relays, onConnection }) {
   let key;
   try { key = SecretKey.fromBytes([...fs.readFileSync(keyFile)]); } catch {
     key = SecretKey.generate();
-    fs.writeFileSync(keyFile, Buffer.from(key.toBytes()), { mode: 0o600 });
+    writeFileAtomic(keyFile, Buffer.from(key.toBytes()), { mode: 0o600 });
   }
 
   const b = Endpoint.builder();

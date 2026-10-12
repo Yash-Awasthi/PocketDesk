@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { writeFileAtomic } from "./atomic_write.js";
 
 const DATA_DIR = process.env.POCKETDESK_DATA || ".pocketdesk";
 const STORE_FILE = path.join(os.homedir(), DATA_DIR, "sessions.json");
@@ -19,7 +20,7 @@ function save() {
   try {
     const dir = path.dirname(STORE_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(STORE_FILE, JSON.stringify(store, null, 2));
+    writeFileAtomic(STORE_FILE, JSON.stringify(store, null, 2));
   } catch {}
 }
 

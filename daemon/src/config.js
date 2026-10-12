@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execSync } from "node:child_process";
 import { generateSelfSignedCert } from "./tls-gen.js";
+import { writeFileAtomic } from "./atomic_write.js";
 
 // RH_HOME relocates every piece of daemon state (config, TLS, SSH keys) —
 // tests set it so a run never touches the real profile.
@@ -82,7 +83,7 @@ export function loadConfig() {
 
 export function saveConfig(cfg) {
   // 0600: this file holds the pairing token.
-  fs.writeFileSync(
+  writeFileAtomic(
     file,
     JSON.stringify({
       port: cfg.port,

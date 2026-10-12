@@ -8,6 +8,7 @@ import { StringDecoder } from "node:string_decoder";
 import { EventEmitter } from "node:events";
 import { expand as expandMentions } from "./mentions.js";
 import * as toolApproval from "./tool_approval.js";
+import { writeFileAtomic } from "./atomic_write.js";
 
 // Chat lifecycle events (state transitions) — consumed by the activity monitor.
 export const chatEvents = new EventEmitter();
@@ -24,7 +25,7 @@ function saveHistory(c) {
   try {
     ensureHistoryDir();
     const file = path.join(HISTORY_DIR, `${c.created}-${c.id}.json`);
-    fs.writeFileSync(file, JSON.stringify({ id: c.id, harnessId: c.harnessId, cwd: c.cwd, transcript: c.transcript, created: c.created }, null, 2));
+    writeFileAtomic(file, JSON.stringify({ id: c.id, harnessId: c.harnessId, cwd: c.cwd, transcript: c.transcript, created: c.created }, null, 2));
   } catch {}
 }
 

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
 import net from "node:net";
+import { writeFileAtomic } from "./atomic_write.js";
 
 // Minimal DER encoder: just the ASN.1 types a self-signed certificate needs.
 function tlv(tag, body) {
@@ -73,11 +74,11 @@ export function generateSelfSignedCert(tls, configDir) {
     });
     const pem = `-----BEGIN CERTIFICATE-----\n${der.toString("base64").match(/.{1,64}/g).join("\n")}\n-----END CERTIFICATE-----\n`;
     fs.mkdirSync(path.dirname(tls.cert), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(tls.key, pair.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
-    fs.writeFileSync(tls.cert, pem);
+    writeFileAtomic(tls.key, pair.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+    writeFileAtomic(tls.cert, pem);
     const fp = new crypto.X509Certificate(pem).fingerprint256.replace(/:/g, "").toLowerCase();
     fs.mkdirSync(path.join(configDir, "tls"), { recursive: true });
-    fs.writeFileSync(path.join(configDir, "tls", "fingerprint.txt"), fp + "\n");
+    writeFileAtomic(path.join(configDir, "tls", "fingerprint.txt"), fp + "\n");
     return true;
   } catch (e) {
     console.warn(`[pocketdesk] certificate generation failed: ${e?.message || e}`);
