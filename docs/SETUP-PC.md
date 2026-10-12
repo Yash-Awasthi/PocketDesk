@@ -83,9 +83,17 @@ silently approve UAC on your behalf. Remove it any time (see Uninstall).
 
 ## Daily use
 
-PocketDesk has no window and no tray icon. The daemon starts at logon and runs in the background as
-**PocketDesk.exe**. Task Manager is the only place it shows: under Processes, and under Startup
-apps, where it can be turned off. End **PocketDesk.exe** there to stop it until the next logon.
+PocketDesk has no window and no tray icon. It runs as administrator, so the phone can also control
+admin windows such as Task Manager. At each sign-in Windows shows its usual **Yes / No** prompt for
+PocketDesk: **Yes** starts it in the background as **PocketDesk.exe**, **No** leaves it stopped until you
+open the **PocketDesk** Start Menu shortcut (which asks again). Task Manager is the only place it
+shows: under Processes, and under Startup apps, where it can be turned off. End **PocketDesk.exe**
+there to stop it until the next sign-in.
+
+Because it runs as administrator, anything a paired phone does (terminals, agents, files, and apps
+it opens) runs with administrator rights too. Set a connection password and turn on two-factor
+pairing. On a standard (non-administrator) account the prompt asks for an administrator's
+password, and PocketDesk then runs as that administrator, with that account's settings.
 
 The **PocketDesk** shortcut in the Start Menu starts the daemon if it is not running and opens the
 pairing and settings page in the browser. That page only opens on the PC itself, and it holds every
@@ -213,4 +221,5 @@ This installs the checkout's daemon instead of a release. To run the daemon dire
 Node.js and ffmpeg on your PATH: `cd daemon; npm install; npm start`.
 
 macOS and Linux: `curl -fsSL https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.sh | bash`,
-then `npm start` in the daemon folder (no tray; H.264 desktop capture is Windows only).
+or run `npm start` in the daemon folder of a checkout. H.264 desktop capture works on Windows and
+macOS (ffmpeg needed on macOS); Linux has no desktop view.

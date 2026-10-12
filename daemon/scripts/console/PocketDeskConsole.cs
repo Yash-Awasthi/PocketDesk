@@ -178,7 +178,7 @@ namespace PocketDeskConsole
                 {
                     string entry = Marshal.PtrToStringUni(p);
                     if (string.IsNullOrEmpty(entry)) break;
-                    if (!StartsAny(entry, "RH_CONSOLE=", "RH_HOME=", "RH_PORT=", "RH_LABEL=", "NODE_ENV=", "FFMPEG_PATH="))
+                    if (!StartsAny(entry, "RH_CONSOLE=", "RH_HOME=", "RH_PORT=", "RH_CLI_PORT=", "RH_LABEL=", "NODE_ENV=", "FFMPEG_PATH="))
                         sb.Append(entry).Append('\0');
                     p = (IntPtr)((long)p + (entry.Length + 1) * 2);
                 }
@@ -186,6 +186,8 @@ namespace PocketDeskConsole
             sb.Append("RH_CONSOLE=1\0");
             sb.Append("RH_HOME=").Append(consoleHome).Append('\0');
             sb.Append("RH_PORT=8766\0");
+            // The user daemon owns CLI port 4679; installers stop it there with the user token.
+            sb.Append("RH_CLI_PORT=4680\0");
             sb.Append("RH_LABEL=PC (console)\0");
             sb.Append("NODE_ENV=production\0");
             if (File.Exists(ffmpeg)) sb.Append("FFMPEG_PATH=").Append(ffmpeg).Append('\0');

@@ -1,8 +1,8 @@
 /**
  * Desktop control tests — the real frame source for the rd_/desktop surface.
  * On Windows: capture produces a real JPEG (sanity-checked header), input
- * helpers respond ok, streaming starts and stops. Elsewhere: every command
- * degrades with unsupported_platform and the daemon stays healthy.
+ * helpers respond ok, streaming starts and stops. On macOS: the helper answers even without
+ * a Screen Recording grant. On Linux: every command degrades with unsupported_platform.
  */
 import { check, failureCount, makeTmp, openAndHello, startDaemon, teardown, REPO } from "./helpers.mjs";
 
@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 
 const IS_WIN = process.platform === "win32";
+const IS_MAC = process.platform === "darwin";
 const keyDown = (vk) => execFileSync("powershell.exe", ["-NoProfile", "-Command",
   `(Add-Type -PassThru -Name K -MemberDefinition '[DllImport("user32.dll")] public static extern short GetAsyncKeyState(int k);')::GetAsyncKeyState(${vk}) -band 0x8000`]).toString().trim() !== "0";
 const tmp = makeTmp("rh-desk-");
@@ -47,7 +48,19 @@ async function main() {
     check("desktop-follow present under RH_CONSOLE", consoleScripts.follow === true && consoleScripts.calls === 2);
   }
 
-  if (!IS_WIN) {
+  if (IS_MAC) {
+    // CI Macs grant no Screen Recording, so a frame may be refused; either way the daemon answers.
+    c.send({ type: "desktop_frame" });
+    const fr = await c.next((m) => m.type === "desktop_frame" || m.type === "desktop_frame_error", 120000);
+    console.log("macOS frame reply:", fr.type, fr.reason || "");
+    check("macOS frame request answers with a frame or a reason",
+      fr.type === "desktop_frame" ? fr.width > 0 : typeof fr.reason === "string" && fr.reason !== "unsupported_platform");
+    c.send({ type: "desktop_monitors" });
+    const mons = await c.next((m) => m.type === "desktop_monitors", 60000);
+    check("macOS monitors have numeric geometry and one primary", !mons.ok || (mons.monitors.length >= 1
+      && mons.monitors.every((m) => Number.isFinite(m.x) && Number.isFinite(m.y) && m.w > 0)
+      && mons.monitors.filter((m) => m.primary).length === 1));
+  } else if (!IS_WIN) {
     // Graceful degradation everywhere, no crashes.
     c.send({ type: "desktop_frame" });
     const fe = await c.next((m) => m.type === "desktop_frame_error" || m.type === "desktop_frame");

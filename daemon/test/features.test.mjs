@@ -67,7 +67,8 @@ async function main() {
 
   // Missed-output backfill: reconnect with since → only newer chunks, incremental replay
   const sinceSeq = firstOut.seq;
-  await c.next((m) => m.type === "out" && Buffer.from(m.data, "base64").toString().includes("feat-ok"));
+  // A fast host prints it before the attach, so it can arrive in the scrollback replay instead.
+  await c.next((m) => (m.type === "out" || m.type === "replay") && m.id === created.id && Buffer.from(m.data, "base64").toString().includes("feat-ok"));
   await c.close();
   const c2 = connect(PORT);
   await new Promise((res) => c2.ws.on("open", res));

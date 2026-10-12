@@ -1,12 +1,17 @@
 using System;
 using System.Diagnostics;
+using System.ComponentModel;
 using System.IO;
 using System.Net.Sockets;
+using System.Security.Principal;
 
-// Windowless launcher for the hidden daemon. Two uses:
+// Windowless launcher for the hidden daemon. Three uses:
 //   PocketDeskLauncher.exe            — a person opening the app: start the daemon if it is not
 //                                       already running, then open the pairing page in the browser.
 //   PocketDeskLauncher.exe --daemon   — the logon autostart: start the daemon hidden, then exit.
+//   PocketDeskLauncher.exe --elevated — internal: the copy that UAC elevated, which only starts the daemon.
+// The daemon runs as administrator, so input reaches elevated windows such as Task Manager. Starting
+// it shows the UAC prompt; No leaves it stopped. The pairing page always opens unelevated.
 // The daemon is spawned detached, so it keeps running after this process exits and is stopped only
 // from Task Manager (end "PocketDesk.exe") or by the uninstaller. No tray icon, no window, no on-screen indicator.
 namespace PocketDeskLauncher
@@ -25,7 +30,13 @@ namespace PocketDeskLauncher
             bool tls = false;
             LoadConfig(ref port, ref token, ref tls);
 
-            if (!DaemonRunning(port)) StartDaemonDetached();
+            if (Array.IndexOf(args, "--elevated") >= 0)
+            {
+                if (!DaemonRunning(port)) StartDaemonDetached();
+                return;
+            }
+
+            if (!DaemonRunning(port) && !StartElevated()) return;
 
             if (!autostart)
             {
@@ -35,6 +46,29 @@ namespace PocketDeskLauncher
                 string url = (tls ? "https" : "http") + "://localhost:" + port + "/pair?k=" + Uri.EscapeDataString(token);
                 try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
             }
+        }
+
+        static bool IsElevated()
+        {
+            using (var id = WindowsIdentity.GetCurrent())
+                return new WindowsPrincipal(id).IsInRole(WindowsBuiltInRole.Administrator);
+        }
+
+        /** Starts the daemon as administrator; false when UAC was declined or could not run. */
+        static bool StartElevated()
+        {
+            if (IsElevated()) { StartDaemonDetached(); return true; }
+            try
+            {
+                var p = Process.Start(new ProcessStartInfo(Path.Combine(ExeDir, "PocketDeskLauncher.exe"), "--elevated")
+                {
+                    UseShellExecute = true,
+                    Verb = "runas",
+                });
+                if (p != null) p.WaitForExit();
+                return true;
+            }
+            catch (Win32Exception) { return false; } // 1223: the user chose No
         }
 
         static bool DaemonRunning(string port)
@@ -71,18 +105,23 @@ namespace PocketDeskLauncher
             try
             {
                 // PocketDesk.exe is a copy of node.exe, so Task Manager lists the daemon by name.
+                // Only binaries in this admin-only folder: the daemon runs elevated, and PATH is the user's to change.
                 var named = Path.Combine(ExeDir, "PocketDesk.exe");
-                var bundledNode = Path.Combine(ExeDir, "node", "node.exe");
+                if (!File.Exists(named)) return;
                 var psi = new ProcessStartInfo
                 {
-                    FileName = File.Exists(named) ? named : File.Exists(bundledNode) ? bundledNode : "node",
+                    FileName = named,
                     Arguments = "src\\index.js",
                     WorkingDirectory = DaemonDir(),
                     CreateNoWindow = true,
                     UseShellExecute = false,
                 };
-                var bundledFfmpeg = Path.Combine(ExeDir, "ffmpeg.exe");
-                if (File.Exists(bundledFfmpeg)) psi.EnvironmentVariables["FFMPEG_PATH"] = bundledFfmpeg;
+                // NODE_OPTIONS and friends come from the user's environment and would load code into the elevated node.
+                var nodeVars = new System.Collections.Generic.List<string>();
+                foreach (string k in psi.EnvironmentVariables.Keys) if (k.StartsWith("NODE_", StringComparison.OrdinalIgnoreCase)) nodeVars.Add(k);
+                foreach (var k in nodeVars) psi.EnvironmentVariables.Remove(k);
+                // Set even when missing, so the daemon falls back to JPEG instead of an ffmpeg found on PATH.
+                psi.EnvironmentVariables["FFMPEG_PATH"] = Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe");
                 // Not a child of this launcher: no stdin pipe, and never stop on stdin EOF, so the
                 // daemon outlives this process.
                 Process.Start(psi);

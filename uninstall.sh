@@ -11,20 +11,29 @@ for a in "$@"; do [ "$a" = "--purge" ] && PURGE=true; done
 
 case "$(uname -s)" in
   Darwin)
-    AGENT="$HOME/Library/LaunchAgents/com.pocketdesk.tray.plist"
-    launchctl unload "$AGENT" 2>/dev/null || true
-    rm -f "$AGENT"
+    # The tray agent is from older installs.
+    for AGENT in "$HOME/Library/LaunchAgents/com.pocketdesk.daemon.plist" "$HOME/Library/LaunchAgents/com.pocketdesk.tray.plist"; do
+      launchctl unload "$AGENT" 2>/dev/null || true
+      rm -f "$AGENT"
+    done
     pkill -f PocketDeskTray 2>/dev/null || true
+    rm -rf "$HOME/Applications/PocketDesk.app"
     ;;
   Linux)
     systemctl --user disable --now pocketdesk 2>/dev/null || true
     rm -f "$HOME/.config/systemd/user/pocketdesk.service"
     systemctl --user daemon-reload 2>/dev/null || true
+    rm -f "$HOME/.local/share/applications/pocketdesk.desktop"
     ;;
 esac
 
 rm -f "$HOME/.local/bin/pocketdesk"
-rm -rf "$INSTALL_DIR/daemon" "$INSTALL_DIR/bin"
+rm -rf "$INSTALL_DIR/app" "$INSTALL_DIR/bin"
+# Older installs cloned the program into the config dir itself; remove its files but not the config.
+if [ -d "$INSTALL_DIR/.git" ]; then
+  git -C "$INSTALL_DIR" ls-files -z | (cd "$INSTALL_DIR" && xargs -0 rm -f)
+  rm -rf "$INSTALL_DIR/.git" "$INSTALL_DIR/daemon"
+fi
 
 if $PURGE; then
   rm -rf "$INSTALL_DIR"

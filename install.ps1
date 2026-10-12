@@ -44,6 +44,12 @@ try {
     # A running daemon holds files open in the install folder; stop it by its listening port.
     $uport = 8765
     try { $uc = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json; if ($uc.port) { $uport = [int]$uc.port } } catch {}
+    # An elevated daemon ignores an unelevated taskkill, so it is asked to stop over its loopback CLI port first.
+    try {
+        $tok = (Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json).token
+        Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:4679/shutdown" -Headers @{ Authorization = "Bearer $tok" } -TimeoutSec 3 | Out-Null
+        Start-Sleep -Seconds 2
+    } catch {}
     # Whole trees, so the daemon's PowerShell and ffmpeg helpers go with it.
     $running = @(Get-Process PocketDesk, PocketDeskTray -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) +
                @(Get-NetTCPConnection -State Listen -LocalPort $uport -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess })
@@ -119,7 +125,7 @@ try {
         DisplayVersion  = if ($Ref) { $Ref.TrimStart("v") } else { "dev" }
         Publisher       = "PocketDesk"
         InstallLocation = $InstallDir
-        DisplayIcon     = Join-Path $InstallDir "PocketDeskLauncher.exe"
+        DisplayIcon     = Join-Path $env:ProgramFiles ("PocketDesk\" + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value + "\PocketDeskLauncher.exe")
         UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`""
         URLInfoAbout    = "https://github.com/$repo"
     }

@@ -83,12 +83,18 @@ Full guide, updating and uninstalling: [docs/SETUP-PC.md](docs/SETUP-PC.md).
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.sh | bash
 ```
-The daemon runs in the background (a login item on macOS, a systemd user service on Linux)
-and serves terminals, files, chat and agent control. Manage it with `pocketdesk`
-(`pair`, `status`, `stop`) — on macOS also from the menu-bar tray. On macOS, screen sharing
-and remote control also work once you grant **Screen Recording** and **Accessibility** to the
-daemon (System Settings → Privacy & Security; prompted on first use). Linux screen sharing is
-not available yet.
+On macOS you can instead download **PocketDesk-mac.zip** from the
+[latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest), unzip it and
+double-click **PocketDesk-Install.command** (the first time, right-click > **Open**, since it is not
+notarized). Both need [Node.js](https://nodejs.org) 18 or newer installed first.
+The daemon runs hidden in the background, like on Windows: a LaunchAgent on macOS (seen only in
+Activity Monitor) and a systemd user service on Linux. It serves terminals, files, chat and agent
+control. Open **PocketDesk** from Spotlight, Launchpad or the app menu to pair a phone and change
+settings, or use `pocketdesk` (`pair`, `status`, `stop`, `start`). On macOS, screen sharing and
+remote control also work once you grant **Screen Recording** and **Accessibility** to the daemon
+(System Settings → Privacy & Security; prompted on first use); with ffmpeg installed
+(`brew install ffmpeg`) the screen streams as H.264, otherwise as still frames. Linux screen
+sharing is not available.
 
 **Manual:**
 ```bash

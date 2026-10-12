@@ -37,7 +37,7 @@ import remoteHandlers from "./handlers/remote.js";
 import sshHandlers from "./handlers/ssh.js";
 import systemHandlers from "./handlers/system.js";
 import { startIroh } from "./iroh_link.js";
-import { configDir } from "./config.js";
+import { configDir, configPath } from "./config.js";
 
 const HELLO_TIMEOUT = 10_000;
 const MAX_AUTH_ATTEMPTS = 5;
@@ -360,19 +360,18 @@ export function start(config, { onTokenRotated } = {}) {
   function authenticate(msg) {
     if (msg.type !== "hello" || typeof msg.token !== "string") return null;
     const t = msg.token;
-    // A correct token or pairing QR is not enough: the connection password is proven on every
-    // hello, so a leaked token cannot open a session on its own.
+    const master = t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token));
+    const d = master ? null : devices.byToken(t);
+    if (!master && !d) return null;
+    // Checked only after a valid token, so the close code never tells a tokenless guesser the password was right.
     if (access.hasPassword && !access.verifyPassword(msg.password)) return { passwordRequired: true };
-    if (t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token))) {
-      let id = String(msg.clientId || crypto.randomUUID());
-      if (devices.isRevoked(id)) return null;
-      // Claiming a paired device's id would replace its token and take over its identity.
-      if (devices.hasToken(id)) id = crypto.randomUUID();
-      if (!totp.allowsPairing(msg.totp)) return { totpRequired: true };
-      return { id, pairing: true };
-    }
-    const d = devices.byToken(t);
-    return d ? { id: d.id } : null;
+    if (d) return { id: d.id };
+    let id = String(msg.clientId || crypto.randomUUID());
+    if (devices.isRevoked(id)) return null;
+    // Claiming a paired device's id would replace its token and take over its identity.
+    if (devices.hasToken(id)) id = crypto.randomUUID();
+    if (!totp.allowsPairing(msg.totp)) return { totpRequired: true };
+    return { id, pairing: true };
   }
 
   function rotateToken() {
@@ -455,9 +454,14 @@ export function start(config, { onTokenRotated } = {}) {
   const video = new DesktopVideo();
   const videoWatchers = new Set();
   let resyncTimer = null;
-  const resync = () => {
+  // Ctrl+Alt+Del, a UAC prompt or the lock screen switch to the secure desktop, which stops ddagrab
+  // until the switch ends; keep retrying while anyone watches instead of leaving the picture frozen.
+  const resync = (delay = 250) => {
     if (resyncTimer) return;
-    resyncTimer = setTimeout(() => { resyncTimer = null; if (videoWatchers.size) video.restart(); }, 250);
+    resyncTimer = setTimeout(async () => {
+      resyncTimer = null;
+      if (videoWatchers.size && !(await video.restart()) && videoWatchers.size) resync(1000);
+    }, delay);
   };
   video.on("packet", ({ kind, data }) => {
     const msg = Buffer.concat([Buffer.from([kind]), data]);
@@ -607,8 +611,8 @@ export function start(config, { onTokenRotated } = {}) {
     const pairUrl = `http${useTls ? "s" : ""}://localhost:${port}/pair`;
     console.log(process.stdout.isTTY
       ? `  pairing   ${pairUrl}?k=${token}  (open on THIS PC, scan the QR from the app)`
-      : `  pairing   tray icon > Pair a phone, or ${pairUrl}?k=<token from config.json>`);
-    console.log("  config    %USERPROFILE%\\.pocketdesk\\config.json");
+      : `  pairing   the PocketDesk app entry, or ${pairUrl}?k=<token from config.json>`);
+    console.log(`  config    ${configPath}`);
     console.log("");
     // iroh sockets join wss.clients so broadcast and revoke reach them like /ws sockets.
     if (irohCfg?.enabled) {

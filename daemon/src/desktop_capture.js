@@ -104,6 +104,22 @@ public static class RHI {
     for (int i = 0; i < ShapeIds.Length; i++) if (LoadCursor(IntPtr.Zero, ShapeIds[i]) == ci.hCursor) { shape = ShapeNames[i]; break; }
     return "\\"x\\":" + (ci.x - ox) + ",\\"y\\":" + (ci.y - oy) + ",\\"shape\\":\\"" + shape + "\\",\\"visible\\":" + ((ci.flags & 1) != 0 ? "true" : "false");
   }
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("advapi32.dll")] static extern bool OpenProcessToken(IntPtr p, uint access, out IntPtr t);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+  /** True when the focused window's process token is closed to us: it runs elevated, and UIPI drops our keys. */
+  public static bool ForegroundElevated() {
+    uint pid; GetWindowThreadProcessId(GetForegroundWindow(), out pid);
+    if (pid == 0) return false;
+    IntPtr p = OpenProcess(0x1000, false, pid);
+    if (p == IntPtr.Zero) return false;
+    IntPtr t; bool open = OpenProcessToken(p, 0x0008, out t);
+    if (open) CloseHandle(t);
+    CloseHandle(p);
+    return !open;
+  }
   public static uint KeyScan(ushort scan, uint flags) {
     var i = new INPUT { type = 1 };
     i.u.ki = new KEYBDINPUT { wVk = 0, wScan = scan, dwFlags = flags };
@@ -112,6 +128,10 @@ public static class RHI {
 }
 '@
 [RHI]::SetProcessDPIAware() | Out-Null
+# Keys go to the focused window, so an elevated one (Task Manager, an admin prompt) swallows them all.
+function KeyReply($id) {
+  if ([RHI]::ForegroundElevated()) { '{"id":' + $id + ',"ok":false,"error":"elevated_window"}' } else { '{"id":' + $id + ',"ok":true}' }
+}
 $stdin = [Console]::In
 while ($true) {
   $line = $stdin.ReadLine()
@@ -162,8 +182,8 @@ while ($true) {
       $vk = [uint16]$cmd.key
       # Without the extended flag, arrows and the Ins/Del/Home/End block act as numpad keys.
       $ext = if (@(0x21,0x22,0x23,0x24,0x25,0x26,0x27,0x28,0x2D,0x2E,0x5B,0x5C,0x5D,0x6F,0x90,0xA3,0xA5) -contains $vk) { [RHI]::EXTENDED } else { 0 }
-      if ($cmd.press -eq 'down') { [RHI]::Key($vk, [RHI]::KEYDOWN -bor $ext) | Out-Null; [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}'); continue }
-      if ($cmd.press -eq 'up')   { [RHI]::Key($vk, [RHI]::KEYUP -bor $ext) | Out-Null; [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}'); continue }
+      if ($cmd.press -eq 'down') { [RHI]::Key($vk, [RHI]::KEYDOWN -bor $ext) | Out-Null; [Console]::Out.WriteLine((KeyReply $cmd.id)); continue }
+      if ($cmd.press -eq 'up')   { [RHI]::Key($vk, [RHI]::KEYUP -bor $ext) | Out-Null; [Console]::Out.WriteLine((KeyReply $cmd.id)); continue }
       $mods = @($cmd.mods)
       if ($mods -contains 'ctrl')  { [RHI]::Key(0x11, [RHI]::KEYDOWN) | Out-Null }
       if ($mods -contains 'alt')   { [RHI]::Key(0x12, [RHI]::KEYDOWN) | Out-Null }
@@ -175,7 +195,7 @@ while ($true) {
       if ($mods -contains 'shift') { [RHI]::Key(0x10, [RHI]::KEYUP) | Out-Null }
       if ($mods -contains 'alt')   { [RHI]::Key(0x12, [RHI]::KEYUP) | Out-Null }
       if ($mods -contains 'ctrl')  { [RHI]::Key(0x11, [RHI]::KEYUP) | Out-Null }
-      [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}')
+      [Console]::Out.WriteLine((KeyReply $cmd.id))
     } catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
     continue
   }
@@ -186,7 +206,7 @@ while ($true) {
         [RHI]::KeyScan([uint16][int]$ch, [RHI]::UNICODE) | Out-Null
         [RHI]::KeyScan([uint16][int]$ch, ([RHI]::UNICODE -bor [RHI]::KEYUP)) | Out-Null
       }
-      [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}')
+      [Console]::Out.WriteLine((KeyReply $cmd.id))
     } catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
     continue
   }
@@ -379,7 +399,8 @@ export class PsHelper {
     if (this.proc && this.proc.exitCode === null) return;
     if (this.starting) return this.starting;
     this.starting = (async () => {
-      this.proc = this._launch();
+      // A helper that cannot start (no swiftc, a failed compile) leaves cmd() answering helper_not_running.
+      try { this.proc = this._launch(); } catch { this.proc = null; return; }
       this.buf = "";
       this.proc.stdout.setEncoding("utf8");
       this.proc.stdout.on("data", (d) => {
@@ -627,7 +648,7 @@ func clipSet(_ cmd: [String: Any]) -> [String: Any] {
   let pb = NSPasteboard.general
   pb.clearContents()
   if let files = cmd["files"] as? [String], !files.isEmpty {
-    pb.writeObjects(files.map { URL(fileURLToPath: $0) as NSURL })
+    pb.writeObjects(files.map { URL(fileURLWithPath: $0) as NSURL })
   } else if let b64 = cmd["png"] as? String, let data = Data(base64Encoded: b64) {
     pb.setData(data, forType: .png)
   } else if let text = cmd["text"] as? String {
@@ -701,10 +722,14 @@ export class MacHelper extends PsHelper {
     }
     try {
       fs.writeFileSync(src, this.script, { encoding: "utf8" });
-      execFileSync("swiftc", ["-O", src, "-o", this.bin], { stdio: "ignore", timeout: 60000 });
+      // shortcut: the macOS 15 SDK drops CGDisplayCreateImage, so build for 14, where it still links and runs;
+      // move capture to ScreenCaptureKit before Apple removes the symbol itself.
+      const target = `${process.arch === "arm64" ? "arm64" : "x86_64"}-apple-macos14.0`;
+      execFileSync("swiftc", ["-O", "-target", target, src, "-o", this.bin], { stdio: ["ignore", "ignore", "pipe"], timeout: 120000 });
       this._compileFailedAt = 0;
     } catch (e) {
       this._compileFailedAt = Date.now();
+      console.warn(`[desktop] ${this.name} helper failed to compile: ${String(e.stderr || e.message).slice(-1500)}`);
       throw e;
     }
     return this.bin;
@@ -733,6 +758,11 @@ export function macMonitors(list) {
     left: Math.round(m.x * ratio), top: Math.round(m.y * ratio), w: m.pw ?? m.w, h: m.ph ?? m.h,
   }));
 }
+
+// UIPI: Windows drops input from a normal process into an elevated window, with no other signal.
+const ELEVATED = "An administrator window (such as Task Manager) has focus, and Windows blocks remote input to it. " +
+  "Click another window, or install console access on the PC to control admin windows.";
+const inputError = (e) => (e === "elevated_window" || e === "input_blocked" ? ELEVATED : e);
 
 export class DesktopController extends EventEmitter {
   static get supported() {
@@ -850,7 +880,7 @@ export class DesktopController extends EventEmitter {
     if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     await this._input.ensure();
     const r = await this._input.cmd({ op: "mouse", x, y, click, press, button, wheel }, 8000);
-    return { ok: !!r?.ok, error: r?.error };
+    return { ok: !!r?.ok, error: inputError(r?.error) };
   }
 
   /** press: down|up sends only that half, for held keys; without it the key is tapped with modifiers. */
@@ -860,14 +890,14 @@ export class DesktopController extends EventEmitter {
     if (!Number.isFinite(vk) || vk <= 0 || vk > 254) return { ok: false, error: "bad_vk" };
     await this._input.ensure();
     const r = await this._input.cmd({ op: "key", key: vk, press, mods: Array.isArray(modifiers) ? modifiers : [] }, 8000);
-    return { ok: !!r?.ok, error: r?.error };
+    return { ok: !!r?.ok, error: inputError(r?.error) };
   }
 
   async inputType(text) {
     if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     await this._input.ensure();
     const r = await this._input.cmd({ op: "type", text: String(text).slice(0, 512) }, 10000);
-    return { ok: !!r?.ok, error: r?.error };
+    return { ok: !!r?.ok, error: inputError(r?.error) };
   }
 
   /**

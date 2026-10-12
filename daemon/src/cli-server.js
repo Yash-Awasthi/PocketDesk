@@ -58,7 +58,12 @@ export function start(getToken, port = Number(process.env.RH_CLI_PORT) || 4679) 
       try {
         let result;
 
-        if (path === "/sessions") {
+        if (path === "/shutdown" && req.method === "POST") {
+          // An elevated daemon cannot be killed by an unelevated installer, so it is asked to stop instead.
+          res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ok: true }));
+          setImmediate(() => process.emit("SIGTERM"));
+          return;
+        } else if (path === "/sessions") {
           result = allSessions();
         } else if (path === "/status") {
           const sessions = allSessions();

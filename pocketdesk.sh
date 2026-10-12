@@ -26,7 +26,7 @@ fetch_script() {
 }
 
 installed=false
-[ -d "$INSTALL_DIR/daemon" ] && installed=true
+{ [ -d "$INSTALL_DIR/app/daemon" ] || [ -d "$INSTALL_DIR/daemon" ]; } && installed=true
 
 if $UNINSTALL; then
   if ! $installed; then echo "PocketDesk is not installed."; exit 0; fi
