@@ -108,6 +108,12 @@ try {
     $cfg = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json
     if ($cfg.port) { $port = [int]$cfg.port }
 } catch {}
+# An elevated daemon ignores an unelevated taskkill, so it is asked to stop over its loopback CLI port first.
+try {
+    $tok = (Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json).token
+    Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:4679/shutdown" -Headers @{ Authorization = "Bearer $tok" } -TimeoutSec 3 | Out-Null
+    Start-Sleep -Seconds 2
+} catch {}
 # Whole trees, so the daemon's PowerShell and ffmpeg helpers go with it.
 $running = @(Get-Process PocketDesk, PocketDeskTray -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) +
            @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess })

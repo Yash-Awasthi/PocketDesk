@@ -38,6 +38,15 @@ jobs:
       - name: Syntax check
         shell: bash
         run: for f in $(git ls-files 'src/*.js' 'scripts/*.js' 'scripts/*.mjs'); do node --check "$f" || exit 1; done
+      - name: Compile the Windows launchers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $csc = Join-Path $env:WINDIR "Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+          & $csc /nologo /target:winexe /out:$env:RUNNER_TEMP\PocketDeskLauncher.exe /r:System.dll scripts\PocketDeskLauncher.cs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & $csc /nologo /target:exe /out:$env:RUNNER_TEMP\PocketDeskConsole.exe /r:System.dll scripts\console\PocketDeskConsole.cs
+          if ($LASTEXITCODE -ne 0) { exit 1 }
       - name: Run test suite
         run: npm test
 

@@ -12,6 +12,10 @@ check("no shortcut is created on the desktop", !/CreateShortcut\([^)]*Desktop/.t
 check("a Start Menu shortcut is created", /CreateShortcut\(\(Join-Path \(\[Environment\]::GetFolderPath\("Programs"\)\)/.test(install));
 check("an older desktop shortcut is removed", /Remove-Item \(Join-Path \(\[Environment\]::GetFolderPath\("Desktop"\)\) "PocketDesk.lnk"\)/.test(install));
 check("the SYSTEM daemon gets its own exe name", install.includes("PocketDeskConsoleDaemon.exe") && consoleCs.includes("PocketDeskConsoleDaemon.exe"));
+check("starting the daemon asks UAC, and No leaves it stopped", launcherCs.includes('Verb = "runas"') && launcherCs.includes("--elevated")
+  && /catch \(Win32Exception\) \{ return false; \}/.test(launcherCs) && launcherCs.includes("if (!DaemonRunning(port) && !StartElevated()) return;"));
+check("installers ask a running daemon to stop before killing it", ["install.ps1", "uninstall.ps1", path.join("daemon", "scripts", "install-service.ps1")]
+  .every((f) => fs.readFileSync(path.join(REPO, f), "utf8").includes("127.0.0.1:4679/shutdown")));
 check("the launcher has no tray icon or window", !/NotifyIcon|Application\.Run|new Form/.test(launcherCs) && launcherCs.includes("CreateNoWindow = true"));
 
 // macOS and Linux follow the same rule: a hidden service, an app entry that opens the settings page.

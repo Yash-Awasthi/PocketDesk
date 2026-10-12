@@ -43,6 +43,12 @@ function Stop-PocketDesk {
     }
 }
 
+# An elevated daemon ignores an unelevated taskkill, so it is asked to stop over its loopback CLI port first.
+try {
+    $tok = (Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json).token
+    Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:4679/shutdown" -Headers @{ Authorization = "Bearer $tok" } -TimeoutSec 3 | Out-Null
+    Start-Sleep -Seconds 2
+} catch {}
 try { schtasks /End /TN "PocketDeskConsole" 2>$null | Out-Null } catch {}
 Stop-PocketDesk
 Start-Sleep -Milliseconds 500
