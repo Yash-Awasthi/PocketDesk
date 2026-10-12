@@ -42,7 +42,7 @@ try {
   await c.next((m) => m.type === "welcome");
   c.send({ type: "create", harness: "node", cwd: tmp, args: [agent] });
   const created = await c.next((m) => m.type === "created" || m.type === "error");
-  check("agent session created", created.type === "created");
+  check(`agent session created${created.message ? ": " + created.message : ""}`, created.type === "created");
   c.send({ type: "attach", id: created.id });
   let out = "";
   await c.next((m) => {

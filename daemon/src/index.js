@@ -3,6 +3,9 @@ import { start, closeClients } from "./server.js";
 import { killAll, liveIds, stopReaper } from "./sessions.js";
 import * as chat from "./chat.js";
 
+// ps, Activity Monitor and system monitors list the daemon by this name instead of "node".
+process.title = process.env.RH_CONSOLE ? "PocketDeskConsole" : "PocketDesk";
+
 // ── Graceful shutdown ───────────────────────────────────────────────────────
 // On SIGTERM/SIGINT: kill all live PTY sessions (no orphaned children), stop
 // the session reaper, and exit cleanly. Synchronous so the signal doesn't

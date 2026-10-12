@@ -22,8 +22,11 @@ object Pairing {
         val url = s("u")?.takeIf { it.startsWith("ws://") || it.startsWith("wss://") } ?: return emptyList()
         val token = s("t") ?: return emptyList()
         val host = url.substringAfter("://").substringBefore('/').substringBefore(':')
+        val iroh = s("i")?.let { "iroh://$it" }
+        // A daemon without TLS refuses LAN sockets, so only its iroh ticket (encrypted end to end) can reach it.
+        if (!url.startsWith("wss://")) return iroh?.let { listOf(ServerEntry(s("n") ?: host, it, token, null)) } ?: emptyList()
         // The iroh ticket rides along as the fallback, so one entry works at home and away.
-        return listOf(ServerEntry(s("n") ?: host, url, token, fingerprint(s("f")), s("i")?.let { "iroh://$it" }))
+        return listOf(ServerEntry(s("n") ?: host, url, token, fingerprint(s("f")), iroh))
     }
 
     /** The daemon prints `AB:CD:…`; [Tls.sha256] compares lowercase hex without separators. */

@@ -263,7 +263,7 @@ private fun ServerFormDialog(initial: ServerEntry?, onSave: (ServerEntry) -> Uni
                     value = url,
                     onValueChange = { url = it },
                     label = { Text("URL") },
-                    placeholder = { Text("ws://192.168.1.10:8765/ws · wss://… · iroh://… · pocketdesk://pair#…") },
+                    placeholder = { Text("wss://192.168.1.10:8765/ws · iroh://… · pocketdesk://pair#…") },
                     singleLine = true,
                 )
                 OutlinedTextField(value = token, onValueChange = { token = it }, label = { Text("Token") }, singleLine = true)
@@ -271,7 +271,7 @@ private fun ServerFormDialog(initial: ServerEntry?, onSave: (ServerEntry) -> Uni
         },
         confirmButton = {
             TextButton(
-                enabled = name.isNotBlank() && (url.startsWith("ws") || url.startsWith("iroh://")) && token.isNotBlank(),
+                enabled = name.isNotBlank() && (url.startsWith("wss://") || url.startsWith("iroh://")) && token.isNotBlank(),
                 onClick = { onSave(ServerEntry(name.trim(), url.trim(), token.trim(), initial?.pinnedFingerprint, initial?.fallback)) },
             ) { Text("Save") }
         },

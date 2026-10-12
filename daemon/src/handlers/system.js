@@ -3,16 +3,14 @@ import * as sessions from "../sessions.js";
 import * as chat from "../chat.js";
 import * as proposals from "../proposals.js";
 import * as toolApproval from "../tool_approval.js";
-import * as totp from "../totp.js";
 import * as pcPower from "../pc_power.js";
-import os from "node:os";
 import { hostStats } from "../stats.js";
 import * as fbCtrl from "../freebuff_control.js";
 import * as doctor from "../doctor.js";
 import * as devices from "../devices.js";
 
 export default function systemHandlers(ctx) {
-  const { send, broadcast, allSessions, plugins, streamParser, tls, rotateToken, disconnectDevice } = ctx;
+  const { send, broadcast, allSessions, plugins, streamParser, tls } = ctx;
   return {
     async propose(ws, msg) {
       const p = proposals.create({
@@ -45,21 +43,6 @@ export default function systemHandlers(ctx) {
     },
     async pc_power(ws, msg) {
       send(ws, { type: "pc_power", action: msg.action, ...(await pcPower.run(msg.action)) });
-    },
-    // ── Two-factor pairing: a code from an authenticator app before the master token pairs ──
-    async totp_status(ws) {
-      send(ws, { type: "totp_status", enabled: totp.enabled() });
-    },
-    async totp_setup(ws) {
-      send(ws, { type: "totp_setup", ...totp.setup(os.hostname()) });
-    },
-    async totp_enable(ws, msg) {
-      const ok = totp.enable(msg.code);
-      send(ws, { type: "totp_status", enabled: totp.enabled(), ...(ok ? {} : { error: "wrong code" }) });
-    },
-    async totp_disable(ws, msg) {
-      const ok = totp.disable(msg.code);
-      send(ws, { type: "totp_status", enabled: totp.enabled(), ...(ok ? {} : { error: "wrong code" }) });
     },
     async proposal_list(ws, msg) {
       send(ws, { type: "proposal_list", items: proposals.listPending() });
@@ -144,23 +127,9 @@ export default function systemHandlers(ctx) {
       const health = await doctor.diagnose({ tls, manifests: undefined });
       send(ws, { type: "doctor_report", ...health });
     },
-    // ── Client devices (openchamber/netbird: list + revoke) ──────────
+    // ── Client devices: read-only here; revoke and allow live on the local settings page ──
     async device_list(ws, msg) {
       send(ws, { type: "device_list", items: devices.list() });
-    },
-    async device_revoke(ws, msg) {
-      const r = devices.revoke(String(msg.clientId ?? ""));
-      // The revoked device knew the pairing token too, so it must change.
-      let pairingToken;
-      if (r.ok) {
-        disconnectDevice(String(msg.clientId));
-        pairingToken = rotateToken();
-      }
-      send(ws, { type: "device_revoked", ...r, pairingToken });
-    },
-    async device_allow(ws, msg) {
-      const r = devices.allow(String(msg.clientId ?? ""));
-      send(ws, { type: "device_allowed", ...r });
     },
   };
 }

@@ -121,7 +121,7 @@
 </div>
 
 <div class="connect-bar">
-  <input id="host" size="28" placeholder="ws://localhost:8765/ws" />
+  <input id="host" size="28" placeholder="this PC" />
   <input id="token" size="32" placeholder="token" />
   <button class="btn primary" onclick="connect()">Connect</button>
 </div>
@@ -400,7 +400,8 @@
           </div>
           <div class="dash-section" id="dDevicesSection" style="display:none">
             <h3>📱 Devices</h3>
-            <table class="client-table" id="dDeviceTable"><thead><tr><th>Name</th><th>Platform</th><th>Last IP</th><th>Seen</th><th></th></tr></thead><tbody></tbody></table>
+            <table class="client-table" id="dDeviceTable"><thead><tr><th>Name</th><th>Platform</th><th>Last IP</th><th>Seen</th></tr></thead><tbody></tbody></table>
+            <p style="color:#8b949e;font-size:12px">Revoke or allow devices from the settings page on the PC itself (Start menu → PocketDesk).</p>
           </div>
           <div class="dash-section" id="dSchedSection" style="display:none">
             <h3>⏰ Scheduled Runs</h3>
@@ -487,7 +488,7 @@ function connect() {
   if (ws) { ws.onclose = null; ws.close(); }
   clearTimeout(reconnectTimer);
   reconnectDelay = 1000;
-  const url = document.getElementById("host").value || "ws://localhost:8765/ws";
+  const url = document.getElementById("host").value || `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
   ws = new WebSocket(url);
   ws.onopen = () => { reconnectDelay = 1000; send({ type: "hello", token: document.getElementById("token").value, totp: pairCode }); pairCode = undefined; };
   ws.onclose = (ev) => {
@@ -642,11 +643,6 @@ function handle(m) {
       break;
     case "prompt_queue": renderPromptQueue(m); break;
     case "device_list": renderDevices(m); break;
-    case "device_revoked":
-      if (m.pairingToken) alert("Device revoked. New pairing token for other devices:\n" + m.pairingToken);
-      send({ type: "device_list" });
-      break;
-    case "device_allowed": send({ type: "device_list" }); break;
     case "model_list":
       if (m.ok) renderModelPicker(m.models || [], m.current);
       break;
@@ -1741,20 +1737,9 @@ function renderDevices(m) {
   const tb = document.querySelector("#dDeviceTable tbody");
   tb.innerHTML = (m.items || []).map(d =>
     `<tr><td>${esc(d.name)}${d.id === myClientId ? ' <span style="color:#58a6ff">(this device)</span>' : ""}${d.online ? ' <span style="color:#3fb950">●</span>' : ""}</td>` +
-    `<td>${esc(d.platform)}</td><td>${esc(d.lastIp || "—")}</td><td>${new Date(d.lastSeen).toLocaleTimeString()}</td>` +
-    `<td>${d.revoked
-      ? `<button class="btn" onclick="deviceAllow(${jsArg(d.id)})">Allow</button>`
-      : `<button class="btn danger" onclick="deviceRevoke(${jsArg(d.id)})">Revoke</button>`}</td></tr>`
-  ).join("") || `<tr><td colspan="5" style="color:#8b949e">no devices seen</td></tr>`;
+    `<td>${esc(d.platform)}</td><td>${esc(d.lastIp || "—")}</td><td>${d.revoked ? "revoked" : new Date(d.lastSeen).toLocaleTimeString()}</td></tr>`
+  ).join("") || `<tr><td colspan="4" style="color:#8b949e">no devices seen</td></tr>`;
 }
-function deviceRevoke(id) {
-  if (id === myClientId) {
-    inlineConfirm("Revoke THIS device? You will be disconnected and locked out until another device allows it again.", () => send({ type: "device_revoke", clientId: id }));
-    return;
-  }
-  send({ type: "device_revoke", clientId: id });
-}
-function deviceAllow(id) { send({ type: "device_allow", clientId: id }); }
 
 // ── Scheduler (⏰) ──
 function syncSchedChatOptions(extraIds) {

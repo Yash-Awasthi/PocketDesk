@@ -18,8 +18,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows is the platform the daemon ships on (ConPTY, tasklist, tray).
-        os: [windows-latest, ubuntu-latest]
+        # Windows is the main platform (ConPTY, console endpoint); macOS and Linux run the hidden daemon too.
+        os: [windows-latest, ubuntu-latest, macos-latest]
     defaults:
       run:
         working-directory: daemon

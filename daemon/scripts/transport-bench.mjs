@@ -163,7 +163,7 @@ async function sender() {
     const extra = opt.encoder === "h264_nvenc" ? ["-forced-idr", "1"] : [];
     proc = spawn(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi",
       "-i", `testsrc2=size=${w}x${h}:rate=${p.fps}`, "-pix_fmt", "nv12",
-      "-c:v", opt.encoder, ...ENCODERS[opt.encoder](p.q), ...extra, "-g", gopMode ? opt.gop : "9999", "-bf", "0",
+      "-c:v", opt.encoder, ...ENCODERS[opt.encoder](p.q, p), ...extra, "-g", gopMode ? opt.gop : "9999", "-bf", "0",
       "-maxrate", p.maxrate, "-bufsize", p.maxrate, "-flush_packets", "1",
       "-f", "flv", "-flvflags", "no_duration_filesize", "pipe:1"], { stdio: ["ignore", "pipe", "inherit"], windowsHide: true });
     const demux = new FlvToAnnexB();

@@ -102,7 +102,6 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
             ToolCard(tool, ws, cwd, openDesktop, openFreebuff)
         }
         item { PowerRow(ws) }
-        item { TwoFactorSection(ws) }
         if (lock.available) item {
             var on by remember { mutableStateOf(lock.enabled) }
             Row(verticalAlignment = Alignment.CenterVertically) {

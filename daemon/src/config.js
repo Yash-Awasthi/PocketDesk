@@ -54,7 +54,7 @@ export function loadConfig() {
     } else if (process.env.RH_CONSOLE) {
       throw new Error("console endpoint needs TLS: its token opens a SYSTEM daemon. Certificate generation failed; see the warning above.");
     } else {
-      console.warn("[pocketdesk] TLS not enabled and no certificate found — the pairing token is crossing the LAN in plaintext.");
+      console.warn("[pocketdesk] TLS not enabled and no certificate found — only this machine can connect until it is.");
       console.warn("[pocketdesk] run `npm run setup-tls` to fix this.");
     }
   }

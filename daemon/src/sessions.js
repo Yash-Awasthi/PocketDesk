@@ -1,10 +1,20 @@
+import fs from "node:fs";
 import os from "node:os";
+import { createRequire } from "node:module";
 import path from "node:path";
 import { execFile, execFileSync } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { EventEmitter } from "node:events";
 import pty from "node-pty";
 import * as toolApproval from "./tool_approval.js";
+
+// npm installs node-pty's macOS spawn-helper without its exec bit, and every spawn then fails with posix_spawnp.
+if (process.platform === "darwin") {
+  try {
+    const dir = path.join(path.dirname(createRequire(import.meta.url).resolve("node-pty/package.json")), "prebuilds");
+    for (const d of fs.readdirSync(dir)) if (d.startsWith("darwin")) fs.chmodSync(path.join(dir, d, "spawn-helper"), 0o755);
+  } catch { /* built from source: no prebuilds to fix */ }
+}
 
 const IS_WIN = process.platform === "win32";
 

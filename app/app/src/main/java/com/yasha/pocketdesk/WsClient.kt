@@ -233,6 +233,13 @@ class WsClient(
     private fun route(): String? = lanUrl?.let { ConnectRoute.pick(it, fallbackUrl, network, lanFailedOn) }
 
     fun connect(url: String, token: String, pinnedFingerprint: String?, fallback: String? = null) {
+        // Entries saved before wss was required: the daemon refuses plaintext from the LAN.
+        if (url.startsWith("ws://")) {
+            if (fallback != null) return connect(fallback, token, null)
+            close()
+            lastError = "plain ws:// is not allowed: re-pair this PC from its QR code"
+            return
+        }
         close()
         userClosed = false
         policy.reset()
@@ -298,7 +305,6 @@ class WsClient(
         route = url.substringAfter("://").substringBefore('/')
         val fp = lastFingerprint
         val client: OkHttpClient = when {
-            !url.startsWith("wss") -> base
             fp != null -> Tls.pinnedClient(base, fp)
             else -> Tls.collectingClient(base).also { collectingTm = it.second }.first
         }
@@ -474,16 +480,6 @@ class WsClient(
     var desktopRecording by mutableStateOf(false)
         private set
     fun pcPower(action: String): Boolean = send(Proto.pcPower(action))
-
-    /** Two-factor pairing on the PC: null until asked. */
-    var totpEnabled by mutableStateOf<Boolean?>(null)
-        private set
-    /** Secret and otpauth link offered by the PC, waiting for a first code. */
-    var totpOffer by mutableStateOf<Pair<String, String>?>(null)
-        private set
-    var totpError by mutableStateOf<String?>(null)
-        private set
-    fun totp(op: String, code: String? = null): Boolean { totpError = null; return send(Proto.totp(op, code)) }
 
     /** The PC wants an authenticator code before this new device may pair. */
     var totpNeeded by mutableStateOf(false)
@@ -1019,12 +1015,6 @@ class WsClient(
                 desktopNotice = if (bool(m, "allowed") == false) "The PC owner paused control. You can watch only." else ""
             }
             "pc_power" -> events.tryEmit(RhEvent.PowerDone(str(m, "action") ?: "", bool(m, "ok") == true, str(m, "error")))
-            "totp_status" -> {
-                totpEnabled = bool(m, "enabled")
-                totpError = str(m, "error")
-                if (totpError == null) totpOffer = null
-            }
-            "totp_setup" -> totpOffer = (str(m, "secret") ?: return) to (str(m, "uri") ?: "")
             "desktop_stopped" -> {
                 desktopStreaming = false
                 str(m, "reason")?.let { desktopResume = null; _desktopError.value = "Session $it" }

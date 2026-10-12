@@ -19,7 +19,7 @@ import { StreamJsonParser } from "./stream_json_parser.js";
 import { DesktopController } from "./desktop_capture.js";
 import { createAccess } from "./access.js";
 import { wakeTargets } from "./wake.js";
-import { Recorder } from "./recorder.js";
+import { Recorder, RECORD_FLAG } from "./recorder.js";
 import { DesktopVideo } from "./desktop_video.js";
 import { AdvancedSSHServerManager } from "./advanced_ssh_server.js";
 import { SSHBastion } from "./ssh_bastion.js";
@@ -37,7 +37,7 @@ import remoteHandlers from "./handlers/remote.js";
 import sshHandlers from "./handlers/ssh.js";
 import systemHandlers from "./handlers/system.js";
 import { startIroh } from "./iroh_link.js";
-import { configDir } from "./config.js";
+import { configDir, configPath } from "./config.js";
 
 const HELLO_TIMEOUT = 10_000;
 const MAX_AUTH_ATTEMPTS = 5;
@@ -146,13 +146,19 @@ export function start(config, { onTokenRotated } = {}) {
     // the key is the token itself, so only whoever can read the config dir can open the page.
     const key = new URL(req.url, "http://x").searchParams.get("k") || "";
     const keyOk = key.length === token.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(token));
-    // Local, token-gated controls the pair page drives: the connection password and the control gate.
+    // Local, token-gated settings the pair page drives. Security settings live only here, never on the
+    // socket, so a stolen phone or device token can use the PC but cannot change who may reach it.
     if (req.url.startsWith("/access") && loopback && keyOk) {
       const path0 = req.url.split("?")[0];
-      if (req.method === "GET" && path0 === "/access") {
-        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-        res.end(JSON.stringify({ hasPassword: access.hasPassword, controlAllowed: access.controlAllowed }));
-        return;
+      const reply = (code, obj) => {
+        res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
+        res.end(JSON.stringify(obj));
+      };
+      const status = () => ({ hasPassword: access.hasPassword, controlAllowed: access.controlAllowed, totpEnabled: totp.enabled(), recording: recorder.enabled });
+      if (req.method === "GET") {
+        if (path0 === "/access") return reply(200, status());
+        if (path0 === "/access/devices") return reply(200, { items: devices.list() });
+        return reply(404, { ok: false });
       }
       let body = "";
       req.on("data", (d) => { body += d; if (body.length > 4096) req.destroy(); });
@@ -160,14 +166,30 @@ export function start(config, { onTokenRotated } = {}) {
         try {
           let msg = {};
           try { msg = JSON.parse(body || "{}"); } catch { /* empty */ }
+          const id = String(msg.clientId ?? "");
           if (path0 === "/access/control") access.setControlAllowed(msg.allowed !== false);
           else if (path0 === "/access/password") access.setPassword(typeof msg.password === "string" ? msg.password : "");
-          else { res.writeHead(404).end(); return; }
-          res.writeHead(200, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: true, hasPassword: access.hasPassword, controlAllowed: access.controlAllowed }));
+          else if (path0 === "/access/record") {
+            if (msg.on) fs.writeFileSync(RECORD_FLAG, "");
+            else fs.rmSync(RECORD_FLAG, { force: true });
+          }
+          else if (path0 === "/access/devices/revoke") {
+            const r = devices.revoke(id);
+            if (!r.ok) return reply(404, r);
+            disconnectDevice(id);
+            // The revoked device knew the pairing token too, so it must change.
+            return reply(200, { ...r, pairingToken: rotateToken() });
+          } else if (path0 === "/access/devices/allow") {
+            const r = devices.allow(id);
+            return reply(r.ok ? 200 : 404, r);
+          } else if (path0 === "/access/totp/setup") return reply(200, { ok: true, ...totp.setup(os.hostname()) });
+          else if (path0 === "/access/totp/enable" || path0 === "/access/totp/disable") {
+            const ok = path0 === "/access/totp/enable" ? totp.enable(String(msg.code ?? "")) : totp.disable(String(msg.code ?? ""));
+            return reply(ok ? 200 : 400, { ok, ...status(), ...(ok ? {} : { error: "wrong code" }) });
+          } else return reply(404, { ok: false });
+          reply(200, { ok: true, ...status() });
         } catch (e) {
-          res.writeHead(500, { "content-type": "application/json" });
-          res.end(JSON.stringify({ ok: false, error: String(e?.message || e) }));
+          reply(500, { ok: false, error: String(e?.message || e) });
         }
       });
       return;
@@ -196,6 +218,8 @@ export function start(config, { onTokenRotated } = {}) {
   const server = useTls
     ? https.createServer({ cert: fs.readFileSync(tls.cert), key: fs.readFileSync(tls.key) }, requestHandler)
     : http.createServer(requestHandler);
+  // Plaintext would put the token and every byte on the LAN in the clear, so without TLS only this machine may connect.
+  if (!useTls) server.on("connection", (s) => { if (!/^(::ffff:)?127\.|^::1$/.test(s.remoteAddress || "")) s.destroy(); });
 
   // WebSocket upgrade with origin check (ttyd/gotty pattern): browsers always
   // send Origin — cross-origin upgrades are rejected at the HTTP level (403)
@@ -431,9 +455,14 @@ export function start(config, { onTokenRotated } = {}) {
   const video = new DesktopVideo();
   const videoWatchers = new Set();
   let resyncTimer = null;
-  const resync = () => {
+  // Ctrl+Alt+Del, a UAC prompt or the lock screen switch to the secure desktop, which stops ddagrab
+  // until the switch ends; keep retrying while anyone watches instead of leaving the picture frozen.
+  const resync = (delay = 250) => {
     if (resyncTimer) return;
-    resyncTimer = setTimeout(() => { resyncTimer = null; if (videoWatchers.size) video.restart(); }, 250);
+    resyncTimer = setTimeout(async () => {
+      resyncTimer = null;
+      if (videoWatchers.size && !(await video.restart()) && videoWatchers.size) resync(1000);
+    }, delay);
   };
   video.on("packet", ({ kind, data }) => {
     const msg = Buffer.concat([Buffer.from([kind]), data]);
@@ -553,7 +582,7 @@ export function start(config, { onTokenRotated } = {}) {
   const ctx = {
     send, broadcast, allSessions, plugins, power,
     desktop, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
-    activity, tls, rotateToken, disconnectDevice,
+    activity, tls,
   };
   const handlers = {
     ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx),
@@ -577,12 +606,14 @@ export function start(config, { onTokenRotated } = {}) {
     }
     if (useTls) {
       console.log(`  tls       enabled, cert fingerprint ${fp}`);
+    } else {
+      console.warn("  tls       OFF: only connections from this machine are accepted (phones need wss)");
     }
     const pairUrl = `http${useTls ? "s" : ""}://localhost:${port}/pair`;
     console.log(process.stdout.isTTY
       ? `  pairing   ${pairUrl}?k=${token}  (open on THIS PC, scan the QR from the app)`
-      : `  pairing   tray icon > Pair a phone, or ${pairUrl}?k=<token from config.json>`);
-    console.log("  config    %USERPROFILE%\\.pocketdesk\\config.json");
+      : `  pairing   the PocketDesk app entry, or ${pairUrl}?k=<token from config.json>`);
+    console.log(`  config    ${configPath}`);
     console.log("");
     // iroh sockets join wss.clients so broadcast and revoke reach them like /ws sockets.
     if (irohCfg?.enabled) {
