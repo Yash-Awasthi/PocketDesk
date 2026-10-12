@@ -83,6 +83,10 @@ Full guide, updating and uninstalling: [docs/SETUP-PC.md](docs/SETUP-PC.md).
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.sh | bash
 ```
+On macOS you can instead download **PocketDesk-mac.zip** from the
+[latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest), unzip it and
+double-click **PocketDesk-Install.command** (the first time, right-click > **Open**, since it is not
+notarized). Both need [Node.js](https://nodejs.org) 18 or newer installed first.
 The daemon runs hidden in the background, like on Windows: a LaunchAgent on macOS (seen only in
 Activity Monitor) and a systemd user service on Linux. It serves terminals, files, chat and agent
 control. Open **PocketDesk** from Spotlight, Launchpad or the app menu to pair a phone and change
