@@ -360,19 +360,18 @@ export function start(config, { onTokenRotated } = {}) {
   function authenticate(msg) {
     if (msg.type !== "hello" || typeof msg.token !== "string") return null;
     const t = msg.token;
-    // A correct token or pairing QR is not enough: the connection password is proven on every
-    // hello, so a leaked token cannot open a session on its own.
+    const master = t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token));
+    const d = master ? null : devices.byToken(t);
+    if (!master && !d) return null;
+    // Checked only after a valid token, so the close code never tells a tokenless guesser the password was right.
     if (access.hasPassword && !access.verifyPassword(msg.password)) return { passwordRequired: true };
-    if (t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token))) {
-      let id = String(msg.clientId || crypto.randomUUID());
-      if (devices.isRevoked(id)) return null;
-      // Claiming a paired device's id would replace its token and take over its identity.
-      if (devices.hasToken(id)) id = crypto.randomUUID();
-      if (!totp.allowsPairing(msg.totp)) return { totpRequired: true };
-      return { id, pairing: true };
-    }
-    const d = devices.byToken(t);
-    return d ? { id: d.id } : null;
+    if (d) return { id: d.id };
+    let id = String(msg.clientId || crypto.randomUUID());
+    if (devices.isRevoked(id)) return null;
+    // Claiming a paired device's id would replace its token and take over its identity.
+    if (devices.hasToken(id)) id = crypto.randomUUID();
+    if (!totp.allowsPairing(msg.totp)) return { totpRequired: true };
+    return { id, pairing: true };
   }
 
   function rotateToken() {

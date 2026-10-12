@@ -16,6 +16,7 @@ check("starting the daemon asks UAC, and No leaves it stopped", launcherCs.inclu
   && /catch \(Win32Exception\) \{ return false; \}/.test(launcherCs) && launcherCs.includes("if (!DaemonRunning(port) && !StartElevated()) return;"));
 check("installers ask a running daemon to stop before killing it", ["install.ps1", "uninstall.ps1", path.join("daemon", "scripts", "install-service.ps1")]
   .every((f) => fs.readFileSync(path.join(REPO, f), "utf8").includes("127.0.0.1:4679/shutdown")));
+check("the SYSTEM daemon leaves CLI port 4679 to the user daemon", /RH_CLI_PORT=(?!4679)\d+/.test(consoleCs));
 check("the launcher has no tray icon or window", !/NotifyIcon|Application\.Run|new Form/.test(launcherCs) && launcherCs.includes("CreateNoWindow = true"));
 
 // macOS and Linux follow the same rule: a hidden service, an app entry that opens the settings page.
