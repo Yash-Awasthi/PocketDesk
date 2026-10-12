@@ -258,7 +258,7 @@ internal fun DirPickerDialog(ws: WsClient, onSelect: (String) -> Unit, onDismiss
                                 transfer = if (err != null) "download failed: $err" else "saved ${entry.name}"
                             },
                         )
-                    }
+                    }?.let { transfer = "download failed: $it" }
                 }) { Text("Download") }
             },
             dismissButton = { TextButton(onClick = { pendingDownload = null }) { Text("Cancel") } },
@@ -276,21 +276,21 @@ internal fun queryDisplayName(ctx: Context, uri: Uri): String {
     return uri.lastPathSegment ?: "upload.bin"
 }
 
-/** Opens a sink in the public Downloads collection and hands back a finish() that closes it. */
-internal inline fun saveToDownloads(ctx: Context, fileName: String, crossinline use: (java.io.OutputStream, (String?) -> Unit) -> Unit) {
+/**
+ * Opens a sink in the public Downloads collection and hands back a finish() that closes it.
+ * Returns an error, without calling [use], when the sink cannot be created.
+ */
+internal inline fun saveToDownloads(ctx: Context, fileName: String, crossinline use: (java.io.OutputStream, (String?) -> Unit) -> Unit): String? {
     val values = android.content.ContentValues().apply {
         put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, fileName)
         put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
     }
     val uri = ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
-    if (uri == null) {
-        use(NullOutputStream()) { "could not create download entry" }
-        return
-    }
+        ?: return "could not create download entry"
     val out = ctx.contentResolver.openOutputStream(uri)
     if (out == null) {
-        use(NullOutputStream()) { "could not open output stream" }
-        return
+        ctx.contentResolver.delete(uri, null, null)
+        return "could not open output stream"
     }
     use(out) { err ->
         try {
@@ -299,9 +299,5 @@ internal inline fun saveToDownloads(ctx: Context, fileName: String, crossinline 
         }
         if (err != null) ctx.contentResolver.delete(uri, null, null)
     }
-}
-
-internal class NullOutputStream : java.io.OutputStream() {
-    override fun write(b: Int) {}
-    override fun write(b: ByteArray, off: Int, len: Int) {}
+    return null
 }

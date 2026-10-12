@@ -101,7 +101,7 @@ fun FilesScreen(ws: WsClient) {
             ws.downloadFile(path, out::write,
                 onProgress = { n, _ -> status = "Saving $name (${i + 1}/${items.size}) · ${sizeText(n)}" },
                 onDone = { err -> finish(err); if (err != null) status = "Saving $name failed: $err" else saveAll(items, i + 1) })
-        }
+        }?.let { status = "Saving $name failed: $it" }
     }
     // A folder is zipped on the PC first; the zip then downloads like any file.
     LaunchedEffect(Unit) {
@@ -310,7 +310,7 @@ fun FilesScreen(ws: WsClient) {
                                 ws.downloadFile(row.path, out::write,
                                     onProgress = { n, _ -> status = "Saving ${row.name} · ${sizeText(n)}" },
                                     onDone = { err -> finish(err); status = err?.let { "Saving ${row.name} failed: $it" } ?: "Saved ${row.name} to Downloads" })
-                            }
+                            }?.let { status = "Saving ${row.name} failed: $it" }
                         }
                     } else {
                         MenuAction("Open folder") { menuFor = null; open(row.path) }
