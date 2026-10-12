@@ -23,6 +23,10 @@ check("the elevated launcher runs from an admin-only Program Files copy", /\$pro
 check("the launcher never takes node or ffmpeg from PATH", !/: "node"/.test(launcherCs) && launcherCs.includes('Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe")'));
 check("the launcher drops NODE_* variables before starting node", launcherCs.includes('StartsWith("NODE_"'));
 check("the console install takes ownership of ProgramData\\PocketDesk", install.includes('icacls $pdRoot /setowner "*S-1-5-32-544"'));
+// The pairing URL carries the master token, so it only goes to a listener proven to be this install.
+check("the launcher checks the daemon's certificate before opening pairing", launcherCs.includes("if (tls && !IsOurDaemon(port)) return;"));
+check("install.ps1 opens pairing through the launcher", !/Start-Process "\$\{scheme\}:\/\/localhost/.test(fs.readFileSync(path.join(REPO, "install.ps1"), "utf8")));
+check("the console install checks who holds port 8766", install.includes('(Get-Process -Id $listener.OwningProcess).Path -ne'));
 check("the launcher has no tray icon or window", !/NotifyIcon|Application\.Run|new Form/.test(launcherCs) && launcherCs.includes("CreateNoWindow = true"));
 
 // macOS and Linux follow the same rule: a hidden service, an app entry that opens the settings page.

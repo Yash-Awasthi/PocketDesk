@@ -109,7 +109,10 @@ if ($Console) {
         Start-ScheduledTask -TaskName "PocketDeskConsole"
         $cfgFile = Join-Path $consoleHome "config.json"
         for ($i = 0; $i -lt 60; $i++) {
-            if ((Test-Path $cfgFile) -and (Get-NetTCPConnection -State Listen -LocalPort 8766 -ErrorAction SilentlyContinue)) {
+            $listener = Get-NetTCPConnection -State Listen -LocalPort 8766 -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ((Test-Path $cfgFile) -and $listener) {
+                # The URL carries the SYSTEM token: open it only when our daemon, not a squatter, holds the port.
+                if ((Get-Process -Id $listener.OwningProcess).Path -ne (Join-Path $root "node\PocketDeskConsoleDaemon.exe")) { throw "port 8766 is held by another program; not opening the pairing page" }
                 $consoleToken = (Get-Content $cfgFile -Raw | ConvertFrom-Json).token
                 Start-Process "https://localhost:8766/pair?k=$([uri]::EscapeDataString($consoleToken))"
                 break
