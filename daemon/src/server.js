@@ -37,7 +37,7 @@ import remoteHandlers from "./handlers/remote.js";
 import sshHandlers from "./handlers/ssh.js";
 import systemHandlers from "./handlers/system.js";
 import { startIroh } from "./iroh_link.js";
-import { configDir } from "./config.js";
+import { configDir, configPath } from "./config.js";
 
 const HELLO_TIMEOUT = 10_000;
 const MAX_AUTH_ATTEMPTS = 5;
@@ -607,8 +607,8 @@ export function start(config, { onTokenRotated } = {}) {
     const pairUrl = `http${useTls ? "s" : ""}://localhost:${port}/pair`;
     console.log(process.stdout.isTTY
       ? `  pairing   ${pairUrl}?k=${token}  (open on THIS PC, scan the QR from the app)`
-      : `  pairing   tray icon > Pair a phone, or ${pairUrl}?k=<token from config.json>`);
-    console.log("  config    %USERPROFILE%\\.pocketdesk\\config.json");
+      : `  pairing   the PocketDesk app entry, or ${pairUrl}?k=<token from config.json>`);
+    console.log(`  config    ${configPath}`);
     console.log("");
     // iroh sockets join wss.clients so broadcast and revoke reach them like /ws sockets.
     if (irohCfg?.enabled) {
