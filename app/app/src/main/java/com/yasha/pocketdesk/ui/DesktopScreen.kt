@@ -1,6 +1,5 @@
 package com.yasha.pocketdesk.ui
 
-import android.app.Activity
 import android.content.pm.ActivityInfo
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -11,13 +10,12 @@ import android.widget.Toast
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LifecycleStartEffect
 import android.util.Base64
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -57,7 +55,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -129,15 +126,10 @@ fun DesktopScreen(
 
     var videoSize by remember { mutableStateOf<IntSize?>(null) }
     var boxSize by remember { mutableStateOf(IntSize.Zero) }
-    // The stream only runs while the app is visible; ON_START also fires on first attach.
-    val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle) {
-        val obs = LifecycleEventObserver { _, e ->
-            if (e == Lifecycle.Event.ON_START) ws.desktopStartVideo()
-            if (e == Lifecycle.Event.ON_STOP) ws.desktopStop()
-        }
-        lifecycle.addObserver(obs)
-        onDispose { lifecycle.removeObserver(obs); ws.desktopStop() }
+    // The stream only runs while the app is visible.
+    LifecycleStartEffect(ws) {
+        ws.desktopStartVideo()
+        onStopOrDispose { ws.desktopStop() }
     }
     BackHandler(enabled = fullscreen) { onFullscreen(false) }
 
@@ -525,7 +517,7 @@ private class Viewport(val f: IntSize, val viewW: Float, val viewH: Float, val z
 @Composable
 fun DesktopFullscreenEffect(fullscreen: Boolean) {
     val view = LocalView.current
-    val activity = LocalContext.current as? Activity ?: return
+    val activity = LocalActivity.current ?: return
     LaunchedEffect(fullscreen) {
         val controller = WindowCompat.getInsetsController(activity.window, view)
         if (fullscreen) {
