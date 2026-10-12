@@ -455,9 +455,14 @@ export function start(config, { onTokenRotated } = {}) {
   const video = new DesktopVideo();
   const videoWatchers = new Set();
   let resyncTimer = null;
-  const resync = () => {
+  // Ctrl+Alt+Del, a UAC prompt or the lock screen switch to the secure desktop, which stops ddagrab
+  // until the switch ends; keep retrying while anyone watches instead of leaving the picture frozen.
+  const resync = (delay = 250) => {
     if (resyncTimer) return;
-    resyncTimer = setTimeout(() => { resyncTimer = null; if (videoWatchers.size) video.restart(); }, 250);
+    resyncTimer = setTimeout(async () => {
+      resyncTimer = null;
+      if (videoWatchers.size && !(await video.restart()) && videoWatchers.size) resync(1000);
+    }, delay);
   };
   video.on("packet", ({ kind, data }) => {
     const msg = Buffer.concat([Buffer.from([kind]), data]);
