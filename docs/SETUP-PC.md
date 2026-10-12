@@ -213,4 +213,5 @@ This installs the checkout's daemon instead of a release. To run the daemon dire
 Node.js and ffmpeg on your PATH: `cd daemon; npm install; npm start`.
 
 macOS and Linux: `curl -fsSL https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.sh | bash`,
-then `npm start` in the daemon folder (no tray; H.264 desktop capture is Windows only).
+or run `npm start` in the daemon folder of a checkout. H.264 desktop capture works on Windows and
+macOS (ffmpeg needed on macOS); Linux has no desktop view.

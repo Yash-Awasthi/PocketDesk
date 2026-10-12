@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=PocketDesk
+Comment=Pair a phone and change PocketDesk settings
+Exec="__BIN__" pair
+Icon=network-workgroup
+Terminal=false
+Categories=Network;RemoteAccess;

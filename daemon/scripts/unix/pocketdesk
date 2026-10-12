@@ -9,9 +9,14 @@ CONFIG="$HOME_DIR/config.json"
 LOG="$HOME_DIR/daemon.log"
 PIDFILE="$HOME_DIR/daemon.pid"
 
-# The install copies the daemon here; a checkout runs from its own tree.
-DAEMON_DIR="${POCKETDESK_DAEMON_DIR:-$HOME_DIR/daemon}"
+# The install puts the program in app/ (older installs: the home dir itself); a checkout runs from its own tree.
+DAEMON_DIR="${POCKETDESK_DAEMON_DIR:-$HOME_DIR/app/daemon}"
+[ -f "$DAEMON_DIR/src/index.js" ] || DAEMON_DIR="$HOME_DIR/daemon"
 [ -f "$DAEMON_DIR/src/index.js" ] || DAEMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
+# When installed as a service, the service manager owns the process, or it would restart what we kill.
+AGENT="$HOME/Library/LaunchAgents/com.pocketdesk.daemon.plist"
+has_unit() { command -v systemctl >/dev/null 2>&1 && [ -f "$HOME/.config/systemd/user/pocketdesk.service" ]; }
 
 json_field() { node -e "try{process.stdout.write(String(JSON.parse(require('fs').readFileSync('$CONFIG','utf8')).$1||''))}catch(e){}" 2>/dev/null; }
 port() { local p; p=$(json_field port); echo "${p:-8765}"; }
@@ -19,11 +24,14 @@ scheme() { node -e "try{process.stdout.write(JSON.parse(require('fs').readFileSy
 
 running_pid() {
   # The listener on the daemon port is the daemon, whichever shell started it.
-  if command -v lsof >/dev/null 2>&1; then lsof -ti ":$(port)" -sTCP:LISTEN 2>/dev/null | head -1; fi
+  if command -v lsof >/dev/null 2>&1; then lsof -ti ":$(port)" -sTCP:LISTEN 2>/dev/null | head -1
+  elif command -v ss >/dev/null 2>&1; then ss -ltnpH "sport = :$(port)" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2; fi
 }
 
 start() {
   if [ -n "$(running_pid)" ]; then echo "already running (port $(port))"; return 0; fi
+  if [ -f "$AGENT" ]; then launchctl load "$AGENT" 2>/dev/null || true; sleep 2; status; return 0; fi
+  if has_unit; then systemctl --user start pocketdesk; sleep 1; status; return 0; fi
   [ -f "$DAEMON_DIR/src/index.js" ] || { echo "daemon not found at $DAEMON_DIR" >&2; exit 1; }
   mkdir -p "$HOME_DIR"
   # Detached and headless: it keeps running after this shell exits, logging to the home dir.
@@ -33,6 +41,8 @@ start() {
 }
 
 stop() {
+  [ -f "$AGENT" ] && launchctl unload "$AGENT" 2>/dev/null || true
+  has_unit && systemctl --user stop pocketdesk 2>/dev/null || true
   local pid; pid="$(running_pid)"
   if [ -z "$pid" ]; then echo "not running"; rm -f "$PIDFILE"; return 0; fi
   kill "$pid" 2>/dev/null || true
