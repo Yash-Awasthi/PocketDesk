@@ -495,7 +495,8 @@ func monitors() -> [[String: Any]] {
   for (i, id) in ids.enumerated() {
     let b = CGDisplayBounds(id)
     out.append(["index": i, "id": Int(id), "x": Int(b.origin.x), "y": Int(b.origin.y),
-                "w": Int(b.width), "h": Int(b.height), "primary": id == main])
+                "w": Int(b.width), "h": Int(b.height), "pw": CGDisplayPixelsWide(id), "ph": CGDisplayPixelsHigh(id),
+                "primary": id == main])
   }
   return out
 }
@@ -719,6 +720,20 @@ export class MacHelper extends PsHelper {
   }
 }
 
+/**
+ * The Swift helper reports displays in points; capture and input use the main display's pixels,
+ * so offsets scale by its pixel ratio and sizes are each display's own pixels.
+ * avfoundation numbers screens in the same CGGetActiveDisplayList order, which is `output`.
+ */
+export function macMonitors(list) {
+  const main = list.find((m) => m.primary) || list[0];
+  const ratio = main && main.w ? main.pw / main.w : 1;
+  return list.map((m, i) => ({
+    adapter: 0, output: i, name: `Display ${i + 1}`,
+    left: Math.round(m.x * ratio), top: Math.round(m.y * ratio), w: m.pw ?? m.w, h: m.ph ?? m.h,
+  }));
+}
+
 export class DesktopController extends EventEmitter {
   static get supported() {
     return IS_WIN || IS_MAC;
@@ -864,6 +879,7 @@ export class DesktopController extends EventEmitter {
     await this.helperCapture.ensure();
     const r = await this.helperCapture.cmd({ op: "monitors" }, 10000);
     if (!r?.ok) return { ok: false, error: r?.error || "monitors_failed" };
+    if (IS_MAC) r.monitors = macMonitors(r.monitors);
     const ox = Math.min(...r.monitors.map((m) => m.left));
     const oy = Math.min(...r.monitors.map((m) => m.top));
     const monitors = r.monitors.map((m, index) => ({
