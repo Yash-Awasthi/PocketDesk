@@ -197,6 +197,11 @@ export function resize(id, cols, rows) {
   return true;
 }
 
+// The pty child leads its own session and process group, so signalling the group takes the agent's children too.
+function hangUpGroup(s) {
+  if (s.pty.pid) try { process.kill(-s.pty.pid, "SIGHUP"); } catch {}
+}
+
 export function kill(id) {
   const s = sessions.get(id);
   if (!s || s.exitCode !== null) return false;
@@ -205,6 +210,7 @@ export function kill(id) {
     // Tree-kill the wrapper + children so agents don't keep running orphaned; the wrapper must outlive the walk.
     execFile("taskkill", ["/PID", String(s.pty.pid), "/T", "/F"], { timeout: 5000, windowsHide: true }, killPty);
   } else {
+    hangUpGroup(s);
     killPty();
   }
   s.endedAt = Date.now();
@@ -231,6 +237,7 @@ export function killAll() {
     if (s.exitCode === null) {
       // Synchronous: the daemon exits right after, and the agent's own children must not outlive it.
       if (IS_WIN && s.pty.pid) try { execFileSync("taskkill", ["/PID", String(s.pty.pid), "/T", "/F"], { stdio: "ignore", timeout: 5000, windowsHide: true }); } catch {}
+      else hangUpGroup(s);
       try { s.pty.kill(); } catch {}
       s.exitCode = -1; // mark as killed by shutdown
       s.endedAt = Date.now();
