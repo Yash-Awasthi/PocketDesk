@@ -17,6 +17,12 @@ check("starting the daemon asks UAC, and No leaves it stopped", launcherCs.inclu
 check("installers ask a running daemon to stop before killing it", ["install.ps1", "uninstall.ps1", path.join("daemon", "scripts", "install-service.ps1")]
   .every((f) => fs.readFileSync(path.join(REPO, f), "utf8").includes("127.0.0.1:4679/shutdown")));
 check("the SYSTEM daemon leaves CLI port 4679 to the user daemon", /RH_CLI_PORT=(?!4679)\d+/.test(consoleCs));
+// The daemon runs elevated, so nothing it executes may come from a folder or variable the user's programs can change.
+check("the elevated launcher runs from an admin-only Program Files copy", /\$protected = Join-Path \$env:ProgramFiles/.test(install)
+  && install.includes('$exe = Join-Path $protected "PocketDeskLauncher.exe"') && /-Name "PocketDesk" -Value "`"\$exe`" --daemon"/.test(install));
+check("the launcher never takes node or ffmpeg from PATH", !/: "node"/.test(launcherCs) && launcherCs.includes('Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe")'));
+check("the launcher drops NODE_* variables before starting node", launcherCs.includes('StartsWith("NODE_"'));
+check("the console install takes ownership of ProgramData\\PocketDesk", install.includes('icacls $pdRoot /setowner "*S-1-5-32-544"'));
 check("the launcher has no tray icon or window", !/NotifyIcon|Application\.Run|new Form/.test(launcherCs) && launcherCs.includes("CreateNoWindow = true"));
 
 // macOS and Linux follow the same rule: a hidden service, an app entry that opens the settings page.

@@ -125,7 +125,7 @@ try {
         DisplayVersion  = if ($Ref) { $Ref.TrimStart("v") } else { "dev" }
         Publisher       = "PocketDesk"
         InstallLocation = $InstallDir
-        DisplayIcon     = Join-Path $InstallDir "PocketDeskLauncher.exe"
+        DisplayIcon     = Join-Path $env:ProgramFiles ("PocketDesk\" + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value + "\PocketDeskLauncher.exe")
         UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`""
         URLInfoAbout    = "https://github.com/$repo"
     }

@@ -105,18 +105,23 @@ namespace PocketDeskLauncher
             try
             {
                 // PocketDesk.exe is a copy of node.exe, so Task Manager lists the daemon by name.
+                // Only binaries in this admin-only folder: the daemon runs elevated, and PATH is the user's to change.
                 var named = Path.Combine(ExeDir, "PocketDesk.exe");
-                var bundledNode = Path.Combine(ExeDir, "node", "node.exe");
+                if (!File.Exists(named)) return;
                 var psi = new ProcessStartInfo
                 {
-                    FileName = File.Exists(named) ? named : File.Exists(bundledNode) ? bundledNode : "node",
+                    FileName = named,
                     Arguments = "src\\index.js",
                     WorkingDirectory = DaemonDir(),
                     CreateNoWindow = true,
                     UseShellExecute = false,
                 };
-                var bundledFfmpeg = Path.Combine(ExeDir, "ffmpeg.exe");
-                if (File.Exists(bundledFfmpeg)) psi.EnvironmentVariables["FFMPEG_PATH"] = bundledFfmpeg;
+                // NODE_OPTIONS and friends come from the user's environment and would load code into the elevated node.
+                var nodeVars = new System.Collections.Generic.List<string>();
+                foreach (string k in psi.EnvironmentVariables.Keys) if (k.StartsWith("NODE_", StringComparison.OrdinalIgnoreCase)) nodeVars.Add(k);
+                foreach (var k in nodeVars) psi.EnvironmentVariables.Remove(k);
+                // Set even when missing, so the daemon falls back to JPEG instead of an ffmpeg found on PATH.
+                psi.EnvironmentVariables["FFMPEG_PATH"] = Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe");
                 // Not a child of this launcher: no stdin pipe, and never stop on stdin EOF, so the
                 // daemon outlives this process.
                 Process.Start(psi);

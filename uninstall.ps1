@@ -5,6 +5,8 @@
 
 param(
     [string]$InstallDir = "$env:LOCALAPPDATA\PocketDesk",
+    # The admin-only copy the elevated daemon runs from; passed on re-run, since another admin's elevation changes the SID.
+    [string]$UserRoot = (Join-Path $env:ProgramFiles ("PocketDesk\" + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)),
     [switch]$RemoveData
 )
 $ErrorActionPreference = "Stop"
@@ -12,11 +14,11 @@ $ErrorActionPreference = "Stop"
 # The console endpoint runs as SYSTEM, so only an elevated uninstall can stop and remove it.
 $consoleRoot = Join-Path $env:ProgramData "PocketDesk"
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)
-if (-not $isAdmin -and (Test-Path (Join-Path $consoleRoot "bin"))) {
-    $elevated = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-InstallDir', "`"$InstallDir`"")
+if (-not $isAdmin -and ((Test-Path (Join-Path $consoleRoot "bin")) -or (Test-Path $UserRoot))) {
+    $elevated = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-InstallDir', "`"$InstallDir`"", '-UserRoot', "`"$UserRoot`"")
     if ($RemoveData) { $elevated += '-RemoveData' }
     try { Start-Process powershell -Verb RunAs -Wait -ArgumentList $elevated; exit } catch {
-        Write-Warning "Not elevated: the console endpoint (SYSTEM) stays installed."
+        Write-Warning "Not elevated: the console endpoint and $UserRoot stay installed."
     }
 }
 
@@ -28,7 +30,7 @@ function Stop-PocketDesk {
         $cfg = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json
         if ($cfg.port) { $port = [int]$cfg.port }
     } catch {}
-    $roots = @($InstallDir, (Join-Path $consoleRoot "bin")) | ForEach-Object { $_.TrimEnd('\') + '\' }
+    $roots = @($InstallDir, $UserRoot, (Join-Path $consoleRoot "bin")) | ForEach-Object { $_.TrimEnd('\') + '\' }
     $helpers = Join-Path $env:USERPROFILE ".pocketdesk\helpers\"
     $ids = @(Get-Process PocketDesk, PocketDeskTray, PocketDeskLauncher, PocketDeskConsole -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
     $ids += @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in $port, 8766 } | ForEach-Object { $_.OwningProcess })
@@ -66,6 +68,9 @@ $consoleBin = Join-Path $consoleRoot "bin"
 if (Test-Path $consoleBin) { Remove-Item -Recurse -Force $consoleBin -ErrorAction SilentlyContinue }
 
 if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
+if (Test-Path $UserRoot) { Remove-Item -Recurse -Force $UserRoot -ErrorAction SilentlyContinue }
+$pfRoot = Split-Path $UserRoot
+if ((Test-Path $pfRoot) -and -not (Get-ChildItem $pfRoot -Force)) { Remove-Item $pfRoot -Force -ErrorAction SilentlyContinue }
 if ($RemoveData) {
     $data = Join-Path $env:USERPROFILE ".pocketdesk"
     if (Test-Path $data) { Remove-Item -Recurse -Force $data }

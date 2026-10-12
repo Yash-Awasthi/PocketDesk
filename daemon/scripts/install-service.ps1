@@ -11,18 +11,38 @@ param(
     [switch]$NoStart,
     # Registers the SYSTEM console endpoint (secure desktop: lock screen, UAC, before login)
     # instead of the tray. Must run elevated. See docs/console-endpoint-plan.md.
-    [switch]$Console
+    [switch]$Console,
+    # Internal, elevated: copies the staged install into this admin-only folder, which the elevated daemon runs from.
+    [string]$Protect = ""
 )
 $ErrorActionPreference = "Stop"
 
 $csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if (-not (Test-Path $csc)) { throw "csc.exe not found at $csc" }
 
-if ($Console) {
+function Assert-Elevated($what) {
     $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
-    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) {
-        throw "install-service.ps1 -Console must run elevated (it registers a SYSTEM scheduled task)."
-    }
+    if (-not $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) { throw "$what must run elevated." }
+}
+
+if ($Protect) {
+    Assert-Elevated "install-service.ps1 -Protect"
+    # Program Files: users cannot create or own anything here, so nothing can be planted before this copy.
+    if (-not $Protect.StartsWith($env:ProgramFiles + "\", [StringComparison]::OrdinalIgnoreCase)) { throw "refusing to protect $Protect" }
+    New-Item -ItemType Directory -Force -Path $Protect | Out-Null
+    foreach ($f in "PocketDeskLauncher.exe", "PocketDesk.exe") { Copy-Item (Join-Path $InstallDir $f) $Protect -Force }
+    robocopy $DaemonDir (Join-Path $Protect "daemon") /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+    if ($LASTEXITCODE -ge 8) { throw "copying the daemon into $Protect failed (robocopy $LASTEXITCODE)" }
+    # A reused system ffmpeg is snapshotted too: the elevated daemon never looks on PATH.
+    $ff = Join-Path $InstallDir "ffmpeg\ffmpeg.exe"
+    if (-not (Test-Path $ff)) { $ff = (Get-Command ffmpeg.exe -ErrorAction SilentlyContinue).Source }
+    if ($ff) { New-Item -ItemType Directory -Force (Join-Path $Protect "ffmpeg") | Out-Null; Copy-Item $ff (Join-Path $Protect "ffmpeg\ffmpeg.exe") -Force }
+    Set-Content -Path (Join-Path $Protect "PocketDesk.ini") -Value (Join-Path $Protect "daemon")
+    return
+}
+
+if ($Console) {
+    Assert-Elevated "install-service.ps1 -Console (it registers a SYSTEM scheduled task)"
 
     $consoleSrc = Join-Path $PSScriptRoot "console\PocketDeskConsole.cs"
     # Everything the SYSTEM task executes lives here, where only Administrators + SYSTEM may write.
@@ -41,6 +61,16 @@ if ($Console) {
     Get-NetTCPConnection -State Listen -LocalPort 8766 -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 500
+
+    # Any user may create ProgramData\PocketDesk first; as its owner they could swap the folders below.
+    # So: drop a planted link, take ownership, keep users to listing it, and reset everything inside.
+    $pdRoot = Split-Path $root
+    $planted = Get-Item -LiteralPath $pdRoot -Force -ErrorAction SilentlyContinue
+    if ($planted -and ($planted.Attributes -band [IO.FileAttributes]::ReparsePoint)) { $planted.Delete() }
+    New-Item -ItemType Directory -Force -Path $pdRoot | Out-Null
+    icacls $pdRoot /setowner "*S-1-5-32-544" /T /C /Q | Out-Null
+    icacls $pdRoot /inheritance:r /grant:r "*S-1-5-32-544:(OI)(CI)F" /grant:r "*S-1-5-18:(OI)(CI)F" /grant:r "*S-1-5-32-545:(RX)" /Q | Out-Null
+    if (Get-ChildItem -LiteralPath $pdRoot -Force) { icacls "$pdRoot\*" /reset /T /C /Q | Out-Null }
 
     # Create + lock the protected root BEFORE copying, so all contents inherit the locked ACL.
     New-Item -ItemType Directory -Force -Path $root | Out-Null
@@ -92,7 +122,7 @@ if ($Console) {
     return
 }
 
-$exe = Join-Path $InstallDir "PocketDeskLauncher.exe"
+$staged = Join-Path $InstallDir "PocketDeskLauncher.exe"
 $src = Join-Path $PSScriptRoot "PocketDeskLauncher.cs"
 
 # The launcher prefers a node.exe next to it (install.ps1 puts one there), then PATH.
@@ -125,11 +155,20 @@ $nodeExe = if (Test-Path $bundledNode) { $bundledNode } else { (Get-Command node
 Copy-Item $nodeExe (Join-Path $InstallDir "PocketDesk.exe") -Force
 
 # Always rebuilt: a release zip gives the source its commit time, often older than the previous exe.
-& $csc /nologo /target:winexe /out:$exe /r:System.dll $src
+& $csc /nologo /target:winexe /out:$staged /r:System.dll $src
 if ($LASTEXITCODE -ne 0) { throw "compile failed" }
 
-# The launcher spawns the daemon from this folder.
-Set-Content -Path (Join-Path $InstallDir "PocketDesk.ini") -Value $DaemonDir
+# The daemon runs as administrator, and this folder is writable by every program the user runs,
+# so the launcher, node, daemon and ffmpeg are copied (one UAC prompt) to a per-user admin-only folder.
+$protected = Join-Path $env:ProgramFiles ("PocketDesk\" + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+$protectArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Protect', "`"$protected`"",
+                 '-InstallDir', "`"$InstallDir`"", '-DaemonDir', "`"$DaemonDir`"")
+Write-Host "  copying PocketDesk to $protected (elevation required)"
+try { $p = Start-Process powershell -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList $protectArgs } catch { throw "elevation declined: PocketDesk needs it to install" }
+if ($p.ExitCode -ne 0 -or -not (Test-Path (Join-Path $protected "PocketDesk.ini"))) { throw "copying PocketDesk to $protected failed" }
+$exe = Join-Path $protected "PocketDeskLauncher.exe"
+# Staged copies are not run; left here they would only invite elevating something any program can replace.
+foreach ($f in "PocketDeskLauncher.exe", "PocketDesk.exe", "PocketDesk.ini") { Remove-Item (Join-Path $InstallDir $f) -Force -ErrorAction SilentlyContinue }
 
 # Start Menu only: a click starts the daemon if needed and opens the pairing and settings page.
 # No desktop icon, so outside Task Manager the daemon leaves nothing on screen.

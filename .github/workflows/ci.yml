@@ -47,6 +47,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit 1 }
           & $csc /nologo /target:exe /out:$env:RUNNER_TEMP\PocketDeskConsole.exe /r:System.dll scripts\console\PocketDeskConsole.cs
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          foreach ($f in "..\install.ps1", "..\uninstall.ps1", "scripts\install-service.ps1") {
+            $errs = $null
+            [void][Management.Automation.Language.Parser]::ParseFile((Resolve-Path $f), [ref]$null, [ref]$errs)
+            if ($errs) { $errs | ForEach-Object { Write-Error "$f $($_.Extent.StartLineNumber): $($_.Message)" }; exit 1 }
+          }
       - name: Run test suite
         run: npm test
 
