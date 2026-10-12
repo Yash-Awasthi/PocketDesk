@@ -35,9 +35,9 @@ export async function diagnose({ tls, manifests } = {}) {
   const major = Number(process.versions.node.split(".")[0]);
   checks.push({
     name: "node",
-    ok: major >= 18,
+    ok: major >= 24,
     detail: `v${process.versions.node}`,
-    hint: major >= 18 ? undefined : "PocketDesk needs Node >= 18",
+    hint: major >= 24 ? undefined : "PocketDesk needs Node >= 24",
   });
 
   // Data dir writable

@@ -10,8 +10,8 @@ try { iroh = await import("@number0/iroh"); } catch {
 }
 const { Endpoint, RelayMode, EndpointTicket } = iroh;
 
-const PORT = 8841;
-const CLI_PORT = 46841;
+const PORT = 8842;
+const CLI_PORT = 46842;
 const TOKEN = "irohtoken";
 const alpn = [...Buffer.from(ALPN)];
 const keep = [];

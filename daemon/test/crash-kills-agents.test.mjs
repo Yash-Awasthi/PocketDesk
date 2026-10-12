@@ -25,7 +25,7 @@ const d = spawn(process.execPath, ["--import", crash, "src/index.js"], {
   cwd: REPO + "/daemon",
   env: {
     ...process.env, RH_PORT: String(PORT), RH_CLI_PORT: String(PORT + 1), RH_TOKEN: "testtoken", RH_MANIFESTS: tmp,
-    POCKETDESK_DATA: ".pocketdesk-test", RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT),
+    POCKETDESK_DATA: ".pocketdesk-test-" + PORT, RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT),
   },
   stdio: ["pipe", "pipe", "pipe"],
 });
