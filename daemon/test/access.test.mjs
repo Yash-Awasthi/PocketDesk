@@ -15,9 +15,9 @@ const base = `http://127.0.0.1:${PORT}`;
 const status = () => fetch(`${base}/access?k=${TOKEN}`).then((r) => r.json());
 const post = (p, body) => fetch(`${base}${p}?k=${TOKEN}`, { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
 /** Resolve { welcome } on a completed handshake, or { code } on the close that refused it. */
-const attempt = (password) => new Promise((resolve) => {
-  const c = connect(PORT, TOKEN);
-  c.ws.on("open", () => c.send({ type: "hello", token: TOKEN, ...(password ? { password } : {}) }));
+const attempt = (password, token = TOKEN) => new Promise((resolve) => {
+  const c = connect(PORT, token);
+  c.ws.on("open", () => c.send({ type: "hello", token, ...(password ? { password } : {}) }));
   c.ws.on("close", (code) => resolve({ code }));
   c.next((m) => m.type === "welcome", 8000).then(() => resolve({ welcome: true })).catch(() => {});
 });
@@ -34,6 +34,16 @@ try {
 
   await post("/access/control", { allowed: false });
   check("control toggle persists", (await status()).controlAllowed === false);
+  // Paused control leaves the phone able to look but not act, through any handler, not only the desktop.
+  const paused = await openAndHello(PORT, TOKEN);
+  const target = path.join(os.tmpdir(), `rh-paused-${PORT}.txt`);
+  fs.rmSync(target, { force: true });
+  paused.send({ type: "fwrite", path: target, data: "aGk=" });
+  const refused = await paused.next((m) => m.type === "error" || m.type === "fwritten", 8000);
+  check("paused control refuses a file write", refused.type === "error" && /paused/.test(refused.message) && !fs.existsSync(target));
+  paused.send({ type: "fs" });
+  check("paused control still lists files", !(await paused.next((m) => m.type === "fs" || m.type === "error", 8000)).error);
+  await paused.close();
   await post("/access/control", { allowed: true });
   check("control toggle restores", (await status()).controlAllowed === true);
 
@@ -41,6 +51,8 @@ try {
   check("password now set", (await status()).hasPassword === true);
   check("right token, no password is refused", (await attempt()).code === 4012);
   check("right token, wrong password is refused", (await attempt("nope")).code === 4012);
+  // Without the token, the close code must not reveal whether a guessed password was right.
+  check("wrong token, wrong password reads as bad token", (await attempt("nope", "wrongtoken1")).code === 4003);
   check("right token and password connects", (await attempt("s3cret-pass")).welcome === true);
   await post("/access/password", { password: "" });
   check("password cleared", (await status()).hasPassword === false);
@@ -49,6 +61,13 @@ try {
   check("recording toggle turns on", (await status()).recording === true);
   await post("/access/record", { on: false });
   check("recording toggle turns off", (await status()).recording === false);
+
+  const early = await new Promise((resolve) => {
+    const c = connect(PORT, TOKEN);
+    c.ws.on("open", () => c.send({ type: "sessions" }));
+    c.ws.on("close", (code) => resolve(code));
+  });
+  check("a message before hello closes the socket", early === 4003);
 
   const code = await fetch(`${base}/access`).then((r) => r.status).catch(() => 0);
   check("/access without the token is forbidden", code === 403);

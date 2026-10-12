@@ -46,6 +46,20 @@ const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugi
 const CONSOLE = Boolean(process.env.RH_CONSOLE);
 const AUDIT_LOG = path.join(configDir, "console-audit.log");
 // Input, pointer and video traffic arrive many times a second and say nothing about intent.
+// While the PC owner has paused control, a phone may only look: these read, view, refuse or stop something.
+// Everything else (terminals, file changes, agents, power, approvals) is refused, including handlers added later.
+const PAUSE_ALLOWED = new Set([
+  "sessions", "sessions_get", "sessions_scan", "attach", "detach", "chat_history", "chat_search", "auth_status", "detect",
+  "plan_get", "apps_discover", "model_list", "activity_list", "prompt_queue", "todos_get", "todos_status", "schedule_list",
+  "approval_waiting", "usage_list", "usage_get",
+  "fs", "fread", "fs_search", "fs_zip", "fs_thumb", "git_status", "git_diff", "git_log", "git_branches", "mention",
+  "desktop_start", "desktop_ping", "desktop_monitors", "video_ack", "desktop_stop", "desktop_frame", "desktop_quality",
+  "desktop_status", "desktop_permissions", "desktop_mouse", "desktop_key", "desktop_type",
+  "bastion_user_list", "bastion_host_list", "bastion_sessions", "bastion_stats", "bastion_stop", "sshserver_user_list",
+  "sshserver_sessions", "sshserver_stats", "sshserver_stop", "profile_list", "profile_disconnect", "hostkey_list", "sshkey_list", "mproto_status",
+  "proposal_list", "reject", "stats", "fb_status", "fb_config_list", "fb_config_get", "fb_skill_list", "fb_skill_get",
+  "fb_auth_status", "fb_accounts", "stream_parse", "stream_stats", "doctor", "device_list",
+]);
 const AUDIT_SKIP = new Set(["in", "resize", "video_ack", "desktop_ping", "desktop_frame", "desktop_mouse", "desktop_key", "desktop_type"]);
 
 /** One line per action on the SYSTEM endpoint, in its admin-only directory. */
@@ -138,8 +152,8 @@ export function start(config, { onTokenRotated } = {}) {
       /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(req.headers.host || "");
     if (req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
-      // Anyone on the network may probe liveness; only this machine learns how busy it is.
-      res.end(JSON.stringify({ status: "healthy", service: "pocketdesk", sessions: loopback ? allSessions().length : undefined }));
+      // Anyone on the network may probe liveness; only this machine learns what answers and how busy it is.
+      res.end(JSON.stringify(loopback ? { status: "healthy", service: "pocketdesk", sessions: allSessions().length } : { status: "healthy" }));
       return;
     }
     // Loopback alone admits every local account, and the console endpoint's token is SYSTEM;
@@ -275,6 +289,8 @@ export function start(config, { onTokenRotated } = {}) {
         return;
       }
       if (!msg || typeof msg !== "object") return;
+      // Nothing but a hello is answered before auth, so the socket is not kept open to feed plugins and logs.
+      if (!ws._authed && msg.type !== "hello") return ws.close(4003, "hello first");
       // Plugin hook: onMessage (may block or modify)
       plugins.callHook("onMessage", ws, msg).then(({ blocked }) => {
         if (blocked) return;
@@ -360,19 +376,18 @@ export function start(config, { onTokenRotated } = {}) {
   function authenticate(msg) {
     if (msg.type !== "hello" || typeof msg.token !== "string") return null;
     const t = msg.token;
-    // A correct token or pairing QR is not enough: the connection password is proven on every
-    // hello, so a leaked token cannot open a session on its own.
+    const master = t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token));
+    const d = master ? null : devices.byToken(t);
+    if (!master && !d) return null;
+    // Checked only after a valid token, so the close code never tells a tokenless guesser the password was right.
     if (access.hasPassword && !access.verifyPassword(msg.password)) return { passwordRequired: true };
-    if (t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token))) {
-      let id = String(msg.clientId || crypto.randomUUID());
-      if (devices.isRevoked(id)) return null;
-      // Claiming a paired device's id would replace its token and take over its identity.
-      if (devices.hasToken(id)) id = crypto.randomUUID();
-      if (!totp.allowsPairing(msg.totp)) return { totpRequired: true };
-      return { id, pairing: true };
-    }
-    const d = devices.byToken(t);
-    return d ? { id: d.id } : null;
+    if (d) return { id: d.id };
+    let id = String(msg.clientId || crypto.randomUUID());
+    if (devices.isRevoked(id)) return null;
+    // Claiming a paired device's id would replace its token and take over its identity.
+    if (devices.hasToken(id)) id = crypto.randomUUID();
+    if (!totp.allowsPairing(msg.totp)) return { totpRequired: true };
+    return { id, pairing: true };
   }
 
   function rotateToken() {
@@ -386,6 +401,7 @@ export function start(config, { onTokenRotated } = {}) {
   async function handle(ws, msg) {
     const h = Object.hasOwn(handlers, msg.type) ? handlers[msg.type] : null;
     if (!h) return send(ws, { type: "error", message: `unknown type: ${msg.type}` });
+    if (!access.controlAllowed && !PAUSE_ALLOWED.has(msg.type)) return send(ws, { type: "error", message: `${msg.type}: control is paused on the PC` });
     if (CONSOLE) audit(ws, msg);
     await h(ws, msg);
   }
