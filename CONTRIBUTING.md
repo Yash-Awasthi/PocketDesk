@@ -22,7 +22,7 @@ node daemon/src/index.js
 | Component | Technology | Version |
 |-----------|------------|---------|
 | Language | JavaScript | ES2022+ |
-| Runtime | Node.js | 18+ |
+| Runtime | Node.js | 24+ |
 | Protocol | WebSocket | ws 8.0+ |
 | Terminal | xterm.js | 5.0+ |
 | Testing | Node.js test runner | Built-in |
@@ -158,14 +158,14 @@ function handleMessage(session, message) {
 ### Testing
 
 ```bash
-# Run all tests
-node --test daemon/src/__tests__/*.test.js
+# Run all tests (from daemon/)
+npm test
 
 # Run specific test
-node --test daemon/src/__tests__/plugins.test.js
+node --test test/plugins.test.mjs
 
-# Watch mode (Node 20+)
-node --test --watch daemon/src/__tests__/*.test.js
+# Watch mode
+node --test --watch "test/*.test.mjs"
 ```
 
 ### Security Considerations
@@ -177,7 +177,7 @@ node --test --watch daemon/src/__tests__/*.test.js
 
 ## Pull Request Checklist
 
-- [ ] Tests pass (`node --test daemon/src/__tests__/*.test.js`)
+- [ ] Tests pass (`cd daemon && npm test`)
 - [ ] No console.log in production code (use logger)
 - [ ] WebSocket messages validated
 - [ ] Plugin hooks documented

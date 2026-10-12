@@ -50,7 +50,7 @@ export function startDaemon(port, cliPort, opts = {}) {
     RH_TOKEN: opts.token || process.env.RH_TEST_TOKEN || "testtoken",
     RH_MANIFESTS: opts.manifests,
     RH_CLI_PORT: String(cliPort),
-    POCKETDESK_DATA: opts.dataDir || ".pocketdesk-test",
+    POCKETDESK_DATA: opts.dataDir || ".pocketdesk-test-" + port,
     // Keep generated state (config, TLS, SSH host/user keys) out of the real profile.
     RH_HOME: opts.home || path.join(os.tmpdir(), "rh-home-" + port),
     ...(opts.env || {}),

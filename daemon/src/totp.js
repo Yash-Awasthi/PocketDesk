@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { configDir } from "./config.js";
+import { writeFileAtomic } from "./atomic_write.js";
 
 const FILE = path.join(configDir, "totp.json");
 const B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -71,7 +72,7 @@ export function setup(label) {
 export function enable(given) {
   if (!pending || !check(pending, given)) return false;
   fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify({ secret: pending }), { mode: 0o600 });
+  writeFileAtomic(FILE, JSON.stringify({ secret: pending }), { mode: 0o600 });
   pending = null;
   return true;
 }

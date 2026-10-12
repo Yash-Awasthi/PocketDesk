@@ -7,20 +7,20 @@
     "pocketdesk": "src/index.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
   },
   "scripts": {
     "start": "node src/index.js",
     "setup-tls": "node scripts/gen-cert.js",
-    "test": "node scripts/run-tests.js"
+    "test": "node --test --test-global-setup=test/setup.mjs \"test/*.test.mjs\""
   },
   "dependencies": {
-    "node-pty": "^1.0.0",
+    "node-pty": "1.2.0-beta.15",
     "ssh2": "^1.17.0",
-    "ws": "^8.18.0"
+    "ws": "^8.22.0"
   },
   "allowScripts": {
-    "node-pty@1.1.0": true
+    "node-pty@1.2.0-beta.15": true
   },
   "optionalDependencies": {
     "@number0/iroh": "^1.1.0"

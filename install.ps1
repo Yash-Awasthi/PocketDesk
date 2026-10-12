@@ -61,13 +61,13 @@ try {
     if ($LASTEXITCODE -ge 8) { throw "copying the daemon failed (robocopy $LASTEXITCODE)" }
     Copy-Item (Join-Path $srcRoot "uninstall.ps1") $InstallDir -Force
 
-    # 2. Node.js: a Node 20+ already on PATH is reused, otherwise a private copy. node-pty uses
+    # 2. Node.js: a Node 24+ already on PATH is reused, otherwise a private copy. node-pty uses
     # Node-API, so upgrading that Node later does not break it. Console access needs the private copy.
     $nodeDir = Join-Path $InstallDir "node"
     $npm = "$nodeDir\npm.cmd"
     $systemNode = Get-Command node.exe -ErrorAction SilentlyContinue
     $systemMajor = if ($systemNode) { [int]((& $systemNode.Source --version) -replace '^v(\d+).*', '$1') } else { 0 }
-    if (-not $Console -and -not (Test-Path "$nodeDir\node.exe") -and $systemMajor -ge 20) {
+    if (-not $Console -and -not (Test-Path "$nodeDir\node.exe") -and $systemMajor -ge 24) {
         Step "Using Node.js $(& $systemNode.Source --version) from $($systemNode.Source)"
         $npm = Join-Path (Split-Path $systemNode.Source) "npm.cmd"
         $want = $null

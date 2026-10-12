@@ -1,6 +1,6 @@
 /**
  * Tests for session leak guard — spawns the real daemon and checks session
- * behavior through the WebSocket protocol (same approach as smoke.mjs).
+ * behavior through the WebSocket protocol (same approach as smoke.test.mjs).
  *
  * Verifies:
  *   - Multiple sessions can be created
@@ -23,7 +23,7 @@ fs.writeFileSync(
 
 const daemon = spawn(process.execPath, ["src/index.js"], {
   cwd: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
-  env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-test", RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT), RH_STOP_ON_STDIN_EOF: "1" },
+  env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-test-" + PORT, RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT), RH_STOP_ON_STDIN_EOF: "1" },
   stdio: ["pipe", "pipe", "pipe"],
 });
 daemon.stderr.on("data", (d) => process.stderr.write("[daemon!] " + d));

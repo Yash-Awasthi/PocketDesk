@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { configDir } from "./config.js";
 import * as proposals from "./proposals.js";
+import { writeFileAtomic } from "./atomic_write.js";
 
 // Separate from the master token: an agent can read its own environment, and this key only asks.
 const key = crypto.randomBytes(24).toString("hex");
@@ -22,7 +23,7 @@ export function init(cliPort) {
   const settings = { hooks: { PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command, timeout: 300 }] }] } };
   try {
     fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+    writeFileAtomic(settingsFile, JSON.stringify(settings, null, 2));
   } catch (e) {
     settingsFile = null;
     console.warn(`  approvals unavailable: ${e.message}`);

@@ -20,6 +20,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execSync, execFileSync, spawn } from "node:child_process";
+import { writeFileAtomic } from "./atomic_write.js";
 
 const PROFILE_DIR = process.env.FB_PROFILE_DIR || (process.env.APPDATA
   ? path.join(process.env.APPDATA, "Freebuff")
@@ -145,11 +146,9 @@ export function configSet(name, patch) {
     const backup = `${p}.bak-${Date.now()}`;
     fs.copyFileSync(p, backup);
     const next = deepMerge(current, patch);
-    // Atomic write: temp file + rename, so a crash mid-write never leaves a
-    // truncated Preferences/Local State the app then flushes back on exit.
-    const tmp = `${p}.tmp-${Date.now()}`;
-    fs.writeFileSync(tmp, JSON.stringify(next, null, 2));
-    fs.renameSync(tmp, p);
+    // Atomic write, so a crash mid-write never leaves a truncated Preferences/Local State
+    // the app then flushes back on exit.
+    writeFileAtomic(p, JSON.stringify(next, null, 2));
     const appRunning = isRunning();
     return {
       ok: true,
@@ -252,9 +251,7 @@ function readJson(file, fallback) {
 
 function writeJson(file, value) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
-  fs.renameSync(tmp, file);
+  writeFileAtomic(file, JSON.stringify(value, null, 2));
 }
 
 function currentSession() {

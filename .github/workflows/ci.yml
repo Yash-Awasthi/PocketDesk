@@ -13,24 +13,26 @@ concurrency:
 
 jobs:
   daemon:
-    name: Daemon tests (${{ matrix.os }})
+    name: Daemon tests (${{ matrix.os }}, Node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         # Windows is the main platform (ConPTY, console endpoint); macOS and Linux run the hidden daemon too.
         os: [windows-latest, ubuntu-latest, macos-latest]
+        # 24 is the supported floor, 26 the current release.
+        node: [24, 26]
     defaults:
       run:
         working-directory: daemon
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # tools-ui.test.mjs reads recent commits of this repo through git_log.
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
           cache: npm
           cache-dependency-path: daemon/package-lock.json
       - name: Install dependencies
@@ -59,18 +61,18 @@ jobs:
     name: Android lint, unit tests, build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: 17
-          cache: gradle
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v6
       - name: Lint, unit tests, debug APK
         working-directory: app
         run: chmod +x gradlew && ./gradlew lintDebug testDebugUnitTest assembleDebug --no-daemon
       - name: Upload lint and test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: android-reports
           path: |
@@ -78,7 +80,7 @@ jobs:
             app/app/build/test-results/
           retention-days: 14
       - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PocketDesk-debug-apk
           path: app/app/build/outputs/apk/debug/app-debug.apk
@@ -100,7 +102,7 @@ jobs:
           rm pocketdesk.keystore keystore.properties
       - name: Upload release APK
         if: github.event_name != 'pull_request'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: PocketDesk-release-apk
           path: app/app/build/outputs/apk/release/app-release.apk

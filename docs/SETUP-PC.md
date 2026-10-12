@@ -22,7 +22,7 @@ That's all: the PC now starts PocketDesk at every logon, and the phone reaches i
 What the installer does, with nothing installed beforehand:
 
 1. Downloads the latest release of the daemon.
-2. Uses Node.js 20 or newer and ffmpeg (for the fast H.264 desktop stream) if they are already on
+2. Uses Node.js 24 or newer and ffmpeg (for the fast H.264 desktop stream) if they are already on
    your PATH. Whatever is missing is downloaded as a private copy; nothing is added to your PATH and
    no other program is affected. Console access always uses a private Node.js.
 3. Installs the daemon's dependencies.

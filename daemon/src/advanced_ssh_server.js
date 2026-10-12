@@ -17,6 +17,7 @@ import { spawn } from "node:child_process";
 import ssh2 from "ssh2";
 import pty from "node-pty";
 import { configDir } from "./config.js";
+import { writeFileAtomic } from "./atomic_write.js";
 
 const { Server, utils } = ssh2;
 const IS_WIN = process.platform === "win32";
@@ -35,7 +36,7 @@ export function generateKeyPair(type = "ed25519", opts) {
 export function hostKeyFile(file) {
   if (!fs.existsSync(file) || utils.parseKey(fs.readFileSync(file)) instanceof Error) {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, generateKeyPair().private, { mode: 0o600 });
+    writeFileAtomic(file, generateKeyPair().private, { mode: 0o600 });
   }
   return fs.readFileSync(file);
 }

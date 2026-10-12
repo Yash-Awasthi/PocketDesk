@@ -143,7 +143,7 @@ async function main() {
   await c.close();
   d1.kill("SIGTERM");
   // cleanup test data dir in home
-  try { fs.rmSync(path.join(os.homedir(), ".pocketdesk-test"), { recursive: true, force: true }); } catch {}
+  try { fs.rmSync(path.join(os.homedir(), ".pocketdesk-test-" + PORT), { recursive: true, force: true }); } catch {}
   await teardown(tmp);
 
   console.log(failureCount() ? `\n${failureCount()} FAILURE(S): ${failureNames()}` : "\nALL PASS");

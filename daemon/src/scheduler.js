@@ -13,6 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
+import { writeFileAtomic } from "./atomic_write.js";
 
 const DATA_DIR = process.env.POCKETDESK_DATA || ".pocketdesk";
 const STORE = path.join(os.homedir(), DATA_DIR, "schedules.json");
@@ -36,7 +37,7 @@ function load() {
 function save() {
   try {
     fs.mkdirSync(path.dirname(STORE), { recursive: true });
-    fs.writeFileSync(STORE, JSON.stringify(jobs.slice(-MAX_RUNS), null, 2));
+    writeFileAtomic(STORE, JSON.stringify(jobs.slice(-MAX_RUNS), null, 2));
   } catch {}
 }
 
