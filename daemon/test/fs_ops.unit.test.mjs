@@ -8,7 +8,8 @@ import { zipFolder, thumbnail, dispose } from "../src/file_extras.js";
 import { execFileSync } from "node:child_process";
 
 process.env.RH_FS_NO_TRASH = "1";
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rh-fsops-"));
+// Real path: on macOS os.tmpdir() is /var/..., a symlink the daemon resolves to /private/var/...
+const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "rh-fsops-")));
 const at = (...p) => path.join(tmp, ...p);
 
 try {
