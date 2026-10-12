@@ -1,7 +1,7 @@
 package com.yasha.pocketdesk.ui
 
-import org.junit.Assert.assertEquals
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Test
 
 /** US-layout virtual keys the desktop keyboard sends; a wrong entry types the wrong character on the PC. */
 class DesktopKeyboardTest {
