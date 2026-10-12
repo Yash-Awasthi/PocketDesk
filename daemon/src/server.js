@@ -196,6 +196,8 @@ export function start(config, { onTokenRotated } = {}) {
   const server = useTls
     ? https.createServer({ cert: fs.readFileSync(tls.cert), key: fs.readFileSync(tls.key) }, requestHandler)
     : http.createServer(requestHandler);
+  // Plaintext would put the token and every byte on the LAN in the clear, so without TLS only this machine may connect.
+  if (!useTls) server.on("connection", (s) => { if (!/^(::ffff:)?127\.|^::1$/.test(s.remoteAddress || "")) s.destroy(); });
 
   // WebSocket upgrade with origin check (ttyd/gotty pattern): browsers always
   // send Origin — cross-origin upgrades are rejected at the HTTP level (403)
@@ -577,6 +579,8 @@ export function start(config, { onTokenRotated } = {}) {
     }
     if (useTls) {
       console.log(`  tls       enabled, cert fingerprint ${fp}`);
+    } else {
+      console.warn("  tls       OFF: only connections from this machine are accepted (phones need wss)");
     }
     const pairUrl = `http${useTls ? "s" : ""}://localhost:${port}/pair`;
     console.log(process.stdout.isTTY

@@ -233,6 +233,13 @@ class WsClient(
     private fun route(): String? = lanUrl?.let { ConnectRoute.pick(it, fallbackUrl, network, lanFailedOn) }
 
     fun connect(url: String, token: String, pinnedFingerprint: String?, fallback: String? = null) {
+        // Entries saved before wss was required: the daemon refuses plaintext from the LAN.
+        if (url.startsWith("ws://")) {
+            if (fallback != null) return connect(fallback, token, null)
+            close()
+            lastError = "plain ws:// is not allowed: re-pair this PC from its QR code"
+            return
+        }
         close()
         userClosed = false
         policy.reset()
@@ -298,7 +305,6 @@ class WsClient(
         route = url.substringAfter("://").substringBefore('/')
         val fp = lastFingerprint
         val client: OkHttpClient = when {
-            !url.startsWith("wss") -> base
             fp != null -> Tls.pinnedClient(base, fp)
             else -> Tls.collectingClient(base).also { collectingTm = it.second }.first
         }

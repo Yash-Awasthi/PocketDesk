@@ -121,7 +121,7 @@
 </div>
 
 <div class="connect-bar">
-  <input id="host" size="28" placeholder="ws://localhost:8765/ws" />
+  <input id="host" size="28" placeholder="this PC" />
   <input id="token" size="32" placeholder="token" />
   <button class="btn primary" onclick="connect()">Connect</button>
 </div>
@@ -487,7 +487,7 @@ function connect() {
   if (ws) { ws.onclose = null; ws.close(); }
   clearTimeout(reconnectTimer);
   reconnectDelay = 1000;
-  const url = document.getElementById("host").value || "ws://localhost:8765/ws";
+  const url = document.getElementById("host").value || `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
   ws = new WebSocket(url);
   ws.onopen = () => { reconnectDelay = 1000; send({ type: "hello", token: document.getElementById("token").value, totp: pairCode }); pairCode = undefined; };
   ws.onclose = (ev) => {
