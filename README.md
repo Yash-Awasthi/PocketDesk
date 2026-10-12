@@ -41,7 +41,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | ⏰ **Wake-on-LAN** | Wake a sleeping PC from the phone on the same network. |
 | 🟥 **Viewing frame** | A red edge around every monitor while someone is connected, seen only at the PC |
 | 🔌 **PC power** | Lock, sign out, sleep, restart or shut down the PC from the phone (`pc_power`) |
-| 🔑 **Two-factor pairing** | Optionally require a code from an authenticator app before a new device may pair (`totp_*`) |
+| 🔑 **Two-factor pairing** | Optionally require a code from an authenticator app before a new device may pair; set up on the PC's settings page (`/access/totp/*`) |
 | 🛡️ **SSH Bastion** | A real jump host: log in as `user@host` with your registered key, the access rule is checked, and the channel is proxied to the target with byte accounting (`bastion_*`) |
 | 🔒 **SSH Server Control** | A real SSH listener on the PC: per-user password/public-key auth, command allowlists enforced before a command runs, PTY shells, session recording (`sshserver_*`) |
 | 📇 **Connection Profiles** | Real SSH, SFTP and VNC connections from saved profiles, host-key trust-on-first-use, OpenSSH key generation kept out of the protocol (`profile_*`/`hostkey_*`/`sshkey_*`) |
@@ -72,11 +72,11 @@ Or the same installer from PowerShell:
 irm https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.ps1 | iex
 ```
 
-It downloads the daemon with its own Node.js and ffmpeg, installs a tray icon that
-starts it at logon, adds a **PocketDesk** shortcut to the Start Menu and the desktop, and opens the
+It downloads the daemon with its own Node.js and ffmpeg, starts it hidden at logon (it shows only
+in Task Manager, as PocketDesk.exe), adds a **PocketDesk** shortcut to the Start Menu, and opens the
 pairing QR. Scan it with the app and you are done. Clicking the shortcut later starts PocketDesk,
 or shows the pairing QR again if it is already running.
-To remove it: tray icon > **Uninstall PocketDesk**, or **Settings > Apps > Installed apps > PocketDesk > Uninstall**.
+To remove it: **Settings > Apps > Installed apps > PocketDesk > Uninstall**.
 Full guide, updating and uninstalling: [docs/SETUP-PC.md](docs/SETUP-PC.md).
 
 **macOS / Linux:**
@@ -135,13 +135,13 @@ auth token (also persisted to `~/.pocketdesk/config.json` —
 ### Step 3 — Pair
 
 1. **QR pairing (easiest)** — on the PC, open the pairing link from the banner
-   (`http://localhost:8765/pair?k=<token>`; the tray's **Pair a phone...** opens it too) and
+   (`https://localhost:8765/pair?k=<token>`; the **PocketDesk** Start Menu shortcut opens it) and
    scan the QR **with the PocketDesk app** (tap **＋ → Scan QR**). The app
    receives the URL, token and (with TLS) the cert fingerprint automatically.
    > Note: the QR page is loopback-only by design — open it on the PC itself,
    not on the phone.
 2. **Manual entry** — in the app tap **＋**, then enter
-   `ws://<pc-ip>:8765/ws` (find the PC's IP with `ipconfig` / `ip a`) and the
+   `wss://<pc-ip>:8765/ws` (find the PC's IP with `ipconfig` / `ip a`) and the
    token from the banner or `config.json`.
 3. **Browser smoke test** — open `http://localhost:8765` on the PC, paste the
    token, hit **Connect**, then **＋ New Chat** → pick an installed agent →
@@ -221,7 +221,7 @@ Environment overrides (win each over the config file): `RH_PORT`, `RH_TOKEN`,
 `RH_IROH` (`0` disables iroh), `RH_IROH_RELAYS` (comma-separated relay URLs). TLS: `node scripts/gen-cert.js`
 then set `tls.enabled: true` in the config.
 
-On Windows the installer sets up a tray icon that starts the daemon at logon; see
+On Windows the installer starts the daemon hidden at logon; see
 [docs/SETUP-PC.md](docs/SETUP-PC.md).
 
 ### How access works
@@ -520,7 +520,7 @@ PocketDesk/
 │       ├── WsClient.kt           # WebSocket client
 │       ├── Protocol.kt           # Message protocol
 │       └── MainActivity.kt       # Navigation
-├── docs/SETUP-PC.md              # PC install, tray, update, uninstall
+├── docs/SETUP-PC.md              # PC install, settings, update, uninstall
 ├── install.sh                    # One-liner installer (Linux/Mac)
 ├── install.ps1                   # One-liner installer (Windows)
 │                                 # daemon/scripts/build-setup.ps1 wraps it as PocketDesk-Install.exe

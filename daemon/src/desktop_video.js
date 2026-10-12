@@ -1,7 +1,7 @@
 /**
- * H.264 desktop stream: ffmpeg grabs the primary monitor (ddagrab) and encodes
- * with the first working encoder (NVENC, Quick Sync, x264). Frames are emitted
- * only when the screen changes, as Annex B packets ready for a hardware decoder.
+ * H.264 desktop stream: ffmpeg grabs a monitor (ddagrab on Windows, avfoundation on
+ * macOS) and encodes with the first working encoder (NVENC, Quick Sync, VideoToolbox,
+ * x264). Frames go out as Annex B packets ready for a hardware decoder.
  *
  * ffmpeg writes FLV because its tags carry lengths: a frame can be forwarded the
  * moment it is written, while raw Annex B only ends when the next frame starts.
@@ -20,11 +20,19 @@ export const PRESETS = {
 // The pointer is left out of the picture; viewers draw it from desktop_cursor so it moves without video delay.
 const grab = (p, output) => `ddagrab=output_idx=${output}:framerate=${p.fps}:dup_frames=0:draw_mouse=0,hwdownload,format=bgra,`
   + (p.scale === 1 ? "" : `scale=trunc(iw*${p.scale}/2)*2:-2,`) + "format=nv12";
+// avfoundation hands over full-resolution (Retina) pixels; the pointer is left out as on Windows.
+const grabMac = (p, output) => ["-f", "avfoundation", "-capture_cursor", "0", "-framerate", String(p.fps),
+  "-pixel_format", "nv12", "-i", `Capture screen ${output}:none`,
+  "-vf", (p.scale === 1 ? "" : `scale=trunc(iw*${p.scale}/2)*2:-2,`) + "format=nv12"];
 export const ENCODERS = {
   h264_nvenc: (q) => ["-preset", "p1", "-tune", "ull", "-zerolatency", "1", "-rc", "vbr", "-cq", String(q), "-b:v", "0"],
   h264_qsv: (q) => ["-preset", "veryfast", "-low_delay_brc", "1", "-global_quality", String(q - 2)],
+  // VideoToolbox has no constant-quality mode on Intel Macs, so it targets the preset's cap.
+  h264_videotoolbox: (q, p) => ["-realtime", "1", "-b:v", p.maxrate],
   libx264: (q) => ["-preset", "ultrafast", "-tune", "zerolatency", "-crf", String(q - 2)],
 };
+/** Encoders worth trying on each platform, fastest first. */
+export const ENCODER_ORDER = { win32: ["h264_nvenc", "h264_qsv", "libx264"], darwin: ["h264_videotoolbox", "libx264"] };
 const START_CODE = Buffer.from([0, 0, 0, 1]);
 const LADDER = ["low", "saver", "balanced", "quality"];
 
@@ -32,14 +40,15 @@ const LADDER = ["low", "saver", "balanced", "quality"];
 export const KIND = { config: 0, key: 1, delta: 2 };
 
 /** ffmpeg arguments for one encoder; a monitor on another GPU needs its own D3D11 device. */
-export function ffmpegArgs(enc, presetName, monitor) {
+export function ffmpegArgs(enc, presetName, monitor, platform = process.platform) {
   const p = PRESETS[presetName];
   const adapter = monitor?.adapter || 0;
-  return ["-hide_banner", "-loglevel", "error",
+  const input = platform === "darwin" ? grabMac(p, monitor?.output || 0) : [
     ...(adapter ? ["-init_hw_device", `d3d11va=rh:${adapter}`, "-filter_hw_device", "rh"] : []),
-    "-filter_complex", grab(p, monitor?.output || 0),
+    "-filter_complex", grab(p, monitor?.output || 0)];
+  return ["-hide_banner", "-loglevel", "error", ...input,
     // A keyframe every `fps` changed frames starts each iroh GOP stream; see docs/TRANSPORT-BENCH.md.
-    "-c:v", enc, ...ENCODERS[enc](p.q), ...(enc === "h264_nvenc" ? ["-forced-idr", "1"] : []), "-g", String(p.fps), "-bf", "0", "-maxrate", p.maxrate, "-bufsize", p.maxrate,
+    "-c:v", enc, ...ENCODERS[enc](p.q, p), ...(enc === "h264_nvenc" ? ["-forced-idr", "1"] : []), "-g", String(p.fps), "-bf", "0", "-maxrate", p.maxrate, "-bufsize", p.maxrate,
     "-flush_packets", "1", "-f", "flv", "-flvflags", "no_duration_filesize", "pipe:1"];
 }
 
@@ -143,13 +152,13 @@ export class DesktopVideo extends EventEmitter {
 
   /** Resolves with the encoder in use, or null when none can start. */
   start() {
-    // ddagrab is Windows-only; elsewhere the caller falls back to the JPEG frame stream.
-    if (process.platform !== "win32") return Promise.resolve(null);
+    // No grabber here (Linux): the caller falls back to the JPEG frame stream.
+    if (!ENCODER_ORDER[process.platform]) return Promise.resolve(null);
     if (this.proc) return Promise.resolve(this.encoder);
     if (this._starting) return this._starting;
     const gen = this.gen;
     this._starting = (async () => {
-      const order = this.encoder ? [this.encoder] : Object.keys(ENCODERS);
+      const order = this.encoder ? [this.encoder] : ENCODER_ORDER[process.platform];
       for (const enc of order) {
         const ok = await this._spawn(enc, gen);
         if (gen !== this.gen) return null;

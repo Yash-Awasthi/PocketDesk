@@ -40,16 +40,12 @@ internet, and the entry fits one remote address and expires when idle.
   carries `wss://` and the fingerprint, and the app pins it (`Tls.pinnedClient`). A rogue device
   on the same IP cannot match the pin, so the token is never sent to it.
 
-## Remaining gap
+## Plain ws:// is refused
 
-`WsClient.kt` sends the `hello` with the token as soon as a plain `ws://` socket opens, with no
-check that the server is the PC. This only applies to entries that are `ws://`: pairings made
-before TLS, hand-typed URLs, or a daemon where certificate generation failed. On untrusted
-Wi-Fi, a device holding the saved LAN IP could read the token.
-
-Mitigation today: make sure the saved entry starts with `wss://`. If not, re-scan the pairing
-QR once. Possible hardening, not done: refuse `ws://` unless the host is loopback, the Android
-emulator address, or a Tailscale address (`100.64.0.0/10`), and ask the user to re-pair.
+Plaintext never leaves the PC. A daemon without TLS (certificate generation failed, or
+`tls.enabled` set to false) accepts sockets from loopback only. The app refuses `ws://` entries:
+a pairing QR without TLS yields an iroh-only entry when it carries an iroh ticket, and an older
+saved `ws://` entry connects over its iroh fallback or asks the user to re-scan the QR.
 
 ## Behaviour on network change
 

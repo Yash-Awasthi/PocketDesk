@@ -481,16 +481,6 @@ class WsClient(
         private set
     fun pcPower(action: String): Boolean = send(Proto.pcPower(action))
 
-    /** Two-factor pairing on the PC: null until asked. */
-    var totpEnabled by mutableStateOf<Boolean?>(null)
-        private set
-    /** Secret and otpauth link offered by the PC, waiting for a first code. */
-    var totpOffer by mutableStateOf<Pair<String, String>?>(null)
-        private set
-    var totpError by mutableStateOf<String?>(null)
-        private set
-    fun totp(op: String, code: String? = null): Boolean { totpError = null; return send(Proto.totp(op, code)) }
-
     /** The PC wants an authenticator code before this new device may pair. */
     var totpNeeded by mutableStateOf(false)
         private set
@@ -1025,12 +1015,6 @@ class WsClient(
                 desktopNotice = if (bool(m, "allowed") == false) "The PC owner paused control. You can watch only." else ""
             }
             "pc_power" -> events.tryEmit(RhEvent.PowerDone(str(m, "action") ?: "", bool(m, "ok") == true, str(m, "error")))
-            "totp_status" -> {
-                totpEnabled = bool(m, "enabled")
-                totpError = str(m, "error")
-                if (totpError == null) totpOffer = null
-            }
-            "totp_setup" -> totpOffer = (str(m, "secret") ?: return) to (str(m, "uri") ?: "")
             "desktop_stopped" -> {
                 desktopStreaming = false
                 str(m, "reason")?.let { desktopResume = null; _desktopError.value = "Session $it" }

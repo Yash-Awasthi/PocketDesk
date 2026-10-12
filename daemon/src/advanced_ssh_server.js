@@ -304,7 +304,7 @@ export class AdvancedSSHServerManager extends EventEmitter {
           if (!this.executeCommand(session.id, execInfo.command)) return rej();
           const stream = acc();
           const command = this.config.forceCommand || execInfo.command;
-          const proc = spawn(command, { shell: true, cwd: process.env.HOME || process.cwd() });
+          const proc = spawn(command, { shell: true, cwd: process.env.HOME || process.cwd(), windowsHide: true });
           proc.stdout.on("data", (d) => stream.write(d));
           proc.stderr.on("data", (d) => stream.stderr.write(d));
           proc.on("close", (code) => { stream.exit(code ?? 0); stream.end(); });

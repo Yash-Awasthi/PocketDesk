@@ -172,10 +172,10 @@ ws2.close();
 send({ type: "device_list" });
 const dl = await next((m) => m.type === "device_list");
 check("device_list contains our device", dl.items.some((d) => d.id === "test-device-1"));
-send({ type: "device_revoke", clientId: "test-device-1" });
-check("device_revoke acks", (await next((m) => m.type === "device_revoked")).ok === true);
-send({ type: "device_allow", clientId: "test-device-1" });
-check("device_allow acks", (await next((m) => m.type === "device_allowed")).ok === true);
+for (const type of ["device_revoke", "device_allow", "totp_setup", "totp_disable"]) {
+  send({ type, clientId: "test-device-1" });
+  check(`${type} is not reachable over the socket`, /unknown type/.test((await next((m) => m.type === "error" && m.message.includes(type))).message));
+}
 // frp: hot manifest reload
 send({ type: "manifest_reload" });
 check("manifest_reload acks", (await next((m) => m.type === "manifests_reloaded")).count > 0);

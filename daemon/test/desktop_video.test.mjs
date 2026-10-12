@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DesktopVideo, FlvToAnnexB, KIND, ffmpegArgs, seiStamp, STAMP_UUID } from "../src/desktop_video.js";
+import { DesktopVideo, ENCODER_ORDER, FlvToAnnexB, KIND, ffmpegArgs, seiStamp, STAMP_UUID } from "../src/desktop_video.js";
+import { macMonitors } from "../src/desktop_capture.js";
 
 function tag(type, body) {
   const h = Buffer.alloc(11);
@@ -72,4 +73,25 @@ test("frame stamps survive as an SEI unit with no zero bytes to escape", () => {
   let v = 0;
   for (let i = 0; i < 7; i++) v = v * 128 + (sei[at + i] & 0x7f);
   assert.equal(v, ms);
+});
+
+test("macOS captures the chosen screen through avfoundation and tries VideoToolbox first", () => {
+  const a = ffmpegArgs("h264_videotoolbox", "saver", { adapter: 0, output: 1 }, "darwin");
+  assert.equal(a[a.indexOf("-f") + 1], "avfoundation");
+  assert.equal(a[a.indexOf("-i") + 1], "Capture screen 1:none");
+  assert.equal(a[a.indexOf("-capture_cursor") + 1], "0", "viewers draw the pointer themselves");
+  assert.match(a[a.indexOf("-vf") + 1], /scale=trunc\(iw\*0\.6+\d*\/2\)\*2:-2,format=nv12/);
+  assert.equal(a[a.indexOf("-b:v") + 1], "1500k");
+  assert.ok(!a.includes("ddagrab") && !a.includes("-filter_complex"));
+  assert.deepEqual(ENCODER_ORDER.darwin, ["h264_videotoolbox", "libx264"]);
+  assert.ok(!ENCODER_ORDER.linux, "Linux has no grabber, so it keeps the JPEG stream");
+});
+
+test("macOS displays map from points to the main display's pixels", () => {
+  const m = macMonitors([
+    { x: 0, y: 0, w: 1440, h: 900, pw: 2880, ph: 1800, primary: true },
+    { x: 1440, y: -100, w: 1920, h: 1080, pw: 1920, ph: 1080, primary: false },
+  ]);
+  assert.deepEqual(m[0], { adapter: 0, output: 0, name: "Display 1", left: 0, top: 0, w: 2880, h: 1800 });
+  assert.deepEqual(m[1], { adapter: 0, output: 1, name: "Display 2", left: 2880, top: -200, w: 1920, h: 1080 });
 });

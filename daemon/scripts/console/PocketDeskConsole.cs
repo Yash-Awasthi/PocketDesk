@@ -80,7 +80,9 @@ namespace PocketDeskConsole
         static void Main()
         {
             string daemonDir = DaemonDir();
-            string node = Path.Combine(ExeDir, "node", "node.exe");
+            // The install copies node.exe under this name so Task Manager names the SYSTEM daemon.
+            string node = Path.Combine(ExeDir, "node", "PocketDeskConsoleDaemon.exe");
+            if (!File.Exists(node)) node = Path.Combine(ExeDir, "node", "node.exe");
             string ffmpeg = Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe");
             string consoleHome = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
