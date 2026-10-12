@@ -1,9 +1,9 @@
 package com.yasha.pocketdesk.ui
 
 import android.view.KeyEvent
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Test
 
 /** A wrong entry here presses the wrong key on the PC when a keyboard is plugged into the phone. */
 class HardwareInputTest {

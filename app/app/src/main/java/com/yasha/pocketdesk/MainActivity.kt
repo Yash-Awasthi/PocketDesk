@@ -2,7 +2,6 @@ package com.yasha.pocketdesk
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.ui.platform.compositionContext
 import androidx.compose.ui.platform.createLifecycleAwareWindowRecomposer
@@ -32,10 +31,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.navigation3.runtime.NavKey
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.ui.NavDisplay
 import com.yasha.pocketdesk.ui.ChatScreen
 import com.yasha.pocketdesk.ui.DesktopScreen
 import com.yasha.pocketdesk.ui.ConnectScreen
@@ -45,27 +47,20 @@ import com.yasha.pocketdesk.ui.SessionsScreen
 import com.yasha.pocketdesk.ui.SshScreen
 import com.yasha.pocketdesk.ui.TerminalScreen
 import com.yasha.pocketdesk.ui.ToolsScreen
+import kotlinx.serialization.Serializable
 
-sealed interface Screen {
-    data object Connect : Screen
-    data object Tools : Screen
-    data object Sessions : Screen
-    data object Chats : Screen
-    data object Freebuff : Screen
-    data object Desktop : Screen
-    data object Files : Screen
-    data object Ssh : Screen
-    data class Terminal(val sessionId: String) : Screen
+@Serializable
+sealed interface Screen : NavKey {
+    @Serializable data object Connect : Screen
+    @Serializable data object Tools : Screen
+    @Serializable data object Sessions : Screen
+    @Serializable data object Chats : Screen
+    @Serializable data object Freebuff : Screen
+    @Serializable data object Desktop : Screen
+    @Serializable data object Files : Screen
+    @Serializable data object Ssh : Screen
+    @Serializable data class Terminal(val sessionId: String) : Screen
 }
-
-private val ScreenSaver = Saver<Screen, String>(
-    save = { if (it is Screen.Terminal) "terminal:" + it.sessionId else it.toString() },
-    restore = { s ->
-        if (s.startsWith("terminal:")) Screen.Terminal(s.removePrefix("terminal:"))
-        else listOf(Screen.Connect, Screen.Tools, Screen.Sessions, Screen.Chats, Screen.Freebuff, Screen.Desktop, Screen.Files, Screen.Ssh)
-            .firstOrNull { it.toString() == s } ?: Screen.Connect
-    },
-)
 
 private object NoMotion : androidx.compose.ui.MotionDurationScale {
     override val scaleFactor = 0f
@@ -138,7 +133,16 @@ class MainActivity : ComponentActivity() {
             }
         }
         // Declared before the lock gate so a re-lock keeps navigation.
-        var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Connect) }
+        val backStack = rememberNavBackStack(Screen.Connect)
+        val screen = backStack.lastOrNull() ?: Screen.Connect
+        // Sessions and Chats are roots, so back from them leaves the app; other tabs return to Sessions.
+        fun showTab(tab: Screen) {
+            backStack.clear()
+            if (tab != Screen.Sessions && tab != Screen.Chats) backStack.add(Screen.Sessions)
+            backStack.add(tab)
+        }
+        fun open(next: Screen) = backStack.add(next)
+        fun back() = if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) else showTab(Screen.Sessions)
         var desktopFullscreen by rememberSaveable { mutableStateOf(false) }
         var desktopKeys by rememberSaveable { mutableStateOf(false) }
         LaunchedEffect(screen) { if (screen != Screen.Desktop) desktopFullscreen = false }
@@ -152,9 +156,6 @@ class MainActivity : ComponentActivity() {
         }
 
         val connected = client.status == Status.Connected
-        BackHandler(enabled = connected && screen != Screen.Sessions && screen != Screen.Chats) {
-            screen = Screen.Sessions
-        }
 
         Scaffold(
             bottomBar = {
@@ -163,38 +164,38 @@ class MainActivity : ComponentActivity() {
                     NavigationBar {
                         NavigationBarItem(
                             selected = screen == Screen.Tools,
-                            onClick = { screen = Screen.Tools },
+                            onClick = { showTab(Screen.Tools) },
                             icon = { Icon(Icons.Filled.Build, contentDescription = null) },
                             label = { Text("Tools") },
                         )
                         NavigationBarItem(
                             selected = screen == Screen.Sessions,
-                            onClick = { screen = Screen.Sessions },
+                            onClick = { showTab(Screen.Sessions) },
                             icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
                             label = { Text("Sessions") },
                         )
                         NavigationBarItem(
                             selected = screen == Screen.Chats,
-                            onClick = { screen = Screen.Chats },
+                            onClick = { showTab(Screen.Chats) },
                             icon = { Icon(Icons.Filled.Email, contentDescription = null) },
                             label = { Text("Chats") },
                         )
                         NavigationBarItem(
                             selected = screen == Screen.Files,
-                            onClick = { screen = Screen.Files },
+                            onClick = { showTab(Screen.Files) },
                             icon = { Icon(com.yasha.pocketdesk.ui.FolderIcon, contentDescription = null) },
                             label = { Text("Files") },
                         )
                         NavigationBarItem(
                             selected = screen == Screen.Desktop,
-                            onClick = { screen = Screen.Desktop },
+                            onClick = { showTab(Screen.Desktop) },
                             icon = { Icon(com.yasha.pocketdesk.ui.MonitorIcon, contentDescription = null) },
                             label = { Text("Desktop") },
                         )
                         // Disconnects and shows the saved PCs, to switch to another one.
                         NavigationBarItem(
                             selected = false,
-                            onClick = { client.close(); screen = Screen.Connect },
+                            onClick = { client.close(); backStack.clear(); backStack.add(Screen.Connect) },
                             icon = { Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null) },
                             label = { Text("PCs") },
                         )
@@ -225,31 +226,41 @@ class MainActivity : ComponentActivity() {
                     )
                     else -> {}
                 }
-                when (val s = if (client.status == Status.Disconnected) Screen.Connect else screen) {
-                    Screen.Connect -> ConnectScreen(client) { screen = Screen.Sessions }
-                    Screen.Tools -> ToolsScreen(
-                        client,
-                        openDesktop = { screen = Screen.Desktop },
-                        openTerminal = { screen = Screen.Terminal(it) },
-                        openSsh = { screen = Screen.Ssh },
-                        openFreebuff = { screen = Screen.Freebuff },
-                        lock = lock,
-                    )
-                    Screen.Sessions -> SessionsScreen(client, openTerminal = { screen = Screen.Terminal(it) })
-                    Screen.Chats -> ChatScreen(client)
-                    Screen.Files -> FilesScreen(client)
-                    Screen.Freebuff -> FreebuffScreen(client, openDesktop = { screen = Screen.Desktop })
-                    Screen.Desktop -> DesktopScreen(
-                        client,
-                        onClose = { screen = Screen.Sessions },
-                        fullscreen = desktopFullscreen,
-                        onFullscreen = { desktopFullscreen = it },
-                        showKeys = desktopKeys,
-                        onShowKeys = { desktopKeys = it },
-                    )
-                    Screen.Ssh -> SshScreen(client, onClose = { screen = Screen.Tools })
-                    is Screen.Terminal -> TerminalScreen(client, s.sessionId, onClose = { screen = Screen.Sessions })
-                }
+                if (client.status == Status.Disconnected) {
+                    ConnectScreen(client) { showTab(Screen.Sessions) }
+                } else NavDisplay(
+                    backStack = backStack,
+                    onBack = { back() },
+                    entryProvider = entryProvider {
+                        entry<Screen.Connect> { ConnectScreen(client) { showTab(Screen.Sessions) } }
+                        entry<Screen.Tools> {
+                            ToolsScreen(
+                                client,
+                                openDesktop = { open(Screen.Desktop) },
+                                openTerminal = { open(Screen.Terminal(it)) },
+                                openSsh = { open(Screen.Ssh) },
+                                openFreebuff = { open(Screen.Freebuff) },
+                                lock = lock,
+                            )
+                        }
+                        entry<Screen.Sessions> { SessionsScreen(client, openTerminal = { open(Screen.Terminal(it)) }) }
+                        entry<Screen.Chats> { ChatScreen(client) }
+                        entry<Screen.Files> { FilesScreen(client) }
+                        entry<Screen.Freebuff> { FreebuffScreen(client, openDesktop = { open(Screen.Desktop) }) }
+                        entry<Screen.Desktop> {
+                            DesktopScreen(
+                                client,
+                                onClose = { back() },
+                                fullscreen = desktopFullscreen,
+                                onFullscreen = { desktopFullscreen = it },
+                                showKeys = desktopKeys,
+                                onShowKeys = { desktopKeys = it },
+                            )
+                        }
+                        entry<Screen.Ssh> { SshScreen(client, onClose = { back() }) }
+                        entry<Screen.Terminal> { TerminalScreen(client, it.sessionId, onClose = { back() }) }
+                    },
+                )
                 if (client.status != Status.Disconnected) {
                     com.yasha.pocketdesk.ui.ApprovalCard(client, Modifier.align(androidx.compose.ui.Alignment.TopCenter))
                 }

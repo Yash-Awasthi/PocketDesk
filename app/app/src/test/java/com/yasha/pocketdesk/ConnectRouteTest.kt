@@ -1,7 +1,7 @@
 package com.yasha.pocketdesk
 
-import org.junit.Assert.assertEquals
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Test
 
 class ConnectRouteTest {
     private val lan = "wss://192.168.1.2:8897/ws"

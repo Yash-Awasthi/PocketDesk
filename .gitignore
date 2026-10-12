@@ -6,6 +6,7 @@ local.properties
 *.keystore
 keystore.properties
 .cxx/
+.kotlin/
 
 # Test/runtime artifacts
 .pocketdesk-*/

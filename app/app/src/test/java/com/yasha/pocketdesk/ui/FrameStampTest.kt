@@ -1,8 +1,8 @@
 package com.yasha.pocketdesk.ui
 
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
-import org.junit.Test
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Test
 
 /** Mirrors seiStamp() in daemon/src/desktop_video.js; a mismatch shows a nonsense delay. */
 class FrameStampTest {

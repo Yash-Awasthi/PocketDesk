@@ -23,7 +23,8 @@ mobile "with all features enabled" → plan is `launch` adapter for GUI apps + V
 - `daemon/public/` — index.html (browser test client), pair.html (QR pairing page), vendor/qrcode.min.js (qrcode-generator@1.4.4, works as browser global `qrcode`)
 - `daemon/manifests/*.json` — claude, opencode, codex, gemini, aider, qwen (+chat sections)
 - `daemon/test/smoke.mjs` + `test/smoke-chat.mjs` — run via `npm.cmd test` (npm.ps1 blocked by execution policy; use npm.cmd)
-- `app/` — Android project. Gradle wrapper 9.3.1, AGP 8.13.1, Kotlin 2.1.20, compileSdk 36.
+- `app/` — Android project. Gradle wrapper 9.8.1, AGP 9.5.0-alpha09 (built-in Kotlin), Kotlin 2.5.0-Beta1,
+  compileSdk 37.2, targetSdk 37, JDK 25 to build; versions live in `app/gradle/libs.versions.toml`.
   Keystore: `app/pocketdesk.keystore`, creds in `app/keystore.properties` (both gitignored).
 - APKs land in `app/app/build/outputs/apk/{debug,release}/`.
 
@@ -143,7 +144,7 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
 
 ## Environment facts
 
-- ANDROID_HOME set, SDK platforms 36/37, JDK17 at Eclipse Adoptium, node v24.
+- ANDROID_HOME set, SDK platforms 36/37, JDK 25 needed for the app build, node v24 or newer.
 - No gradle on PATH; wrapper generated from local dist (9.3.1).
 - TLS certs are generated in pure Node (no openssl needed); csc.exe available
   (.NET Framework 4) — used to compile tray app.
