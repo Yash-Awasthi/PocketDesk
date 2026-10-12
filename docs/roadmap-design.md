@@ -170,7 +170,7 @@ window flash during a chat turn, a git action or a desktop stream.
 - **A CA-issued certificate or mkcert.** Pinning a self-signed certificate is equally
   strong for a paired phone.
 
-## Part 4 — Order
+## Part 4 — Order and status
 
 1. wss only (2.1). This is the smallest change and closes the only cleartext path.
 2. Settings to the browser (2.2). Daemon routes and tests first, then `pair.html`, then
@@ -179,3 +179,24 @@ window flash during a chat turn, a git action or a desktop stream.
    hardware check.
 4. On-device run of the foreground service, the biometric lock and QR pairing, so those
    items can be marked verified rather than compile-checked.
+
+### Status (2026-10-12)
+
+- 2.1 wss only: done. A plaintext daemon refuses non-loopback sockets
+  (`test/plaintext-loopback.test.mjs`), the app refuses `ws://` (`PairingTest`), and the manifest
+  no longer allows cleartext.
+- 2.2 settings on the PC: done. `/access/devices*` and `/access/totp/*` back the Devices and
+  Two-factor sections of the pair page. The socket handlers and the phone's two-factor section
+  are gone. Power stays on the phone.
+- 2.3 Task Manager only: done. The install creates a Start Menu shortcut only, the SYSTEM daemon
+  runs as `PocketDeskConsoleDaemon.exe`, and the remaining Windows helpers pass `windowsHide`.
+  The recording toggle, which had no UI since the tray was removed, is on the settings page.
+- macOS and Linux: the daemon runs hidden (LaunchAgent, systemd user service) with the
+  installing shell's PATH. A PocketDesk app (macOS) or app-menu entry (Linux) opens the settings
+  page. The menu-bar tray is gone. macOS streams H.264 through ffmpeg avfoundation, and its
+  monitor list, which read fields the helper never sent, is fixed. The install keeps the program
+  in `~/.pocketdesk/app`. CI runs the daemon suite on macOS as well.
+- Linux desktop viewing stays out of scope.
+- Still needs real hardware: a phone run (foreground service, biometric lock, QR pairing), a
+  Windows check that no helper flashes a window, and a Mac check of H.264 capture and
+  Retina input mapping.
