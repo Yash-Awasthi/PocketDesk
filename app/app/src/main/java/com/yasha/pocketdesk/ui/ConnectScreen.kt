@@ -16,7 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -54,6 +54,7 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
     var servers by remember { mutableStateOf(book.load()) }
     var editing by remember { mutableStateOf<ServerEntry?>(null) }
     var adding by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf<ServerEntry?>(null) }
     var trustFp by remember { mutableStateOf<String?>(null) }
     PairCodeDialog(ws)
     ConnectionPasswordDialog(ws)
@@ -199,8 +200,8 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
                             IconButton(onClick = { editing = s }) {
                                 Icon(Icons.Filled.Settings, contentDescription = "Edit")
                             }
-                            IconButton(onClick = { persist(servers - s) }) {
-                                Icon(Icons.Filled.Close, contentDescription = "Delete")
+                            IconButton(onClick = { deleting = s }) {
+                                Icon(Icons.Filled.Delete, contentDescription = "Delete")
                             }
                             TextButton(onClick = { startConnect(s) }, enabled = ws.status == Status.Disconnected) {
                                 Text(if (ws.status == Status.Connecting || ws.status == Status.AwaitingTrust) "..." else "Connect")
@@ -221,6 +222,24 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
             }
         }
+    }
+
+    // The saved token cannot be recovered on the phone, so removing one means pairing from the PC again.
+    deleting?.let { s ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Remove ${s.name}?") },
+            text = {
+                Text("The phone forgets this PC's address, token and certificate. " +
+                    "To use it again, pair from the QR code on the PC.")
+            },
+            confirmButton = {
+                TextButton(onClick = { persist(servers - s); deleting = null }) {
+                    Text("Remove", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
+        )
     }
 
     val showForm = adding || editing != null
