@@ -260,11 +260,12 @@
                    onkeydown="if(event.key==='Enter'){desktopTypeText();}" />
             <button class="btn" onclick="desktopTypeText()">Type</button>
             <!-- Shortcuts the browser keeps for itself when pressed on the keyboard. -->
-            <button class="btn" onclick="send({type:'desktop_key', key:87, modifiers:['ctrl']})">Ctrl+W</button>
-            <button class="btn" onclick="send({type:'desktop_key', key:84, modifiers:['ctrl']})">Ctrl+T</button>
-            <button class="btn" onclick="send({type:'desktop_key', key:78, modifiers:['ctrl']})">Ctrl+N</button>
-            <button class="btn" onclick="send({type:'desktop_key', key:9, modifiers:['alt']})">Alt+Tab</button>
-            <button class="btn" onclick="send({type:'desktop_key', key:0x5B})">Win</button>
+            <!-- A Mac takes Cmd where Windows and Linux take Ctrl or Alt; relabelled on welcome. -->
+            <button class="btn" data-mac="Cmd+W" onclick="send({type:'desktop_key', key:87, modifiers:[hostMod('ctrl')]})">Ctrl+W</button>
+            <button class="btn" data-mac="Cmd+T" onclick="send({type:'desktop_key', key:84, modifiers:[hostMod('ctrl')]})">Ctrl+T</button>
+            <button class="btn" data-mac="Cmd+N" onclick="send({type:'desktop_key', key:78, modifiers:[hostMod('ctrl')]})">Ctrl+N</button>
+            <button class="btn" data-mac="Cmd+Tab" onclick="send({type:'desktop_key', key:9, modifiers:[hostMod('alt')]})">Alt+Tab</button>
+            <button class="btn" data-mac="Spotlight" onclick="send(hostOs === 'darwin' ? {type:'desktop_key', key:0x20, modifiers:['win']} : {type:'desktop_key', key:0x5B})">Win</button>
             <button class="btn" onclick="document.getElementById('deskFilePick').click()">Send files…</button>
             <input type="file" id="deskFilePick" multiple style="display:none" onchange="desktopSendFiles([...this.files]); this.value=''" />
           </div>
@@ -473,6 +474,8 @@ const chatStates = {};
 const chatDomNodes = {};
 const pendingProposals = []; // {id, type, summary, detail, created, ttlRemaining}
 let myClientId = null; // this browser's device id (from welcome)
+let hostOs = ""; // the PC's process.platform, from welcome
+const hostMod = (m) => (hostOs === "darwin" && (m === "ctrl" || m === "alt") ? "win" : m);
 const queued = {}; // chatId -> queued prompts
 const todoBoards = {}; // chatId -> todo items
 const permModes = {}; // chatId -> permission mode
@@ -523,6 +526,8 @@ function handle(m) {
     case "welcome":
       setStatus(true);
       myClientId = m.clientId || myClientId;
+      hostOs = m.os || "";
+      if (hostOs === "darwin") document.querySelectorAll("[data-mac]").forEach((b) => { b.textContent = b.dataset.mac; });
       if (m.deviceToken) document.getElementById("token").value = m.deviceToken;
       send({ type: "usage_list" });
       send({ type: "device_list" });
@@ -1110,7 +1115,7 @@ function desktopPointer() {
   g.clearRect(0, 0, pc.width, pc.height);
   if (!c || !c.visible || desk.hover || !desk.viewing) return;
   const u = pc.width / Math.max(1, pc.getBoundingClientRect().width);
-  g.save(); g.translate(c.x, c.y); g.scale(u, u);
+  g.save(); g.translate(c.fx != null ? c.fx * pc.width : c.x, c.fy != null ? c.fy * pc.height : c.y); g.scale(u, u);
   g.beginPath(); g.moveTo(0, 0); g.lineTo(0, 17); g.lineTo(4.5, 13); g.lineTo(7.5, 19.5); g.lineTo(10, 18.5); g.lineTo(7, 12); g.lineTo(12.5, 12); g.closePath();
   g.fillStyle = "#fff"; g.fill(); g.lineWidth = 1.5; g.strokeStyle = "#000"; g.stroke(); g.restore();
 }
@@ -1120,7 +1125,8 @@ function desktopToScreen(ev) {
   const r = cv.getBoundingClientRect();
   const x = Math.round((ev.clientX - r.left) * cv.width / r.width);
   const y = Math.round((ev.clientY - r.top) * cv.height / r.height);
-  return x < 0 || y < 0 || x >= cv.width || y >= cv.height ? null : { x, y };
+  // fx/fy let the daemon place the point on the real screen whatever size the picture is (a Retina Mac).
+  return x < 0 || y < 0 || x >= cv.width || y >= cv.height ? null : { x, y, fx: x / cv.width, fy: y / cv.height };
 }
 function desktopTypeText() {
   const el = document.getElementById("deskTypeBox");
@@ -1812,7 +1818,7 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
     if (!desk.viewing || desk.viewOnly || ev.timeStamp - lastMove < 16) return;
     lastMove = ev.timeStamp;
     const p = desktopToScreen(ev);
-    if (p) send({ type: "desktop_mouse", x: p.x, y: p.y });
+    if (p) send({ type: "desktop_mouse", ...p });
   });
   for (const [evt, press] of [["mousedown", "down"], ["mouseup", "up"]]) {
     cv.addEventListener(evt, (ev) => {
@@ -1821,7 +1827,7 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
       const p = desktopToScreen(ev);
       if (!button || !p) return;
       if (press === "down") { cv.focus(); desk.held.add("b:" + button); } else desk.held.delete("b:" + button);
-      send({ type: "desktop_mouse", x: p.x, y: p.y, press, button });
+      send({ type: "desktop_mouse", ...p, press, button });
       ev.preventDefault();
     });
   }
@@ -1829,9 +1835,11 @@ setInterval(() => { if (ws && ws.readyState === 1) send({ type: "schedule_list" 
   cv.addEventListener("wheel", (ev) => {
     if (!desk.viewing || desk.viewOnly) return;
     ev.preventDefault();
-    const px = ev.deltaMode === 1 ? ev.deltaY * 40 : ev.deltaY;
-    const wheel = Math.max(-1200, Math.min(1200, Math.round(-px * 1.2)));
+    const amount = (d) => Math.max(-1200, Math.min(1200, Math.round((ev.deltaMode === 1 ? d * 40 : d) * 1.2)));
+    const wheel = -amount(ev.deltaY);
+    const hwheel = amount(ev.deltaX);
     if (wheel) send({ type: "desktop_mouse", wheel });
+    if (hwheel) send({ type: "desktop_mouse", hwheel });
   }, { passive: false });
   for (const [evt, press] of [["keydown", "down"], ["keyup", "up"]]) {
     cv.addEventListener(evt, (ev) => {

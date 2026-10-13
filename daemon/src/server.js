@@ -16,7 +16,7 @@ import * as cliServer from "./cli-server.js";
 import { PowerManager, normalizeAwakeMode } from "./power_manager.js";
 import { createActivityMonitor } from "./activity.js";
 import { StreamJsonParser } from "./stream_json_parser.js";
-import { DesktopController } from "./desktop_capture.js";
+import { DesktopController, toFraction } from "./desktop_capture.js";
 import { createAccess } from "./access.js";
 import { wakeTargets } from "./wake.js";
 import { Recorder, RECORD_FLAG } from "./recorder.js";
@@ -364,7 +364,7 @@ export function start(config, { onTokenRotated } = {}) {
     const deviceToken = auth.pairing ? devices.issueToken(auth.id) : undefined;
     // The phone keeps the current iroh address, which also repairs an entry paired from a QR without one.
     const iroh = irohEp?.ticket() || undefined;
-    return { type: "welcome", version: 1, clientId: auth.id, deviceToken, sessions: allSessions(), manifests: registry.list(), wake, iroh };
+    return { type: "welcome", version: 1, clientId: auth.id, deviceToken, sessions: allSessions(), manifests: registry.list(), wake, iroh, os: process.platform };
   }
 
   function disconnectDevice(clientId) {
@@ -444,15 +444,24 @@ export function start(config, { onTokenRotated } = {}) {
       } catch { /* watcher vanished mid-send */ }
     }
   });
+  // A stream that cannot capture (macOS without Screen Recording) would otherwise just stay black.
+  desktop.on("capture_error", (reason) => {
+    for (const w of desktopWatchers) {
+      try { send(w, { type: "desktop_frame_error", reason }); } catch { /* watcher vanished mid-send */ }
+    }
+  });
 
   // Viewers draw the pointer themselves, in the pixels of the picture they receive.
+  // fx/fy (a fraction of what the viewer's picture shows) is exact at any capture size; x/y is for older viewers.
   desktop.on("cursor", (c) => {
     for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
       const video_ = videoWatchers.has(w);
       const s = video_ ? video.scale : desktop.scale;
       const m = video_ ? video.monitor : null;
+      const rect = video_ ? video.monitor : desktop.frameRect;
+      const f = rect?.w > 0 && rect?.h > 0 ? toFraction(rect, c) : {};
       try {
-        send(w, { type: "desktop_cursor", x: Math.round((c.x - (m?.x || 0)) * s), y: Math.round((c.y - (m?.y || 0)) * s), shape: c.shape, visible: c.visible });
+        send(w, { type: "desktop_cursor", x: Math.round((c.x - (m?.x || 0)) * s), y: Math.round((c.y - (m?.y || 0)) * s), ...f, shape: c.shape, visible: c.visible });
       } catch { /* watcher vanished mid-send */ }
     }
   });

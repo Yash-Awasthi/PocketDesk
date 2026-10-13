@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -127,6 +128,9 @@ class WsClient(
     val _configContent = kotlinx.coroutines.flow.MutableStateFlow("")
 
     // ── Desktop control state (AnyDesk-style screen viewer) ──
+    /** The PC's OS as Node names it (win32, darwin, linux); empty from a daemon too old to say. */
+    var hostOs by mutableStateOf("")
+        private set
     /** Latest desktop frame (base64 JPEG + geometry) — null until first frame. */
     var desktopFrame by mutableStateOf<DesktopFrame?>(null)
         private set
@@ -222,6 +226,8 @@ class WsClient(
 
     /** Primary url and its fallback for the current server; retries alternate between them. */
     private var lanUrl: String? = null
+    /** The saved entry's own url, which stays the same whichever route is in use. */
+    val serverUrl: String? get() = lanUrl
     private var fallbackUrl: String? = null
     /** Updated by [Link] from the system; decides between the LAN url and iroh. */
     @Volatile var network = NetInfo(null, local = true)
@@ -527,17 +533,32 @@ class WsClient(
     fun clipboardSetFiles(paths: List<String>, paste: Boolean) = control(Proto.clipboardSet(null, files = paths, paste = paste))
     fun desktopStop() { desktopStreaming = false; desktopResume = null; send(Proto.desktopStop()) }
     fun desktopSnapshot() = send(Proto.desktopFrame())
+    /** Width and height of the picture on screen; positions also go out as fractions of it. */
+    @Volatile var desktopFrameSize: Pair<Int, Int>? = null
+    /** The user's pointer calibration for the PC and screen in view; null sends and reads fractions as they are. */
+    @Volatile var desktopCalibration: com.yasha.pocketdesk.ui.Calibration? = null
+    /** The last pointer report as the daemon sent it, before any calibration; what calibrating measures. */
+    @Volatile var desktopPointerRaw: Pair<Double, Double>? = null
+        private set
+    private fun frac(x: Int, y: Int) = desktopFrameSize?.takeIf { it.first > 0 && it.second > 0 }
+        ?.let { (w, h) ->
+            val fx = x.toDouble() / w
+            val fy = y.toDouble() / h
+            desktopCalibration?.toPc(fx, fy) ?: (fx to fy)
+        }
     /** x/y are frame pixels; click is left|right|middle|double. */
-    fun desktopClick(x: Int, y: Int, click: String) = control(Proto.desktopMouse(x, y, click, null))
-    fun desktopMove(x: Int, y: Int) = control(Proto.desktopMouse(x, y, null, null))
+    fun desktopClick(x: Int, y: Int, click: String) = control(Proto.desktopMouse(x, y, click, null, frac = frac(x, y)))
+    fun desktopMove(x: Int, y: Int) = control(Proto.desktopMouse(x, y, null, null, frac = frac(x, y)))
     /** Holds (down) or releases (up) the left button at x/y, for dragging. */
-    fun desktopPress(x: Int, y: Int, down: Boolean) = control(Proto.desktopMouse(x, y, null, null, if (down) "down" else "up"))
+    fun desktopPress(x: Int, y: Int, down: Boolean) = control(Proto.desktopMouse(x, y, null, null, if (down) "down" else "up", frac = frac(x, y)))
     fun desktopScroll(down: Boolean) = control(Proto.desktopMouse(null, null, null, if (down) -120 else 120))
     fun desktopKey(vk: Int, modifiers: List<String> = emptyList()) = control(Proto.desktopKey(vk, modifiers))
     fun desktopKeyPress(vk: Int, down: Boolean) = control(Proto.desktopKey(vk, emptyList(), if (down) "down" else "up"))
     fun desktopButton(x: Int, y: Int, button: String, down: Boolean) =
-        control(Proto.desktopMouse(x, y, null, null, if (down) "down" else "up", button))
+        control(Proto.desktopMouse(x, y, null, null, if (down) "down" else "up", button, frac = frac(x, y)))
     fun desktopWheel(delta: Int) = control(Proto.desktopMouse(null, null, null, delta))
+    /** Positive scrolls right. */
+    fun desktopHWheel(delta: Int) = control(Proto.desktopMouse(null, null, null, null, hwheel = delta))
     fun desktopType(text: String) = control(Proto.desktopType(text))
 
     fun modelList(chatId: String) = send(Proto.modelList(chatId))
@@ -735,6 +756,7 @@ class WsClient(
                     val bc = (w["broadcasts"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
                     if (macs.isNotEmpty()) wakeInfo = WakeInfo(macs, bc)
                 }
+                hostOs = str(m, "os") ?: ""
                 tools = Proto.parseTools(m)
                 sessions = Proto.parseSessions(m)
                 chats = Proto.parseChats(m)
@@ -1022,7 +1044,11 @@ class WsClient(
             "desktop_cursor" -> {
                 val x = (m["x"] as? JsonPrimitive)?.intOrNull ?: return
                 val y = (m["y"] as? JsonPrimitive)?.intOrNull ?: return
-                desktopCursor = DesktopCursor(x, y, str(m, "shape") ?: "arrow")
+                val fx = (m["fx"] as? JsonPrimitive)?.doubleOrNull
+                val fy = (m["fy"] as? JsonPrimitive)?.doubleOrNull
+                desktopPointerRaw = if (fx != null && fy != null) fx to fy else null
+                val pic = if (fx != null && fy != null) desktopCalibration?.toPicture(fx, fy) ?: (fx to fy) else null
+                desktopCursor = DesktopCursor(x, y, str(m, "shape") ?: "arrow", pic?.first, pic?.second)
             }
             "desktop_monitors" -> if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
                 desktopMonitors = (m["monitors"] as? JsonArray)?.mapIndexed { i, e ->

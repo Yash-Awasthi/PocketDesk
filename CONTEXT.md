@@ -49,7 +49,26 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
 
 ## State at save (IMPORTANT — current)
 
-**2026-09-26 pass — console (secure-desktop) endpoint (newest):**
+**2026-10-14 pass — desktop control on macOS, OS-aware input, pointer mapping (0.7.0, newest):**
+
+- `welcome` carries `os` (`process.platform`); the app picks shortcut bar, modifier names and
+  three-finger swipe shortcuts from it (`ui/HostKeys.kt`).
+- Pointer placement is by fraction of the picture: `desktop_mouse` carries `fx`/`fy` and
+  `desktop_cursor` sends them back, mapped onto the watched monitor's rect (video) or `jpegRect`
+  (still frames). x/y stays for older clients. On macOS the input space is CG global points, so
+  no pixel ratio is involved; `CGDisplayPixelsWide` returns points on HiDPI modes, which is what
+  made the Mac pointer land at twice the distance before.
+- Manual corner calibration lives on the phone only (`Calibration` in `ui/TouchGestures.kt`), keyed
+  by server url and monitor; a tap while calibrating marks a corner and is never sent as a click.
+- Swift helper: drag events while a button is held, click counts for double clicks, held
+  modifiers applied to every event, full key map with the fn flag on arrows/F-keys (needed for
+  Ctrl+arrow Space switching), media keys, horizontal scroll, Accessibility check with a clear
+  error. A changed source now forces a rebuild (the old binary used to win on mtime).
+- Held keys and buttons are released on `desktop_stop` and when control is paused.
+- UNPROVEN: none of the macOS changes have run on a real Mac; CI's macOS job compiles the helper
+  (`desktop.test.mjs` fails on `helper_not_running`). Linux still has no desktop capture or input.
+
+**2026-09-26 pass — console (secure-desktop) endpoint:**
 
 - A second daemon instance runs as SYSTEM in the active console session so it can reach the
   secure desktop (UAC prompts, lock screen, before login), which the user daemon cannot. It is

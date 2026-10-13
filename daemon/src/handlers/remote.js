@@ -1,5 +1,6 @@
 import { resolvePath } from "../fs_ops.js";
 import * as devices from "../devices.js";
+import { fromFraction } from "../desktop_capture.js";
 
 export default function remoteHandlers(ctx) {
   const { send, desktop, desktopWatchers, video, videoWatchers, recorder, access } = ctx;
@@ -28,31 +29,32 @@ export default function remoteHandlers(ctx) {
   // The PC owner flipping "allow control" off drops every live controller to view-only at once.
   if (access) access.onControlChange = (on) => {
     for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
-      if (!on) w._viewOnly = true;
+      if (!on) { w._viewOnly = true; release(w); }
       else if (!w._viewOnlyForced) w._viewOnly = false;
       send(w, { type: "control_allowed", allowed: on, viewOnly: !!w._viewOnly });
     }
   };
-  let monitorList = null;
   async function monitorAt(index) {
-    if (!monitorList || !monitorList[index]) monitorList = (await desktop.monitors()).monitors || [];
-    return monitorList[index] || null;
+    if (!desktop.monitorList?.[index]) await desktop.monitors();
+    return desktop.monitorList?.[index] || null;
   }
-  // A viewer that drops mid-press would leave the key or button stuck down on the PC.
+  // A viewer that drops, stops or loses control mid-press would leave the key or button stuck down on the PC.
+  function release(ws) {
+    for (const h of ws._held || []) {
+      const [kind, v] = h.split(":");
+      if (kind === "k") desktop.inputKey({ key: Number(v), press: "up" });
+      else desktop.inputMouse({ press: "up", button: v });
+    }
+    ws._held?.clear();
+  }
   function hold(ws, id, press) {
     if (!ws._held) {
       ws._held = new Set();
-      ws.once?.("close", () => {
-        for (const h of ws._held) {
-          const [kind, v] = h.split(":");
-          if (kind === "k") desktop.inputKey({ key: Number(v), press: "up" });
-          else desktop.inputMouse({ press: "up", button: v });
-        }
-        ws._held.clear();
-      });
+      ws.once?.("close", () => release(ws));
     }
     if (press === "down") ws._held.add(id); else ws._held.delete(id);
   }
+  const wheelAmount = (v) => (v == null ? undefined : Math.max(-12000, Math.min(12000, Math.round(Number(v)) || 0)));
   return {
     // ── Real desktop control (AnyDesk-style: watch + full input) ─────────
     async desktop_start(ws, msg) {
@@ -75,6 +77,8 @@ export default function remoteHandlers(ctx) {
         videoWatchers.delete(ws);
       }
       const r = await desktop.startFrameStream(ws._clientId || "anon", msg.quality);
+      // Pointing by fraction needs to know what the still frames show.
+      if (r.ok && !desktop.monitorList) await desktop.monitors();
       // A repeat start from the same socket must not stack another close listener.
       if (r.ok && !desktopWatchers.has(ws)) {
         desktopWatchers.add(ws);
@@ -95,7 +99,6 @@ export default function remoteHandlers(ctx) {
     },
     async desktop_monitors(ws, msg) {
       const r = await desktop.monitors();
-      if (r.ok) monitorList = r.monitors;
       send(ws, { type: "desktop_monitors", ...r, current: video.monitor?.index ?? 0 });
     },
     // iroh viewers report GOP progress so the daemon sees delay hidden in QUIC and relay buffers.
@@ -103,6 +106,7 @@ export default function remoteHandlers(ctx) {
       ws.onVideoAck?.(Number(msg.g) || 0, Number(msg.f) || 0);
     },
     async desktop_stop(ws, msg) {
+      release(ws);
       if (videoWatchers.delete(ws) && !videoWatchers.size) video.stop();
       desktopWatchers.delete(ws);
       const r = desktop.stopFrameStream(ws._clientId || "anon");
@@ -119,19 +123,31 @@ export default function remoteHandlers(ctx) {
     },
     async desktop_mouse(ws, msg) {
       if (!mayControl(ws)) return send(ws, { type: "desktop_input_ok", ok: false, error: "view only" });
-      // Frame px -> real desktop px: the capture helper downscales the full
-      // virtual screen by the quality factor (1 / 0.75 / 0.5), so client
-      // coords measured on the frame must be divided back out. Wheel-only
-      // events carry no meaningful x/y and skip the transform.
-      const factor = videoWatchers.has(ws) ? video.scale : desktop.scale;
-      const origin = (videoWatchers.has(ws) && video.monitor) || { x: 0, y: 0 };
-      const at = msg.x != null && msg.y != null && msg.wheel == null;
-      const x = at ? Math.round(Number(msg.x) / factor) + origin.x : undefined;
-      const y = at ? Math.round(Number(msg.y) / factor) + origin.y : undefined;
+      // fx/fy, a fraction of the picture, maps straight onto the monitor it shows, whatever pixel
+      // size the capture has (a Retina Mac captures twice its point size). Older viewers send
+      // only picture px, divided back out by the quality factor. Wheel-only events skip both.
+      const video_ = videoWatchers.has(ws);
+      const rect = video_ ? video.monitor : desktop.frameRect;
+      const wheel = wheelAmount(msg.wheel);
+      const hwheel = wheelAmount(msg.hwheel);
+      const fx = Number(msg.fx), fy = Number(msg.fy);
+      const finite = (v) => v != null && Number.isFinite(Number(v));
+      let x, y;
+      if (wheel == null && hwheel == null) {
+        if (rect && finite(msg.fx) && finite(msg.fy)) {
+          ({ x, y } = fromFraction(rect, Math.min(1, Math.max(0, fx)), Math.min(1, Math.max(0, fy))));
+        } else if (finite(msg.x) && finite(msg.y)) {
+          const factor = video_ ? video.scale : desktop.scale;
+          const origin = (video_ && video.monitor) || { x: 0, y: 0 };
+          x = Math.round(Number(msg.x) / factor) + origin.x;
+          y = Math.round(Number(msg.y) / factor) + origin.y;
+        }
+      }
       const press = msg.press === "down" || msg.press === "up" ? msg.press : undefined;
       const button = ["left", "right", "middle"].includes(msg.button) ? msg.button : "left";
+      const click = ["left", "right", "middle", "double"].includes(msg.click) ? msg.click : undefined;
       if (press) hold(ws, "b:" + button, press);
-      const r = await desktop.inputMouse({ x, y, click: msg.click, press, button, wheel: msg.wheel });
+      const r = await desktop.inputMouse({ x, y, click, press, button, wheel, hwheel });
       send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
     },
     async desktop_key(ws, msg) {
@@ -163,7 +179,7 @@ export default function remoteHandlers(ctx) {
       const png = typeof msg.png === "string" ? msg.png.slice(0, 24 << 20) : undefined;
       const r = await desktop.clipboardSet({ text, png, files });
       if (r.ok && files) recorder.log("files_sent", { device: deviceName(ws), files });
-      if (r.ok && msg.paste) await desktop.inputKey({ key: 86, modifiers: ["ctrl"] });
+      if (r.ok && msg.paste) await desktop.inputKey({ key: 86, modifiers: [process.platform === "darwin" ? "win" : "ctrl"] });
       send(ws, { type: "clipboard_set_ok", ...r });
     },
     async desktop_quality(ws, msg) {
@@ -172,9 +188,9 @@ export default function remoteHandlers(ctx) {
     async desktop_status(ws, msg) {
       send(ws, { type: "desktop_status", ...desktop.getStatus() });
     },
-    // macOS grants: { request:true } shows the system prompts, otherwise just reports the state.
+    // macOS grants: { request:true } shows the system prompts on the PC, so only a controller may ask.
     async desktop_permissions(ws, msg) {
-      const r = msg.request ? await desktop.requestPermissions() : await desktop.permissions();
+      const r = msg.request && mayControl(ws) ? await desktop.requestPermissions() : await desktop.permissions();
       send(ws, { type: "desktop_permissions", ...r });
     },
   };

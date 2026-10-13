@@ -73,7 +73,7 @@ public static class RHI {
   [StructLayout(LayoutKind.Explicit)] public struct INPUTUNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; }
   [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public INPUTUNION u; }
   public const uint MOVE=0x0001, LEFTDOWN=0x0002, LEFTUP=0x0004, RIGHTDOWN=0x0008, RIGHTUP=0x0010,
-                    MIDDLEDOWN=0x0020, MIDDLEUP=0x0040, WHEEL=0x0800, VIRTUALDESK=0x4000, ABSOLUTE=0x8000,
+                    MIDDLEDOWN=0x0020, MIDDLEUP=0x0040, WHEEL=0x0800, HWHEEL=0x1000, VIRTUALDESK=0x4000, ABSOLUTE=0x8000,
                     KEYDOWN=0x0000, EXTENDED=0x0001, KEYUP=0x0002, UNICODE=0x0004;
   public static uint Mouse(int x, int y, uint flags, int wheel) {
     var i = new INPUT { type = 0 };
@@ -168,6 +168,7 @@ while ($true) {
         [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":false,"error":"input_blocked"}'); continue
       }
       if ($cmd.wheel) { [RHI]::Mouse(0,0,[RHI]::WHEEL,[int]$cmd.wheel) | Out-Null }
+      if ($cmd.hwheel) { [RHI]::Mouse(0,0,[RHI]::HWHEEL,[int]$cmd.hwheel) | Out-Null }
       [Console]::Out.WriteLine('{"id":' + $cmd.id + ',"ok":true}')
     } catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
     continue
@@ -551,75 +552,185 @@ func capture(_ scale: Double, _ index: Int) -> [String: Any] {
 // Windows virtual-key codes (what the phone and web client send) to macOS CGKeyCodes.
 let VK: [Int: CGKeyCode] = [
   0x08: 51, 0x09: 48, 0x0D: 36, 0x1B: 53, 0x20: 49, 0x2E: 117, 0x24: 115, 0x23: 119,
-  0x21: 116, 0x22: 121, 0x25: 123, 0x26: 126, 0x27: 124, 0x28: 125,
+  0x21: 116, 0x22: 121, 0x25: 123, 0x26: 126, 0x27: 124, 0x28: 125, 0x2D: 114,
   0x30: 29, 0x31: 18, 0x32: 19, 0x33: 20, 0x34: 21, 0x35: 23, 0x36: 22, 0x37: 26, 0x38: 28, 0x39: 25,
   0x41: 0, 0x42: 11, 0x43: 8, 0x44: 2, 0x45: 14, 0x46: 3, 0x47: 5, 0x48: 4, 0x49: 34, 0x4A: 38,
   0x4B: 40, 0x4C: 37, 0x4D: 46, 0x4E: 45, 0x4F: 31, 0x50: 35, 0x51: 12, 0x52: 15, 0x53: 1, 0x54: 17,
   0x55: 32, 0x56: 9, 0x57: 13, 0x58: 7, 0x59: 16, 0x5A: 6,
+  0x60: 82, 0x61: 83, 0x62: 84, 0x63: 85, 0x64: 86, 0x65: 87, 0x66: 88, 0x67: 89, 0x68: 91, 0x69: 92,
+  0x6A: 67, 0x6B: 69, 0x6D: 78, 0x6E: 65, 0x6F: 75,
   0x70: 122, 0x71: 120, 0x72: 99, 0x73: 118, 0x74: 96, 0x75: 97, 0x76: 98, 0x77: 100,
+  0x78: 101, 0x79: 109, 0x7A: 103, 0x7B: 111, 0x7C: 105, 0x7D: 107, 0x7E: 113, 0x7F: 106,
+  0x80: 64, 0x81: 79, 0x82: 80, 0x83: 90,
+  0xBA: 41, 0xBB: 24, 0xBC: 43, 0xBD: 27, 0xBE: 47, 0xBF: 44, 0xC0: 50,
+  0xDB: 33, 0xDC: 42, 0xDD: 30, 0xDE: 39,
 ]
 
-// The capture is in pixels; CGEvent works in points. On Retina that ratio is 2, so incoming
-// pixel coordinates (already mapped to full-capture pixels by the server) convert to points here.
-func pointScale() -> Double {
-  let id = CGMainDisplayID()
-  let px = Double(CGDisplayPixelsWide(id))
-  let pt = Double(CGDisplayBounds(id).width)
-  return px > 0 ? pt / px : 1.0
-}
+// Modifier virtual keys (generic, left, right) to their key code and flag.
+let MODS: [Int: (CGKeyCode, CGEventFlags)] = [
+  0x10: (56, CGEventFlags.maskShift), 0xA0: (56, CGEventFlags.maskShift), 0xA1: (60, CGEventFlags.maskShift),
+  0x11: (59, CGEventFlags.maskControl), 0xA2: (59, CGEventFlags.maskControl), 0xA3: (62, CGEventFlags.maskControl),
+  0x12: (58, CGEventFlags.maskAlternate), 0xA4: (58, CGEventFlags.maskAlternate), 0xA5: (61, CGEventFlags.maskAlternate),
+  0x5B: (55, CGEventFlags.maskCommand), 0x5C: (54, CGEventFlags.maskCommand),
+]
+let TAP_MODS: [(String, CGKeyCode, CGEventFlags)] = [
+  ("ctrl", 59, CGEventFlags.maskControl), ("alt", 58, CGEventFlags.maskAlternate),
+  ("shift", 56, CGEventFlags.maskShift), ("win", 55, CGEventFlags.maskCommand),
+]
+// Real keyboards flag the arrows, the navigation block and F-keys like this; without the flags
+// the system ignores shortcuts such as Ctrl+Left (previous Space) and Ctrl+Up (Mission Control).
+let FN_KEYS: Set<CGKeyCode> = [122, 120, 99, 118, 96, 97, 98, 100, 101, 109, 103, 111, 105, 107, 113, 106, 64, 79, 80, 90,
+  114, 115, 116, 117, 119, 121, 123, 124, 125, 126]
+let ARROW_KEYS: Set<CGKeyCode> = [123, 124, 125, 126]
+// Windows media virtual keys to NX_KEYTYPE codes, which macOS only takes as system-defined events.
+let MEDIA: [Int: Int] = [0xAD: 7, 0xAE: 1, 0xAF: 0, 0xB0: 17, 0xB1: 18, 0xB3: 16]
 
-func flags(_ mods: [String]) -> CGEventFlags {
+let src = CGEventSource(stateID: .hidSystemState)
+// Synthetic events carry no modifier state of their own, so held modifiers are applied to every event.
+var heldMods = Set<Int>()
+var buttonsDown = Set<String>()
+var lastClick: (button: String, at: CGPoint, time: Double, count: Int) = ("", CGPoint.zero, 0, 0)
+
+func heldFlags() -> CGEventFlags {
   var f = CGEventFlags()
-  if mods.contains("ctrl") { f.insert(.maskControl) }
-  if mods.contains("alt") { f.insert(.maskAlternate) }
-  if mods.contains("shift") { f.insert(.maskShift) }
-  if mods.contains("win") { f.insert(.maskCommand) }
+  for vk in heldMods { if let m = MODS[vk] { f.insert(m.1) } }
   return f
 }
 
-func postMouse(_ cmd: [String: Any]) -> [String: Any] {
-  let sc = pointScale()
-  let loc = CGEvent(source: nil)?.location ?? .zero
-  let x = cmd["x"] != nil ? Double(cmd["x"] as? Int ?? 0) * sc : Double(loc.x)
-  let y = cmd["y"] != nil ? Double(cmd["y"] as? Int ?? 0) * sc : Double(loc.y)
-  let p = CGPoint(x: x, y: y)
-  let btn = cmd["button"] as? String ?? "left"
-  let down: CGEventType = btn == "right" ? .rightMouseDown : btn == "middle" ? .otherMouseDown : .leftMouseDown
-  let up: CGEventType = btn == "right" ? .rightMouseUp : btn == "middle" ? .otherMouseUp : .leftMouseUp
-  let cgBtn: CGMouseButton = btn == "right" ? .right : btn == "middle" ? .center : .left
-  func ev(_ t: CGEventType) { CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: cgBtn)?.post(tap: .cghidEventTap) }
-  if cmd["x"] != nil || cmd["y"] != nil { ev(.mouseMoved) }
-  if let click = cmd["click"] as? String {
-    let d: CGEventType = click == "right" ? .rightMouseDown : click == "middle" ? .otherMouseDown : .leftMouseDown
-    let u: CGEventType = click == "right" ? .rightMouseUp : click == "middle" ? .otherMouseUp : .leftMouseUp
-    ev(d); ev(u); if click == "double" { ev(d); ev(u) }
+func num(_ v: Any?) -> Double? { return (v as? NSNumber)?.doubleValue }
+
+// macOS leaves click counting to whoever posts the event: a second quick click on the same spot
+// must say 2, or apps see two single clicks and a double tap never opens anything.
+func clickCount(_ button: String, _ p: CGPoint) -> Int64 {
+  let now = ProcessInfo.processInfo.systemUptime
+  let near = abs(p.x - lastClick.at.x) < 6 && abs(p.y - lastClick.at.y) < 6
+  let n = button == lastClick.button && near && now - lastClick.time < NSEvent.doubleClickInterval ? lastClick.count + 1 : 1
+  lastClick = (button, p, now, n)
+  return Int64(n)
+}
+
+func mouseKinds(_ b: String) -> (CGEventType, CGEventType, CGEventType, CGMouseButton) {
+  switch b {
+  case "right": return (.rightMouseDown, .rightMouseUp, .rightMouseDragged, .right)
+  case "middle": return (.otherMouseDown, .otherMouseUp, .otherMouseDragged, .center)
+  default: return (.leftMouseDown, .leftMouseUp, .leftMouseDragged, .left)
   }
-  if let press = cmd["press"] as? String { ev(press == "down" ? down : up) }
-  if let wheel = cmd["wheel"] as? Int, wheel != 0 {
-    CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: Int32(wheel), wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+}
+
+func postMouse(_ cmd: [String: Any]) -> [String: Any] {
+  if !AXIsProcessTrusted() { return ["ok": false, "error": "accessibility_permission"] }
+  // x/y arrive as global points (top-left of the main display is 0,0), the space CGEvent uses.
+  let moved = num(cmd["x"]) != nil && num(cmd["y"]) != nil
+  let p = moved ? CGPoint(x: num(cmd["x"]) ?? 0, y: num(cmd["y"]) ?? 0)
+    : (CGEvent(source: nil)?.location ?? CGPoint.zero)
+  let f = heldFlags()
+  func ev(_ t: CGEventType, _ b: CGMouseButton, _ clicks: Int64) {
+    guard let e = CGEvent(mouseEventSource: src, mouseType: t, mouseCursorPosition: p, mouseButton: b) else { return }
+    e.setIntegerValueField(.mouseEventClickState, value: clicks)
+    e.flags = f
+    e.post(tap: .cghidEventTap)
+  }
+  if moved {
+    // With a button held macOS expects drag events; plain moves would drop the drag.
+    if let held = ["left", "right", "middle"].first(where: { buttonsDown.contains($0) }) {
+      let k = mouseKinds(held)
+      ev(k.2, k.3, Int64(lastClick.count))
+    } else {
+      ev(.mouseMoved, .left, 0)
+    }
+  }
+  if let click = cmd["click"] as? String {
+    if click == "double" {
+      let k = mouseKinds("left")
+      ev(k.0, k.3, 1); ev(k.1, k.3, 1); ev(k.0, k.3, 2); ev(k.1, k.3, 2)
+      lastClick = ("left", p, ProcessInfo.processInfo.systemUptime, 2)
+    } else {
+      let k = mouseKinds(click)
+      let n = clickCount(click, p)
+      ev(k.0, k.3, n); ev(k.1, k.3, n)
+    }
+  }
+  if let press = cmd["press"] as? String {
+    let btn = cmd["button"] as? String ?? "left"
+    let k = mouseKinds(btn)
+    if press == "down" {
+      buttonsDown.insert(btn)
+      ev(k.0, k.3, clickCount(btn, p))
+    } else {
+      buttonsDown.remove(btn)
+      ev(k.1, k.3, Int64(max(1, lastClick.count)))
+    }
+  }
+  let wheel = cmd["wheel"] as? Int ?? 0
+  let hwheel = cmd["hwheel"] as? Int ?? 0
+  if wheel != 0 || hwheel != 0 {
+    // hwheel is positive to the right, as on Windows; the second macOS wheel counts the other way.
+    let e = CGEvent(scrollWheelEvent2Source: src, units: .pixel, wheelCount: 2,
+      wheel1: Int32(clamping: wheel), wheel2: Int32(clamping: -hwheel), wheel3: 0)
+    e?.flags = f
+    e?.post(tap: .cghidEventTap)
   }
   return ["ok": true]
 }
 
+func keyEvent(_ code: CGKeyCode, _ down: Bool, _ flags: CGEventFlags) {
+  guard let e = CGEvent(keyboardEventSource: src, virtualKey: code, keyDown: down) else { return }
+  var f = flags
+  if FN_KEYS.contains(code) { f.insert(.maskSecondaryFn) }
+  if ARROW_KEYS.contains(code) { f.insert(.maskNumericPad) }
+  e.flags = f
+  e.post(tap: .cghidEventTap)
+}
+
+func mediaKey(_ key: Int) {
+  for down in [true, false] {
+    let state = down ? 0xa : 0xb
+    let e = NSEvent.otherEvent(with: .systemDefined, location: NSPoint.zero,
+      modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(state << 8)), timestamp: 0, windowNumber: 0,
+      context: nil, subtype: 8, data1: (key << 16) | (state << 8), data2: -1)
+    e?.cgEvent?.post(tap: .cghidEventTap)
+  }
+}
+
 func postKey(_ cmd: [String: Any]) -> [String: Any] {
-  guard let vk = cmd["key"] as? Int, let code = VK[vk] else { return ["ok": false, "error": "unmapped_key"] }
-  let f = flags(cmd["mods"] as? [String] ?? [])
-  func ev(_ down: Bool) { let e = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down); e?.flags = f; e?.post(tap: .cghidEventTap) }
-  switch cmd["press"] as? String {
-  case "down": ev(true)
-  case "up": ev(false)
-  default: ev(true); ev(false)
+  if !AXIsProcessTrusted() { return ["ok": false, "error": "accessibility_permission"] }
+  guard let vk = cmd["key"] as? Int else { return ["ok": false, "error": "bad_key"] }
+  let press = cmd["press"] as? String
+  if let media = MEDIA[vk] {
+    if press != "up" { mediaKey(media) }
+    return ["ok": true]
+  }
+  if let m = MODS[vk] {
+    if press == "up" { heldMods.remove(vk) } else { heldMods.insert(vk) }
+    keyEvent(m.0, press != "up", heldFlags())
+    if press == nil { heldMods.remove(vk); keyEvent(m.0, false, heldFlags()) }
+    return ["ok": true]
+  }
+  guard let code = VK[vk] else { return ["ok": false, "error": "unmapped_key"] }
+  switch press ?? "" {
+  case "down": keyEvent(code, true, heldFlags())
+  case "up": keyEvent(code, false, heldFlags())
+  default:
+    // Modifiers go down and up as their own key events around the key, as on a real keyboard.
+    let wanted = cmd["mods"] as? [String] ?? []
+    let used = TAP_MODS.filter { wanted.contains($0.0) }
+    let base = heldFlags()
+    var f = base
+    for m in used { f.insert(m.2); keyEvent(m.1, true, f) }
+    keyEvent(code, true, f)
+    keyEvent(code, false, f)
+    for i in used.indices.reversed() {
+      var after = base
+      for m in used[..<i] { after.insert(m.2) }
+      keyEvent(used[i].1, false, after)
+    }
   }
   return ["ok": true]
 }
 
 func cursor() -> [String: Any] {
-  let sc = pointScale()  // points per pixel
-  let p = NSEvent.mouseLocation  // points, bottom-left origin
-  let h = CGDisplayBounds(CGMainDisplayID()).height  // points
-  let xPx = sc > 0 ? Double(p.x) / sc : Double(p.x)
-  let yPx = sc > 0 ? (Double(h) - Double(p.y)) / sc : (Double(h) - Double(p.y))
-  return ["ok": true, "x": Int(xPx), "y": Int(yPx), "shape": "default", "visible": true]
+  let p = CGEvent(source: nil)?.location ?? CGPoint.zero  // global points, top-left origin, like input
+  return ["ok": true, "x": Double(p.x), "y": Double(p.y), "shape": "default", "visible": true]
 }
 
 func clipSeq() -> [String: Any] { return ["ok": true, "seq": NSPasteboard.general.changeCount] }
@@ -658,14 +769,16 @@ func clipSet(_ cmd: [String: Any]) -> [String: Any] {
 }
 
 func postType(_ text: String) -> [String: Any] {
-  for ch in text.unicodeScalars {
-    let e = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true)
-    var u = [UniChar(ch.value & 0xffff)]
-    e?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &u)
-    e?.post(tap: .cghidEventTap)
-    let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false)
-    up?.keyboardSetUnicodeString(stringLength: 1, unicodeString: &u)
-    up?.post(tap: .cghidEventTap)
+  if !AXIsProcessTrusted() { return ["ok": false, "error": "accessibility_permission"] }
+  // Whole characters, so emoji and other text outside one UTF-16 unit arrive intact.
+  for ch in text {
+    var u = Array(String(ch).utf16)
+    for down in [true, false] {
+      let e = CGEvent(keyboardEventSource: src, virtualKey: 0, keyDown: down)
+      e?.flags = CGEventFlags()
+      e?.keyboardSetUnicodeString(stringLength: u.count, unicodeString: &u)
+      e?.post(tap: .cghidEventTap)
+    }
   }
   return ["ok": true]
 }
@@ -714,7 +827,10 @@ export class MacHelper extends PsHelper {
     const stale = () => {
       try { return fs.statSync(this.bin).mtimeMs < fs.statSync(src).mtimeMs; } catch { return true; }
     };
-    if (binExists() && !stale()) return this.bin;
+    // An upgrade brings new source while the old binary is newer than the old source on disk.
+    let changed = true;
+    try { changed = fs.readFileSync(src, "utf8") !== this.script; } catch { /* first run */ }
+    if (!changed && binExists() && !stale()) return this.bin;
     // A missing or broken swiftc would otherwise be retried on every poll (cursor runs at 33ms).
     // After a failure, don't attempt another compile for a minute.
     if (this._compileFailedAt && Date.now() - this._compileFailedAt < 60_000) {
@@ -725,7 +841,9 @@ export class MacHelper extends PsHelper {
       // shortcut: the macOS 15 SDK drops CGDisplayCreateImage, so build for 14, where it still links and runs;
       // move capture to ScreenCaptureKit before Apple removes the symbol itself.
       const target = `${process.arch === "arm64" ? "arm64" : "x86_64"}-apple-macos14.0`;
-      execFileSync("swiftc", ["-O", "-target", target, src, "-o", this.bin], { stdio: ["ignore", "ignore", "pipe"], timeout: 120000 });
+      // A compile killed by the timeout must not leave a half-written binary that looks current.
+      execFileSync("swiftc", ["-O", "-target", target, src, "-o", this.bin + ".tmp"], { stdio: ["ignore", "ignore", "pipe"], timeout: 120000 });
+      fs.renameSync(this.bin + ".tmp", this.bin);
       this._compileFailedAt = 0;
     } catch (e) {
       this._compileFailedAt = Date.now();
@@ -746,23 +864,37 @@ export class MacHelper extends PsHelper {
 }
 
 /**
- * The Swift helper reports displays in points; capture and input use the main display's pixels,
- * so offsets scale by its pixel ratio and sizes are each display's own pixels.
- * avfoundation numbers screens in the same CGGetActiveDisplayList order, which is `output`.
+ * macOS input and the pointer work in points (CGEvent's global space), so displays stay in points.
+ * Pixel ratios are never needed: viewers point by fraction of the picture, and on HiDPI modes
+ * CGDisplayPixelsWide reports points anyway. avfoundation numbers screens in the same
+ * CGGetActiveDisplayList order, which is `output`.
  */
 export function macMonitors(list) {
-  const main = list.find((m) => m.primary) || list[0];
-  const ratio = main && main.w ? main.pw / main.w : 1;
   return list.map((m, i) => ({
-    adapter: 0, output: i, name: `Display ${i + 1}`,
-    left: Math.round(m.x * ratio), top: Math.round(m.y * ratio), w: m.pw ?? m.w, h: m.ph ?? m.h,
+    adapter: 0, output: i, name: `Display ${i + 1}`, left: m.x, top: m.y, w: m.w, h: m.h, primary: !!m.primary,
   }));
+}
+
+/** A fraction of the picture showing [rect] to input coordinates, and the pointer back to a fraction. */
+export const fromFraction = (r, fx, fy) => ({ x: r.x + fx * r.w, y: r.y + fy * r.h });
+export const toFraction = (r, c) => ({ fx: (c.x - r.x) / r.w, fy: (c.y - r.y) / r.h });
+
+/** The part of the input space a still frame shows: the main display on macOS, every monitor on Windows. */
+export function jpegRect(list, mac = IS_MAC) {
+  if (!list?.length) return null;
+  if (mac) return list.find((m) => m.primary) || list[0];
+  return { x: 0, y: 0, w: Math.max(...list.map((m) => m.x + m.w)), h: Math.max(...list.map((m) => m.y + m.h)) };
 }
 
 // UIPI: Windows drops input from a normal process into an elevated window, with no other signal.
 const ELEVATED = "An administrator window (such as Task Manager) has focus, and Windows blocks remote input to it. " +
   "Click another window, or install console access on the PC to control admin windows.";
-const inputError = (e) => (e === "elevated_window" || e === "input_blocked" ? ELEVATED : e);
+// macOS drops synthetic input, and returns no screen pixels, until the user allows each one.
+const MAC_HELP = {
+  accessibility_permission: "The Mac blocks remote input until you allow PocketDesk (it may be listed as node) under System Settings > Privacy & Security > Accessibility.",
+  screen_permission: "The Mac shows no screen until you allow PocketDesk (it may be listed as node) under System Settings > Privacy & Security > Screen Recording. The picture starts by itself once allowed.",
+};
+const inputError = (e) => (e === "elevated_window" || e === "input_blocked" ? ELEVATED : MAC_HELP[e] || e);
 
 export class DesktopController extends EventEmitter {
   static get supported() {
@@ -781,6 +913,8 @@ export class DesktopController extends EventEmitter {
     this.helperInput = new PsHelper("input", INPUT_SCRIPT);
     this.helperCapture = IS_MAC ? new MacHelper("pdcap", MAC_CAP_SWIFT) : new PsHelper("capture", CAPTURE_SCRIPT);
     this.helperClip = new PsHelper("clipboard", CLIP_SCRIPT);
+    this.origin = { x: 0, y: 0 };
+    this.monitorList = null;
   }
 
   /** Stream frames for `clientId` (server keeps the ws mapping). */
@@ -815,7 +949,7 @@ export class DesktopController extends EventEmitter {
       // wait for that frame rather than reporting a failure that never was.
       if (this.capturing) await this._nextFrame(15000);
       else await this.captureOnce();
-      if (!this.lastFrame) return { ok: false, reason: this._lastCaptureError || "capture_failed" };
+      if (!this.lastFrame) return { ok: false, reason: inputError(this._lastCaptureError) || "capture_failed" };
     }
     return { ok: true, ...this.lastFrame };
   }
@@ -855,14 +989,17 @@ export class DesktopController extends EventEmitter {
         this.stats.lastCaptureMs = Date.now() - t0;
         this.lastFrame = { base64: r.b64, width: r.w, height: r.h, ts: Date.now(), seq: ++this.frameSeq };
         this.stats.framesSent++;
+        this._lastCaptureError = null;
         this.emit("frame", this.lastFrame);
       } else {
         this.stats.capturesFailed++;
-        this._lastCaptureError = r?.error || "capture_failed";
-        // Blocked on macOS Screen Recording: show the system prompt once so the user can grant it.
-        if (r?.error === "screen_permission" && !this._permRequested) {
-          this._permRequested = true;
-          this.requestPermissions().catch(() => {});
+        const error = r?.error || "capture_failed";
+        if (error !== this._lastCaptureError) this.emit("capture_error", inputError(error));
+        this._lastCaptureError = error;
+        if (error === "screen_permission") {
+          // Show the system prompt once; macOS applies a new grant only to a fresh process, so restart now and then.
+          if (!this._permRequested) { this._permRequested = true; this.requestPermissions().catch(() => {}); }
+          else if (Date.now() - (this._permRestartAt || 0) > 10_000) { this._permRestartAt = Date.now(); this.helperCapture.kill(); }
         }
       }
     } catch {
@@ -872,32 +1009,45 @@ export class DesktopController extends EventEmitter {
     }
   }
 
-  /** x/y: virtual-screen pixels from its top-left (omit to act at the cursor); click: left|right|middle|double; press: down|up of button. */
+  /** x/y: from the top-left monitor's corner, in pixels (points on macOS) (omit to act at the cursor); click: left|right|middle|double; press: down|up of button. */
   get _input() { return IS_MAC ? this.helperCapture : this.helperInput; }
   get _clip() { return IS_MAC ? this.helperCapture : this.helperClip; }
 
-  async inputMouse({ x, y, click, press, button, wheel }) {
+  async _inject(cmd, timeoutMs) {
     if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     await this._input.ensure();
-    const r = await this._input.cmd({ op: "mouse", x, y, click, press, button, wheel }, 8000);
+    const r = await this._input.cmd(cmd, timeoutMs);
+    // The Accessibility prompt is shown once; macOS applies a grant without a restart.
+    if (r?.error === "accessibility_permission" && !this._axRequested) {
+      this._axRequested = true;
+      this.requestPermissions().catch(() => {});
+    }
     return { ok: !!r?.ok, error: inputError(r?.error) };
   }
+
+  /** wheel: positive scrolls up; hwheel: positive scrolls right (Windows convention, both in 120ths of a notch). */
+  async inputMouse({ x, y, click, press, button, wheel, hwheel }) {
+    if (IS_MAC && x != null) {
+      if (!this.monitorList) await this.monitors();
+      x += this.origin.x;
+      y += this.origin.y;
+    }
+    return this._inject({ op: "mouse", x, y, click, press, button, wheel, hwheel }, 8000);
+  }
+
+  /** What a still frame shows, in input coordinates; null until the monitors are known. */
+  get frameRect() { return jpegRect(this.monitorList); }
 
   /** press: down|up sends only that half, for held keys; without it the key is tapped with modifiers. */
-  async inputKey({ key, modifiers = [], press }) {
-    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
+  inputKey({ key, modifiers = [], press }) {
     const vk = Number(key);
-    if (!Number.isFinite(vk) || vk <= 0 || vk > 254) return { ok: false, error: "bad_vk" };
-    await this._input.ensure();
-    const r = await this._input.cmd({ op: "key", key: vk, press, mods: Array.isArray(modifiers) ? modifiers : [] }, 8000);
-    return { ok: !!r?.ok, error: inputError(r?.error) };
+    if (!Number.isFinite(vk) || vk <= 0 || vk > 254) return Promise.resolve({ ok: false, error: "bad_vk" });
+    const mods = (Array.isArray(modifiers) ? modifiers : []).filter((m) => ["ctrl", "alt", "shift", "win"].includes(m));
+    return this._inject({ op: "key", key: vk, press, mods }, 8000);
   }
 
-  async inputType(text) {
-    if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
-    await this._input.ensure();
-    const r = await this._input.cmd({ op: "type", text: String(text).slice(0, 512) }, 10000);
-    return { ok: !!r?.ok, error: inputError(r?.error) };
+  inputType(text) {
+    return this._inject({ op: "type", text: String(text).slice(0, 512) }, 10000);
   }
 
   /**
@@ -914,8 +1064,11 @@ export class DesktopController extends EventEmitter {
     const oy = Math.min(...r.monitors.map((m) => m.top));
     const monitors = r.monitors.map((m, index) => ({
       index, adapter: m.adapter, output: m.output, name: m.name,
-      x: m.left - ox, y: m.top - oy, w: m.w, h: m.h, primary: m.left === 0 && m.top === 0,
+      x: m.left - ox, y: m.top - oy, w: m.w, h: m.h, primary: m.primary ?? (m.left === 0 && m.top === 0),
     }));
+    // The Swift helper takes and reports global points, which start at the main display, not the top-left one.
+    this.origin = IS_MAC ? { x: ox, y: oy } : { x: 0, y: 0 };
+    this.monitorList = monitors;
     return { ok: true, monitors };
   }
 
@@ -931,7 +1084,7 @@ export class DesktopController extends EventEmitter {
       try {
         await this._input.ensure();
         const r = await this._input.cmd({ op: "cursor" }, 2000);
-        const c = r?.ok ? { x: r.x, y: r.y, shape: r.shape, visible: r.visible } : null;
+        const c = r?.ok ? { x: r.x - this.origin.x, y: r.y - this.origin.y, shape: r.shape, visible: r.visible } : null;
         const key = JSON.stringify(c);
         if (c && key !== last) { last = key; this.cursor = c; this.emit("cursor", c); }
       } finally { busy = false; }

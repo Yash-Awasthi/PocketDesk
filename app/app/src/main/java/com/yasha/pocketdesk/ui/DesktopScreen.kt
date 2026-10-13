@@ -59,6 +59,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -91,12 +92,16 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.yasha.pocketdesk.DesktopFrame
 import com.yasha.pocketdesk.WsClient
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Remote desktop from the phone. Touchpad mode (default): one finger moves the
  * PC cursor relatively and a tap left-clicks at it; direct mode clicks where you
  * tap. Hold then move drags, a long press right-clicks. Two fingers: pinch zooms,
- * a drag scrolls (pans when zoomed in with direct taps), a quick tap right-clicks.
+ * a drag scrolls either way (pans when zoomed in with direct taps), a quick tap right-clicks.
+ * Three fingers work like the PC's own touchpad: sideways switches desktop, up shows every
+ * window, down shows the desktop (the app's windows on a Mac), a tap middle-clicks.
  * The L/R buttons click at the cursor, Drag holds the left button, Apps launches
  * anything installed on the PC.
  */
@@ -154,15 +159,65 @@ fun DesktopScreen(
         }
     }
     LaunchedEffect(dims) {
+        ws.desktopFrameSize = dims?.let { it.width to it.height }
         if (cursor == null && dims != null) cursor = Offset(dims.width / 2f, dims.height / 2f)
     }
     val here = { cursor?.let { Pair(it.x.toInt(), it.y.toInt()) } }
     // The PC pointer wins unless this phone moved it a moment ago, so local drags do not jitter back.
     var lastLocal by remember { mutableStateOf(0L) }
-    LaunchedEffect(ws.desktopCursor) {
+    LaunchedEffect(ws.desktopCursor, dims) {
         val c = ws.desktopCursor ?: return@LaunchedEffect
-        if (android.os.SystemClock.uptimeMillis() - lastLocal > 300) cursor = Offset(c.x.toFloat(), c.y.toFloat())
+        val f = dims ?: return@LaunchedEffect
+        if (android.os.SystemClock.uptimeMillis() - lastLocal > 300) pointerInFrame(c.fx, c.fy, c.x, c.y, f)?.let { cursor = it }
     }
+    val nextScreen = {
+        ws.desktopMonitor = (ws.desktopMonitor + 1) % ws.desktopMonitors.size
+        ws.desktopStartVideo()
+    }
+
+    // Manual pointer calibration, kept per PC and per screen: the user pushes the PC pointer into the
+    // top-left and then the bottom-right corner, tapping at each; see Calibration.
+    val calKey = "calibration:${ws.serverUrl}:${ws.desktopMonitor}"
+    var calibrating by remember { mutableStateOf(false) }
+    var calCorner by remember { mutableStateOf<Pair<Double, Double>?>(null) }
+    var calNote by remember { mutableStateOf("") }
+    val calScope = rememberCoroutineScope()
+    LaunchedEffect(calKey) {
+        calibrating = false
+        ws.desktopCalibration = Calibration.decode(prefs.getString(calKey, null))
+    }
+    LaunchedEffect(calNote) { if (calNote.isNotEmpty()) { delay(5000); calNote = "" } }
+    fun startCalibration() {
+        ws.desktopCalibration = null
+        calCorner = null
+        calNote = ""
+        calibrating = true
+    }
+    fun cancelCalibration() {
+        calibrating = false
+        ws.desktopCalibration = Calibration.decode(prefs.getString(calKey, null))
+    }
+    /** A tap while calibrating marks a corner instead of clicking: a click in a corner opens menus on the PC. */
+    fun calibrationTap(c: Offset) {
+        ws.desktopMove(c.x.toInt(), c.y.toInt())
+        calScope.launch {
+            delay(400) // the pointer report for that move has arrived by now
+            val p = ws.desktopPointerRaw ?: dims?.let { d -> c.x.toDouble() / d.width to c.y.toDouble() / d.height } ?: return@launch
+            val topLeft = calCorner
+            if (topLeft == null) { calCorner = p; return@launch }
+            calibrating = false
+            val cal = Calibration.of(topLeft, p)
+            if (cal == null) {
+                calNote = "Calibration failed: mark the top-left corner first, then the bottom-right. Try again from the menu."
+                ws.desktopCalibration = Calibration.decode(prefs.getString(calKey, null))
+                return@launch
+            }
+            prefs.edit().putString(calKey, cal.encode()).apply()
+            ws.desktopCalibration = cal
+            calNote = "Pointer calibrated for this screen."
+        }
+    }
+    fun leftClick(c: Offset) { if (calibrating) calibrationTap(c) else ws.desktopClick(c.x.toInt(), c.y.toInt(), "left") }
 
     val transfer = remember { DesktopTransfer() }
     DesktopClipboardSync(ws, transfer)
@@ -212,10 +267,7 @@ fun DesktopScreen(
                         @Composable
                         fun Item(label: String, onClick: () -> Unit) =
                             androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { more = false; onClick() })
-                        if (video && ws.desktopMonitors.size > 1) Item("Screen: " + ws.desktopMonitors.getOrElse(ws.desktopMonitor) { "1" } + " (switch)") {
-                            ws.desktopMonitor = (ws.desktopMonitor + 1) % ws.desktopMonitors.size
-                            ws.desktopStartVideo()
-                        }
+                        if (video && ws.desktopMonitors.size > 1) Item("Screen: " + ws.desktopMonitors.getOrElse(ws.desktopMonitor) { "1" } + " (switch)", nextScreen)
                         if (video) Item("Quality: " + ws.desktopPreset.replaceFirstChar { it.uppercase() } + " (switch)") {
                             ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
                             prefs.edit().putString("desktop_preset", ws.desktopPreset).apply()
@@ -231,6 +283,12 @@ fun DesktopScreen(
                         }
                         if (!ws.desktopViewOnly) {
                             Item("Send files to the PC", sendFiles)
+                            Item("Calibrate pointer") { startCalibration() }
+                            if (prefs.contains(calKey)) Item("Reset pointer calibration") {
+                                prefs.edit().remove(calKey).apply()
+                                ws.desktopCalibration = null
+                                calNote = "Pointer calibration removed for this screen."
+                            }
                         }
                         androidx.compose.material3.HorizontalDivider()
                         POWER_ACTIONS.forEach { (a, l) -> Item(l) { power = a } }
@@ -246,6 +304,10 @@ fun DesktopScreen(
         }
         if (desktopError.isNotEmpty()) {
             Text(desktopError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.padding(horizontal = 12.dp))
+        }
+        if (calNote.isNotEmpty()) {
+            Text(calNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp))
         }
 
@@ -280,7 +342,8 @@ fun DesktopScreen(
                                 val ch = ev.changes.firstOrNull() ?: continue
                                 if (ch.type != PointerType.Mouse) continue
                                 if (ev.type == PointerEventType.Scroll) {
-                                    ws.desktopWheel((-ch.scrollDelta.y * 120).toInt())
+                                    if (ch.scrollDelta.y != 0f) ws.desktopWheel((-ch.scrollDelta.y * 120).toInt())
+                                    if (ch.scrollDelta.x != 0f) ws.desktopHWheel((ch.scrollDelta.x * 120).toInt())
                                 } else {
                                     val p = Viewport(f, size.width.toFloat(), size.height.toFloat(), zoom, pan).toFrame(ch.position)
                                     if (p != null) {
@@ -318,12 +381,28 @@ fun DesktopScreen(
                             var startSpread = -1f
                             var startCentre = Offset.Zero
                             var scrollLeft = 0f
+                            var scrollAcross = 0f
+                            var horizontal: Boolean? = null
                             var dragging = false
+                            var three = false
+                            var threeTravel = Offset.Zero
+                            var swiped = false
+                            val swipePx = 64.dp.toPx()
                             while (true) {
                                 val ev = awaitPointerEvent()
                                 val pressed = ev.changes.filter { it.pressed }
                                 if (pressed.isEmpty()) { end = ev.changes.first().uptimeMillis; break }
-                                if (pressed.size >= 2) {
+                                if (pressed.size >= 3 || three) {
+                                    // Once three fingers land the gesture stays theirs, even as they lift one by one.
+                                    multi = true
+                                    three = true
+                                    threeTravel += ev.calculatePan()
+                                    if (!swiped) threeFingerSwipe(threeTravel, swipePx)?.let { s ->
+                                        swiped = true
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        swipeCombo(ws.hostOs, s).let { ws.desktopKey(it.vk, it.mods) }
+                                    }
+                                } else if (pressed.size == 2) {
                                     multi = true
                                     val z = ev.calculateZoom()
                                     val p = ev.calculatePan()
@@ -344,9 +423,18 @@ fun DesktopScreen(
                                             zoom = newZoom
                                         }
                                         TwoFinger.Scroll -> {
-                                            val (notches, rest) = wheelNotches(scrollLeft + p.y)
-                                            scrollLeft = rest
-                                            if (notches != 0) ws.desktopWheel(notches * 120)
+                                            // One axis per scroll, so a vertical swipe never drifts sideways.
+                                            val d = centre - startCentre
+                                            val across = horizontal ?: (kotlin.math.abs(d.x) > kotlin.math.abs(d.y)).also { horizontal = it }
+                                            if (across) {
+                                                val (notches, rest) = wheelNotches(scrollAcross + p.x)
+                                                scrollAcross = rest
+                                                if (notches != 0) ws.desktopHWheel(-notches * 120)
+                                            } else {
+                                                val (notches, rest) = wheelNotches(scrollLeft + p.y)
+                                                scrollLeft = rest
+                                                if (notches != 0) ws.desktopWheel(notches * 120)
+                                            }
                                         }
                                         TwoFinger.Undecided -> {}
                                     }
@@ -379,16 +467,18 @@ fun DesktopScreen(
                                 ev.changes.forEach { it.consume() }
                             }
                             val c = cursor ?: return@awaitEachGesture
-                            // A quick two-finger tap that neither scrolled nor zoomed is a right click.
+                            // A quick tap that neither scrolled, zoomed nor swiped: two fingers right-click, three middle-click.
                             if (multi) {
-                                if (two == TwoFinger.Undecided && end - start < 300) ws.desktopClick(c.x.toInt(), c.y.toInt(), "right")
+                                if (three) {
+                                    if (!swiped && threeTravel.getDistance() < 24f && end - start < 400) ws.desktopClick(c.x.toInt(), c.y.toInt(), "middle")
+                                } else if (two == TwoFinger.Undecided && end - start < 300) ws.desktopClick(c.x.toInt(), c.y.toInt(), "right")
                                 return@awaitEachGesture
                             }
                             when {
                                 dragging -> ws.desktopPress(c.x.toInt(), c.y.toInt(), false)
                                 moved > 8f -> ws.desktopMove(c.x.toInt(), c.y.toInt())
                                 end - start >= 500 -> ws.desktopClick(c.x.toInt(), c.y.toInt(), "right")
-                                else -> ws.desktopClick(c.x.toInt(), c.y.toInt(), "left")
+                                else -> leftClick(c)
                             }
                         }
                     },
@@ -414,13 +504,36 @@ fun DesktopScreen(
             if (fullscreen) {
                 TextButton(onClick = { onFullscreen(false) }, modifier = Modifier.align(Alignment.TopEnd)) { Text("Exit ⛶") }
             }
+            // With several monitors, which one is showing and how to change it must be visible, not buried in the menu.
+            if (video && ws.desktopMonitors.size > 1) {
+                FilledTonalButton(onClick = nextScreen, modifier = Modifier.align(Alignment.TopStart).padding(6.dp).height(32.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp)) {
+                    Text("Screen ${ws.desktopMonitor + 1} of ${ws.desktopMonitors.size} ⇄", style = MaterialTheme.typography.labelMedium)
+                }
+            }
+            // In the middle, so both corners being marked stay in view.
+            if (calibrating) {
+                Column(
+                    Modifier.align(Alignment.Center).padding(24.dp).clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xE6161B22)).padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        if (calCorner == null) "Calibrate 1 of 2: drag the pointer into the TOP-LEFT corner of the PC screen, " +
+                            "push a little past it, then tap once (or press L). The tap only marks the corner; nothing is clicked."
+                        else "Calibrate 2 of 2: now the BOTTOM-RIGHT corner, push a little past it, then tap once.",
+                        color = Color(0xFFE6EDF3), style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TextButton(onClick = { cancelCalibration() }, modifier = Modifier.align(Alignment.End)) { Text("Cancel") }
+                }
+            }
         }
 
         if (shortcuts && !ws.desktopViewOnly) ShortcutBar(ws)
         // Mouse bar: always visible, in fullscreen too.
         Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val pad = PaddingValues(horizontal = 4.dp)
-            FilledTonalButton(onClick = { here()?.let { ws.desktopClick(it.first, it.second, "left") } },
+            FilledTonalButton(onClick = { cursor?.let { leftClick(it) } },
                 modifier = Modifier.weight(2f).fillMaxHeight(), contentPadding = pad) { Text("L") }
             FilledTonalButton(onClick = { here()?.let { ws.desktopClick(it.first, it.second, "right") } },
                 modifier = Modifier.weight(2f).fillMaxHeight(), contentPadding = pad) { Text("R") }
@@ -555,31 +668,18 @@ private fun AppLauncher(ws: WsClient, onDismiss: () -> Unit) {
     )
 }
 
-/** Key combinations used all the time, one tap each: (label, virtual key, modifiers). */
-private val SHORTCUTS = listOf(
-    Triple("Copy", 0x43, listOf("ctrl")),
-    Triple("Paste", 0x56, listOf("ctrl")),
-    Triple("Undo", 0x5A, listOf("ctrl")),
-    Triple("Save", 0x53, listOf("ctrl")),
-    Triple("Find", 0x46, listOf("ctrl")),
-    Triple("Alt+Tab", 0x09, listOf("alt")),
-    Triple("Esc", 0x1B, emptyList()),
-    Triple("Enter", 0x0D, emptyList()),
-    Triple("Win", 0x5B, emptyList()),
-    Triple("Desktop", 0x44, listOf("win")),
-    Triple("Task Manager", 0x1B, listOf("ctrl", "shift")),
-)
-
+/** Key combinations used all the time, one tap each, spelled for the PC's OS. */
 @Composable
 private fun ShortcutBar(ws: WsClient) {
+    val shortcuts = shortcutsFor(ws.hostOs)
     androidx.compose.foundation.lazy.LazyRow(
         Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        items(SHORTCUTS.size) { i ->
-            val (label, vk, mods) = SHORTCUTS[i]
-            OutlinedButton(onClick = { ws.desktopKey(vk, mods) }, contentPadding = PaddingValues(horizontal = 10.dp), modifier = Modifier.height(34.dp)) {
+        items(shortcuts.size) { i ->
+            val (label, combo) = shortcuts[i]
+            OutlinedButton(onClick = { ws.desktopKey(combo.vk, combo.mods) }, contentPadding = PaddingValues(horizontal = 10.dp), modifier = Modifier.height(34.dp)) {
                 Text(label, style = MaterialTheme.typography.labelMedium, maxLines = 1)
             }
         }

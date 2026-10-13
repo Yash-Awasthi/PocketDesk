@@ -26,6 +26,8 @@ async function main() {
   const d = startDaemon(PORT, CLI_PORT, { token: TOKEN, manifests: tmp });
   await d.ready;
   const c = await openAndHello(PORT, TOKEN);
+  const hi = await c.next((m) => m.type === "welcome");
+  check("welcome names the PC's OS", hi.os === process.platform);
 
   // Status reflects platform support either way.
   c.send({ type: "desktop_status" });
@@ -55,6 +57,11 @@ async function main() {
     console.log("macOS frame reply:", fr.type, fr.reason || "");
     check("macOS frame request answers with a frame or a reason",
       fr.type === "desktop_frame" ? fr.width > 0 : typeof fr.reason === "string" && fr.reason !== "unsupported_platform");
+    // A Swift compile error would otherwise pass as just another refusal.
+    check("macOS helper compiles and runs", fr.reason !== "helper_not_running");
+    c.send({ type: "desktop_permissions" });
+    const perms = await c.next((m) => m.type === "desktop_permissions", 60000);
+    check("macOS helper reports its grants", perms.ok === true && typeof perms.accessibility === "boolean");
     c.send({ type: "desktop_monitors" });
     const mons = await c.next((m) => m.type === "desktop_monitors", 60000);
     check("macOS monitors have numeric geometry and one primary", !mons.ok || (mons.monitors.length >= 1
@@ -94,6 +101,14 @@ async function main() {
     c.send({ type: "desktop_key", key: 65 });
     const ik = await c.next((m) => m.type === "desktop_input_ok", 15000);
     check("desktop_key ok", ik.ok === true);
+
+    // A point given as a fraction of the picture comes back from the PC pointer as the same fraction.
+    c.send({ type: "desktop_monitors" });
+    await c.next((m) => m.type === "desktop_monitors", 20000);
+    c.send({ type: "desktop_mouse", x: 1, y: 1, fx: 0.3, fy: 0.6 });
+    await c.next((m) => m.type === "desktop_input_ok", 15000);
+    const fc = await c.next((m) => m.type === "desktop_cursor" && Math.abs(m.fx - 0.3) < 0.01, 5000).catch(() => ({}));
+    check("pointer lands where the picture fraction says", Math.abs(fc.fx - 0.3) < 0.01 && Math.abs(fc.fy - 0.6) < 0.01);
 
     // H.264 needs ffmpeg; the first packet of a stream is always the decoder config.
     if (process.env.FFMPEG_PATH) {
@@ -220,6 +235,23 @@ async function main() {
     await h.close();
     await new Promise((r) => setTimeout(r, 1500));
     check("dropped viewer releases held key", !keyDown(0x87));
+
+    // Stopping the stream (the app going to the background) must not leave a key down either.
+    const s = await openAndHello(PORT, TOKEN);
+    s.send({ type: "desktop_start", quality: 30 });
+    await s.next((m) => m.type === "desktop_started", 20000);
+    s.send({ type: "desktop_key", key: 0x87, press: "down" });
+    await s.next((m) => m.type === "desktop_input_ok", 15000);
+    s.send({ type: "desktop_stop" });
+    await s.next((m) => m.type === "desktop_stopped", 10000);
+    await new Promise((r) => setTimeout(r, 1000));
+    check("stopping the stream releases held key", !keyDown(0x87));
+    s.send({ type: "desktop_start", quality: 30 });
+    await s.next((m) => m.type === "desktop_started", 20000);
+    s.send({ type: "desktop_mouse", hwheel: 120 });
+    const hw = await s.next((m) => m.type === "desktop_input_ok", 15000);
+    check("horizontal wheel is accepted", hw.ok === true);
+    await s.close();
   }
 
   await finish(d, c);

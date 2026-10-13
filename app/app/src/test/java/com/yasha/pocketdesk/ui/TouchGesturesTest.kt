@@ -37,6 +37,30 @@ class TouchGesturesTest {
     }
 
     @Test
+    fun `the PC pointer is placed by fraction of the picture, whatever its pixel size`() {
+        assertEquals(Offset(720f, 450f), pointerInFrame(0.25, 0.25, 0, 0, IntSize(2880, 1800)))
+        assertEquals(null, pointerInFrame(1.2, 0.5, 0, 0, IntSize(2880, 1800)))
+        assertEquals(Offset(10f, 20f), pointerInFrame(null, null, 10, 20, IntSize(2880, 1800)))
+    }
+
+    @Test
+    fun `calibration makes the picture corners reach the corners the PC pointer stopped at`() {
+        // A Mac whose pointer hit the right edge at half the picture and the bottom at 0.8.
+        val cal = Calibration.of(0.0 to 0.0, 0.5 to 0.8)!!
+        assertEquals(0.5 to 0.8, cal.toPc(1.0, 1.0))
+        assertEquals(0.25 to 0.4, cal.toPc(0.5, 0.5))
+        assertEquals(1.0 to 1.0, cal.toPicture(0.5, 0.8))
+        assertEquals(cal, Calibration.decode(cal.encode()))
+    }
+
+    @Test
+    fun `corners that are swapped or nearly the same point are refused`() {
+        assertEquals(null, Calibration.of(0.6 to 0.6, 0.2 to 0.9))
+        assertEquals(null, Calibration.of(0.5 to 0.5, 0.52 to 0.9))
+        assertEquals(null, Calibration.decode("garbage"))
+    }
+
+    @Test
     fun `zooming keeps the point under the fingers under the fingers`() {
         val frame = IntSize(1920, 1080)
         val view = IntSize(1080, 700)

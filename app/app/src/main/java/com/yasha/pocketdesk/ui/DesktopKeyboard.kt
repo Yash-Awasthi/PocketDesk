@@ -43,7 +43,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 private enum class Layer { Letters, Numbers, Symbols }
-private enum class Mod(val wire: String, val label: String) { Ctrl("ctrl", "Ctrl"), Shift("shift", "Shift"), Alt("alt", "Alt"), Win("win", "Win") }
+private enum class Mod(val wire: String) { Ctrl("ctrl"), Shift("shift"), Alt("alt"), Win("win") }
 
 /** Off, held for the next key only, or locked until tapped again. */
 private enum class Latch { Off, Once, Locked }
@@ -77,10 +77,10 @@ private const val VK_DEL = 46
 
 private val NAV_KEYS = listOf(
     "Esc" to VK_ESC, "Tab" to VK_TAB, "Del" to VK_DEL, "Home" to 36, "End" to 35, "PgUp" to 33, "PgDn" to 34,
-    "PrtSc" to 44,
+    "PrtSc" to 44, "Vol−" to 0xAE, "Vol+" to 0xAF, "Mute" to 0xAD, "⏯" to 0xB3,
 ) + (1..12).map { "F$it" to 111 + it }
 private val ARROWS = listOf("←" to 37, "↑" to 38, "↓" to 40, "→" to 39)
-private val REPEATING = setOf(VK_BACK, VK_DEL, VK_SPACE, 37, 38, 39, 40)
+private val REPEATING = setOf(VK_BACK, VK_DEL, VK_SPACE, 37, 38, 39, 40, 0xAE, 0xAF)
 
 private val LETTER_ROWS = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
 private val NUMBER_ROWS = listOf("789/", "456*", "123-", "0.=+")
@@ -136,7 +136,7 @@ fun DesktopKeyboard(ws: WsClient) {
         KeyRow {
             Mod.entries.forEach { m ->
                 val l = latches.getValue(m)
-                Key(m.label + if (l == Latch.Locked) " ■" else "", Modifier.weight(1f), special = true,
+                Key(modLabel(ws.hostOs, m.wire) + if (l == Latch.Locked) " ■" else "", Modifier.weight(1f), special = true,
                     background = when (l) { Latch.Off -> null; Latch.Once -> ONCE_BG; Latch.Locked -> LOCKED_BG }) {
                     latches = latches + (m to when (l) { Latch.Off -> Latch.Once; Latch.Once -> Latch.Locked; Latch.Locked -> Latch.Off })
                 }

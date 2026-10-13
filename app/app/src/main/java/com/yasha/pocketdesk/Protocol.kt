@@ -103,7 +103,7 @@ data class PcFile(val path: String, val name: String, val size: Long?, val dir: 
 data class PcClip(val kind: String, val text: String?, val png: String?, val files: List<PcFile>, val requested: Boolean)
 
 /** The PC pointer in picture pixels; [shape] is a CSS cursor name such as "arrow" or "text". */
-data class DesktopCursor(val x: Int, val y: Int, val shape: String)
+data class DesktopCursor(val x: Int, val y: Int, val shape: String, val fx: Double? = null, val fy: Double? = null)
 
 data class FsListing(val path: String, val parent: String?, val items: List<FsEntry>, val home: String? = null)
 
@@ -228,11 +228,16 @@ object Proto {
     }
     fun desktopStop() = obj { put("type", "desktop_stop") }
     fun desktopFrame() = obj { put("type", "desktop_frame") }
-    fun desktopMouse(x: Int?, y: Int?, click: String?, wheel: Int?, press: String? = null, button: String? = null) = obj {
+    fun desktopMouse(
+        x: Int?, y: Int?, click: String?, wheel: Int?, press: String? = null, button: String? = null, hwheel: Int? = null,
+        frac: Pair<Double, Double>? = null,
+    ) = obj {
         put("type", "desktop_mouse")
         if (x != null && y != null) { put("x", x); put("y", y) }
+        if (frac != null) { put("fx", frac.first); put("fy", frac.second) }
         if (click != null) put("click", click)
         if (wheel != null) put("wheel", wheel)
+        if (hwheel != null) put("hwheel", hwheel)
         if (press != null) put("press", press)
         if (button != null) put("button", button)
     }

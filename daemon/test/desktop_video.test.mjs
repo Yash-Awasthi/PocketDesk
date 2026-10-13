@@ -87,11 +87,11 @@ test("macOS captures the chosen screen through avfoundation and tries VideoToolb
   assert.ok(!ENCODER_ORDER.linux, "Linux has no grabber, so it keeps the JPEG stream");
 });
 
-test("macOS displays map from points to the main display's pixels", () => {
+test("macOS displays stay in points, the space input and the pointer use, whatever their pixel density", () => {
   const m = macMonitors([
-    { x: 0, y: 0, w: 1440, h: 900, pw: 2880, ph: 1800, primary: true },
+    { x: 0, y: 0, w: 1440, h: 900, pw: 1440, ph: 900, primary: true },
     { x: 1440, y: -100, w: 1920, h: 1080, pw: 1920, ph: 1080, primary: false },
   ]);
-  assert.deepEqual(m[0], { adapter: 0, output: 0, name: "Display 1", left: 0, top: 0, w: 2880, h: 1800 });
-  assert.deepEqual(m[1], { adapter: 0, output: 1, name: "Display 2", left: 2880, top: -200, w: 1920, h: 1080 });
+  assert.deepEqual(m[0], { adapter: 0, output: 0, name: "Display 1", left: 0, top: 0, w: 1440, h: 900, primary: true });
+  assert.deepEqual(m[1], { adapter: 0, output: 1, name: "Display 2", left: 1440, top: -100, w: 1920, h: 1080, primary: false });
 });
