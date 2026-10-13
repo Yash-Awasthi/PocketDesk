@@ -1,6 +1,6 @@
 import { resolvePath } from "../fs_ops.js";
 import * as devices from "../devices.js";
-import { fromFraction } from "../desktop_capture.js";
+import { centerFor, fromFraction } from "../desktop_capture.js";
 
 export default function remoteHandlers(ctx) {
   const { send, desktop, desktopWatchers, video, videoWatchers, recorder, access } = ctx;
@@ -71,6 +71,12 @@ export default function remoteHandlers(ctx) {
             ws._videoCloseHooked = true;
             ws.once?.("close", () => { videoWatchers.delete(ws); if (!videoWatchers.size) video.stop(); syncCursor(); });
           }
+          // A chosen screen starts with the pointer in its middle, so it is never left on a screen out of view.
+          if (mayControl(ws) && video.monitor) {
+            const to = centerFor(video.monitor, await desktop.pointer(), ws._monitor);
+            if (to) await desktop.inputMouse(to);
+          }
+          ws._monitor = video.monitor?.index;
           syncCursor();
           return send(ws, { type: "desktop_started", ok: true, mode: "h264", encoder, preset: video.preset, monitor: video.monitor?.index ?? 0, viewOnly: ws._viewOnly, recording: recorder.recordingScreen });
         }

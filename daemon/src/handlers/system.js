@@ -10,7 +10,7 @@ import * as doctor from "../doctor.js";
 import * as devices from "../devices.js";
 
 export default function systemHandlers(ctx) {
-  const { send, broadcast, allSessions, plugins, streamParser, tls } = ctx;
+  const { send, broadcast, allSessions, plugins, streamParser, tls, desktop } = ctx;
   return {
     async propose(ws, msg) {
       const p = proposals.create({
@@ -42,7 +42,7 @@ export default function systemHandlers(ctx) {
       }
     },
     async pc_power(ws, msg) {
-      send(ws, { type: "pc_power", action: msg.action, ...(await pcPower.run(msg.action)) });
+      send(ws, { type: "pc_power", action: msg.action, ...(await pcPower.run(msg.action, { lockMac: () => desktop.lockScreen() })) });
     },
     async proposal_list(ws, msg) {
       send(ws, { type: "proposal_list", items: proposals.listPending() });

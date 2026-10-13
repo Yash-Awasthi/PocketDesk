@@ -170,8 +170,13 @@ fun DesktopScreen(
         val f = dims ?: return@LaunchedEffect
         if (android.os.SystemClock.uptimeMillis() - lastLocal > 300) pointerInFrame(c.fx, c.fy, c.x, c.y, f)?.let { cursor = it }
     }
-    val nextScreen = {
-        ws.desktopMonitor = (ws.desktopMonitor + 1) % ws.desktopMonitors.size
+    // The daemon moves the PC pointer to the middle of a chosen screen; the dot starts there too.
+    fun pickScreen(i: Int) {
+        if (i == ws.desktopMonitor) return
+        ws.desktopMonitor = i
+        zoom = 1f
+        pan = Offset.Zero
+        cursor = dims?.let { Offset(it.width / 2f, it.height / 2f) }
         ws.desktopStartVideo()
     }
 
@@ -267,7 +272,6 @@ fun DesktopScreen(
                         @Composable
                         fun Item(label: String, onClick: () -> Unit) =
                             androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { more = false; onClick() })
-                        if (video && ws.desktopMonitors.size > 1) Item("Screen: " + ws.desktopMonitors.getOrElse(ws.desktopMonitor) { "1" } + " (switch)", nextScreen)
                         if (video) Item("Quality: " + ws.desktopPreset.replaceFirstChar { it.uppercase() } + " (switch)") {
                             ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
                             prefs.edit().putString("desktop_preset", ws.desktopPreset).apply()
@@ -506,9 +510,20 @@ fun DesktopScreen(
             }
             // With several monitors, which one is showing and how to change it must be visible, not buried in the menu.
             if (video && ws.desktopMonitors.size > 1) {
-                FilledTonalButton(onClick = nextScreen, modifier = Modifier.align(Alignment.TopStart).padding(6.dp).height(32.dp),
-                    contentPadding = PaddingValues(horizontal = 10.dp)) {
-                    Text("Screen ${ws.desktopMonitor + 1} of ${ws.desktopMonitors.size} ⇄", style = MaterialTheme.typography.labelMedium)
+                var picking by remember { mutableStateOf(false) }
+                Box(Modifier.align(Alignment.TopStart).padding(6.dp)) {
+                    FilledTonalButton(onClick = { picking = true }, modifier = Modifier.height(32.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp)) {
+                        Text("Screen ${ws.desktopMonitor + 1} of ${ws.desktopMonitors.size} ▾", style = MaterialTheme.typography.labelMedium)
+                    }
+                    androidx.compose.material3.DropdownMenu(expanded = picking, onDismissRequest = { picking = false }) {
+                        ws.desktopMonitors.forEachIndexed { i, name ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text((if (i == ws.desktopMonitor) "● " else "   ") + "Screen $name") },
+                                onClick = { picking = false; pickScreen(i) },
+                            )
+                        }
+                    }
                 }
             }
             // In the middle, so both corners being marked stay in view.

@@ -1055,7 +1055,8 @@ class WsClient(
                     val o = e as? JsonObject
                     val w = (o?.get("w") as? JsonPrimitive)?.intOrNull
                     val h = (o?.get("h") as? JsonPrimitive)?.intOrNull
-                    "${i + 1}" + if (w != null && h != null) " · ${w}×$h" else ""
+                    "${i + 1}" + (if (w != null && h != null) " · ${w}×$h" else "") +
+                        (if ((o?.get("primary") as? JsonPrimitive)?.booleanOrNull == true) " · main" else "")
                 } ?: emptyList()
             }
             "clipboard", "clipboard_changed" ->

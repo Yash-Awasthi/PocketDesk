@@ -682,6 +682,37 @@ func keyEvent(_ code: CGKeyCode, _ down: Bool, _ flags: CGEventFlags) {
   e.post(tap: .cghidEventTap)
 }
 
+func screenLocked() -> Bool {
+  let d = CGSessionCopyCurrentDictionary() as? [String: Any]
+  return (d?["CGSSessionScreenIsLocked"] as? Bool) ?? false
+}
+
+func waitLocked() -> Bool {
+  for _ in 0..<15 {
+    if screenLocked() { return true }
+    usleep(100_000)
+  }
+  return false
+}
+
+// SACLockScreenImmediate is what the menu bar's Lock Screen calls: it locks at once, whatever the
+// "require password after sleep" delay. The Ctrl+Cmd+Q shortcut is the fallback; success is checked.
+func lockScreen() -> [String: Any] {
+  if let h = dlopen("/System/Library/PrivateFrameworks/login.framework/Versions/Current/login", RTLD_LAZY),
+     let sym = dlsym(h, "SACLockScreenImmediate") {
+    typealias Lock = @convention(c) () -> Int32
+    _ = unsafeBitCast(sym, to: Lock.self)()
+    if waitLocked() { return ["ok": true] }
+  }
+  if AXIsProcessTrusted() {
+    let f: CGEventFlags = [.maskControl, .maskCommand]
+    keyEvent(12, true, f)
+    keyEvent(12, false, f)
+    if waitLocked() { return ["ok": true] }
+  }
+  return ["ok": false, "error": "lock_failed"]
+}
+
 func mediaKey(_ key: Int) {
   for down in [true, false] {
     let state = down ? 0xa : 0xb
@@ -799,6 +830,7 @@ while let line = readLine(strippingNewline: true) {
   case "key": out = postKey(cmd)
   case "type": out = postType(cmd["text"] as? String ?? "")
   case "cursor": out = cursor()
+  case "lock": out = lockScreen()
   case "seq": out = clipSeq()
   case "read": out = clipRead(cmd["maxImage"] as? Int ?? (12 << 20))
   case "set": out = clipSet(cmd)
@@ -878,6 +910,16 @@ export function macMonitors(list) {
 /** A fraction of the picture showing [rect] to input coordinates, and the pointer back to a fraction. */
 export const fromFraction = (r, fx, fy) => ({ x: r.x + fx * r.w, y: r.y + fy * r.h });
 export const toFraction = (r, c) => ({ fx: (c.x - r.x) / r.w, fy: (c.y - r.y) / r.h });
+
+/**
+ * Where to put the pointer when a viewer opens [rect] (a monitor) after [previousIndex]: the
+ * middle of a newly chosen screen; on first open (undefined) only if the pointer is on another one.
+ */
+export function centerFor(rect, pointer, previousIndex) {
+  if (!rect || previousIndex === rect.index) return null;
+  const on = pointer && pointer.x >= rect.x && pointer.x < rect.x + rect.w && pointer.y >= rect.y && pointer.y < rect.y + rect.h;
+  return previousIndex === undefined && on ? null : fromFraction(rect, 0.5, 0.5);
+}
 
 /** The part of the input space a still frame shows: the main display on macOS, every monitor on Windows. */
 export function jpegRect(list, mac = IS_MAC) {
@@ -1072,6 +1114,21 @@ export class DesktopController extends EventEmitter {
     return { ok: true, monitors };
   }
 
+  /** The pointer now, in the same space as input, or null. */
+  async pointer() {
+    if (!IS_WIN && !IS_MAC) return null;
+    await this._input.ensure();
+    const r = await this._input.cmd({ op: "cursor" }, 2000);
+    return r?.ok ? { x: r.x - this.origin.x, y: r.y - this.origin.y, shape: r.shape, visible: r.visible } : null;
+  }
+
+  /** macOS only: locks the screen at once; { ok:false } elsewhere or when it did not lock. */
+  async lockScreen() {
+    if (!IS_MAC) return { ok: false };
+    await this.helperCapture.ensure();
+    return this.helperCapture.cmd({ op: "lock" }, 8000);
+  }
+
   /** Polls the pointer while anyone watches and emits "cursor" when it moves or changes shape. */
   watchCursor(on) {
     if (!on || (!IS_WIN && !IS_MAC)) { clearInterval(this.cursorTimer); this.cursorTimer = null; return; }
@@ -1082,9 +1139,7 @@ export class DesktopController extends EventEmitter {
       if (busy) return;
       busy = true;
       try {
-        await this._input.ensure();
-        const r = await this._input.cmd({ op: "cursor" }, 2000);
-        const c = r?.ok ? { x: r.x - this.origin.x, y: r.y - this.origin.y, shape: r.shape, visible: r.visible } : null;
+        const c = await this.pointer();
         const key = JSON.stringify(c);
         if (c && key !== last) { last = key; this.cursor = c; this.emit("cursor", c); }
       } finally { busy = false; }
