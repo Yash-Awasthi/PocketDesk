@@ -34,7 +34,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📱 **Multi-PC** | Connect to multiple PCs, each with pinned certificates |
 | 🔔 **Background Notify** | Get notified when sessions end while the app is in background |
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states |
-| 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware H.264 up to 60 fps (WebCodecs in the browser), any monitor, the PC pointer drawn on the viewer as a small dot centred on the click point; touch gestures (two-finger scroll in both directions, two-finger tap for right click, three-finger tap for middle click, three-finger swipes to switch desktops or Spaces and show every window, hold then move to drag, pinch to zoom), a screen switcher on the picture when the PC has several monitors, pointer placement that is exact on Retina and mixed-DPI setups plus a manual corner calibration in the menu, a one-tap shortcut bar that follows the PC's OS (Ctrl shortcuts, Win and Task Manager on Windows; Cmd shortcuts, Spotlight, Mission Control and Force Quit on a Mac), media and volume keys, an app drawer of every installed program, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows and macOS). |
+| 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware video up to 60 fps, negotiated to the best codec both ends support — AV1 or HEVC where the phone can decode them (about 30–50% less data than H.264), H.264 otherwise (NVENC, Quick Sync, AMD AMF, Apple VideoToolbox or VA-API; the browser decodes H.264 with WebCodecs), the PC's sound streamed alongside as AAC, any monitor, the PC pointer drawn on the viewer as a small dot centred on the click point; touch gestures (two-finger scroll in both directions, two-finger tap for right click, three-finger tap for middle click, three-finger swipes to switch desktops or Spaces and show every window, hold then move to drag, pinch to zoom), a screen switcher on the picture when the PC has several monitors, pointer placement that is exact on Retina and mixed-DPI setups plus a manual corner calibration in the menu, a one-tap shortcut bar that follows the PC's OS (Ctrl shortcuts, Win and Task Manager on Windows; Cmd shortcuts, Spotlight, Mission Control and Force Quit on a Mac), media and volume keys, an app drawer of every installed program, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows, macOS and Linux/X11). |
 | 📋 **Clipboard & file drop** | Text, images and copied files move between the PC and the viewer while the desktop is open; files sent from the phone or browser are pasted straight into the focused PC window. |
 | 👁 **Access control** | A connection password is required on every connect; the PC owner can pause control (view-only) from the pairing page, and viewers can join view-only. |
 | 🎥 **Session recording** | Optional MP4 of the watched screen, asciicast of terminals, and a log of every viewer, approval and file sent. |
@@ -93,8 +93,11 @@ control. Open **PocketDesk** from Spotlight, Launchpad or the app menu to pair a
 settings, or use `pocketdesk` (`pair`, `status`, `stop`, `start`). On macOS, screen sharing and
 remote control also work once you grant **Screen Recording** and **Accessibility** to the daemon
 (System Settings → Privacy & Security; prompted on first use); with ffmpeg installed
-(`brew install ffmpeg`) the screen streams as H.264, otherwise as still frames. Linux screen
-sharing is not available.
+the screen streams as hardware video (ScreenCaptureKit + VideoToolbox: HEVC or H.264) and the Mac's
+sound comes with it; without those it falls back to still frames. On Linux (X11), the installer adds
+ffmpeg, xdotool and xrandr, and the screen streams with the PC's sound; Wayland sessions have no
+X server to grab, so sign in with X11/Xorg for screen sharing (terminals, files and agents work
+either way).
 
 **Manual:**
 ```bash

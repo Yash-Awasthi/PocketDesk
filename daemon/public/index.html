@@ -268,6 +268,7 @@
             <button class="btn" data-mac="Spotlight" onclick="send(hostOs === 'darwin' ? {type:'desktop_key', key:0x20, modifiers:['win']} : {type:'desktop_key', key:0x5B})">Win</button>
             <button class="btn" onclick="document.getElementById('deskFilePick').click()">Send files…</button>
             <input type="file" id="deskFilePick" multiple style="display:none" onchange="desktopSendFiles([...this.files]); this.value=''" />
+            <button class="btn" id="deskAudio" onclick="desktopToggleAudio()">🔈 Sound off</button>
           </div>
           <div class="dash-section" id="deskTransfer" style="display:none;color:#8b949e"></div>
           <div class="dash-section" style="padding:0;position:relative">
@@ -1010,16 +1011,25 @@ function renderApps(items) {
 
 // ── Desktop control: H.264 through WebCodecs where the page may use it, JPEG snapshots otherwise ──
 // WebCodecs exists only in secure contexts (https or localhost), so plain http over the LAN gets snapshots.
-const desk = { offset: 0, bestRtt: Infinity, bestAt: 0, rtt: -1, delay: -1, viewOnly: false, viewing: false, mode: "", decoder: null, config: null, needKey: true, ts: 0, frames: 0, cursor: null, hover: false, held: new Set(), monitor: 0 };
+const desk = { offset: 0, bestRtt: Infinity, bestAt: 0, rtt: -1, delay: -1, viewOnly: false, viewing: false, mode: "", decoder: null, config: null, needKey: true, ts: 0, frames: 0, cursor: null, hover: false, held: new Set(), monitor: 0, audio: false, adec: null, actx: null, aNext: 0, aTs: 0 };
 function desktopOnShow() {
   // A single on-demand frame even when not streaming — instant preview.
   if (!desk.viewing) send({ type: "desktop_frame" });
 }
 function desktopStart() {
   const viewOnly = desk.viewOnly || undefined;
-  if (typeof VideoDecoder === "function") send({ type: "desktop_start", video: true, preset: document.getElementById("deskPreset").value, monitor: desk.monitor, viewOnly });
+  // This browser decodes H.264 with WebCodecs; the phone app adds HEVC and AV1. Sound rides along when wanted.
+  const audio = desk.audio && typeof AudioDecoder === "function" ? true : undefined;
+  if (typeof VideoDecoder === "function") send({ type: "desktop_start", video: true, preset: document.getElementById("deskPreset").value, monitor: desk.monitor, codecs: ["h264"], audio, viewOnly });
   else send({ type: "desktop_start", quality: Number(document.getElementById("deskQuality").value), viewOnly });
   send({ type: "desktop_monitors" });
+}
+/** Toggle PC sound; a fresh start renegotiates with the daemon. */
+function desktopToggleAudio() {
+  desk.audio = !desk.audio;
+  document.getElementById("deskAudio").textContent = desk.audio ? "🔊 Sound on" : "🔈 Sound off";
+  if (!desk.audio) desktopAudioStop();
+  if (desk.viewing) desktopStart();
 }
 function desktopToggle() {
   if (desk.viewing) send({ type: "desktop_stop" });
@@ -1032,6 +1042,7 @@ function desktopStopped() {
   desk.mode = "";
   try { desk.decoder?.close(); } catch {}
   desk.decoder = null;
+  desktopAudioStop();
   document.getElementById("deskToggle").textContent = "▶ Start viewing";
   document.getElementById("deskStatus").textContent = "stopped";
   desktopPointer();
@@ -1060,9 +1071,10 @@ function desktopStamp(data) {
   for (let i = 0; i < 7; i++) v = v * 128 + (data[DESK_STAMP.length + i] & 0x7f);
   return v;
 }
-/** Binary message: [kind, ...Annex B]; kind 0 = SPS/PPS, 1 = keyframe, 2 = delta. */
+/** Binary message: [kind, ...bitstream]; 0 = config, 1 = keyframe, 2 = delta, 3 = AAC audio. */
 function desktopPacket(buf) {
   const kind = buf[0], data = buf.subarray(1);
+  if (kind === 3) { desktopAudioFrame(data); return; }
   if (kind === 0) { desk.config = data; desktopConfigure(data); return; }
   const d = desk.decoder;
   if (!d || d.state !== "configured" || (kind === 2 && desk.needKey)) return;
@@ -1074,6 +1086,44 @@ function desktopPacket(buf) {
   const sent = desktopStamp(data);
   try { d.decode(new EncodedVideoChunk({ type: kind === 1 ? "key" : "delta", timestamp: sent ? sent * 1000 : (desk.ts += 16667), data: payload })); }
   catch { desk.needKey = true; }
+}
+const ADTS_RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+/** Plays one AAC-LC ADTS frame from the PC through WebCodecs + Web Audio, scheduled back to back. */
+function desktopAudioFrame(frame) {
+  if (!desk.audio || frame.length < 7 || frame[0] !== 0xff || (frame[1] & 0xf6) !== 0xf0) return;
+  if (!desk.adec) {
+    const rateIndex = (frame[2] >> 2) & 0x0f;
+    const channels = (((frame[2] & 1) << 2) | (frame[3] >> 6)) || 2;
+    const rate = ADTS_RATES[rateIndex] || 48000;
+    desk.actx = new AudioContext({ sampleRate: rate });
+    desk.aNext = 0;
+    const asc = new Uint8Array([(2 << 3) | (rateIndex >> 1), ((rateIndex & 1) << 7) | (channels << 3)]);
+    try {
+      desk.adec = new AudioDecoder({
+        output: (d) => {
+          const buf = desk.actx.createBuffer(d.numberOfChannels, d.numberOfFrames, d.sampleRate);
+          const tmp = new Float32Array(d.numberOfFrames);
+          for (let ch = 0; ch < d.numberOfChannels; ch++) { d.copyTo(tmp, { planeIndex: ch, format: "f32-planar" }); buf.copyToChannel(tmp.slice(), ch); }
+          d.close();
+          const src = desk.actx.createBufferSource();
+          src.buffer = buf; src.connect(desk.actx.destination);
+          const now = desk.actx.currentTime;
+          // Keep a tiny lead; if we fell behind, resync to now instead of piling up delay.
+          if (desk.aNext < now + 0.02 || desk.aNext > now + 0.5) desk.aNext = now + 0.05;
+          src.start(desk.aNext); desk.aNext += buf.duration;
+        },
+        error: () => desktopAudioStop(),
+      });
+      desk.adec.configure({ codec: "mp4a.40.2", sampleRate: rate, numberOfChannels: channels, description: asc });
+    } catch { desk.adec = null; return; }
+  }
+  if (desk.adec.state !== "configured") return;
+  try { desk.adec.decode(new EncodedAudioChunk({ type: "key", timestamp: (desk.aTs = (desk.aTs || 0) + 1024), data: frame.subarray(7) })); } catch {}
+}
+function desktopAudioStop() {
+  try { desk.adec?.close(); } catch {}
+  try { desk.actx?.close(); } catch {}
+  desk.adec = null; desk.actx = null;
 }
 function desktopConfigure(cfg) {
   // The SPS follows the first 4-byte start code; profile, constraints and level name the codec.

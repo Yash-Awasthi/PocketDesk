@@ -140,6 +140,11 @@ class WsClient(
     /** "h264" when the daemon streams video, "jpeg" for the frame-by-frame fallback. */
     var desktopMode by mutableStateOf("")
         private set
+    /** The codec the daemon is encoding with ("h264", "hevc" or "av1"), decided per session. */
+    var desktopCodec by mutableStateOf("h264")
+        private set
+    /** Whether to ask the PC to stream its sound; remembered between sessions by the screen. */
+    @Volatile var desktopAudio = false
     /** Latest PC pointer; the video carries no pointer, so the screen draws this. */
     var desktopCursor by mutableStateOf<DesktopCursor?>(null)
         private set
@@ -147,8 +152,10 @@ class WsClient(
     var desktopMonitors by mutableStateOf<List<String>>(emptyList())
         private set
     var desktopMonitor by mutableStateOf(0)
-    /** Receives binary H.264 packets; called on the socket thread. */
+    /** Receives binary video packets (kinds 0-2); called on the socket thread. */
     @Volatile var videoSink: ((ByteArray) -> Unit)? = null
+    /** Receives PC audio packets (kind 3, an ADTS frame); called on the socket thread. */
+    @Volatile var audioSink: ((ByteArray) -> Unit)? = null
     /** PC clipboard content, asked for or copied on the PC while the desktop is open. */
     val pcClip = kotlinx.coroutines.flow.MutableSharedFlow<PcClip>(extraBufferCapacity = 4)
     /** Daemon clock minus ours, from the fastest recent ping; frame stamps are in daemon time. */
@@ -416,6 +423,7 @@ class WsClient(
 
     private fun onVideoPacket(pkt: ByteArray) {
         videoBytes += pkt.size
+        if (pkt.isNotEmpty() && pkt[0].toInt() == 3) { audioSink?.invoke(pkt.copyOfRange(1, pkt.size)); return }
         if (pkt.isNotEmpty() && pkt[0].toInt() != 0) videoFrames++
         videoSink?.invoke(pkt)
     }
@@ -519,10 +527,13 @@ class WsClient(
     private fun control(line: String): Boolean = !desktopViewOnly && send(line)
     /** saver / balanced / quality; sent with every start so a daemon restart keeps it. */
     var desktopPreset by mutableStateOf("balanced")
+    /** Codecs this device can decode, best first; computed once and offered to the daemon. */
+    private val decodable by lazy { com.yasha.pocketdesk.ui.decodableCodecs() }
     fun desktopStartVideo() {
         desktopStreaming = true
-        desktopResume = { send(Proto.desktopStartVideo(desktopPreset, desktopMonitor, desktopViewOnly)) }
-        send(Proto.desktopStartVideo(desktopPreset, desktopMonitor, desktopViewOnly))
+        val start = { Proto.desktopStartVideo(desktopPreset, desktopMonitor, desktopViewOnly, decodable, desktopAudio) }
+        desktopResume = { send(start()) }
+        send(start())
         send(Proto.desktopMonitors())
     }
     fun clipboardGet() = send(Proto.clipboardGet())
@@ -1010,6 +1021,7 @@ class WsClient(
                 if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
                     desktopStreaming = true
                     desktopMode = str(m, "mode") ?: "jpeg"
+                    desktopCodec = str(m, "codec") ?: "h264"
                     bool(m, "viewOnly")?.let { desktopViewOnly = it }
                     desktopRecording = bool(m, "recording") ?: false
                 } else {

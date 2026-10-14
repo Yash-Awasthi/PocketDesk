@@ -200,6 +200,15 @@ export class IrohSocket extends EventEmitter {
     return true;
   }
 
+  /** PC sound as a [3, ...adts] control message: never dropped with a video GOP, and dropped only if far behind. */
+  sendAudio(adts) {
+    if (this.readyState !== 1 || this._ctl.dead || this._ctl.queued > 1_000_000) return;
+    const pkt = Buffer.allocUnsafe(1 + adts.length);
+    pkt[0] = 3;
+    adts.copy(pkt, 1);
+    this._ctl.write(frame(pkt));
+  }
+
   close(code = 1000, reason = "") {
     if (this.readyState !== 1) return;
     try { this.conn.close(BigInt(code), [...Buffer.from(String(reason))]); } catch {}

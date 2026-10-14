@@ -21,6 +21,7 @@ import { createAccess } from "./access.js";
 import { wakeTargets } from "./wake.js";
 import { Recorder, RECORD_FLAG } from "./recorder.js";
 import { DesktopVideo } from "./desktop_video.js";
+import { DesktopAudio } from "./desktop_audio.js";
 import { AdvancedSSHServerManager } from "./advanced_ssh_server.js";
 import { SSHBastion } from "./ssh_bastion.js";
 import { MultiProtocolClient } from "./ssh_vnc_client.js";
@@ -475,9 +476,10 @@ export function start(config, { onTokenRotated } = {}) {
     }
   });
 
-  // H.264 viewers get binary [kind, ...annexB] messages. A viewer whose socket
-  // backs up skips frames until a fresh keyframe, which only a restart produces.
-  const video = new DesktopVideo();
+  // Viewers get binary [kind, ...bitstream] messages (0 config, 1 key, 2 delta, 3 audio). A viewer
+  // whose socket backs up skips frames until a fresh keyframe, which only a restart produces.
+  const video = new DesktopVideo({ native: desktop.macVideo });
+  const audio = new DesktopAudio();
   const videoWatchers = new Set();
   let resyncTimer = null;
   // Ctrl+Alt+Del, a UAC prompt or the lock screen switch to the secure desktop, which stops ddagrab
@@ -503,6 +505,28 @@ export function start(config, { onTokenRotated } = {}) {
     }
   });
   video.on("ended", () => { if (videoWatchers.size) resync(); });
+  // PC sound: Windows/Linux encode it separately; macOS's native helper hands it through DesktopVideo.
+  // One AAC ADTS frame per message, kind 3, only to viewers that asked for sound and are not far behind.
+  const onAudio = (adts) => {
+    const msg = Buffer.concat([Buffer.from([3]), adts]);
+    for (const w of videoWatchers) {
+      if (w.readyState !== 1 || !w._audio) continue;
+      if (w.sendAudio) w.sendAudio(adts);
+      else if (w.bufferedAmount < 1_000_000) w.send(msg);
+    }
+  };
+  video.on("audio", onAudio);
+  audio.on("audio", onAudio);
+  /** Turn PC sound on while any viewer wants it, off when none do. macOS folds it into the video restart. */
+  function syncAudio() {
+    const want = [...videoWatchers].some((w) => w._audio);
+    if (process.platform === "darwin") {
+      if (want !== video.audio) { video.audio = want; if (videoWatchers.size) resync(); }
+      return;
+    }
+    if (want && !audio.running) audio.start();
+    else if (!want && audio.running) audio.stop();
+  }
   let lastDrop = 0;
   function congested() {
     const now = Date.now();
@@ -550,6 +574,7 @@ export function start(config, { onTokenRotated } = {}) {
     power.dispose();
     activity.stop();
     video.stop();
+    audio.stop();
     scheduler.stop();
     desktop.dispose();
     recorder.dispose();
@@ -607,7 +632,7 @@ export function start(config, { onTokenRotated } = {}) {
   const ctx = {
     send, broadcast, allSessions, plugins, power,
     desktop, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
-    activity, tls,
+    activity, tls, syncAudio,
   };
   const handlers = {
     ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx),

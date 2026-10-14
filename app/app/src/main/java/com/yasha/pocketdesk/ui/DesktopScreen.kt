@@ -54,6 +54,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -118,6 +119,7 @@ fun DesktopScreen(
     // Input mode, quality and the shortcut bar are remembered between sessions.
     val prefs = LocalContext.current.getSharedPreferences("pocketdesk", android.content.Context.MODE_PRIVATE)
     remember { prefs.getString("desktop_preset", null)?.takeIf { it in PRESETS }?.let { ws.desktopPreset = it }; true }
+    remember { ws.desktopAudio = prefs.getBoolean("desktop_audio", false); true }
     var touchpad by remember { mutableStateOf(prefs.getBoolean("desktop_touchpad", true)) }
     var shortcuts by remember { mutableStateOf(prefs.getBoolean("desktop_shortcuts", true)) }
     var dragLock by remember { mutableStateOf(false) }
@@ -129,6 +131,14 @@ fun DesktopScreen(
 
     var videoSize by remember { mutableStateOf<IntSize?>(null) }
     var boxSize by remember { mutableStateOf(IntSize.Zero) }
+    var videoPlayer by remember { mutableStateOf<H264Player?>(null) }
+    // A codec change mid-session (e.g. HEVC stepped down to H.264) rebuilds the decoder in place.
+    LaunchedEffect(ws.desktopCodec) { videoPlayer?.setCodec(ws.desktopCodec) }
+    // PC sound plays through an AAC decoder only while the stream is on and sound is wanted.
+    DisposableEffect(ws.desktopAudio, ws.desktopStreaming) {
+        val player = if (ws.desktopAudio && ws.desktopStreaming) AacPlayer().also { ws.audioSink = it::feed } else null
+        onDispose { ws.audioSink = null; player?.release() }
+    }
     // The stream only runs while the app is visible.
     LifecycleStartEffect(ws) {
         ws.desktopStartVideo()
@@ -277,6 +287,11 @@ fun DesktopScreen(
                             prefs.edit().putString("desktop_preset", ws.desktopPreset).apply()
                             ws.desktopStartVideo()
                         }
+                        if (video) Item(if (ws.desktopAudio) "PC sound: on (mute)" else "PC sound: off (play)") {
+                            ws.desktopAudio = !ws.desktopAudio
+                            prefs.edit().putBoolean("desktop_audio", ws.desktopAudio).apply()
+                            ws.desktopStartVideo()
+                        }
                         Item(if (touchpad) "Input: Touchpad (switch to direct tap)" else "Input: Direct tap (switch to touchpad)") {
                             touchpad = !touchpad
                             prefs.edit().putBoolean("desktop_touchpad", touchpad).apply()
@@ -318,7 +333,7 @@ fun DesktopScreen(
         Box(Modifier.fillMaxWidth().weight(1f).onSizeChanged { boxSize = it }) {
             if (video) {
                 AndroidView(
-                    factory = { ctx -> videoView(ctx, ws) { videoSize = it } },
+                    factory = { ctx -> videoView(ctx, ws, onPlayer = { videoPlayer = it }) { videoSize = it } },
                     update = { tv ->
                         val d = videoSize
                         if (d != null && boxSize.width > 0) {
@@ -578,19 +593,21 @@ fun DesktopScreen(
 }
 
 /** TextureView fed by a hardware decoder; each new surface asks the daemon for a fresh keyframe. */
-private fun videoView(ctx: android.content.Context, ws: WsClient, onSize: (IntSize) -> Unit) = TextureView(ctx).apply {
+private fun videoView(ctx: android.content.Context, ws: WsClient, onPlayer: (H264Player?) -> Unit, onSize: (IntSize) -> Unit) = TextureView(ctx).apply {
     surfaceTextureListener = object : TextureView.SurfaceTextureListener {
         var player: H264Player? = null
         var surface: Surface? = null
         override fun onSurfaceTextureAvailable(st: SurfaceTexture, w: Int, h: Int) {
             val s = Surface(st).also { surface = it }
-            val p = H264Player(s, onSize = { vw, vh -> onSize(IntSize(vw, vh)) }, onLost = { ws.desktopStartVideo() }, onShown = ws::frameShown)
+            val p = H264Player(s, onSize = { vw, vh -> onSize(IntSize(vw, vh)) }, onLost = { ws.desktopStartVideo() }, onShown = ws::frameShown, codec = ws.desktopCodec)
             player = p
+            onPlayer(p)
             ws.videoSink = p::feed
             ws.desktopStartVideo()
         }
         override fun onSurfaceTextureDestroyed(st: SurfaceTexture): Boolean {
             ws.videoSink = null
+            onPlayer(null)
             player?.release()
             surface?.release()
             return true

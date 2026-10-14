@@ -69,7 +69,11 @@ class IrohLink(
                 }
                 onOpen()
                 val recv = bi.recv()
-                while (true) onText(String(readMessage(recv), Charsets.UTF_8))
+                // Control is UTF-8 JSON (starts with '{'); a leading byte 3 marks an audio packet instead.
+                while (true) {
+                    val m = readMessage(recv)
+                    if (m.isNotEmpty() && m[0].toInt() == 3) onVideo(m) else onText(String(m, Charsets.UTF_8))
+                }
             } catch (t: Throwable) {
                 finish(null, t.message ?: "connection failed")
             }

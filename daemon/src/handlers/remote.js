@@ -3,11 +3,18 @@ import * as devices from "../devices.js";
 import { centerFor, fromFraction } from "../desktop_capture.js";
 
 export default function remoteHandlers(ctx) {
-  const { send, desktop, desktopWatchers, video, videoWatchers, recorder, access } = ctx;
+  const { send, desktop, desktopWatchers, video, videoWatchers, recorder, access, syncAudio } = ctx;
   // Sockets that took a single snapshot stay on the viewer set for a few seconds.
   const snapshots = new Map();
   const deviceName = (ws) => devices.list().find((d) => d.id === ws._clientId)?.name || "A remote device";
   const watching = (ws) => videoWatchers.has(ws) || desktopWatchers.has(ws);
+  /** Codecs every current video viewer can decode, in the first viewer's order; H.264 is the floor. */
+  function sharedCodecs() {
+    const lists = [...videoWatchers].map((w) => w._codecs || []);
+    if (!lists.length) return ["h264"];
+    const shared = lists[0].filter((c) => lists.every((l) => l.includes(c)));
+    return shared.includes("h264") ? shared : [...shared, "h264"];
+  }
   /** Pointer and clipboard follow the PC only while someone is viewing it. */
   function syncCursor() {
     const on = videoWatchers.size + desktopWatchers.size > 0;
@@ -59,17 +66,22 @@ export default function remoteHandlers(ctx) {
     // ── Real desktop control (AnyDesk-style: watch + full input) ─────────
     async desktop_start(ws, msg) {
       ws._viewOnly = !!msg.viewOnly || !!ws._viewOnlyForced || !access.controlAllowed;
+      // Codecs the phone can decode, best first (av1, hevc, h264); older clients send none and get H.264.
+      ws._codecs = Array.isArray(msg.codecs) ? msg.codecs.filter((c) => ["av1", "hevc", "h264"].includes(c)) : [];
+      ws._audio = !!msg.audio;
       // Binary frames need a real socket; relay shims fall back to JPEG.
       if (msg.video && typeof ws.bufferedAmount === "number") {
         videoWatchers.add(ws);
         ws._needKey = true;
         video.setPreset(msg.preset);
+        // One encoder serves everyone, so only codecs every current viewer decodes are on the table.
+        video.setCodecs(sharedCodecs());
         if (msg.monitor != null) video.monitor = await monitorAt(Number(msg.monitor) || 0);
         const encoder = video.running ? await video.restart() : await video.start();
         if (encoder) {
           if (!ws._videoCloseHooked) {
             ws._videoCloseHooked = true;
-            ws.once?.("close", () => { videoWatchers.delete(ws); if (!videoWatchers.size) video.stop(); syncCursor(); });
+            ws.once?.("close", () => { videoWatchers.delete(ws); if (!videoWatchers.size) video.stop(); syncCursor(); syncAudio(); });
           }
           // A chosen screen starts with the pointer in its middle, so it is never left on a screen out of view.
           if (mayControl(ws) && video.monitor) {
@@ -78,7 +90,8 @@ export default function remoteHandlers(ctx) {
           }
           ws._monitor = video.monitor?.index;
           syncCursor();
-          return send(ws, { type: "desktop_started", ok: true, mode: "h264", encoder, preset: video.preset, monitor: video.monitor?.index ?? 0, viewOnly: ws._viewOnly, recording: recorder.recordingScreen });
+          syncAudio();
+          return send(ws, { type: "desktop_started", ok: true, mode: "h264", encoder, codec: video.codec, audio: ws._audio, preset: video.preset, monitor: video.monitor?.index ?? 0, viewOnly: ws._viewOnly, recording: recorder.recordingScreen });
         }
         videoWatchers.delete(ws);
       }
@@ -113,9 +126,11 @@ export default function remoteHandlers(ctx) {
     },
     async desktop_stop(ws, msg) {
       release(ws);
+      ws._audio = false;
       if (videoWatchers.delete(ws) && !videoWatchers.size) video.stop();
       desktopWatchers.delete(ws);
       const r = desktop.stopFrameStream(ws._clientId || "anon");
+      syncAudio();
       syncCursor();
       send(ws, { type: "desktop_stopped", ...r });
     },

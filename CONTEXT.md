@@ -49,7 +49,28 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
 
 ## State at save (IMPORTANT — current)
 
-**2026-10-14 pass — desktop control on macOS, OS-aware input, pointer mapping (0.7.0, newest):**
+**2026-10-14 pass B — codecs, PC sound, native macOS capture, Linux X11 (0.8.0, newest):**
+
+- Codec negotiation: `desktop_start` carries `codecs` (phone/browser decodables, best first) and `audio`.
+  `DesktopVideo.setCodecs` + `candidates()` pick AV1 → HEVC → H.264 across NVENC/QSV/AMF/VA-API/
+  VideoToolbox/x264; the shared codec is the intersection of all current viewers. `desktop_started`
+  reports `codec`. Enhanced FLV (hvc1/av01) parsing + AV1 sequence-header insertion in `desktop_video.js`.
+- Per-codec latency stamp: H.264 SEI, HEVC prefix-SEI, AV1 padding OBU (`stampFrame`); phone + browser
+  read all three.
+- PC sound: kind-3 packets, AAC-LC ADTS. Windows WASAPI loopback helper + ffmpeg (`desktop_audio.js`),
+  Linux pulse monitor source (pactl), macOS from the native helper. iroh carries audio on the control
+  stream (`sendAudio`); the phone splits kind 3 to `AacPlayer`, the browser to WebCodecs AudioDecoder.
+- macOS capture is now ScreenCaptureKit + VideoToolbox in the Swift helper (`stream` mode, records
+  `[kind u8][len u32][data]`); stills use SCScreenshotManager. No ffmpeg needed on a Mac. CGDisplayCreateImage is gone.
+- Linux X11 (`linux_desktop.js`): monitors via xrandr, input via xdotool, cursor via xdotool, video via
+  ffmpeg x11grab. Wayland unsupported (no X grab). `DesktopController.usable` gates it on xdotool.
+- Phone decodes HEVC/AV1 when a hardware decoder exists (`decodableCodecs`), rebuilds the decoder on a
+  codec switch. `install.sh` installs ffmpeg/xdotool/xrandr/xclip per package manager.
+- UNPROVEN: macOS ScreenCaptureKit/VideoToolbox stream and Linux X11 have NOT run on hardware; CI
+  compiles the Mac helper but has no display to capture. Windows AV1/HEVC/H.264 NVENC + WASAPI loopback
+  ARE verified on real hardware (RTX 4060) via `desktop.test.mjs` with FFMPEG_PATH.
+
+**2026-10-14 pass A — desktop control on macOS, OS-aware input, pointer mapping (0.7.0):**
 
 - `welcome` carries `os` (`process.platform`); the app picks shortcut bar, modifier names and
   three-finger swipe shortcuts from it (`ui/HostKeys.kt`).

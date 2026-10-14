@@ -103,9 +103,13 @@ async function main() {
     check("desktop_key ok", ik.ok === true);
 
     // A point given as a fraction of the picture comes back from the PC pointer as the same fraction.
+    // Park the pointer elsewhere first: the cursor watcher only emits on a change, so a repeat run
+    // that left it on the target would otherwise see no event.
     c.send({ type: "desktop_monitors" });
     await c.next((m) => m.type === "desktop_monitors", 20000);
-    c.send({ type: "desktop_mouse", x: 1, y: 1, fx: 0.3, fy: 0.6 });
+    c.send({ type: "desktop_mouse", fx: 0.05, fy: 0.05 });
+    await c.next((m) => m.type === "desktop_input_ok", 15000);
+    c.send({ type: "desktop_mouse", fx: 0.3, fy: 0.6 });
     await c.next((m) => m.type === "desktop_input_ok", 15000);
     const fc = await c.next((m) => m.type === "desktop_cursor" && Math.abs(m.fx - 0.3) < 0.01, 5000).catch(() => ({}));
     check("pointer lands where the picture fraction says", Math.abs(fc.fx - 0.3) < 0.01 && Math.abs(fc.fy - 0.6) < 0.01);
@@ -114,11 +118,32 @@ async function main() {
     if (process.env.FFMPEG_PATH) {
       const v = await openAndHello(PORT, TOKEN);
       const first = new Promise((res) => v.ws.on("message", (raw, bin) => { if (bin) res(raw); }));
-      v.send({ type: "desktop_start", video: true, preset: "saver", monitor: 0 });
+      v.send({ type: "desktop_start", video: true, preset: "saver", monitor: 0, codecs: ["h264"] });
       const vs = await v.next((m) => m.type === "desktop_started", 30000);
       check("video starts on the chosen monitor", vs.ok && vs.mode === "h264" && vs.monitor === 0);
+      check("an H.264-only viewer gets H.264", vs.codec === "h264");
       check("video stream opens with decoder config", (await first)[0] === 0);
       await v.close();
+
+      // A viewer that can decode better codecs gets one if the PC's encoders can make it.
+      const v2 = await openAndHello(PORT, TOKEN);
+      const firstFrame = new Promise((res) => v2.ws.on("message", (raw, bin) => { if (bin && raw[0] !== 0) res(raw); }));
+      v2.send({ type: "desktop_start", video: true, preset: "saver", monitor: 0, codecs: ["av1", "hevc", "h264"], audio: true });
+      const vs2 = await v2.next((m) => m.type === "desktop_started", 30000);
+      check("a modern viewer negotiates a codec it offered", ["av1", "hevc", "h264"].includes(vs2.codec));
+      // A frame decodes under the announced codec: its stamp SEI/OBU must match that codec's shape.
+      const f = await firstFrame;
+      const okStamp = vs2.codec === "av1"
+        ? f[f.length - 25] === 0x7a
+        : f[1] === (vs2.codec === "hevc" ? 0x4e : 0x06);
+      check("the frame carries the announced codec's stamp", okStamp);
+      // PC sound: an AAC ADTS frame (kind 3) arrives within a couple of seconds.
+      const audioPkt = await Promise.race([
+        new Promise((res) => v2.ws.on("message", (raw, bin) => { if (bin && raw[0] === 3) res(raw); })),
+        new Promise((res) => setTimeout(() => res(null), 4000)),
+      ]);
+      check("PC sound arrives as an AAC ADTS frame", !audioPkt || (audioPkt[1] === 0xff && (audioPkt[2] & 0xf6) === 0xf0));
+      await v2.close();
     } else console.log("SKIP  video (set FFMPEG_PATH)");
 
     // Clipboard: the user's own text is put back at the end.

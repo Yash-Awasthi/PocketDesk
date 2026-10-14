@@ -63,6 +63,30 @@ if ! command -v git &>/dev/null; then
   warn "git not found — will try to download archive instead"
 fi
 
+# Screen sharing tools. ffmpeg encodes the stream (and PC sound) everywhere; Linux X11 also needs
+# xdotool for input and xrandr for monitors. Installed if a known package manager is present.
+OS="$(uname -s)"
+need_linux=""
+command -v ffmpeg &>/dev/null || need_linux="$need_linux ffmpeg"
+if [ "$OS" = "Linux" ]; then
+  command -v xdotool &>/dev/null || need_linux="$need_linux xdotool"
+  command -v xrandr &>/dev/null || need_linux="$need_linux x11-xserver-utils"
+  command -v xclip &>/dev/null || need_linux="$need_linux xclip"
+fi
+if [ -n "$need_linux" ] && [ "$OS" = "Linux" ]; then
+  info "Installing screen-sharing tools:$need_linux"
+  if command -v apt-get &>/dev/null; then sudo apt-get update -qq && sudo apt-get install -y $need_linux || warn "install failed; install manually:$need_linux"
+  elif command -v dnf &>/dev/null; then sudo dnf install -y ffmpeg xdotool xrandr xclip || warn "install failed; dnf needs RPM Fusion for ffmpeg"
+  elif command -v pacman &>/dev/null; then sudo pacman -S --needed --noconfirm ffmpeg xdotool xorg-xrandr xclip || warn "install failed; install manually"
+  elif command -v zypper &>/dev/null; then sudo zypper install -y ffmpeg xdotool xrandr xclip || warn "install failed; install manually"
+  else warn "no known package manager; install these yourself for screen sharing:$need_linux"
+  fi
+fi
+if [ "$OS" = "Linux" ] && [ "${XDG_SESSION_TYPE:-}" = "wayland" ]; then
+  warn "Wayland session: screen sharing needs X11 (log in with 'Xorg'/'X11'); terminals, files and agents still work."
+fi
+if command -v ffmpeg &>/dev/null; then ok "ffmpeg $(ffmpeg -version 2>/dev/null | head -1 | awk '{print $3}')"; else warn "ffmpeg not found — desktop streaming will be unavailable"; fi
+
 # ── Step 2: Clone or update repo ─────────────────────────────────────────────
 step "Setting up PocketDesk"
 

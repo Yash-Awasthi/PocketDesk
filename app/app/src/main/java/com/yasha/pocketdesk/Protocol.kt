@@ -212,9 +212,11 @@ object Proto {
 
     // ── Desktop control (AnyDesk-style watch + full input) ──
     fun desktopStart(quality: Int) = obj { put("type", "desktop_start"); put("quality", quality) }
-    fun desktopStartVideo(preset: String, monitor: Int, viewOnly: Boolean) = obj {
+    fun desktopStartVideo(preset: String, monitor: Int, viewOnly: Boolean, codecs: List<String> = emptyList(), audio: Boolean = false) = obj {
         put("type", "desktop_start"); put("video", true); put("preset", preset); put("monitor", monitor)
         if (viewOnly) put("viewOnly", true)
+        if (codecs.isNotEmpty()) put("codecs", JsonArray(codecs.map { JsonPrimitive(it) }))
+        if (audio) put("audio", true)
     }
     fun desktopMonitors() = obj { put("type", "desktop_monitors") }
     fun desktopPing(t: Long) = obj { put("type", "desktop_ping"); put("t", t) }

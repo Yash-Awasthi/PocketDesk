@@ -27,6 +27,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { EventEmitter } from "node:events";
 import { configDir } from "./config.js";
+import { LinuxDesktop, IS_LINUX } from "./linux_desktop.js";
 // Helper scripts live in the private config dir: in a shared temp dir another user could
 // swap one in before it runs, as SYSTEM for the console endpoint.
 
@@ -478,14 +479,21 @@ export class PsHelper {
   }
 }
 
-// macOS screen helper (Phase 2.1: view only). Same JSON-line protocol as the PowerShell helpers:
-// one request object per line in, one reply per line out. CoreGraphics captures the display;
-// without Screen Recording permission CGDisplayCreateImage returns null, reported as a clear error.
+// macOS helper, compiled from this Swift source. Two modes:
+//  • no arguments: the JSON-line protocol of the PowerShell helpers (one request per line in, one
+//    reply per line out) for stills, input, pointer, clipboard, permissions and lock;
+//  • "stream ...": ScreenCaptureKit frames encoded by VideoToolbox (H.264 or HEVC) and the PC's sound
+//    as AAC, written as [kind u8][length u32 BE][data] records (1 key, 2 delta, 3 audio).
+// Without the Screen Recording grant ScreenCaptureKit finds no displays, reported as a clear error.
 const MAC_CAP_SWIFT = `
 import Foundation
 import CoreGraphics
 import AppKit
 import ApplicationServices
+import ScreenCaptureKit
+import VideoToolbox
+import AVFoundation
+import CoreMedia
 
 // Screen Recording and Accessibility are separate macOS grants; without them capture returns
 // nothing and input is silently dropped. "perms" reports them, "request" shows the system prompts.
@@ -507,46 +515,68 @@ func reply(_ o: [String: Any]) {
   fflush(stdout)
 }
 
-func monitors() -> [[String: Any]] {
+func displayIDs() -> [CGDirectDisplayID] {
   var count: UInt32 = 0
   CGGetActiveDisplayList(0, nil, &count)
   var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
   CGGetActiveDisplayList(count, &ids, &count)
+  return ids
+}
+
+func monitors() -> [[String: Any]] {
   let main = CGMainDisplayID()
   var out: [[String: Any]] = []
-  for (i, id) in ids.enumerated() {
+  for (i, id) in displayIDs().enumerated() {
     let b = CGDisplayBounds(id)
     out.append(["index": i, "id": Int(id), "x": Int(b.origin.x), "y": Int(b.origin.y),
-                "w": Int(b.width), "h": Int(b.height), "pw": CGDisplayPixelsWide(id), "ph": CGDisplayPixelsHigh(id),
-                "primary": id == main])
+                "w": Int(b.width), "h": Int(b.height), "primary": id == main])
   }
   return out
 }
 
-func capture(_ scale: Double, _ index: Int) -> [String: Any] {
-  var count: UInt32 = 0
-  CGGetActiveDisplayList(0, nil, &count)
-  var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-  CGGetActiveDisplayList(count, &ids, &count)
+// The display at [index] in CGGetActiveDisplayList order (the main one for -1), as ScreenCaptureKit sees it.
+func scDisplay(_ index: Int) -> SCDisplay? {
+  let ids = displayIDs()
   let id = (index >= 0 && index < ids.count) ? ids[index] : CGMainDisplayID()
-  guard let img = CGDisplayCreateImage(id) else {
-    return ["ok": false, "error": "screen_permission"]  // no Screen Recording grant, or display gone
+  var found: SCDisplay?
+  let sem = DispatchSemaphore(value: 0)
+  SCShareableContent.getExcludingDesktopWindows(false, onScreenWindowsOnly: true) { content, _ in
+    found = content?.displays.first { $0.displayID == id }
+    sem.signal()
   }
+  sem.wait()
+  return found
+}
+
+// Backing pixels (twice the points on Retina) scaled by the quality factor, kept even for the encoders.
+func pixelSize(_ d: SCDisplay, _ scale: Double) -> (Int, Int) {
+  let mode = CGDisplayCopyDisplayMode(d.displayID)
+  let pw = mode?.pixelWidth ?? d.width
+  let ph = mode?.pixelHeight ?? d.height
   let s = max(0.2, min(1.0, scale))
-  let w = max(1, Int(Double(img.width) * s)), h = max(1, Int(Double(img.height) * s))
-  let cs = CGColorSpaceCreateDeviceRGB()
-  guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-      space: cs, bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue) else {
-    return ["ok": false, "error": "context"]
+  return (max(2, Int(Double(pw) * s) / 2 * 2), max(2, Int(Double(ph) * s) / 2 * 2))
+}
+
+func capture(_ scale: Double, _ index: Int) -> [String: Any] {
+  guard let display = scDisplay(index) else { return ["ok": false, "error": "screen_permission"] }
+  let (w, h) = pixelSize(display, scale)
+  let cfg = SCStreamConfiguration()
+  cfg.width = w
+  cfg.height = h
+  cfg.showsCursor = false
+  var shot: CGImage?
+  let sem = DispatchSemaphore(value: 0)
+  SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: display, excludingWindows: []), configuration: cfg) { img, _ in
+    shot = img
+    sem.signal()
   }
-  ctx.interpolationQuality = .low
-  ctx.draw(img, in: CGRect(x: 0, y: 0, width: w, height: h))
-  guard let scaled = ctx.makeImage() else { return ["ok": false, "error": "scale"] }
-  let rep = NSBitmapImageRep(cgImage: scaled)
+  sem.wait()
+  guard let img = shot else { return ["ok": false, "error": "screen_permission"] }
+  let rep = NSBitmapImageRep(cgImage: img)
   guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.6]) else {
     return ["ok": false, "error": "encode"]
   }
-  return ["ok": true, "b64": jpeg.base64EncodedString(), "w": w, "h": h]
+  return ["ok": true, "b64": jpeg.base64EncodedString(), "w": img.width, "h": img.height]
 }
 
 // Windows virtual-key codes (what the phone and web client send) to macOS CGKeyCodes.
@@ -814,16 +844,16 @@ func postType(_ text: String) -> [String: Any] {
   return ["ok": true]
 }
 
-while let line = readLine(strippingNewline: true) {
+func handle(_ line: String) {
   guard let data = line.data(using: .utf8),
-        let cmd = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+        let cmd = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
   let id = cmd["id"]
   let op = cmd["op"] as? String ?? ""
   var out: [String: Any]
   switch op {
   case "ping": out = ["ok": true]
   case "monitors": out = ["ok": true, "monitors": monitors()]
-  case "capture": out = capture(cmd["s"] as? Double ?? 1.0, cmd["index"] as? Int ?? -1)
+  case "capture": out = capture(num(cmd["s"]) ?? 1.0, cmd["index"] as? Int ?? -1)
   case "perms": out = perms()
   case "request": out = requestPerms()
   case "mouse": out = postMouse(cmd)
@@ -839,6 +869,213 @@ while let line = readLine(strippingNewline: true) {
   if let id = id { out["id"] = id }
   reply(out)
 }
+
+// AAC-LC, 48 kHz, stereo: the ADTS header that lets the phone decode each frame on its own.
+func adtsHeader(_ size: Int) -> Data {
+  let full = size + 7
+  return Data([0xFF, 0xF1, 0x4C, UInt8(0x80 | ((full >> 11) & 0x03)), UInt8((full >> 3) & 0xFF), UInt8(((full & 0x07) << 5) | 0x1F), 0xFC])
+}
+
+final class Streamer: NSObject, SCStreamOutput, SCStreamDelegate {
+  let codec: String
+  let fps: Int
+  let bitrate: Int
+  var session: VTCompressionSession?
+  var stream: SCStream?
+  var aac: AVAudioConverter?
+  var aacFormat: AVAudioFormat?
+  let outLock = NSLock()
+  let videoQueue = DispatchQueue(label: "pocketdesk.video")
+  let audioQueue = DispatchQueue(label: "pocketdesk.audio")
+
+  init(codec: String, fps: Int, bitrate: Int) {
+    self.codec = codec
+    self.fps = fps
+    self.bitrate = bitrate
+  }
+
+  func write(_ kind: UInt8, _ data: Data) {
+    let n = UInt32(data.count)
+    let head = Data([kind, UInt8(n >> 24), UInt8((n >> 16) & 0xFF), UInt8((n >> 8) & 0xFF), UInt8(n & 0xFF)])
+    outLock.lock()
+    FileHandle.standardOutput.write(head + data)
+    outLock.unlock()
+  }
+
+  func makeSession(_ w: Int, _ h: Int) -> Bool {
+    let type = codec == "hevc" ? kCMVideoCodecType_HEVC : kCMVideoCodecType_H264
+    var spec: [CFString: Any] = [:]
+    if codec == "h264" { spec[kVTVideoEncoderSpecification_EnableLowLatencyRateControl] = true }
+    var made: VTCompressionSession?
+    let st = VTCompressionSessionCreate(allocator: nil, width: Int32(w), height: Int32(h), codecType: type,
+      encoderSpecification: spec as CFDictionary, imageBufferAttributes: nil, compressedDataAllocator: nil,
+      outputCallback: nil, refcon: nil, compressionSessionOut: &made)
+    guard st == noErr, let s = made else { return false }
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: NSNumber(value: fps))
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: fps))
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitrate))
+    VTSessionSetProperty(s, key: kVTCompressionPropertyKey_ProfileLevel,
+      value: codec == "hevc" ? kVTProfileLevel_HEVC_Main_AutoLevel : kVTProfileLevel_H264_Main_AutoLevel)
+    VTCompressionSessionPrepareToEncodeFrames(s)
+    session = s
+    return true
+  }
+
+  func stream(_ stream: SCStream, didOutputSampleBuffer sb: CMSampleBuffer, of type: SCStreamOutputType) {
+    if type == .audio { encodeAudio(sb); return }
+    // Idle and blank frames carry no picture; only complete ones are encoded.
+    guard type == .screen, sb.isValid,
+          let atts = CMSampleBufferGetSampleAttachmentsArray(sb, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
+          let raw = atts.first?[.status] as? Int, SCFrameStatus(rawValue: raw) == .complete,
+          let pb = CMSampleBufferGetImageBuffer(sb) else { return }
+    if session == nil && !makeSession(CVPixelBufferGetWidth(pb), CVPixelBufferGetHeight(pb)) { exit(3) }
+    guard let s = session else { return }
+    VTCompressionSessionEncodeFrame(s, imageBuffer: pb, presentationTimeStamp: CMSampleBufferGetPresentationTimeStamp(sb),
+      duration: CMTime.invalid, frameProperties: nil, infoFlagsOut: nil) { [weak self] status, _, sample in
+      guard status == noErr, let sample = sample else { return }
+      self?.emitVideo(sample)
+    }
+  }
+
+  func stream(_ stream: SCStream, didStopWithError error: Error) { exit(6) }
+
+  // A keyframe goes out as parameter sets then the frame, all Annex B; the daemon splits them.
+  func emitVideo(_ sample: CMSampleBuffer) {
+    let atts = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]]
+    let key = !((atts?.first?[kCMSampleAttachmentKey_NotSync] as? Bool) ?? false)
+    let startCode: [UInt8] = [0, 0, 0, 1]
+    var out = Data()
+    if key, let fmt = CMSampleBufferGetFormatDescription(sample) {
+      var count = 0
+      var i = 0
+      repeat {
+        var ptr: UnsafePointer<UInt8>?
+        var size = 0
+        let st = codec == "hevc"
+          ? CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(fmt, parameterSetIndex: i, parameterSetPointerOut: &ptr,
+              parameterSetSizeOut: &size, parameterSetCountOut: &count, nalUnitHeaderLengthOut: nil)
+          : CMVideoFormatDescriptionGetH264ParameterSetAtIndex(fmt, parameterSetIndex: i, parameterSetPointerOut: &ptr,
+              parameterSetSizeOut: &size, parameterSetCountOut: &count, nalUnitHeaderLengthOut: nil)
+        if st != noErr { break }
+        if let ptr = ptr {
+          out.append(contentsOf: startCode)
+          out.append(ptr, count: size)
+        }
+        i += 1
+      } while i < count
+    }
+    guard let block = CMSampleBufferGetDataBuffer(sample) else { return }
+    let total = CMBlockBufferGetDataLength(block)
+    var bytes = [UInt8](repeating: 0, count: total)
+    guard CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: total, destination: &bytes) == noErr else { return }
+    var p = 0
+    while p + 4 <= total {
+      var n = Int(bytes[p]) << 24
+      n |= Int(bytes[p + 1]) << 16
+      n |= Int(bytes[p + 2]) << 8
+      n |= Int(bytes[p + 3])
+      p += 4
+      if n <= 0 || p + n > total { break }
+      out.append(contentsOf: startCode)
+      out.append(contentsOf: bytes[p..<(p + n)])
+      p += n
+    }
+    write(key ? 1 : 2, out)
+  }
+
+  func encodeAudio(_ sb: CMSampleBuffer) {
+    guard let desc = CMSampleBufferGetFormatDescription(sb),
+          let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(desc),
+          let inFmt = AVAudioFormat(streamDescription: asbd) else { return }
+    let frames = AVAudioFrameCount(CMSampleBufferGetNumSamples(sb))
+    guard frames > 0, let pcm = AVAudioPCMBuffer(pcmFormat: inFmt, frameCapacity: frames) else { return }
+    pcm.frameLength = frames
+    guard CMSampleBufferCopyPCMDataIntoAudioBufferList(sb, at: 0, frameCount: Int32(frames), into: pcm.mutableAudioBufferList) == noErr else { return }
+    if aac == nil {
+      var outDesc = AudioStreamBasicDescription(mSampleRate: 48000, mFormatID: kAudioFormatMPEG4AAC, mFormatFlags: 0,
+        mBytesPerPacket: 0, mFramesPerPacket: 1024, mBytesPerFrame: 0, mChannelsPerFrame: 2, mBitsPerChannel: 0, mReserved: 0)
+      guard let outFmt = AVAudioFormat(streamDescription: &outDesc), let conv = AVAudioConverter(from: inFmt, to: outFmt) else { return }
+      conv.bitRate = 128_000
+      aac = conv
+      aacFormat = outFmt
+    }
+    guard let conv = aac, let outFmt = aacFormat else { return }
+    let out = AVAudioCompressedBuffer(format: outFmt, packetCapacity: 16, maximumPacketSize: max(conv.maximumOutputPacketSize, 1536))
+    var fed = false
+    var err: NSError?
+    let status = conv.convert(to: out, error: &err) { _, inStatus in
+      if fed { inStatus.pointee = .noDataNow; return nil }
+      fed = true
+      inStatus.pointee = .haveData
+      return pcm
+    }
+    guard status != .error, let descs = out.packetDescriptions else { return }
+    for i in 0..<Int(out.packetCount) {
+      let d = descs[i]
+      let size = Int(d.mDataByteSize)
+      var frame = adtsHeader(size)
+      frame.append(Data(bytes: out.data.advanced(by: Int(d.mStartOffset)), count: size))
+      write(3, frame)
+    }
+  }
+
+  func start(_ display: SCDisplay, scale: Double, audio: Bool) {
+    let (w, h) = pixelSize(display, scale)
+    let cfg = SCStreamConfiguration()
+    cfg.width = w
+    cfg.height = h
+    cfg.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
+    cfg.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
+    cfg.showsCursor = false
+    cfg.queueDepth = 6
+    if audio {
+      cfg.capturesAudio = true
+      cfg.sampleRate = 48000
+      cfg.channelCount = 2
+      cfg.excludesCurrentProcessAudio = true
+    }
+    let s = SCStream(filter: SCContentFilter(display: display, excludingWindows: []), configuration: cfg, delegate: self)
+    do {
+      try s.addStreamOutput(self, type: .screen, sampleHandlerQueue: videoQueue)
+      if audio { try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: audioQueue) }
+    } catch { exit(4) }
+    stream = s
+    s.startCapture { err in
+      if err != nil { FileHandle.standardError.write(Data("screen_permission\\n".utf8)); exit(5) }
+    }
+  }
+}
+
+var streamer: Streamer?
+
+func runStream(_ args: [String]) {
+  func arg(_ name: String) -> String? {
+    guard let i = args.firstIndex(of: name), i + 1 < args.count else { return nil }
+    return args[i + 1]
+  }
+  guard let display = scDisplay(Int(arg("--display") ?? "") ?? -1) else {
+    FileHandle.standardError.write(Data("screen_permission\\n".utf8))
+    exit(2)
+  }
+  let s = Streamer(codec: arg("--codec") == "hevc" ? "hevc" : "h264", fps: Int(arg("--fps") ?? "") ?? 30,
+    bitrate: Int(arg("--bitrate") ?? "") ?? 6_000_000)
+  streamer = s
+  s.start(display, scale: Double(arg("--scale") ?? "") ?? 1.0, audio: args.contains("--audio"))
+  // The daemon ends a stream by closing stdin.
+  while readLine() != nil {}
+  exit(0)
+}
+
+// ScreenCaptureKit and AppKit may deliver on the main queue, so the work runs beside it.
+let mainArgs = CommandLine.arguments
+DispatchQueue.global().async {
+  if mainArgs.count > 1 && mainArgs[1] == "stream" { runStream(Array(mainArgs.dropFirst(2))) }
+  while let line = readLine(strippingNewline: true) { handle(line) }
+  exit(0)
+}
+dispatchMain()
 `;
 
 /** Helper backed by a compiled Swift binary (macOS). Same wire protocol as PsHelper. */
@@ -870,8 +1107,7 @@ export class MacHelper extends PsHelper {
     }
     try {
       fs.writeFileSync(src, this.script, { encoding: "utf8" });
-      // shortcut: the macOS 15 SDK drops CGDisplayCreateImage, so build for 14, where it still links and runs;
-      // move capture to ScreenCaptureKit before Apple removes the symbol itself.
+      // macOS 14 is the oldest with ScreenCaptureKit stills (SCScreenshotManager).
       const target = `${process.arch === "arm64" ? "arm64" : "x86_64"}-apple-macos14.0`;
       // A compile killed by the timeout must not leave a half-written binary that looks current.
       execFileSync("swiftc", ["-O", "-target", target, src, "-o", this.bin + ".tmp"], { stdio: ["ignore", "ignore", "pipe"], timeout: 120000 });
@@ -894,6 +1130,79 @@ export class MacHelper extends PsHelper {
     // Keep the compiled binary; recompiled only when the source changes.
   }
 }
+
+/**
+ * macOS video backend for DesktopVideo: runs the compiled helper in "stream" mode (ScreenCaptureKit
+ * + VideoToolbox, plus the PC's sound as AAC). VideoToolbox does H.264 and HEVC, not AV1. It shares
+ * the binary that [helper] (the capture MacHelper) compiles, so there is one compile and one source.
+ */
+export class MacVideoNative {
+  constructor(helper) {
+    this.helper = helper;
+    this.proc = null;
+  }
+
+  /** opts: { monitor, preset, codecs, audio }; onRecord({ kind, data, codec }); onEnd(). */
+  async start(opts, onRecord, onEnd) {
+    this.stop();
+    const codec = (opts.codecs || []).includes("hevc") ? "hevc" : "h264";
+    let bin;
+    try { bin = this.helper.ensureFile(); } catch { return null; }
+    const p = opts.preset;
+    const args = ["stream", "--display", String(opts.monitor?.output ?? -1), "--codec", codec,
+      "--fps", String(p.fps), "--bitrate", String(Math.round(parseRate(p.maxrate))), "--scale", String(p.scale)];
+    if (opts.audio) args.push("--audio");
+    let proc;
+    try { proc = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"] }); } catch { return null; }
+    this.proc = proc;
+    const reader = new FrameReaderLocal();
+    proc.stdout.on("data", (chunk) => {
+      for (const rec of reader.push(chunk)) onRecord({ kind: rec.kind, data: rec.data, codec });
+    });
+    let err = "";
+    proc.stderr.on("data", (d) => { err = (err + d).slice(-400); });
+    const ended = new Promise((resolve) => {
+      proc.once("exit", () => { if (this.proc === proc) { this.proc = null; onEnd?.(); } resolve(); });
+      proc.once("error", () => resolve());
+    });
+    // Resolve once the first video record arrives (capture is working), or null if it dies first.
+    const ready = new Promise((resolve) => {
+      let done = false;
+      const onFirst = (chunk) => {
+        if (done) return;
+        done = true;
+        proc.stdout.off("data", onFirst);
+        resolve({ encoder: `videotoolbox_${codec}`, codec });
+      };
+      proc.stdout.on("data", onFirst);
+      ended.then(() => { if (!done) { done = true; resolve(null); } });
+    });
+    return ready;
+  }
+
+  stop() {
+    if (this.proc) { try { this.proc.kill(); } catch { /* gone */ } this.proc = null; }
+  }
+}
+
+/** Kept local so this file needs no import from desktop_video (which imports from here). */
+class FrameReaderLocal {
+  constructor() { this.buf = Buffer.alloc(0); }
+
+  push(chunk) {
+    this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;
+    const out = [];
+    while (this.buf.length >= 5) {
+      const len = this.buf.readUInt32BE(1);
+      if (this.buf.length < 5 + len) break;
+      out.push({ kind: this.buf[0], data: this.buf.subarray(5, 5 + len) });
+      this.buf = this.buf.subarray(5 + len);
+    }
+    return out;
+  }
+}
+
+const parseRate = (s) => (/g/i.test(s) ? parseFloat(s) * 1e9 : /m/i.test(s) ? parseFloat(s) * 1e6 : /k/i.test(s) ? parseFloat(s) * 1e3 : parseFloat(s));
 
 /**
  * macOS input and the pointer work in points (CGEvent's global space), so displays stay in points.
@@ -940,7 +1249,7 @@ const inputError = (e) => (e === "elevated_window" || e === "input_blocked" ? EL
 
 export class DesktopController extends EventEmitter {
   static get supported() {
-    return IS_WIN || IS_MAC;
+    return IS_WIN || IS_MAC || IS_LINUX;
   }
 
   constructor() {
@@ -955,9 +1264,16 @@ export class DesktopController extends EventEmitter {
     this.helperInput = new PsHelper("input", INPUT_SCRIPT);
     this.helperCapture = IS_MAC ? new MacHelper("pdcap", MAC_CAP_SWIFT) : new PsHelper("capture", CAPTURE_SCRIPT);
     this.helperClip = new PsHelper("clipboard", CLIP_SCRIPT);
+    // macOS streams video through the same helper binary; DesktopVideo drives it.
+    this.macVideo = IS_MAC ? new MacVideoNative(this.helperCapture) : null;
+    // Linux drives input and monitors through xdotool/xrandr; video comes from ffmpeg x11grab.
+    this.linux = IS_LINUX ? new LinuxDesktop() : null;
     this.origin = { x: 0, y: 0 };
     this.monitorList = null;
   }
+
+  /** True when this host can do real desktop control now (a Linux box needs xdotool). */
+  get usable() { return IS_WIN || IS_MAC || !!this.linux?.supported; }
 
   /** Stream frames for `clientId` (server keeps the ws mapping). */
   async startFrameStream(clientId, quality) {
@@ -1069,6 +1385,7 @@ export class DesktopController extends EventEmitter {
 
   /** wheel: positive scrolls up; hwheel: positive scrolls right (Windows convention, both in 120ths of a notch). */
   async inputMouse({ x, y, click, press, button, wheel, hwheel }) {
+    if (this.linux) return this.linux.mouse({ x, y, click, press, button, wheel, hwheel });
     if (IS_MAC && x != null) {
       if (!this.monitorList) await this.monitors();
       x += this.origin.x;
@@ -1085,10 +1402,12 @@ export class DesktopController extends EventEmitter {
     const vk = Number(key);
     if (!Number.isFinite(vk) || vk <= 0 || vk > 254) return Promise.resolve({ ok: false, error: "bad_vk" });
     const mods = (Array.isArray(modifiers) ? modifiers : []).filter((m) => ["ctrl", "alt", "shift", "win"].includes(m));
+    if (this.linux) return this.linux.key({ key: vk, modifiers: mods, press });
     return this._inject({ op: "key", key: vk, press, mods }, 8000);
   }
 
   inputType(text) {
+    if (this.linux) return this.linux.type(text);
     return this._inject({ op: "type", text: String(text).slice(0, 512) }, 10000);
   }
 
@@ -1097,6 +1416,15 @@ export class DesktopController extends EventEmitter {
    * virtual screen's top-left, the origin input coordinates use.
    */
   async monitors() {
+    if (this.linux) {
+      // xdotool/x11grab use raw X-screen coordinates, so monitors keep them and the origin stays 0.
+      const list = await this.linux.monitors();
+      if (!list.length) return { ok: false, error: "monitors_failed" };
+      const monitors = list.map((m, index) => ({ index, adapter: 0, output: index, name: m.name, x: m.x, y: m.y, w: m.w, h: m.h, primary: !!m.primary }));
+      this.origin = { x: 0, y: 0 };
+      this.monitorList = monitors;
+      return { ok: true, monitors };
+    }
     if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
     await this.helperCapture.ensure();
     const r = await this.helperCapture.cmd({ op: "monitors" }, 10000);
@@ -1116,6 +1444,7 @@ export class DesktopController extends EventEmitter {
 
   /** The pointer now, in the same space as input, or null. */
   async pointer() {
+    if (this.linux) return this.linux.pointer();
     if (!IS_WIN && !IS_MAC) return null;
     await this._input.ensure();
     const r = await this._input.cmd({ op: "cursor" }, 2000);
@@ -1131,10 +1460,11 @@ export class DesktopController extends EventEmitter {
 
   /** Polls the pointer while anyone watches and emits "cursor" when it moves or changes shape. */
   watchCursor(on) {
-    if (!on || (!IS_WIN && !IS_MAC)) { clearInterval(this.cursorTimer); this.cursorTimer = null; return; }
+    if (!on || !this.usable) { clearInterval(this.cursorTimer); this.cursorTimer = null; return; }
     if (this.cursorTimer) return;
     let busy = false;
     let last = "";
+    // xdotool spawns a process per poll, so Linux polls far slower than the native Win/Mac helpers.
     this.cursorTimer = setInterval(async () => {
       if (busy) return;
       busy = true;
@@ -1143,7 +1473,7 @@ export class DesktopController extends EventEmitter {
         const key = JSON.stringify(c);
         if (c && key !== last) { last = key; this.cursor = c; this.emit("cursor", c); }
       } finally { busy = false; }
-    }, 33);
+    }, this.linux ? 120 : 33);
   }
 
   /** { kind: text|image|files|empty, ... }; images above maxImage bytes come back without png. */
@@ -1187,7 +1517,7 @@ export class DesktopController extends EventEmitter {
 
   /** macOS Screen-Recording / Accessibility grants; { ok:false } off macOS or without the helper. */
   async permissions() {
-    if (!IS_MAC) return { ok: false, screen: IS_WIN, accessibility: IS_WIN };
+    if (!IS_MAC) return { ok: false, screen: IS_WIN || !!this.linux, accessibility: IS_WIN || !!this.linux?.supported };
     await this.helperCapture.ensure();
     return this.helperCapture.cmd({ op: "perms" }, 8000);
   }
@@ -1201,7 +1531,7 @@ export class DesktopController extends EventEmitter {
 
   getStatus() {
     return {
-      supported: IS_WIN || IS_MAC,
+      supported: this.usable,
       streaming: !!this.captureTimer,
       clients: this.clients.size,
       quality: this.quality,
