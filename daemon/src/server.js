@@ -46,9 +46,8 @@ const authAttempts = new Map();
 const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
 const CONSOLE = Boolean(process.env.RH_CONSOLE);
 const AUDIT_LOG = path.join(configDir, "console-audit.log");
-// Input, pointer and video traffic arrive many times a second and say nothing about intent.
-// While the PC owner has paused control, a phone may only look: these read, view, refuse or stop something.
-// Everything else (terminals, file changes, agents, power, approvals) is refused, including handlers added later.
+// While control is paused a phone may only look: these read/view/refuse/stop ops stay allowed,
+// everything else (terminals, files, agents, power, approvals) is refused, including later handlers.
 const PAUSE_ALLOWED = new Set([
   "sessions", "sessions_get", "sessions_scan", "attach", "detach", "chat_history", "chat_search", "auth_status", "detect",
   "plan_get", "apps_discover", "model_list", "activity_list", "prompt_queue", "todos_get", "todos_status", "schedule_list",
@@ -236,10 +235,8 @@ export function start(config, { onTokenRotated } = {}) {
   // Plaintext would put the token and every byte on the LAN in the clear, so without TLS only this machine may connect.
   if (!useTls) server.on("connection", (s) => { if (!/^(::ffff:)?127\.|^::1$/.test(s.remoteAddress || "")) s.destroy(); });
 
-  // WebSocket upgrade with origin check (ttyd/gotty pattern): browsers always
-  // send Origin — cross-origin upgrades are rejected at the HTTP level (403)
-  // before any socket is established. Native app clients send no Origin.
-  // Largest legitimate message is a clipboard image (24 MB of base64, see clipboard_set).
+  // Origin check: browsers always send Origin, so cross-origin upgrades are refused (403) before any
+  // socket opens; native clients send none. Max payload is a clipboard image (24 MB base64).
   const wss = new WebSocketServer({ noServer: true, maxPayload: 32 << 20 });
   liveWss = wss;
   server.on("upgrade", (req, socket, head) => {
@@ -248,9 +245,8 @@ export function start(config, { onTokenRotated } = {}) {
     if (req.headers.origin) {
       try {
         const oh = new URL(req.headers.origin).host;
-        // Exact same-origin, or any loopback origin (embedded webviews and
-        // port-forwarding proxies change the Host header; the token gate
-        // still authenticates the socket itself).
+        // Exact same-origin or any loopback origin: webviews and port-forward proxies rewrite Host,
+        // and the token gate still authenticates the socket itself.
         originOk = oh === req.headers.host ||
           /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(oh);
       } catch {
@@ -267,12 +263,13 @@ export function start(config, { onTokenRotated } = {}) {
 
   wss.on("connection", (ws, req) => {
     if (stopping) return ws.close(stopping.code, stopping.reason);
-    // Read off `req`: the ws instance exposes the socket as `_socket`, so the
-    // old `ws.socket?.remoteAddress` was always undefined and every client
-    // shared one counter — five bad tokens locked out the whole LAN.
+    // Read off `req`: ws exposes the socket as `_socket`, so `ws.socket?.remoteAddress` was always
+    // undefined and every client shared one rate-limit counter, locking out the whole LAN.
     const clientIp = (req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
     ws._subs = new Set();
     ws._authed = false;
+    ws._alive = true;
+    ws.on("pong", () => { ws._alive = true; });
     plugins.callHook("onConnect", ws);
     const timer = setTimeout(() => ws.close(4001, "auth timeout"), HELLO_TIMEOUT);
     ws.on("close", () => {
@@ -352,6 +349,19 @@ export function start(config, { onTokenRotated } = {}) {
     for (const ws of wss.clients) if (ws._authed) send(ws, obj);
   }
 
+  // A slept or dropped phone leaves a half-open TCP the daemon still counts as connected; ping each
+  // real ws every 30s and drop any that missed the last pong. iroh sockets self-detect a dead path.
+  const heartbeat = setInterval(() => {
+    for (const ws of wss.clients) {
+      if (typeof ws.ping !== "function" || typeof ws.terminate !== "function") continue;
+      if (ws._alive === false) { ws.terminate(); continue; }
+      ws._alive = false;
+      try { ws.ping(); } catch {}
+    }
+  }, 30_000);
+  heartbeat.unref();
+  wss.on("close", () => clearInterval(heartbeat));
+
   function detachClient(ws) {
     sessions.detach(ws);
     chat.detach(ws);
@@ -430,10 +440,8 @@ export function start(config, { onTokenRotated } = {}) {
   // ── Stream JSON parser (format-claude-stream: agent JSONL → structured) ──
   const streamParser = new StreamJsonParser();
 
-  // ── Real desktop capture + input (the frame SOURCE for rd_/desktop UIs) ──
-  // Frames are client-scoped (a watching ws gets them directly — they are
-  // ~200-300 KB each, too heavy for the broadcast fan-out) and the capture
-  // loop runs only while at least one watcher is attached.
+  // Desktop capture + input, the frame source for rd_/desktop UIs. Frames (~200-300 KB) go straight
+  // to each watching ws, too heavy to broadcast; the capture loop runs only while a watcher is attached.
   const desktop = new DesktopController();
   const access = createAccess(config);
   const recorder = new Recorder();
@@ -611,10 +619,8 @@ export function start(config, { onTokenRotated } = {}) {
     const items = agentTodos.observeTurnEnd(id, c.transcript);
     if (items) broadcast({ type: "todos_updated", id, items, derived: true });
   });
-  // Queued follow-ups (1code/ccpocket/oc-remote): when the turn finishes,
-  // send the next queued prompt so the phone can enqueue and walk away.
-  // Broadcast the queue after every change — a silent drain leaves every
-  // client showing a stale queue strip.
+  // Queued follow-ups: when a turn finishes, send the next queued prompt so the phone can walk away.
+  // Broadcast after every change, or clients show a stale queue strip.
   chat.chatEvents.on("state", ({ id, state }) => {
     if (state !== "idle") return;
     const next = promptQueue.dequeue(id);

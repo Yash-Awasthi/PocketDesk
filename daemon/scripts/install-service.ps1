@@ -38,6 +38,17 @@ if ($Protect) {
     if (-not (Test-Path $ff)) { $ff = (Get-Command ffmpeg.exe -ErrorAction SilentlyContinue).Source }
     if ($ff) { New-Item -ItemType Directory -Force (Join-Path $Protect "ffmpeg") | Out-Null; Copy-Item $ff (Join-Path $Protect "ffmpeg\ffmpeg.exe") -Force }
     Set-Content -Path (Join-Path $Protect "PocketDesk.ini") -Value (Join-Path $Protect "daemon")
+
+    # Autostart at logon, registered here where we are already elevated. RunLevel Highest starts the
+    # elevated daemon with no per-logon UAC prompt; RestartCount brings it back if it crashes.
+    $exe      = Join-Path $Protect "PocketDeskLauncher.exe"
+    $me       = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $action   = New-ScheduledTaskAction -Execute $exe -Argument "--supervise"
+    $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $me
+    $prin     = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+                    -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+    Register-ScheduledTask -TaskName "PocketDesk" -Action $action -Trigger $trigger -Principal $prin -Settings $settings -Force | Out-Null
     return
 }
 
@@ -56,7 +67,9 @@ if ($Console) {
     if (-not (Test-Path (Join-Path $srcNode "node.exe"))) { throw "bundled node not found at $srcNode - run the normal install first, then -Console." }
 
     # Stop a running launcher + its console daemon before replacing the protected copy.
-    schtasks /End /TN "PocketDeskConsole" 2>$null | Out-Null
+    # try/catch: with ErrorActionPreference Stop, schtasks' stderr on a first install (no task yet)
+    # is a terminating NativeCommandError that would abort the whole console install.
+    try { schtasks /End /TN "PocketDeskConsole" 2>$null | Out-Null } catch {}
     Get-Process PocketDeskConsole -ErrorAction SilentlyContinue | Stop-Process -Force
     Get-NetTCPConnection -State Listen -LocalPort 8766 -ErrorAction SilentlyContinue |
         ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
@@ -184,9 +197,10 @@ $lnk.Save()
 # Earlier installs also put one on the desktop.
 Remove-Item (Join-Path ([Environment]::GetFolderPath("Desktop")) "PocketDesk.lnk") -ErrorAction SilentlyContinue
 
-# The per-user Run key starts the hidden daemon at logon without admin rights; --daemon opens no page.
-Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -Value "`"$exe`" --daemon"
+# Autostart is the Scheduled Task registered during the elevated copy above; clear the old Run-key
+# autostart so the daemon never starts twice.
+Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -ErrorAction SilentlyContinue
 
-if (-not $NoStart) { Start-Process $exe "--daemon" }
-Write-Host "  hidden daemon installed; it starts at logon. Open the Start-menu 'PocketDesk' to pair."
-Write-Host "  stop it from Task Manager (end PocketDesk.exe). settings: $env:USERPROFILE\.pocketdesk\config.json"
+if (-not $NoStart) { Start-ScheduledTask -TaskName "PocketDesk" }
+Write-Host "  hidden daemon installed; it starts at logon (Scheduled Task 'PocketDesk', auto-restarts on crash)."
+Write-Host "  stop it: schtasks /End /TN PocketDesk (End alone; the task restarts it otherwise). settings: $env:USERPROFILE\.pocketdesk\config.json"

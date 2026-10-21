@@ -6,7 +6,9 @@ package com.yasha.pocketdesk
  * client re-connects, re-auths and replays only the output it missed.
  */
 class ReconnectPolicy(
-    private val maxAttempts: Int = 8,
+    // Never give up on its own: a PC reboot + login can outlast any fixed cap, so retry at the
+    // capped interval until the socket reconnects or the user stops it (userClosed in WsClient).
+    private val maxAttempts: Int = Int.MAX_VALUE,
     baseMs: Long = 1_000,
     private val maxMs: Long = 30_000,
 ) {

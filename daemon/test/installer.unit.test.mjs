@@ -19,7 +19,8 @@ check("installers ask a running daemon to stop before killing it", ["install.ps1
 check("the SYSTEM daemon leaves CLI port 4679 to the user daemon", /RH_CLI_PORT=(?!4679)\d+/.test(consoleCs));
 // The daemon runs elevated, so nothing it executes may come from a folder or variable the user's programs can change.
 check("the elevated launcher runs from an admin-only Program Files copy", /\$protected = Join-Path \$env:ProgramFiles/.test(install)
-  && install.includes('$exe = Join-Path $protected "PocketDeskLauncher.exe"') && /-Name "PocketDesk" -Value "`"\$exe`" --daemon"/.test(install));
+  && install.includes('$exe = Join-Path $protected "PocketDeskLauncher.exe"')
+  && install.includes('New-ScheduledTaskAction -Execute $exe -Argument "--supervise"'));
 check("the launcher never takes node or ffmpeg from PATH", !/: "node"/.test(launcherCs) && launcherCs.includes('Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe")'));
 check("the launcher drops NODE_* variables before starting node", launcherCs.includes('StartsWith("NODE_"'));
 check("the console install takes ownership of ProgramData\\PocketDesk", install.includes('icacls $pdRoot /setowner "*S-1-5-32-544"'));

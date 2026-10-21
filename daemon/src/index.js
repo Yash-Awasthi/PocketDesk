@@ -6,6 +6,11 @@ import * as chat from "./chat.js";
 // ps, Activity Monitor and system monitors list the daemon by this name instead of "node".
 process.title = process.env.RH_CONSOLE ? "PocketDeskConsole" : "PocketDesk";
 
+// Surviving a stray rejection keeps the unsupervised user daemon alive; uncaughtException is left
+// to crash on purpose so an agent's child processes die with it (see crash-kills-agents test).
+// ponytail: real restart-on-crash is a Scheduled Task with RestartCount, like the SYSTEM console task.
+process.on("unhandledRejection", (e) => console.error(`[warn] unhandled rejection (kept alive): ${e?.stack || e}`));
+
 // ── Graceful shutdown ───────────────────────────────────────────────────────
 // On SIGTERM/SIGINT: kill all live PTY sessions (no orphaned children), stop
 // the session reaper, and exit cleanly. Synchronous so the signal doesn't

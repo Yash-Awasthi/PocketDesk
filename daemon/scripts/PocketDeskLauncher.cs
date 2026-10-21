@@ -41,19 +41,37 @@ namespace PocketDeskLauncher
                 return;
             }
 
+            // The scheduled task runs this already-elevated and monitors it: run the daemon in the
+            // foreground and exit with its code, so the task's RestartCount restarts it on a crash.
+            if (Array.IndexOf(args, "--supervise") >= 0)
+            {
+                if (DaemonRunning(port)) return;
+                var psi = BuildDaemonPsi();
+                if (psi == null) Environment.Exit(1);
+                var p = Process.Start(psi);
+                // First run only (no device has paired yet): open the pairing page so a new user sees
+                // the QR without hunting for the Start-menu shortcut. Silent once any phone is paired.
+                if (!File.Exists(Path.Combine(DataDir, "devices.json"))) OpenPairingPage(port);
+                p.WaitForExit();
+                Environment.Exit(p.ExitCode);
+            }
+
             if (!DaemonRunning(port) && !StartElevated()) return;
 
-            if (!autostart)
-            {
-                // Give a just-started daemon a moment to bind before the page loads.
-                for (int i = 0; i < 40 && !DaemonRunning(port); i++) System.Threading.Thread.Sleep(100);
-                LoadConfig(ref port, ref token, ref tls);
-                // The URL carries the master token; a program squatting the port must not receive it.
-                // shortcut: a plaintext daemon cannot be told apart from a squatter; it only exists when TLS setup failed.
-                if (tls && !IsOurDaemon(port)) return;
-                string url = (tls ? "https" : "http") + "://localhost:" + port + "/pair?k=" + Uri.EscapeDataString(token);
-                try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
-            }
+            if (!autostart) OpenPairingPage(port);
+        }
+
+        /** Waits for the daemon to bind, then opens its pairing page in the default browser. */
+        static void OpenPairingPage(string port)
+        {
+            for (int i = 0; i < 40 && !DaemonRunning(port); i++) System.Threading.Thread.Sleep(100);
+            string token = "", p = port; bool tls = false;
+            LoadConfig(ref p, ref token, ref tls);
+            // The URL carries the master token; a program squatting the port must not receive it. A
+            // plaintext daemon cannot be told from a squatter, and only exists when TLS setup failed.
+            if (tls && !IsOurDaemon(port)) return;
+            string url = (tls ? "https" : "http") + "://localhost:" + port + "/pair?k=" + Uri.EscapeDataString(token);
+            try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
         }
 
         static bool IsElevated()
@@ -124,31 +142,38 @@ namespace PocketDeskLauncher
             return dir;
         }
 
+        /** The elevated daemon's launch settings, or null when its exe is missing. */
+        static ProcessStartInfo BuildDaemonPsi()
+        {
+            // PocketDesk.exe is a copy of node.exe, so Task Manager lists the daemon by name. Only
+            // binaries in this admin-only folder: the daemon runs elevated, and PATH is the user's to change.
+            var named = Path.Combine(ExeDir, "PocketDesk.exe");
+            if (!File.Exists(named)) return null;
+            var psi = new ProcessStartInfo
+            {
+                FileName = named,
+                Arguments = "src\\index.js",
+                WorkingDirectory = DaemonDir(),
+                CreateNoWindow = true,
+                UseShellExecute = false,
+            };
+            // NODE_* come from the user's environment and would load code into the elevated node.
+            var nodeVars = new System.Collections.Generic.List<string>();
+            foreach (string k in psi.EnvironmentVariables.Keys) if (k.StartsWith("NODE_", StringComparison.OrdinalIgnoreCase)) nodeVars.Add(k);
+            foreach (var k in nodeVars) psi.EnvironmentVariables.Remove(k);
+            // Set even when missing, so the daemon falls back to JPEG instead of an ffmpeg found on PATH.
+            psi.EnvironmentVariables["FFMPEG_PATH"] = Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe");
+            return psi;
+        }
+
         static void StartDaemonDetached()
         {
             try
             {
-                // PocketDesk.exe is a copy of node.exe, so Task Manager lists the daemon by name.
-                // Only binaries in this admin-only folder: the daemon runs elevated, and PATH is the user's to change.
-                var named = Path.Combine(ExeDir, "PocketDesk.exe");
-                if (!File.Exists(named)) return;
-                var psi = new ProcessStartInfo
-                {
-                    FileName = named,
-                    Arguments = "src\\index.js",
-                    WorkingDirectory = DaemonDir(),
-                    CreateNoWindow = true,
-                    UseShellExecute = false,
-                };
-                // NODE_OPTIONS and friends come from the user's environment and would load code into the elevated node.
-                var nodeVars = new System.Collections.Generic.List<string>();
-                foreach (string k in psi.EnvironmentVariables.Keys) if (k.StartsWith("NODE_", StringComparison.OrdinalIgnoreCase)) nodeVars.Add(k);
-                foreach (var k in nodeVars) psi.EnvironmentVariables.Remove(k);
-                // Set even when missing, so the daemon falls back to JPEG instead of an ffmpeg found on PATH.
-                psi.EnvironmentVariables["FFMPEG_PATH"] = Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe");
+                var psi = BuildDaemonPsi();
                 // Not a child of this launcher: no stdin pipe, and never stop on stdin EOF, so the
                 // daemon outlives this process.
-                Process.Start(psi);
+                if (psi != null) Process.Start(psi);
             }
             catch { }
         }

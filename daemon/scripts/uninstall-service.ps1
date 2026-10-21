@@ -10,11 +10,12 @@ try {
     if ($cfg.port) { $port = [int]$cfg.port }
 } catch {}
 Get-Process PocketDeskTray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# Delete the autostart task before killing the daemon, or its RestartCount respawns it mid-uninstall.
+try { schtasks /End /TN "PocketDesk" 2>$null | Out-Null } catch {}
+try { schtasks /Delete /F /TN "PocketDesk" 2>$null | Out-Null } catch {}
+Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -ErrorAction SilentlyContinue
 Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue |
     ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }
-Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -ErrorAction SilentlyContinue
-# Older installs registered a scheduled task instead.
-try { schtasks /Delete /F /TN "PocketDesk" 2>$null | Out-Null } catch {}
 
 # Console endpoint: stop the SYSTEM launcher + its daemon, then unregister the task.
 try { Stop-ScheduledTask -TaskName "PocketDeskConsole" -ErrorAction SilentlyContinue } catch {}

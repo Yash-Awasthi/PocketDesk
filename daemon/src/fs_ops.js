@@ -26,10 +26,8 @@ function realResolve(p) {
 
 export function resolvePath(p) {
   const resolved = realResolve(p && String(p).trim() ? path.resolve(String(p).replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir());
-  // Security: block path traversal outside home, with an escape hatch for
-  // the OS temp dir (tests and file-transfer staging legitimately live
-  // there, and on Linux /tmp is NOT under home). ponytail: per-user tmp
-  // roots if this ever runs multi-tenant.
+  // Block path traversal outside home, allowing the OS temp dir (test + transfer staging live there,
+  // and /tmp is not under home on Linux). ponytail: per-user tmp roots if this ever runs multi-tenant.
   const home = realResolve(os.homedir());
   const tmpRoot = fs.realpathSync(os.tmpdir());
   const allowed = resolved === home || resolved.startsWith(home + path.sep) ||

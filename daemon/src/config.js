@@ -33,10 +33,8 @@ export function loadConfig() {
     }
   }
   const fromEnv = (key) => key in process.env;
-  // A fully env-driven launch (both RH_PORT and RH_TOKEN set — the test/CI
-  // pattern) must NOT inherit TLS or iroh settings from the interactive config
-  // file, or every spawned test daemon fights the live one for the port, or
-  // picks up wss:// when the test harness expects plain http.
+  // A fully env-driven launch (RH_PORT + RH_TOKEN, the test/CI pattern) must not inherit TLS or iroh
+  // from the config file, or test daemons fight the live one for the port and pick up unexpected wss://.
   const envDriven = fromEnv("RH_PORT") && fromEnv("RH_TOKEN");
   cfg.port = Number(process.env.RH_PORT || cfg.port || 8765);
   cfg.token = process.env.RH_TOKEN || cfg.token || crypto.randomBytes(24).toString("hex");
