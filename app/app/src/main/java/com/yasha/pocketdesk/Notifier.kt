@@ -66,6 +66,52 @@ object Notifier {
     }
 
     private const val APPROVAL_ID = 7
+    private const val SHARE_REQUEST_ID = 10
+
+    /** The PC asked to view this phone; tapping opens Android's own capture prompt. */
+    fun shareRequest(ctx: Context) {
+        if (!canNotify(ctx)) return
+        val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (mgr.getNotificationChannel("share_request") == null) {
+            mgr.createNotificationChannel(NotificationChannel("share_request", "PC asks to view this phone", NotificationManager.IMPORTANCE_HIGH))
+        }
+        val open = PendingIntent.getActivity(ctx, 0, Intent(ctx, ShareConsentActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
+        val n = NotificationCompat.Builder(ctx, "share_request")
+            .setSmallIcon(android.R.drawable.ic_menu_view)
+            .setContentTitle("Your PC wants to view this phone")
+            .setContentText("Tap to choose whether to share the screen")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .build()
+        mgr.notify(SHARE_REQUEST_ID, n)
+    }
+
+    private const val STORAGE_REQUEST_ID = 11
+
+    /** The PC tried to open this phone's storage; tapping opens Android's "All files access" for the app. */
+    fun storageRequest(ctx: Context) {
+        if (!canNotify(ctx)) return
+        val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (mgr.getNotificationChannel("share_request") == null) {
+            mgr.createNotificationChannel(NotificationChannel("share_request", "PC asks to view this phone", NotificationManager.IMPORTANCE_HIGH))
+        }
+        val settings = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            android.net.Uri.fromParts("package", ctx.packageName, null))
+        val n = NotificationCompat.Builder(ctx, "share_request")
+            .setSmallIcon(android.R.drawable.ic_menu_save)
+            .setContentTitle("Your PC wants to open this phone's storage")
+            .setContentText("Tap to choose: turn on All files access for PocketDesk")
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(PendingIntent.getActivity(ctx, 1, settings, PendingIntent.FLAG_IMMUTABLE))
+            .setAutoCancel(true)
+            .build()
+        mgr.notify(STORAGE_REQUEST_ID, n)
+    }
+
+    fun shareRequestGone(ctx: Context) {
+        (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(SHARE_REQUEST_ID)
+    }
 
     private const val LINK_LOST_ID = 8
 

@@ -81,7 +81,8 @@ async function detect(id) {
     state.set(id, { ...state.get(id), installing: false, installed: ok, version: ok ? p : null });
     return;
   }
-  const r = await shell(`${m.bin} --version`);
+  // `check` is for tools without --version (powershell.exe treats it as a script).
+  const r = await shell(m.check || `${m.bin} --version`);
   const ok = r.code === 0 && r.out.trim().length > 0;
   state.set(id, {
     ...state.get(id),

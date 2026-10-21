@@ -1,36 +1,36 @@
-PocketDesk follow-ups
+PocketDesk: what is left
 
-Done
-- Android 17 local network permission; in-app QR scanner.
-- Wi-Fi <-> mobile data switch redials (LAN or iroh) without restarting the app.
-- History of every agent's saved conversations, per agent and app (Claude Code CLI/VS Code, Codex,
-  Copilot Chat, Cline, Roo, Cursor, Antigravity); Claude Code and Codex continue as a chat or a terminal.
-- Claude Code replies stream token by token; slash command picker with the agent's commands and skills.
-- Agent panel (Tools > agent > Skills, commands & settings): skills incl. plugin skills, custom
-  commands, settings and memory files (view, edit, run as a chat).
-- Under Smart App Control the scheduled task and Start-menu entry run signed binaries only
-  (run-daemon.ps1, open-pairing.ps1); the compiled launcher is blocked there.
-- After the PC daemon restarts, the phone returns to the LAN address instead of staying on the relay.
-- Claude Code tool calls show the moment they start; a chat's approvals are answered inside it.
-- A model and permission mode can be picked for the next message only.
-- Starting a tool, chat or app waits for the daemon's first registry scan (no "not installed" right after start).
+Scope as agreed: Windows PC + Android phone first. The PC browser page is the phone only (Phone
+screen and Phone storage tabs). No outside programs (no tmux, WSL, scrcpy or adb on the user's side).
 
-- Settings files shown in the agent panel have tokens and API keys masked; saving keeps the real values.
-- Checked on the phone: tool calls stream once each, an approval is answered inside its chat (Deny
-  reached Claude), "Next message" model and mode reach the CLI and reset after sending.
+To do
+1. Every phone pane live at once (root only). Own app_process server started through su, one
+   virtual display per recent app (am start --display), each encoded and sent like the main screen;
+   the browser panes then all stay live. Build and check it on an emulator with su; a real rooted
+   phone stays untested. Without root, only the app in front is live (current behaviour).
+2. Phone screen off the home network. The upload over iroh (one uni stream per GOP) is written but
+   has only run on the LAN; check it with the phone on mobile data.
+3. Release. Merge branch reverse-bridge-shared-terminals into master, bump the version, build the
+   release APK and publish, when the user says so (nothing is pushed yet).
+4. Phone app scope. The browser page lost every PC feature; decide whether the phone app keeps its
+   own (Tools, Chats, Desktop, Files, SSH) or is trimmed the same way.
+5. Older items still open:
+   - Codex, Cline, Roo and Cursor history readers are checked against fixtures only; check them on a
+     PC that has those stores.
+   - Confirm Gemini, Qwen and OpenCode expand slash commands in headless mode (they are sent as the
+     chat prompt).
+   - Fold Freebuff into the agent panel once Freebuff stores skills elsewhere than ~/.claude/skills.
+   - desktop_mouse/desktop_key could reply only on failure to save relay bandwidth; the browser page
+     no longer uses them, so only the phone and the tests depend on the replies.
+6. Later: Linux (GUI and TTY) and macOS parity for every feature.
 
-Open
-- Copilot, Cline, Roo, Cursor and Antigravity conversations are read-only: none of them can be
-  resumed from outside their editor. Continue them on the Desktop view (Open in <IDE>).
-- VS Code extension chat panels (Claude Code, Codex, Copilot, Cline) have no external API to drive;
-  the Desktop view is the only way to type into them.
-- Codex, Cline, Roo and Cursor history readers are verified against fixtures only; check them on a PC
-  that has those stores.
-- Antigravity transcripts come from its search index: turns are grouped by chunk, not by step.
-- Slash commands of agents other than Claude Code are sent as the chat prompt; confirm Gemini, Qwen
-  and OpenCode expand them in headless mode.
-- Freebuff keeps its own screen; fold it into the agent panel once Freebuff stores skills elsewhere
-  than ~/.claude/skills.
-- desktop_mouse/desktop_key answer every input with desktop_input_ok; replying only on failure would
-  save the relay link bandwidth, but the browser client and tests expect the replies.
-- SSH (server, bastion, client) works but is outside the agent workflow; keep it under Tools.
+Known limits (nothing to fix)
+- Android ends a screen share when the phone locks; Swap asks again after unlocking.
+- Apps that mark their content sensitive (Gmail, Chrome pages) show black in any screen share.
+- PC control needs "PocketDesk PC control" on in Accessibility (sideloaded installs: App info >
+  Allow restricted settings first); under Android 17 Advanced Protection it stays view only.
+- Phone storage needs "All files access" for PocketDesk and covers shared storage only.
+- Copilot, Cline, Roo, Cursor and Antigravity conversations are read-only outside their editor;
+  VS Code extension chat panels have no external API.
+- Antigravity transcripts are grouped by search-index chunk, not by step.
+- `pocketdesk read` rebuilds the screen from scrollback on each call; wide CJK/emoji cells shift a line.

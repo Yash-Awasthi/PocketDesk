@@ -38,15 +38,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.yasha.pocketdesk.RhEvent
 import com.yasha.pocketdesk.WsClient
 
-class TermBridge(
-    private val onInput: (String) -> Unit,
-    private val onResize: (Int, Int) -> Unit,
-) {
+class TermBridge(private val onInput: (String) -> Unit) {
     @JavascriptInterface
     fun input(dataB64: String) = onInput(dataB64)
-
-    @JavascriptInterface
-    fun resize(cols: Int, rows: Int) = onResize(cols, rows)
 }
 
 private val EXTRA_KEYS = listOf(
@@ -80,17 +74,19 @@ fun TerminalScreen(ws: WsClient, sessionId: String, onClose: () -> Unit) {
     var ended by remember { mutableStateOf<Int?>(null) }
 
     DisposableEffect(ws, sessionId) {
-        val sink: (String, String) -> Unit = { id, b64 ->
-            // Under the lock, so output arriving while the page finishes is neither lost nor reordered.
-            if (id == sessionId) synchronized(pending) {
-                val wv = holder[0]
-                if (wv == null) pending += b64 else wv.post { wv.evaluateJavascript("window.termOut('$b64')", null) }
-            }
+        // Under the lock, so output arriving while the page finishes is neither lost nor reordered.
+        fun run(js: String) = synchronized(pending) {
+            val wv = holder[0]
+            if (wv == null) pending += js else wv.post { wv.evaluateJavascript(js, null) }
         }
+        val sink: (String, String) -> Unit = { id, b64 -> if (id == sessionId) run("window.termOut('$b64')") }
+        val sizer: (String, Int, Int) -> Unit = { id, c, r -> if (id == sessionId) run("window.termSize($c,$r)") }
         ws.onTerminalData = sink
+        ws.onTerminalSize = sizer
         ws.attach(sessionId)
         onDispose {
             if (ws.onTerminalData === sink) ws.onTerminalData = null
+            if (ws.onTerminalSize === sizer) ws.onTerminalSize = null
             ws.detach(sessionId)
         }
     }
@@ -148,11 +144,11 @@ fun TerminalScreen(ws: WsClient, sessionId: String, onClose: () -> Unit) {
                             android.view.ViewGroup.LayoutParams.MATCH_PARENT,
                         )
                         settings.javaScriptEnabled = true
+                        // Pinch zoom: the PC-sized grid is drawn small to fit.
+                        settings.builtInZoomControls = true
+                        settings.displayZoomControls = false
                         addJavascriptInterface(
-                            TermBridge(
-                                onInput = { b64 -> ws.sendInput(sessionId, b64) },
-                                onResize = { c, r -> ws.sendResize(sessionId, c, r) },
-                            ),
+                            TermBridge(onInput = { b64 -> ws.sendInput(sessionId, b64) }),
                             "Android",
                         )
                         webViewClient = object : WebViewClient() {
@@ -167,9 +163,7 @@ fun TerminalScreen(ws: WsClient, sessionId: String, onClose: () -> Unit) {
                                     flush = pending.toList()
                                     pending.clear()
                                 }
-                                for (b64 in flush) {
-                                    view.evaluateJavascript("window.termOut('$b64')", null)
-                                }
+                                for (js in flush) view.evaluateJavascript(js, null)
                             }
                         }
                         loadUrl("file:///android_asset/terminal.html")

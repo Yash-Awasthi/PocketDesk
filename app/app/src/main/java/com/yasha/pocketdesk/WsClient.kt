@@ -247,6 +247,8 @@ class WsClient(
 
     /** Terminal output router: (sessionId, base64 chunk). Set by the terminal screen. */
     var onTerminalData: ((String, String) -> Unit)? = null
+    /** Terminal grid from the PC: (sessionId, cols, rows). The phone draws it scaled and never resizes it. */
+    var onTerminalSize: ((String, Int, Int) -> Unit)? = null
 
     private val socket = AtomicReference<WebSocket?>(null)
     private var hello: String? = null
@@ -569,6 +571,18 @@ class WsClient(
     fun clipboardSetImage(pngB64: String) = control(Proto.clipboardSet(null, png = pngB64))
     /** Puts files already on the PC on its clipboard; with [paste] they drop into the focused window. */
     fun clipboardSetFiles(paths: List<String>, paste: Boolean) = control(Proto.clipboardSet(null, files = paths, paste = paste))
+    // ── PC controls the phone: the screen goes up as binary [kind, ...annexB], like the desktop comes down ──
+    fun phoneShareStart(w: Int, h: Int, control: Boolean) = send(Proto.phoneShareStart(w, h, control))
+    fun phoneShareStop() = send(Proto.phoneShareStop())
+    fun phoneFsResult(rid: Long, reply: JsonObject) = send(Proto.phoneFsResult(rid, reply))
+    fun phoneApps(active: Pair<String, String>?, apps: List<Pair<String, String>>) = send(Proto.phoneApps(active, apps))
+    fun sendPhoneVideo(pkt: ByteArray): Boolean {
+        irohLink.get()?.let { return it.sendVideo(pkt) }
+        return socket.get()?.send(okio.ByteString.of(*pkt)) ?: false
+    }
+    /** Bytes the socket has not sent yet; OkHttp closes a socket whose queue passes 16 MB. */
+    fun uploadBacklog(): Long = socket.get()?.queueSize() ?: 0L
+
     fun desktopStop() { desktopStreaming = false; desktopResume = null; send(Proto.desktopStop()) }
     fun desktopSnapshot() = send(Proto.desktopFrame())
     /** Width and height of the picture on screen; positions also go out as fractions of it. */
@@ -622,7 +636,6 @@ class WsClient(
         return send(Proto.detach(id))
     }
     fun sendInput(id: String, dataB64: String): Boolean = send(Proto.input(id, dataB64))
-    fun sendResize(id: String, cols: Int, rows: Int): Boolean = send(Proto.resize(id, cols, rows))
     fun kill(id: String): Boolean = send(Proto.kill(id))
     fun browse(path: String?, hidden: Boolean = false): Boolean = send(Proto.fs(path, hidden))
     fun fileOp(op: String, path: String, to: String? = null): Boolean = send(Proto.fsOp(op, path, to))
@@ -893,8 +906,13 @@ class WsClient(
             "out", "replay" -> {
                 val id = str(m, "id") ?: return
                 num(m, "seq")?.let { seq -> if (seq > (lastSeq[id] ?: 0L)) lastSeq[id] = seq }
+                num(m, "cols")?.let { c -> num(m, "rows")?.let { r -> onTerminalSize?.invoke(id, c.toInt(), r.toInt()) } }
                 val data = str(m, "data") ?: return
                 onTerminalData?.invoke(id, data)
+            }
+            "size" -> {
+                val id = str(m, "id") ?: return
+                num(m, "cols")?.let { c -> num(m, "rows")?.let { r -> onTerminalSize?.invoke(id, c.toInt(), r.toInt()) } }
             }
             "exit" -> {
                 val id = str(m, "id") ?: return
@@ -1134,6 +1152,8 @@ class WsClient(
                     failure(str(m, "error") ?: "model rejected")
                 }
             }
+            "phone_share_request", "phone_share_stop", "phone_keyframe", "phone_input", "phone_switch", "phone_fs" ->
+                events.tryEmit(RhEvent.Phone(type, m))
             else -> {}
         }
     }

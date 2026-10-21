@@ -49,6 +49,7 @@ object Link {
                     if (!MainActivity.foreground) client.lastError?.let { Notifier.linkLost(app, it) }
                 }
                 if (now == Status.Connected) Notifier.linkLostGone(app)
+                if (now != Status.Connected && PhoneShare.sharing) PhoneShare.stop(app)
                 was = now
             }
         }
@@ -58,6 +59,7 @@ object Link {
                     ev is RhEvent.Exit && !MainActivity.foreground -> Notifier.sessionEnded(app, ev.harnessId, ev.code)
                     ev is RhEvent.ApprovalNeeded && !MainActivity.foreground -> Notifier.approval(app, ev.proposal)
                     ev is RhEvent.ApprovalGone -> Notifier.approvalGone(app, ev.id)
+                    ev is RhEvent.Phone -> PhoneShare.onMessage(app, ev)
                 }
             }
         }

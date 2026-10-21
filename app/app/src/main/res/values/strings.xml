@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="control_service_description">Lets your paired PC tap, swipe and type on this phone, only while you share the screen with it. Each share asks first and shows a notification until it stops.</string>
+</resources>

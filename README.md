@@ -230,6 +230,42 @@ each: **VS Code, Zed, Antigravity, OpenCode Desktop** and **Freebuff Desktop**.
 There is no PTY behind them, so opening starts the window on the PC and the
 **Desktop** screen is how you see and drive it from the phone.
 
+### 🖥️ Shared terminals
+
+A terminal runs on the PC (PowerShell from Tools, or any agent CLI), and the phone and local programs
+all see the same one. It keeps the PC's size; the phone shows it scaled down
+(pinch to zoom). On the PC, the `pocketdesk` command drives it, so Claude Code can work in the
+terminal the phone is watching:
+
+```
+pocketdesk new [--cwd DIR] [tool]     # starts PowerShell (or a tool id) and prints its id
+pocketdesk list                       # id, tool, size, folder
+pocketdesk send s1 "npm test" Enter   # tmux-style key names: Enter Tab Escape BSpace Up C-c ...
+pocketdesk read s1                    # the screen as it looks now, as text
+pocketdesk attach s1                  # use it in this window; Ctrl+] leaves it running
+pocketdesk resize s1 120 40
+pocketdesk kill s1
+```
+
+### 📱 Your phone on the PC
+
+`https://localhost:8765` on the PC is the phone and nothing else, in two tabs:
+
+- **Phone screen**: the phone's screen, controlled with the mouse and keyboard (click taps, a held
+  click long-presses, drag swipes, the wheel scrolls; click the picture, then type). Recent apps get
+  their own panes, as many as fit the width; click one to bring it to the front. **Swap** (here or
+  on the phone's Desktop screen) picks which device controls the other.
+- **Phone storage**: the phone's shared storage: browse, download, upload (button or drag and drop),
+  new folder, rename, delete.
+
+Log in once with the token from `%USERPROFILE%\.pocketdesk\config.json` (or open
+`https://localhost:8765/#t=<token>`); the page remembers it. The phone asks its owner through
+Android's own prompt for every screen share and shows a notification while shared; Android ends the
+share when the phone locks. Tapping and typing need **PocketDesk PC control** switched on once under
+Accessibility (sideloaded installs: App info > ⋮ > Allow restricted settings first); the storage tab
+needs **All files access** for PocketDesk (the phone shows a notification that opens it). Apps that
+mark their content as sensitive stay black, as in any screen share.
+
 ### 📚 Every agent's past conversations
 
 The Chats screen has an **On this PC** section: the conversations each coding agent saved on the PC,
@@ -539,7 +575,7 @@ for byte, then reports the VNC framebuffer geometry the server announced.
 | `RH_APPROVAL_TIMEOUT_MS` | `120000` | Auto-deny an agent stuck waiting for approval (0 disables) |
 | `RH_QUIET_MS` | `20000` | Silence before a session counts as *quiet*  |
 | `RH_IDLE_KILL_MINUTES` | off | Kill live sessions idle longer than N minutes |
-| `RH_CLI_PORT` | `4679` | Local CLI status endpoint (`/sessions /status /query`), needs `Authorization: Bearer <token>` |
+| `RH_CLI_PORT` | `4679` | Local CLI endpoint (`/sessions /status /query /term`), used by `pocketdesk`; needs `Authorization: Bearer <token>` |
 | `POCKETDESK_DATA` | `.pocketdesk` | Data dir (chat history, devices) |
 
 ---

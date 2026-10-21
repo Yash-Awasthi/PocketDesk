@@ -184,6 +184,9 @@ sealed interface RhEvent {
     data class ApprovalGone(val id: String) : RhEvent
 
     data class PowerDone(val action: String, val ok: Boolean, val error: String?) : RhEvent
+
+    /** A phone_* request from the PC side; [PhoneShare] acts on it with the app context. */
+    data class Phone(val type: String, val msg: JsonObject) : RhEvent
 }
 
 // Typed reads that yield null for a missing or wrongly typed field instead of throwing on a malformed message.
@@ -202,6 +205,21 @@ object Proto {
         put("name", android.os.Build.MODEL); put("platform", "android")
     }
     fun detect() = obj { put("type", "detect") }
+    fun phoneShareStart(w: Int, h: Int, control: Boolean) = obj {
+        put("type", "phone_share_start"); put("w", w); put("h", h); put("control", control)
+    }
+    fun phoneShareStop() = obj { put("type", "phone_share_stop") }
+    fun phoneFsResult(rid: Long, reply: JsonObject) = obj {
+        put("type", "phone_fs_result"); put("rid", rid)
+        for ((k, v) in reply) put(k, v)
+    }
+    fun phoneApps(active: Pair<String, String>?, apps: List<Pair<String, String>>) = obj {
+        put("type", "phone_apps")
+        active?.let { (pkg, label) -> put("active", buildJsonObject { put("pkg", pkg); put("label", label) }) }
+        put("apps", kotlinx.serialization.json.buildJsonArray {
+            for ((pkg, label) in apps) add(buildJsonObject { put("pkg", pkg); put("label", label) })
+        })
+    }
     fun install(id: String) = obj { put("type", "install"); put("id", id) }
     fun guiOpen(id: String, cwd: String) = obj {
         put("type", "gui_open"); put("harness", id); put("cwd", cwd)
@@ -236,9 +254,6 @@ object Proto {
         put("type", "in"); put("id", id); put("data", dataB64)
     }
 
-    fun resize(id: String, cols: Int, rows: Int) = obj {
-        put("type", "resize"); put("id", id); put("cols", cols); put("rows", rows)
-    }
 
     fun kill(id: String) = obj { put("type", "kill"); put("id", id) }
 

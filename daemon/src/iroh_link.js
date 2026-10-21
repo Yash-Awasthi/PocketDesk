@@ -11,6 +11,7 @@
  * sends desktop video as one unidirectional stream per GOP: a u32 GOP number,
  * then each packet as a u32 length and [kind, ...annexB]. A newer GOP stream
  * supersedes older ones. The viewer acks {g, f} (GOP, packets read) over control.
+ * A sharing phone uploads its screen the same way, in the other direction.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -113,6 +114,7 @@ export class IrohSocket extends EventEmitter {
     this._ack = null;
     this._opening = Promise.resolve();
     this._readLoop(bi.recv).catch(() => {}).finally(() => this._closed(1006));
+    this._acceptUploads().catch(() => {});
     conn.closed().then(() => this._closed(1006), () => this._closed(1006));
   }
 
@@ -143,6 +145,21 @@ export class IrohSocket extends EventEmitter {
       const len = Buffer.from(await recv.readExact(4)).readUInt32BE(0);
       if (len > MAX_MESSAGE) { this.close(1009, "message too big"); return; }
       this.emit("message", Buffer.from(await recv.readExact(len)));
+    }
+  }
+
+  /** A sharing phone sends its screen the way the daemon sends the desktop: one uni stream per GOP, read here as binary messages. */
+  async _acceptUploads() {
+    for (;;) {
+      const st = await this.conn.acceptUni();
+      (async () => {
+        await st.readExact(4); // GOP number; the phone finishes one GOP before opening the next
+        for (;;) {
+          const len = Buffer.from(await st.readExact(4)).readUInt32BE(0);
+          if (len > MAX_MESSAGE) return;
+          this.emit("message", Buffer.from(await st.readExact(len)), true);
+        }
+      })().catch(() => {});
     }
   }
 

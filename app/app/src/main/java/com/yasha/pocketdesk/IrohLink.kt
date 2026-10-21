@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * messages as u32 length + UTF-8 JSON; desktop video arrives as one
  * unidirectional stream per GOP (a u32 GOP number, then packets), and a newer
  * stream makes older ones obsolete. Read progress goes back as `video_ack`.
+ * A shared phone screen goes up the same way in the other direction.
  */
 class IrohLink(
     private val ticket: String,
@@ -83,10 +84,45 @@ class IrohLink(
 
     fun send(text: String): Boolean = !closed.get() && outbox.trySend(text.toByteArray(Charsets.UTF_8)).isSuccess
 
+    private val uploads = Channel<ByteArray>(Channel.UNLIMITED)
+    private var uploading = false
+
+    /**
+     * One phone-screen packet [kind, ...annexB] to the PC, the way the daemon sends its desktop:
+     * a keyframe opens a new uni stream (u32 GOP number, then the held config), deltas follow it.
+     */
+    fun sendVideo(pkt: ByteArray): Boolean {
+        if (closed.get()) return false
+        if (!uploading) {
+            uploading = true
+            scope.launch {
+                var gop = 0
+                var config: ByteArray? = null
+                var stream: computer.iroh.SendStream? = null
+                for (p in uploads) {
+                    when (p[0].toInt()) {
+                        0 -> config = p
+                        1 -> {
+                            stream?.let { old -> runCatching { old.finish() } }
+                            stream = conn?.openUni()?.also { s ->
+                                s.writeAll(java.nio.ByteBuffer.allocate(4).putInt(++gop).array())
+                                config?.let { s.writeAll(frame(it)) }
+                                s.writeAll(frame(p))
+                            }
+                        }
+                        else -> stream?.let { s -> runCatching { s.writeAll(frame(p)) } }
+                    }
+                }
+            }
+        }
+        return uploads.trySend(pkt).isSuccess
+    }
+
     fun close() {
         if (!closed.compareAndSet(false, true)) return
         runCatching { conn?.close(1000L, "bye".toByteArray()) }
         outbox.close()
+        uploads.close()
         scope.cancel()
     }
 

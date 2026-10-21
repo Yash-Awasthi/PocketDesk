@@ -79,6 +79,13 @@ function stopReaper() {
 // Export for graceful shutdown wiring.
 export { stopReaper };
 
+// ponytail: the PC's screen in 9x19 cells once the desktop module has listed monitors, else 120x32;
+// a PC-side viewer (browser terminal, `pocketdesk attach`) resizes to its real window.
+let pcSize = { cols: 120, rows: 32 };
+export function setPcScreen(w, h) {
+  if (w > 0 && h > 0) pcSize = { cols: Math.min(500, Math.floor(w / 9)), rows: Math.min(200, Math.floor(h / 19)) };
+}
+
 export function create({ harnessId, bin, cwd, args = [] }, broadcast) {
   // Session cap: if at the limit, evict the oldest dead session first.
   // If no dead sessions exist, reject the create (prevents unbounded growth).
@@ -106,9 +113,9 @@ export function create({ harnessId, bin, cwd, args = [] }, broadcast) {
   if (harnessId === "claude") args = [...args, ...toolApproval.claudeArgs()];
   const env = harnessId === "claude" ? { ...process.env, ...toolApproval.env(id) } : process.env;
   const proc = IS_WIN
-    ? pty.spawn("cmd.exe", ["/c", bin, ...args], { name: "xterm-256color", cols: 100, rows: 30, cwd: dir, env })
-    : pty.spawn(bin, args, { name: "xterm-256color", cols: 100, rows: 30, cwd: dir, env });
-  const s = { id, harnessId, cwd: dir, pty: proc, decoder: new StringDecoder("utf8"), scrollback: "", chunks: [], seq: 0, subs: new Set(), exitCode: null, lastActivity: Date.now() };
+    ? pty.spawn("cmd.exe", ["/c", bin, ...args], { name: "xterm-256color", ...pcSize, cwd: dir, env })
+    : pty.spawn(bin, args, { name: "xterm-256color", ...pcSize, cwd: dir, env });
+  const s = { id, harnessId, cwd: dir, ...pcSize, pty: proc, decoder: new StringDecoder("utf8"), scrollback: "", chunks: [], seq: 0, subs: new Set(), exitCode: null, lastActivity: Date.now() };
   sessions.set(id, s);
   sessionEvents.emit("create", { id, harnessId: s.harnessId, cwd: dir });
   proc.onData((data) => {
@@ -140,7 +147,7 @@ export function get(id) {
 export function summary() {
   return [...sessions.values()]
     .filter((s) => s.exitCode === null)
-    .map(({ id, harnessId, cwd }) => ({ id, harnessId, cwd }));
+    .map(({ id, harnessId, cwd, cols, rows }) => ({ id, harnessId, cwd, cols, rows }));
 }
 
 export function attach(id, ws, { since } = {}) {
@@ -156,9 +163,9 @@ export function attach(id, ws, { since } = {}) {
     for (const c of s.chunks) {
       if (c.seq > since) send(ws, { type: "out", id, seq: c.seq, data: b64(c.text) });
     }
-    send(ws, { type: "replay", id, seq: s.seq, data: "", incremental: true });
+    send(ws, { type: "replay", id, seq: s.seq, data: "", incremental: true, cols: s.cols, rows: s.rows });
   } else {
-    send(ws, { type: "replay", id, seq: s.seq, data: b64(s.scrollback) });
+    send(ws, { type: "replay", id, seq: s.seq, data: b64(s.scrollback), cols: s.cols, rows: s.rows });
   }
   return true;
 }
@@ -194,6 +201,10 @@ export function resize(id, cols, rows) {
   try {
     s.pty.resize(c, r);
   } catch {}
+  s.cols = c;
+  s.rows = r;
+  // Viewers that never size the terminal themselves (the phone) draw the same grid.
+  for (const ws of s.subs) send(ws, { type: "size", id, cols: c, rows: r });
   sessionEvents.emit("resize", { id, cols: c, rows: r });
   return true;
 }

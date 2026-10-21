@@ -112,6 +112,16 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "npm ci failed" }
     } finally { Pop-Location }
 
+    # 4b. `pocketdesk list/new/attach/send/read` from any terminal, Claude Code included.
+    $binDir = Join-Path $InstallDir "bin"
+    New-Item -ItemType Directory -Force $binDir | Out-Null
+    $nodeExe = if (Test-Path "$nodeDir\node.exe") { "$nodeDir\node.exe" } else { $systemNode.Source }
+    Set-Content -Path "$binDir\pocketdesk.cmd" -Encoding ascii -Value "@`"$nodeExe`" `"$daemon\src\index.js`" %*"
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    if (($userPath -split ';') -notcontains $binDir) {
+        [Environment]::SetEnvironmentVariable("Path", (@($userPath, $binDir) | Where-Object { $_ }) -join ';', "User")
+    }
+
     # 5. The hidden daemon: starts at logon in the background.
     Step "Installing the hidden daemon"
     & "$daemon\scripts\install-service.ps1" -DaemonDir $daemon -InstallDir $InstallDir -NoStart:$NoStart

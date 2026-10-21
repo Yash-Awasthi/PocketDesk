@@ -225,6 +225,8 @@ export default function agentsHandlers(ctx) {
       sessions.write(msg.id, Buffer.from(msg.data, "base64").toString("utf8"));
     },
     async resize(ws, msg) {
+      // A terminal runs on the PC and keeps the PC's size; the phone scales it to fit instead.
+      if (ws._android) return;
       sessions.resize(msg.id, msg.cols, msg.rows);
     },
     async kill(ws, msg) {

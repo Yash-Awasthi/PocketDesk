@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes" />
 <link rel="stylesheet" href="vendor/xterm.min.css" />
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #14161a; }
@@ -12,18 +12,13 @@
 <body>
 <div id="term"></div>
 <script src="vendor/xterm.min.js"></script>
-<script src="vendor/addon-fit.min.js"></script>
 <script>
 const term = new Terminal({ fontSize: 13, theme: { background: '#14161a' } });
-const fit = new FitAddon.FitAddon();
-term.loadAddon(fit);
 term.open(document.getElementById('term'));
 
 function enc(s) { const u = new TextEncoder().encode(s); let b = ''; for (const c of u) b += String.fromCharCode(c); return btoa(b); }
-function doFit() { try { fit.fit(); Android.resize(term.cols, term.rows); } catch (e) {} }
 
 term.onData((d) => { try { Android.input(enc(d)); } catch (e) {} });
-term.onResize(() => { try { Android.resize(term.cols, term.rows); } catch (e) {} });
 
 window.termOut = function (b64) {
   const bin = atob(b64);
@@ -32,9 +27,22 @@ window.termOut = function (b64) {
   term.write(u);
 };
 
-if (window.visualViewport) visualViewport.addEventListener('resize', doFit);
-else window.addEventListener('resize', doFit);
-setTimeout(doFit, 100);
+// The terminal runs on the PC at the PC's size; the phone shrinks the font until that grid fits.
+window.termSize = function (cols, rows) {
+  term.resize(cols, rows);
+  fitFont();
+};
+function fitFont() {
+  const box = document.getElementById('term');
+  const screen = box.querySelector('.xterm-screen');
+  if (!screen || !screen.offsetWidth) return;
+  const k = Math.min(box.clientWidth / screen.offsetWidth, box.clientHeight / screen.offsetHeight);
+  const size = Math.max(4, Math.min(20, term.options.fontSize * k));
+  // Cell width follows the font only roughly; settle over a frame or two.
+  if (Math.abs(size - term.options.fontSize) > 0.25) { term.options.fontSize = size; requestAnimationFrame(fitFont); }
+}
+if (window.visualViewport) visualViewport.addEventListener('resize', fitFont);
+else window.addEventListener('resize', fitFont);
 </script>
 </body>
 </html>

@@ -8,6 +8,7 @@ import filesHandlers from "../src/handlers/files.js";
 import remoteHandlers from "../src/handlers/remote.js";
 import sshHandlers from "../src/handlers/ssh.js";
 import systemHandlers from "../src/handlers/system.js";
+import phoneHandlers from "../src/handlers/phone.js";
 
 const APP = path.join(REPO, "app", "app", "src", "main", "java", "com", "yasha", "pocketdesk");
 const DAEMON = path.join(REPO, "daemon", "src");
@@ -18,7 +19,7 @@ function walk(dir, ext) {
 }
 
 const handled = new Set(["hello"]);
-for (const make of [agentsHandlers, filesHandlers, remoteHandlers, sshHandlers, systemHandlers]) {
+for (const make of [agentsHandlers, filesHandlers, remoteHandlers, sshHandlers, systemHandlers, phoneHandlers]) {
   for (const k of Object.keys(make({}))) handled.add(k);
 }
 

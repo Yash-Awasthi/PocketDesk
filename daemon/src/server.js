@@ -38,6 +38,7 @@ import filesHandlers from "./handlers/files.js";
 import remoteHandlers from "./handlers/remote.js";
 import sshHandlers from "./handlers/ssh.js";
 import systemHandlers from "./handlers/system.js";
+import phoneHandlers, { phoneBinary } from "./handlers/phone.js";
 import { startIroh } from "./iroh_link.js";
 import { configDir, configPath } from "./config.js";
 
@@ -58,10 +59,11 @@ const PAUSE_ALLOWED = new Set([
   "desktop_status", "desktop_permissions", "desktop_mouse", "desktop_key", "desktop_type",
   "bastion_user_list", "bastion_host_list", "bastion_sessions", "bastion_stats", "bastion_stop", "sshserver_user_list",
   "sshserver_sessions", "sshserver_stats", "sshserver_stop", "profile_list", "profile_disconnect", "hostkey_list", "sshkey_list", "mproto_status",
+  "phone_watch", "phone_unwatch", "phone_share_start", "phone_share_stop", "phone_share_end", "phone_apps", "phone_input", "phone_switch", "phone_fs", "phone_fs_result",
   "proposal_list", "reject", "stats", "fb_status", "fb_config_list", "fb_config_get", "fb_skill_list", "fb_skill_get",
   "fb_auth_status", "fb_accounts", "stream_parse", "stream_stats", "doctor", "device_list", "history_list", "history_get", "agent_panel", "agent_doc", "accounts_list",
 ]);
-const AUDIT_SKIP = new Set(["in", "resize", "video_ack", "desktop_ping", "desktop_frame", "desktop_mouse", "desktop_key", "desktop_type"]);
+const AUDIT_SKIP = new Set(["in", "resize", "video_ack", "desktop_ping", "desktop_frame", "desktop_mouse", "desktop_key", "desktop_type", "phone_input"]);
 
 /** One line per action on the SYSTEM endpoint, in its admin-only directory. */
 function audit(ws, msg) {
@@ -292,9 +294,10 @@ export function start(config, { onTokenRotated } = {}) {
       detachClient(ws);
       plugins.callHook("onDisconnect", ws);
     });
-    ws.on("message", (raw) => {
+    ws.on("message", (raw, isBinary) => {
       // A hello is tiny; anything big before auth is only there to burn memory and CPU.
       if (!ws._authed && raw.length > 16 << 10) return ws.close(1009, "hello too large");
+      if (isBinary) return ws._authed && phoneBinary(ws, raw);
       let msg;
       try {
         msg = JSON.parse(raw.toString());
@@ -340,6 +343,7 @@ export function start(config, { onTokenRotated } = {}) {
             authAttempts.delete(clientIp);
             clearTimeout(timer);
             ws._clientId = auth.id;
+            ws._android = msg.platform === "android";
             send(ws, hi);
             // The console token opens a SYSTEM daemon: once a phone holds its own token, the
             // master token (on screen, in a QR photo, in browser history) stops working.
@@ -458,6 +462,14 @@ export function start(config, { onTokenRotated } = {}) {
   // Desktop capture + input, the frame source for rd_/desktop UIs. Frames (~200-300 KB) go straight
   // to each watching ws, too heavy to broadcast; the capture loop runs only while a watcher is attached.
   const desktop = new DesktopController();
+  // New terminals take the PC screen's size once the desktop view has listed the monitors.
+  const listMonitors = desktop.monitors.bind(desktop);
+  desktop.monitors = async () => {
+    const r = await listMonitors();
+    const p = r.monitors?.find((m) => m.primary) || r.monitors?.[0];
+    if (p) sessions.setPcScreen(p.w, p.h);
+    return r;
+  };
   const access = createAccess(config);
   access.onRemoteChange = (on) => { if (!on) for (const ws of wss.clients) try { ws.close(4100, "remote access is switched off on the PC"); } catch {} };
   const recorder = new Recorder();
@@ -654,10 +666,10 @@ export function start(config, { onTokenRotated } = {}) {
   const ctx = {
     send, broadcast, allSessions, plugins, power,
     desktop, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
-    activity, tls, syncAudio,
+    activity, tls, syncAudio, clients: () => wss.clients,
   };
   const handlers = {
-    ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx),
+    ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx), ...phoneHandlers(ctx),
   };
 
 
@@ -714,7 +726,7 @@ export function start(config, { onTokenRotated } = {}) {
       }).catch((e) => { irohStarting = false; console.log(`  iroh      failed to start: ${e?.message || e}`); });
     }
     sessionStore.init();
-    cliServer.start(() => token);
+    cliServer.start(() => token, { broadcast, allSessions });
     proposals.init(broadcast);
     await registry.scanAll(broadcast);
     console.log("  registry scanned");

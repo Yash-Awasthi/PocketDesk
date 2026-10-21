@@ -69,6 +69,11 @@ foreach ($task in "PocketDesk", "PocketDeskConsole") {
 $consoleBin = Join-Path $consoleRoot "bin"
 if (Test-Path $consoleBin) { Remove-Item -Recurse -Force $consoleBin -ErrorAction SilentlyContinue }
 
+$binDir = Join-Path $InstallDir "bin"
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -and (($userPath -split ';') -contains $binDir)) {
+    [Environment]::SetEnvironmentVariable("Path", (($userPath -split ';') | Where-Object { $_ -and $_ -ne $binDir }) -join ';', "User")
+}
 if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
 if (Test-Path $UserRoot) { Remove-Item -Recurse -Force $UserRoot -ErrorAction SilentlyContinue }
 $pfRoot = Split-Path $UserRoot

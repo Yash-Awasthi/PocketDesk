@@ -20,7 +20,7 @@ mobile "with all features enabled" → plan is `launch` adapter for GUI apps + V
 
 - `daemon/src/` — index.js, config.js, server.js, registry.js, sessions.js, chat.js
 - `daemon/scripts/` — gen-cert.js, install-service.ps1, uninstall-service.ps1, tray/PocketDeskTray.cs
-- `daemon/public/` — index.html (browser test client), pair.html (QR pairing page), vendor/qrcode.min.js (qrcode-generator@1.4.4, works as browser global `qrcode`)
+- `daemon/public/` — index.html (the phone on the PC: Phone screen and Phone storage tabs only), pair.html (QR pairing page), vendor/qrcode.min.js (qrcode-generator@1.4.4, works as browser global `qrcode`)
 - `daemon/manifests/*.json` — claude, opencode, codex, gemini, aider, qwen (+chat sections)
 - `daemon/test/smoke.mjs` + `test/smoke-chat.mjs` — run via `npm.cmd test` (npm.ps1 blocked by execution policy; use npm.cmd)
 - `app/` — Android project. Gradle wrapper 9.8.1, AGP 9.5.0-alpha09 (built-in Kotlin), Kotlin 2.5.0-Beta1,

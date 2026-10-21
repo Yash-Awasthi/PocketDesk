@@ -115,6 +115,8 @@ fun DesktopScreen(
     showKeys: Boolean,
     onShowKeys: (Boolean) -> Unit,
 ) {
+    // Swap is exclusive: while the PC views this phone, the phone does not view the PC.
+    if (com.yasha.pocketdesk.PhoneShare.sharing) { PhoneSharedPanel(); return }
     val desktopError by ws._desktopError.collectAsState()
     // Input mode, quality and the shortcut bar are remembered between sessions.
     val prefs = LocalContext.current.getSharedPreferences("pocketdesk", android.content.Context.MODE_PRIVATE)
@@ -597,6 +599,8 @@ fun DesktopScreen(
             keysButton(Modifier.weight(1f).fillMaxHeight())
             OutlinedButton(onClick = { showApps = true }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("▦") }
             OutlinedButton(onClick = { onFullscreen(!fullscreen) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("⛶") }
+            val ctx = LocalContext.current
+            OutlinedButton(onClick = { com.yasha.pocketdesk.PhoneShare.ask(ctx) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("⇄") }
         }
         if (showKeys && !fullscreen) DesktopKeyboard(ws)
     }
@@ -604,6 +608,29 @@ fun DesktopScreen(
     LaunchedEffect(fullscreen) { if (!fullscreen) ws.desktopInputPaused = false }
 
     if (showApps) AppLauncher(ws, onDismiss = { showApps = false })
+}
+
+/** Shown while the PC views this phone: swap back, and the one-time setup that lets the PC tap and type. */
+@Composable
+private fun PhoneSharedPanel() {
+    val ctx = LocalContext.current
+    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Your PC is viewing this phone", style = MaterialTheme.typography.titleMedium)
+        FilledTonalButton(onClick = { com.yasha.pocketdesk.PhoneShare.stop(ctx) }) { Text("⇄ Swap back: view the PC") }
+        if (com.yasha.pocketdesk.ControlService.instance == null) {
+            Text("View only. To let the PC tap and type here, turn on \"PocketDesk PC control\" in Accessibility. " +
+                "If Android greys it out, first open App info, menu ⋮, \"Allow restricted settings\".",
+                style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = {
+                ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }) { Text("Open Accessibility settings") }
+            TextButton(onClick = {
+                ctx.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.fromParts("package", ctx.packageName, null)))
+            }) { Text("Open App info") }
+        }
+    }
 }
 
 /** TextureView fed by a hardware decoder; each new surface asks the daemon for a fresh keyframe. */
