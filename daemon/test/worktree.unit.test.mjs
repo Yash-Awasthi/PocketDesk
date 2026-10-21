@@ -7,7 +7,8 @@ import { execFileSync } from "node:child_process";
 import { add } from "../src/worktree.js";
 
 const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rh-wt-"));
+// Real path as git reports it: macOS tmp sits behind a /var symlink, Windows CI tmp is an 8.3 short name.
+const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "rh-wt-")));
 const repo = path.join(tmp, "proj");
 fs.mkdirSync(repo);
 git(repo, "init", "-q");

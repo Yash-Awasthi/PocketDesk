@@ -28,11 +28,6 @@ export function list(chatId) {
   return [...(queues.get(chatId) ?? [])];
 }
 
-export function peek(chatId) {
-  const q = queues.get(chatId);
-  return q && q.length ? q[0] : null;
-}
-
 /** Pop the oldest prompt (drain target). */
 export function dequeue(chatId) {
   const q = queues.get(chatId);
@@ -50,12 +45,4 @@ export function remove(chatId, promptId) {
   q.splice(idx, 1);
   if (!q.length) queues.delete(chatId);
   return true;
-}
-
-export function clear(chatId) {
-  queues.delete(chatId);
-}
-
-export function count() {
-  return queues.size;
 }

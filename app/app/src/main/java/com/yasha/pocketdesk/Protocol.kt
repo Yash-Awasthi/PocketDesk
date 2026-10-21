@@ -278,7 +278,6 @@ object Proto {
         if (paste) put("paste", true)
     }
     fun desktopStop() = obj { put("type", "desktop_stop") }
-    fun desktopFrame() = obj { put("type", "desktop_frame") }
     fun desktopMouse(
         x: Int?, y: Int?, click: String?, wheel: Int?, press: String? = null, button: String? = null, hwheel: Int? = null,
         frac: Pair<Double, Double>? = null,

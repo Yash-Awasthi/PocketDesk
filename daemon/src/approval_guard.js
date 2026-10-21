@@ -14,12 +14,8 @@
 const DEFAULT_TIMEOUT_MS = Number(process.env.RH_APPROVAL_TIMEOUT_MS) || 120_000;
 
 const waiting = new Map(); // chatId -> { since, timer }
-let timeoutMs = DEFAULT_TIMEOUT_MS;
+const timeoutMs = DEFAULT_TIMEOUT_MS;
 let onAutoDeny = null; // async ({ chatId, waitedMs }) — injected by server
-
-export function setTimeoutMs(ms) {
-  timeoutMs = Math.max(0, Number(ms) || 0);
-}
 
 export function getTimeoutMs() {
   return timeoutMs;

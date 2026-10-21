@@ -1,6 +1,6 @@
 /**
  * Linux X11 desktop backend: screen capture via ffmpeg x11grab (wired in desktop_video.js), input
- * via xdotool, monitor geometry via xrandr, clipboard via xclip. Wayland sessions have no X server
+ * via xdotool, monitor geometry via xrandr. Wayland sessions have no X server
  * to grab, so this reports unsupported there; X11 (or XWayland with an X grab) works.
  *
  * The pure helpers here (argument building, xrandr parsing, key mapping) are unit-tested; the spawns
@@ -63,9 +63,6 @@ export class LinuxDesktop {
   constructor() {
     this.xdotool = X11 && hasTool("xdotool");
     this.xrandr = X11 && hasTool("xrandr");
-    this.xclip = X11 && hasTool("xclip");
-    this.clipSeq = 0;
-    this._lastClip = null;
   }
 
   get supported() { return !!this.xdotool; }

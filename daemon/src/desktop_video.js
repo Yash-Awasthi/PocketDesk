@@ -8,6 +8,7 @@
  * ffmpeg writes FLV (enhanced FLV for HEVC and AV1) because its tags carry lengths: a frame can
  * be forwarded the moment it is written, while raw Annex B only ends when the next frame starts.
  */
+import { IS_WAYLAND, wfRecorderArgs } from "./wayland_desktop.js";
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 
@@ -53,6 +54,8 @@ export const ENCODER_ORDER = {
   win32: ["av1_nvenc", "av1_qsv", "av1_amf", "hevc_nvenc", "hevc_qsv", "hevc_amf", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"],
   linux: ["av1_nvenc", "av1_vaapi", "hevc_nvenc", "hevc_vaapi", "h264_nvenc", "h264_vaapi", "libx264"],
   darwin: ["h264_videotoolbox", "libx264"],
+  // wf-recorder carries its own encoder, without NVENC.
+  wayland: ["h264_vaapi", "libx264"],
 };
 export const CODECS = ["av1", "hevc", "h264"];
 export const codecOf = (enc) => (enc.startsWith("av1") ? "av1" : enc.startsWith("hevc") ? "hevc" : "h264");
@@ -283,7 +286,7 @@ export class DesktopVideo extends EventEmitter {
   }
 
   /** ffmpeg encoders to try, in the viewers' codec order; ones that failed where a later one worked are skipped. */
-  candidates(platform = process.platform) {
+  candidates(platform = IS_WAYLAND ? "wayland" : process.platform) {
     const order = (ENCODER_ORDER[platform] || []).filter((e) => this.codecs.includes(codecOf(e)) && !this.failed.has(e));
     return order.sort((a, b) => this.codecs.indexOf(codecOf(a)) - this.codecs.indexOf(codecOf(b)));
   }
@@ -367,9 +370,9 @@ export class DesktopVideo extends EventEmitter {
   /** True once the first packet arrives; false if ffmpeg dies first. */
   _spawn(enc, gen) {
     return new Promise((resolve) => {
-      const args = ffmpegArgs(enc, this.preset, this.monitor);
+      const [bin, args] = IS_WAYLAND ? ["wf-recorder", wfRecorderArgs(enc, PRESETS[this.preset], this.monitor)] : [this.ffmpeg, ffmpegArgs(enc, this.preset, this.monitor)];
       let proc;
-      try { proc = spawn(this.ffmpeg, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true }); }
+      try { proc = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true }); }
       catch { return resolve(false); }
       this.child = proc;
       const live = () => gen === this.gen && this.child === proc;

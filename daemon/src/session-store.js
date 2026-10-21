@@ -38,19 +38,6 @@ export function upsert(id, data) {
   save();
 }
 
-export function remove(id) {
-  store.sessions = store.sessions.filter((s) => s.id !== id);
-  save();
-}
-
-export function get(id) {
-  return store.sessions.find((s) => s.id === id) || null;
-}
-
-export function list() {
-  return store.sessions;
-}
-
 export function setStatus(id, status, reason) {
   const s = store.sessions.find((s) => s.id === id);
   if (s) {

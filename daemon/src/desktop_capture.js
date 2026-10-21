@@ -28,6 +28,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import { configDir } from "./config.js";
 import { LinuxDesktop, IS_LINUX } from "./linux_desktop.js";
+import { WaylandDesktop, IS_WAYLAND } from "./wayland_desktop.js";
 // Helper scripts live in the private config dir: in a shared temp dir another user could
 // swap one in before it runs, as SYSTEM for the console endpoint.
 
@@ -1266,8 +1267,9 @@ export class DesktopController extends EventEmitter {
     this.helperClip = new PsHelper("clipboard", CLIP_SCRIPT);
     // macOS streams video through the same helper binary; DesktopVideo drives it.
     this.macVideo = IS_MAC ? new MacVideoNative(this.helperCapture) : null;
-    // Linux drives input and monitors through xdotool/xrandr; video comes from ffmpeg x11grab.
-    this.linux = IS_LINUX ? new LinuxDesktop() : null;
+    // Linux drives input and monitors through xdotool/xrandr and video through ffmpeg x11grab, or on a
+    // wlroots Wayland session through its own tools and wf-recorder.
+    this.linux = IS_LINUX ? (IS_WAYLAND ? new WaylandDesktop() : new LinuxDesktop()) : null;
     this.origin = { x: 0, y: 0 };
     this.monitorList = null;
   }

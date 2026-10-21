@@ -78,7 +78,3 @@ export function totals() {
   return { inputTokens, outputTokens, cacheReadTokens, cacheCreateTokens, costUsd: Number(costUsd.toFixed(6)), sessions: usage.size };
 }
 
-export function reset(sessionId) {
-  if (sessionId) usage.delete(String(sessionId));
-  else usage.clear();
-}
