@@ -15,7 +15,7 @@ class NavStateTest {
     fun `every screen survives a back stack round trip`() {
         val screens: List<NavKey> = listOf(
             Screen.Connect, Screen.Tools, Screen.Sessions, Screen.Chats, Screen.Freebuff,
-            Screen.Desktop, Screen.Files, Screen.Ssh, Screen.Terminal("abc-123"),
+            Screen.Desktop, Screen.Files, Screen.Ssh, Screen.Terminal("abc-123"), Screen.Agent("claude"),
         )
         // The sealed descriptor lists every subclass, so a new screen missing here fails the test.
         assertEquals(Screen.serializer().descriptor.getElementDescriptor(1).elementsCount, screens.size)

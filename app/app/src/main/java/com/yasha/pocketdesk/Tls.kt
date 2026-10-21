@@ -46,10 +46,11 @@ object Tls {
     }
 
     fun pinnedClient(base: OkHttpClient, pinnedFp: String): OkHttpClient {
+        val tm = PinnedTrustManager(pinnedFp)
         val ctx = SSLContext.getInstance("TLS")
-        ctx.init(null, arrayOf(PinnedTrustManager(pinnedFp)), null)
+        ctx.init(null, arrayOf(tm), null)
         return base.newBuilder()
-            .sslSocketFactory(ctx.socketFactory, PinnedTrustManager(pinnedFp))
+            .sslSocketFactory(ctx.socketFactory, tm)
             .hostnameVerifier { _, _ -> true }
             .build()
     }

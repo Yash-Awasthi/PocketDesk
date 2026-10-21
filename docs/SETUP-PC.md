@@ -16,7 +16,8 @@ The setup file only wraps `install.ps1`; you can run that directly from PowerShe
 irm https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.ps1 | iex
 ```
 
-When it finishes, the pairing page opens in your browser. In the app, tap **+** and scan the QR code.
+When it finishes, the pairing page opens in your browser. In the app, tap **Scan QR** and scan the
+QR code (on Android 17 and later, allow access to devices on your local network when asked).
 That's all: the PC now starts PocketDesk at every logon, and the phone reaches it from any network.
 
 What the installer does, with nothing installed beforehand:
@@ -29,6 +30,15 @@ What the installer does, with nothing installed beforehand:
 4. Registers the hidden daemon to start at logon and adds a **PocketDesk** shortcut to the Start
    Menu.
 5. Starts everything and opens the pairing page.
+
+**Smart App Control.** When Windows Smart App Control is on, it refuses any program that is neither
+signed nor known to Microsoft, which includes the small launcher the installer compiles on your PC.
+The installer checks for it and then registers the daemon so that only signed programs start it:
+`conhost --headless` runs `daemon\scripts\run-daemon.ps1`, which starts the bundled Node.js
+(`PocketDesk.exe`) with the same cleaned environment the launcher would use. The Start Menu
+shortcut runs `open-pairing.ps1`, which starts the daemon if needed and opens the pairing page only
+after the listener proves it holds this PC's certificate. Both scripts live in the admin-only
+install folder.
 
 The first install downloads up to about 150 MB (much less when Node.js and ffmpeg are already there). Your browser may warn that the
 pairing page's certificate is not trusted; that is expected, because the daemon makes its own
@@ -208,6 +218,8 @@ Edit `%USERPROFILE%\.pocketdesk\config.json`, then end **PocketDesk.exe** in Tas
 | Windows asks whether Node.js may use the network | Allow it on private networks, so phones on the same Wi-Fi connect directly. |
 | The settings page does not open | Click the **PocketDesk** Start Menu shortcut again; if **PocketDesk.exe** is still missing from Task Manager, read `daemon.log` for the error. |
 | Antivirus flags the desktop helper | The daemon sends mouse and keyboard input on your behalf; allow it in your antivirus. |
+| The daemon does not start and the PocketDesk task reports `0x800711C7` | Smart App Control blocked the compiled launcher. Run the install command again: it detects Smart App Control and switches the task to `run-daemon.ps1`. |
+| The phone stays on `iroh relayed` while on the PC's Wi-Fi | On Android 17 and later, allow PocketDesk access to devices on your local network (Settings > Apps > PocketDesk > Permissions). |
 
 ## Running from a checkout (development)
 

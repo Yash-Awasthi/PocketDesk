@@ -69,6 +69,7 @@ export function loadConfig() {
   // Per-connection password (scrypt record) and the control gate survive restarts.
   cfg.connPassword = cfg.connPassword ?? null;
   cfg.controlAllowed = cfg.controlAllowed !== false;
+  cfg.remoteOn = cfg.remoteOn !== false;
   // No password means the pairing token alone is full remote control forever: worth a loud nudge
   // every start, since nothing else in the flow forces one (the pair page can set it, see /access).
   if (!envDriven && !cfg.connPassword) {
@@ -90,6 +91,7 @@ export function saveConfig(cfg) {
       iroh: { enabled: cfg.iroh?.enabled !== false, relays: Array.isArray(cfg.iroh?.relays) ? cfg.iroh.relays : [] },
       connPassword: cfg.connPassword ?? null,
       controlAllowed: cfg.controlAllowed !== false,
+      remoteOn: cfg.remoteOn !== false,
     }, null, 2),
     { mode: 0o600 },
   );

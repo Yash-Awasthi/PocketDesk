@@ -51,6 +51,11 @@ async function main() {
   check("revoke acks with a fresh pairing token", rev.ok === true && typeof rev.pairingToken === "string" && rev.pairingToken !== TOKEN);
   check("revoked device's live socket is closed", (await again.closed) === 4003);
 
+  const removed = await fetch(`http://127.0.0.1:${PORT}/access/devices/remove?k=${rev.pairingToken}`, { method: "POST", body: JSON.stringify({ clientId: phone.first.clientId }) }).then((r) => r.json());
+  check("remove deletes a revoked device", removed.ok === true);
+  const afterRemove = await fetch(`http://127.0.0.1:${PORT}/access/devices?k=${rev.pairingToken}`).then((r) => r.json());
+  check("removed device drops off the list", !afterRemove.items.some((x) => x.id === phone.first.clientId));
+
   check("pair page refuses a request without the pairing key", (await fetch(`http://127.0.0.1:${PORT}/pair`)).status === 403);
   check("pair page refuses a stale pairing key", (await fetch(`http://127.0.0.1:${PORT}/pair?k=${TOKEN}`)).status === 403);
   const pairHtml = await fetch(`http://127.0.0.1:${PORT}/pair?k=${rev.pairingToken}`).then((r) => r.text());

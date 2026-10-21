@@ -59,9 +59,14 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
     PairCodeDialog(ws)
     ConnectionPasswordDialog(ws)
 
+    var pendingConnect by remember { mutableStateOf<ServerEntry?>(null) }
+    // Dials only after the prompt: on Android 17 the LAN url silently times out until local network access is granted.
     val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) {}
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        pendingConnect?.let { ws.connect(it.url, it.token, it.pinnedFingerprint, it.fallback) }
+        pendingConnect = null
+    }
 
     fun persist(list: List<ServerEntry>) {
         servers = list
@@ -69,16 +74,38 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
     }
 
     fun startConnect(entry: ServerEntry) {
-        if (Build.VERSION.SDK_INT >= 33) {
-            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        val wanted = buildList {
+            if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+            if (Build.VERSION.SDK_INT >= 37) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
         }
-        ws.connect(entry.url, entry.token, entry.pinnedFingerprint, entry.fallback)
+        if (wanted.isEmpty()) return ws.connect(entry.url, entry.token, entry.pinnedFingerprint, entry.fallback)
+        pendingConnect = entry
+        permissionLauncher.launch(wanted.toTypedArray())
+    }
+
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= 37) permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_LOCAL_NETWORK))
+    }
+
+    fun scanQr() {
+        val opts = com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions.Builder()
+            .setBarcodeFormats(com.google.mlkit.vision.barcode.common.Barcode.FORMAT_QR_CODE)
+            .build()
+        com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(ctx, opts).startScan()
+            .addOnSuccessListener { code ->
+                val paired = Pairing.parse(code.rawValue ?: "")
+                if (paired.isEmpty()) android.widget.Toast.makeText(ctx, "Not a PocketDesk pairing QR", android.widget.Toast.LENGTH_LONG).show()
+                else Link.pendingPair = paired
+            }
+            .addOnFailureListener { e ->
+                android.widget.Toast.makeText(ctx, "Scanner unavailable: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+            }
     }
 
     androidx.compose.runtime.LaunchedEffect(ws.status) {
         if (ws.status == Status.Connected) {
             val w = ws.wakeInfo
-            if (w != null) persist(servers.map { if (it.url == ws.activeUrl && it.wake != w) it.copy(wake = w) else it })
+            if (w != null) persist(servers.map { if (it.url == ws.serverUrl && it.wake != w) it.copy(wake = w) else it })
             onConnected()
         }
     }
@@ -154,8 +181,11 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
 
     Scaffold(
         floatingActionButton = {
-            FloatingActionButton(onClick = { adding = true }) {
-                Icon(Icons.Filled.Add, contentDescription = "Add server")
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                androidx.compose.material3.ExtendedFloatingActionButton(onClick = { scanQr() }) { Text("Scan QR") }
+                FloatingActionButton(onClick = { adding = true }) {
+                    Icon(Icons.Filled.Add, contentDescription = "Add server")
+                }
             }
         },
     ) { pad ->
@@ -163,8 +193,8 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
             Text("PocketDesk", style = MaterialTheme.typography.headlineMedium)
             if (servers.isEmpty()) {
                 Text(
-                    "No PCs saved yet. Tap + to add one. On the PC run: cd daemon && npm start\n\n" +
-                        "Open https://localhost:8765/pair on the PC and scan the QR. The saved PC " +
+                    "No PCs saved yet. On the PC run: cd daemon && npm start\n\n" +
+                        "Open https://localhost:8765/pair on the PC and tap Scan QR. The saved PC " +
                         "works on the same Wi-Fi and, through iroh, from any other network.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

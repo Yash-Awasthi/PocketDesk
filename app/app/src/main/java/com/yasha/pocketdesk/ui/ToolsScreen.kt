@@ -42,7 +42,7 @@ import com.yasha.pocketdesk.WsClient
 import kotlinx.coroutines.delay
 
 @Composable
-fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit, openSsh: () -> Unit, openFreebuff: () -> Unit, lock: AppLock) {
+fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit, openSsh: () -> Unit, openFreebuff: () -> Unit, openAgent: (String) -> Unit, openChats: () -> Unit, lock: AppLock) {
     // One project folder for everything started from this screen: an IDE opens
     // it, a CLI tool runs in it.
     var cwd by remember { mutableStateOf("") }
@@ -57,7 +57,8 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
         delay(250)
         ws.discoverApps(query.trim())
     }
-    LaunchedEffect(Unit) { ws.runDoctor() }
+    LaunchedEffect(Unit) { if (ws.doctorChecks.isEmpty()) ws.runDoctor() }
+    LaunchedEffect(Unit) { ws.historyList() }
     LaunchedEffect(Unit) {
         ws.events.collect { ev ->
             when (ev) {
@@ -98,8 +99,9 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
                 OutlinedButton(onClick = { browsing = true }) { Text("Browse") }
             }
         }
-        items(ws.tools, key = { it.manifest.id }) { tool ->
-            ToolCard(tool, ws, cwd, openDesktop, openFreebuff)
+        // Claude Code leads; the rest keep the daemon's order.
+        items(ws.tools.sortedBy { it.manifest.id != CLAUDE }, key = { it.manifest.id }) { tool ->
+            ToolCard(tool, ws, cwd, openDesktop, openFreebuff, openAgent, openChats)
         }
         item { PowerRow(ws) }
         if (lock.available) item {
@@ -167,7 +169,8 @@ private fun AppCard(app: AppEntry, ws: WsClient, cwd: String) {
 }
 
 @Composable
-private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String, openDesktop: () -> Unit, openFreebuff: () -> Unit) {
+private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String, openDesktop: () -> Unit, openFreebuff: () -> Unit, openAgent: (String) -> Unit, openChats: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -203,9 +206,15 @@ private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String, openDesktop: () 
                     }
                 }
             }
+            if (tool.manifest.id == CLAUDE && tool.installed == true) ClaudeActions(ws, cwd, openChats)
+            // Accounts show without the CLI too: an editor extension can share its login (Codex keeps ~/.codex/auth.json).
+            if ((tool.manifest.id in AGENT_PANELS && tool.installed == true) || tool.manifest.id in ACCOUNT_AGENTS) {
+                TextButton(onClick = { openAgent(tool.manifest.id) }) {
+                    Text(if (tool.manifest.id in AGENT_PANELS) "Accounts, skills, commands & settings" else "Accounts")
+                }
+            }
             if (tool.manifest.id == "freebuff-desktop" && tool.installed == true) {
-                FreebuffAccounts(ws, openDesktop)
-                TextButton(onClick = openFreebuff) { Text("Skills & config") }
+                TextButton(onClick = openFreebuff) { Text("Accounts, skills & config") }
             }
             val auth = tool.manifest.auth
             if (tool.installed == true && auth.isNotEmpty()) {
@@ -224,21 +233,20 @@ private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String, openDesktop: () 
                         modifier = Modifier.weight(1f),
                     )
                     // Some CLIs drop the current account the moment a login starts, even if it is cancelled.
-                    if ("login" in auth) TextButton(onClick = {
-                        if (st?.first == true) confirm = "login" else ws.authLogin(tool.manifest.id, cwd.trim())
-                    }) { Text("Log in") }
-                    if ("logout" in auth) TextButton(onClick = { confirm = "logout" }) { Text("Log out") }
+                    // Login asks first; logout loses the session, so it takes the owner's fingerprint instead.
+                    if ("login" in auth) TextButton(onClick = { confirm = "login" }) { Text("Log in") }
+                    if ("logout" in auth) TextButton(onClick = {
+                        withOwner(ctx, "Log out of ${tool.manifest.name} on the PC?") { ws.authLogout(tool.manifest.id, cwd.trim()) }
+                    }) { Text("Log out") }
                 }
                 confirm?.let { op ->
                     AlertDialog(
                         onDismissRequest = { confirm = null },
-                        title = { Text(if (op == "login") "Switch account?" else "Log out?") },
-                        text = { Text("${tool.manifest.name} will be signed out on the PC" + (if (op == "login") " until you finish the new login." else ".")) },
+                        title = { Text(if (ws.authStatus[tool.manifest.id]?.first == true) "Switch account?" else "Log in to ${tool.manifest.name}?") },
+                        text = { Text(if (ws.authStatus[tool.manifest.id]?.first == true) "${tool.manifest.name} will be signed out on the PC until you finish the new login."
+                            else "A terminal opens on the phone for the login (a code or a link to open).") },
                         confirmButton = {
-                            TextButton(onClick = {
-                                if (op == "login") ws.authLogin(tool.manifest.id, cwd.trim()) else ws.authLogout(tool.manifest.id, cwd.trim())
-                                confirm = null
-                            }) { Text(if (op == "login") "Continue" else "Log out") }
+                            TextButton(onClick = { ws.authLogin(tool.manifest.id, cwd.trim()); confirm = null }) { Text("Continue") }
                         },
                         dismissButton = { TextButton(onClick = { confirm = null }) { Text("Cancel") } },
                     )
@@ -325,6 +333,24 @@ private fun DoctorSection(ws: WsClient) {
             c.hint?.takeIf { !c.ok }?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+    }
+}
+
+private const val CLAUDE = "claude"
+
+/**
+ * One tap into Claude Code from the Tools screen: a new phone chat or terminal in the project folder
+ * above, or the most recent Claude Code conversation on the PC, continued as a chat.
+ */
+@Composable
+private fun ClaudeActions(ws: WsClient, cwd: String, openChats: () -> Unit) {
+    val last = ws.history.firstOrNull { it.agent == CLAUDE && !it.inUse() }
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        androidx.compose.material3.Button(onClick = { ws.createChat(CLAUDE, cwd.trim()); openChats() }) { Text("New chat") }
+        OutlinedButton(onClick = { ws.createSession(CLAUDE, cwd.trim()) }) { Text("Terminal") }
+        if (last != null) OutlinedButton(onClick = { ws.historyResume(last, terminal = false); openChats() }) {
+            Text("Continue: " + last.title.take(24), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }

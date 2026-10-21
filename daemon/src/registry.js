@@ -142,10 +142,16 @@ export function launchGui(id, folder) {
   return launchApp({ path: guiPath(m), args: m.openArgs || [], folder });
 }
 
+// Settles after the first full scan; before it every tool reads as unknown or not installed, so
+// anything that starts a tool waits for it (a phone often connects while the daemon is starting).
+let firstScan;
+export const ready = new Promise((resolve) => { firstScan = resolve; });
+
 export async function scanAll(broadcast) {
   loadManifests();
   await Promise.all([...registry.keys()].map(detect));
   broadcast({ type: "manifests", items: list() });
+  firstScan();
 }
 
 export function list() {

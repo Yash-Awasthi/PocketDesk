@@ -36,10 +36,17 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
-/** The oldest waiting tool call, with what it would do and Allow / Deny. Hidden when nothing waits. */
+/** The oldest waiting tool call outside the chat on screen (that one shows its own inline). Hidden when nothing waits. */
 @Composable
 fun ApprovalCard(ws: WsClient, modifier: Modifier = Modifier) {
-    val p = ws.proposals.firstOrNull() ?: return
+    val waiting = ws.proposals.filter { it.owner != ws.viewingChat }
+    val p = waiting.firstOrNull() ?: return
+    ProposalCard(ws, p, more = waiting.size - 1, modifier = modifier)
+}
+
+/** One tool call waiting for a decision: what it would do, with Deny, Allow and Allow all. */
+@Composable
+fun ProposalCard(ws: WsClient, p: Proposal, more: Int = 0, modifier: Modifier = Modifier) {
     var expanded by remember(p.id) { mutableStateOf(false) }
     val chat = ws.chats.firstOrNull { it.id == p.owner }
     Card(
@@ -47,7 +54,6 @@ fun ApprovalCard(ws: WsClient, modifier: Modifier = Modifier) {
         colors = CardDefaults.cardColors(containerColor = Color(0xFF2D2A1E)),
     ) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            val more = ws.proposals.size - 1
             Text(
                 "${p.tool.ifEmpty { "Agent" }} wants approval" + (if (more > 0) " · $more more waiting" else ""),
                 style = MaterialTheme.typography.titleSmall,

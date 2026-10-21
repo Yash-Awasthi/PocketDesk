@@ -157,12 +157,7 @@ private fun ToolPicker(installed: List<ToolInfo>, selected: ToolInfo?, onPick: (
     }
 }
 
-private fun humanBytes(n: Long?): String = when {
-    n == null -> ""
-    n >= 1 shl 20 -> "%.1f MB".format(n.toDouble() / (1 shl 20))
-    n >= 1 shl 10 -> "%.1f KB".format(n.toDouble() / (1 shl 10))
-    else -> "$n B"
-}
+private fun humanBytes(n: Long?): String = n?.let(::sizeText) ?: ""
 
 @Composable
 internal fun DirPickerDialog(ws: WsClient, onSelect: (String) -> Unit, onDismiss: () -> Unit) {
@@ -177,7 +172,7 @@ internal fun DirPickerDialog(ws: WsClient, onSelect: (String) -> Unit, onDismiss
     ) { uri: Uri? ->
         val dir = listing?.path ?: return@rememberLauncherForActivityResult
         if (uri == null) return@rememberLauncherForActivityResult
-        val display = queryDisplayName(ctx, uri)
+        val display = freeName(queryDisplayName(ctx, uri), listing.items.map { it.name })
         val remote = childPath(dir, display)
         transfer = "uploading $display..."
         ws.uploadFile(
@@ -266,6 +261,14 @@ internal fun DirPickerDialog(ws: WsClient, onSelect: (String) -> Unit, onDismiss
     }
 }
 
+/** [name], or "name (n).ext" with the first n not in [taken]: an upload never replaces a file already on the PC. */
+internal fun freeName(name: String, taken: Collection<String>): String {
+    val lower = taken.mapTo(HashSet()) { it.lowercase() }
+    if (name.lowercase() !in lower) return name
+    val dot = name.lastIndexOf('.').takeIf { it > 0 } ?: name.length
+    return generateSequence(1) { it + 1 }.map { "${name.substring(0, dot)} ($it)${name.substring(dot)}" }.first { it.lowercase() !in lower }
+}
+
 internal fun queryDisplayName(ctx: Context, uri: Uri): String {
     ctx.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
         if (c.moveToFirst()) {
@@ -300,4 +303,15 @@ internal inline fun saveToDownloads(ctx: Context, fileName: String, crossinline 
         if (err != null) ctx.contentResolver.delete(uri, null, null)
     }
     return null
+}
+
+/** Saves PC files to the phone's Downloads one after another, reporting progress and the outcome through [status]. */
+internal fun saveAllToDownloads(ctx: Context, ws: WsClient, items: List<Pair<String, String>>, status: (String) -> Unit, i: Int = 0) {
+    if (i == items.size) { status("Saved ${items.size} to Downloads"); return }
+    val (path, name) = items[i]
+    saveToDownloads(ctx, name) { out, finish ->
+        ws.downloadFile(path, out::write,
+            onProgress = { n, _ -> status("Saving $name (${i + 1}/${items.size}) · ${sizeText(n)}") },
+            onDone = { err -> finish(err); if (err != null) status("Saving $name failed: $err") else saveAllToDownloads(ctx, ws, items, status, i + 1) })
+    }?.let { status("Saving $name failed: $it") }
 }

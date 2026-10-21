@@ -81,13 +81,10 @@ fun TerminalScreen(ws: WsClient, sessionId: String, onClose: () -> Unit) {
 
     DisposableEffect(ws, sessionId) {
         val sink: (String, String) -> Unit = { id, b64 ->
-            if (id == sessionId) {
+            // Under the lock, so output arriving while the page finishes is neither lost nor reordered.
+            if (id == sessionId) synchronized(pending) {
                 val wv = holder[0]
-                if (wv == null) {
-                    synchronized(pending) { pending += b64 }
-                } else {
-                    wv.post { wv.evaluateJavascript("window.termOut('$b64')", null) }
-                }
+                if (wv == null) pending += b64 else wv.post { wv.evaluateJavascript("window.termOut('$b64')", null) }
             }
         }
         ws.onTerminalData = sink
@@ -164,9 +161,9 @@ fun TerminalScreen(ws: WsClient, sessionId: String, onClose: () -> Unit) {
                                 !request.url.toString().startsWith("file:///android_asset/")
 
                             override fun onPageFinished(view: WebView, url: String) {
-                                holder[0] = view
                                 val flush: List<String>
                                 synchronized(pending) {
+                                    holder[0] = view
                                     flush = pending.toList()
                                     pending.clear()
                                 }

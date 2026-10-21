@@ -54,7 +54,8 @@ data class AppEntry(val name: String, val path: String, val kind: String) {
 sealed interface ChatItem {
     data class User(val text: String) : ChatItem
     data class Assistant(val text: String) : ChatItem
-    data class Tool(val name: String, val detail: String) : ChatItem
+    /** [toolId] ties a call shown when it started to the same call once its input is complete. */
+    data class Tool(val name: String, val detail: String, val toolId: String? = null) : ChatItem
     data class ToolResult(val text: String) : ChatItem
     data class System(val text: String) : ChatItem
 }
@@ -66,6 +67,34 @@ data class ChatSummary(
     val state: String,
     val preview: String,
 )
+
+/** A conversation an agent saved on the PC; [app] is where it ran (CLI, VS Code, Cursor, ...), [gui] the manifest that opens that app. */
+data class HistoryEntry(
+    val agent: String,
+    val app: String,
+    val id: String,
+    val title: String,
+    val cwd: String,
+    val updated: Long,
+    val resumable: Boolean,
+    val gui: String?,
+) {
+    /** Written to in the last two minutes: most likely still open on the PC, where resuming it would fork the session. */
+    fun inUse(now: Long = System.currentTimeMillis()) = now - updated < 120_000
+}
+
+/** What a chat's agent reported at session start: its model, permission mode and slash commands, plus the daemon's own commands. */
+data class ChatInfo(val model: String?, val permissionMode: String?, val commands: List<String>, val pocketdesk: List<Pair<String, String>>)
+
+/** An agent's skills and custom commands (name, description) and its editable settings files. */
+data class AgentPanel(val agent: String, val skills: List<Pair<String, String>>, val commands: List<Pair<String, String>>, val files: List<AgentFile>)
+data class AgentFile(val name: String, val exists: Boolean, val size: Long)
+/** The text of one skill, command or settings file; [kind] is skill, command or file. */
+data class AgentDoc(val agent: String, val kind: String, val name: String, val content: String)
+
+/** An agent's login on the PC and the accounts saved there for switching; never a token. */
+data class AgentAccounts(val agent: String, val signedIn: Boolean, val email: String?, val saved: List<SavedAccount>)
+data class SavedAccount(val id: String, val label: String, val email: String?, val current: Boolean)
 
 data class FsEntry(val name: String, val isDir: Boolean, val size: Long?, val mtime: Long? = null)
 
@@ -157,9 +186,12 @@ sealed interface RhEvent {
     data class PowerDone(val action: String, val ok: Boolean, val error: String?) : RhEvent
 }
 
+// Typed reads that yield null for a missing or wrongly typed field instead of throwing on a malformed message.
+fun str(o: JsonObject, key: String): String? = (o[key] as? JsonPrimitive)?.contentOrNull
+fun bool(o: JsonObject, key: String): Boolean? = (o[key] as? JsonPrimitive)?.booleanOrNull
+fun num(o: JsonObject, key: String): Long? = (o[key] as? JsonPrimitive)?.longOrNull
+
 object Proto {
-    private fun str(o: JsonObject, key: String): String? = (o[key] as? JsonPrimitive)?.contentOrNull
-    private fun bool(o: JsonObject, key: String): Boolean? = (o[key] as? JsonPrimitive)?.booleanOrNull
 
     private fun obj(build: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit) =
         buildJsonObject(build).toString()
@@ -284,8 +316,11 @@ object Proto {
         if (!prompt.isNullOrBlank()) put("prompt", prompt)
     }
 
-    fun chatMsg(id: String, text: String) = obj {
+    /** [model] and [mode] apply to this message only; a model of "" asks for the CLI's default. */
+    fun chatMsg(id: String, text: String, model: String? = null, mode: String? = null) = obj {
         put("type", "chatmsg"); put("id", id); put("text", text)
+        model?.let { put("model", it) }
+        mode?.let { put("mode", it) }
     }
 
     fun chatCancel(id: String) = obj { put("type", "chatcancel"); put("id", id) }
@@ -296,6 +331,20 @@ object Proto {
     fun approve(id: String, all: Boolean) = obj { put("type", "approve"); put("id", id); if (all) put("all", true) }
     fun reject(id: String) = obj { put("type", "reject"); put("id", id) }
     fun proposalList() = obj { put("type", "proposal_list") }
+    fun accountsList(agent: String) = obj { put("type", "accounts_list"); put("agent", agent) }
+    fun accountSave(agent: String, label: String) = obj { put("type", "account_save"); put("agent", agent); put("label", label) }
+    fun accountSwitch(agent: String, id: String) = obj { put("type", "account_switch"); put("agent", agent); put("id", id) }
+    fun accountForget(agent: String, id: String) = obj { put("type", "account_forget"); put("agent", agent); put("id", id) }
+    fun agentPanel(agent: String) = obj { put("type", "agent_panel"); put("agent", agent) }
+    fun agentDoc(agent: String, kind: String, name: String) = obj { put("type", "agent_doc"); put("agent", agent); put("kind", kind); put("name", name) }
+    fun agentFileSet(agent: String, name: String, content: String) = obj {
+        put("type", "agent_file_set"); put("agent", agent); put("name", name); put("content", content)
+    }
+    fun historyList() = obj { put("type", "history_list") }
+    fun historyGet(agent: String, id: String) = obj { put("type", "history_get"); put("agent", agent); put("id", id) }
+    fun historyResume(agent: String, id: String, terminal: Boolean) = obj {
+        put("type", "history_resume"); put("agent", agent); put("id", id); if (terminal) put("mode", "terminal")
+    }
     fun pcPower(action: String) = obj { put("type", "pc_power"); put("action", action) }
     fun chatPermission(id: String, mode: String) = obj { put("type", "chat_permission"); put("id", id); put("mode", mode) }
     fun fsZip(path: String) = obj { put("type", "fs_zip"); put("path", path) }
@@ -420,7 +469,7 @@ object Proto {
             when (str(o, "role")) {
                 "user" -> ChatItem.User(str(o, "text") ?: "")
                 "assistant" -> ChatItem.Assistant(str(o, "text") ?: "")
-                "tool" -> ChatItem.Tool(name = str(o, "name") ?: "", detail = str(o, "detail") ?: "")
+                "tool" -> ChatItem.Tool(name = str(o, "name") ?: "", detail = str(o, "detail") ?: "", toolId = str(o, "toolId"))
                 "toolresult" -> ChatItem.ToolResult(str(o, "text") ?: "")
                 "system" -> ChatItem.System(str(o, "text") ?: "")
                 else -> null
@@ -459,6 +508,46 @@ object Proto {
             owner = str(o, "sessionId") ?: "",
         )
     }
+
+    fun parseHistoryEntry(o: JsonObject): HistoryEntry? = HistoryEntry(
+        agent = str(o, "agent") ?: return null,
+        app = str(o, "app") ?: "",
+        id = str(o, "id") ?: return null,
+        title = str(o, "title") ?: "",
+        cwd = str(o, "cwd") ?: "",
+        updated = (o["updated"] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()?.toLong() ?: 0L,
+        resumable = bool(o, "resumable") ?: false,
+        gui = str(o, "gui"),
+    )
+
+    fun parseChatInfo(m: JsonObject) = ChatInfo(
+        model = str(m, "model"),
+        permissionMode = str(m, "permissionMode"),
+        commands = (m["commands"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList(),
+        pocketdesk = named(m["pocketdesk"]),
+    )
+
+    private fun named(el: JsonElement?) = items(el?.let { JsonObject(mapOf("items" to it)) }).mapNotNull { o -> str(o, "name")?.let { it to (str(o, "description") ?: "") } }
+
+    fun parseAgentPanel(m: JsonObject): AgentPanel? = AgentPanel(
+        agent = str(m, "agent") ?: return null,
+        skills = named(m["skills"]),
+        commands = named(m["commands"]),
+        files = items(m["files"]?.let { JsonObject(mapOf("items" to it)) }).mapNotNull { o ->
+            AgentFile(str(o, "name") ?: return@mapNotNull null, bool(o, "exists") ?: false, num(o, "size") ?: 0L)
+        },
+    )
+
+    fun parseAccounts(m: JsonObject): AgentAccounts? = AgentAccounts(
+        agent = str(m, "agent") ?: return null,
+        signedIn = bool(m, "signedIn") ?: false,
+        email = str(m, "email"),
+        saved = items(m["saved"]?.let { JsonObject(mapOf("items" to it)) }).mapNotNull { o ->
+            SavedAccount(str(o, "id") ?: return@mapNotNull null, str(o, "label") ?: "", str(o, "email"), bool(o, "current") ?: false)
+        },
+    )
+
+    fun parseHistory(m: JsonObject): List<HistoryEntry> = items(m).mapNotNull(::parseHistoryEntry)
 
     fun parseFsFound(o: JsonObject): FsFound = FsFound(
         root = str(o, "path") ?: "",

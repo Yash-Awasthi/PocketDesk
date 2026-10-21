@@ -33,8 +33,24 @@ class DesktopKeyboardTest {
     }
 
     @Test
-    fun `every key on the symbol and number layers can be sent`() {
-        val shown = """!@#$%^&*()-_=+[]{}\|;:'",.<>/?`~""" + "0123456789/*-+.=,()"
-        shown.forEach { c -> assert(CHAR_VK.containsKey(c)) { "no key for '$c'" } }
+    fun `every printable ASCII character the phone keyboard types has a key`() {
+        (' '..'~').forEach { c -> assert(CHAR_VK.containsKey(c)) { "no key for '$c'" } }
+        assertEquals(0x41 to true, CHAR_VK['A'])
+    }
+
+    @Test
+    fun `text typed after the sentinel becomes key presses, Shift where the character needs it`() {
+        assertEquals(listOf(Stroke.Vk(0x48, true), Stroke.Vk(0x49), Stroke.Vk(0x31, true)), imeStrokes(IME_SENTINEL + "Hi!"))
+    }
+
+    @Test
+    fun `characters removed from the sentinel are backspaces`() {
+        assertEquals(List(2) { Stroke.Vk(VK_BACK) }, imeStrokes(IME_SENTINEL.dropLast(2)))
+    }
+
+    @Test
+    fun `characters with no US key are typed as text, and a rewritten sentinel types nothing`() {
+        assertEquals(listOf(Stroke.Text("é")), imeStrokes(IME_SENTINEL + "é"))
+        assertEquals(emptyList<Stroke>(), imeStrokes("x" + IME_SENTINEL))
     }
 }

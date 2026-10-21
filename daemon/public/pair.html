@@ -30,10 +30,19 @@
   .dev { font-size: 13px; }
   .dev small { display: block; color: #9ca3af; }
   #totpqr { background: #fff; padding: 10px; border-radius: 8px; align-self: center; }
+  #uninstall { position: fixed; right: 18px; bottom: 18px; background: #7f1d1d; }
+  body { padding-bottom: 80px; }
 </style>
 </head>
 <body>
 <h1>PocketDesk — pair and settings</h1>
+<div class="card">
+  <div class="row">
+    <label for="remote"><b>Remote access</b></label>
+    <input type="checkbox" id="remote" />
+  </div>
+  <p class="hint" id="remotestate">Off = every phone and browser is disconnected and refused, at home and away. PocketDesk keeps running so you can switch it back on here.</p>
+</div>
 <div id="qr"></div>
 <p>Scan with the PocketDesk app. If the QR does not scan, enter these manually:</p>
 <code>__RH_URL__</code>
@@ -79,6 +88,8 @@
   <p class="hint">Revoking disconnects the device and changes the pairing QR, so other phones keep their own tokens but the old QR stops working.</p>
 </div>
 
+<button id="uninstall">Uninstall PocketDesk</button>
+
 <script src="/vendor/qrcode.min.js"></script>
 <script>
 const payload = "__RH_PAYLOAD__";
@@ -95,7 +106,22 @@ rec.addEventListener("change", () => {
   fetch("/access/record?k=" + encodeURIComponent(k), { method: "POST", body: JSON.stringify({ on: rec.checked }) })
     .then((r) => r.json()).then(paint).catch(() => {});
 });
+const remote = document.getElementById("remote");
+remote.addEventListener("change", () => {
+  fetch("/access/remote?k=" + encodeURIComponent(k), { method: "POST", body: JSON.stringify({ on: remote.checked }) })
+    .then((r) => r.json()).then(paint).catch(() => {});
+});
+document.getElementById("uninstall").addEventListener("click", async () => {
+  if (!confirm("Uninstall PocketDesk from this PC? Every phone is disconnected and the daemon stops.")) return;
+  const removeData = confirm("Also delete its settings, paired phones and saved logins?\n\nOK = delete them, Cancel = keep them for a reinstall.");
+  const r = await fetch("/access/uninstall?k=" + encodeURIComponent(k), { method: "POST", body: JSON.stringify({ removeData }) })
+    .then((x) => x.json()).catch(() => ({ ok: false, error: "the daemon did not answer" }));
+  document.body.innerHTML = r.ok
+    ? "<h1>Uninstalling…</h1><p>Windows may ask for permission. This page stops working when PocketDesk is gone.</p>"
+    : "<h1>Could not uninstall</h1><p>" + (r.error || "") + "</p>";
+});
 function paint(s) {
+  remote.checked = s.remoteOn !== false;
   ctrl.checked = s.controlAllowed !== false;
   rec.checked = !!s.recording;
   pwState.textContent = s.hasPassword ? "A password is set." : "No password set.";
@@ -160,6 +186,11 @@ async function loadDevices() {
       if (r.pairingToken) location.replace("/pair?k=" + encodeURIComponent(r.pairingToken));
     });
     row.append(info, b);
+    if (d.revoked) {
+      const rm = document.createElement("button"); rm.className = "ghost"; rm.textContent = "Remove";
+      rm.addEventListener("click", async () => { await api("/access/devices/remove", { clientId: d.id }); return loadDevices(); });
+      row.append(rm);
+    }
     box.append(row);
   }
 }

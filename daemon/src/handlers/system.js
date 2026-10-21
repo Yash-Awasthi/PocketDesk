@@ -1,16 +1,15 @@
-import * as registry from "../registry.js";
-import * as sessions from "../sessions.js";
-import * as chat from "../chat.js";
 import * as proposals from "../proposals.js";
+import * as registry from "../registry.js";
 import * as toolApproval from "../tool_approval.js";
 import * as pcPower from "../pc_power.js";
 import { hostStats } from "../stats.js";
 import * as fbCtrl from "../freebuff_control.js";
 import * as doctor from "../doctor.js";
 import * as devices from "../devices.js";
+import { startChat } from "./agents.js";
 
 export default function systemHandlers(ctx) {
-  const { send, broadcast, allSessions, plugins, streamParser, tls, desktop } = ctx;
+  const { send, plugins, streamParser, tls, desktop } = ctx;
   return {
     async propose(ws, msg) {
       const p = proposals.create({
@@ -19,15 +18,14 @@ export default function systemHandlers(ctx) {
         detail: msg.detail || {},
         sessionId: msg.sessionId || "unknown",
       });
+      // proposals.create, approve and reject broadcast the change to every phone, this one included.
       plugins.callHook("onProposal", ws, p);
-      send(ws, { type: "proposal_created", proposal: { id: p.id, type: p.type, summary: p.summary, status: p.status } });
     },
     async approve(ws, msg) {
       const p = proposals.approve(msg.id);
       if (p) {
         if (msg.all === true) toolApproval.trust(p.detail?.agentSession);
         plugins.callHook("onProposalApproved", ws, p);
-        send(ws, { type: "proposal_approved", proposal: { id: p.id, status: p.status } });
       } else {
         send(ws, { type: "error", message: `proposal ${msg.id} not found or already decided` });
       }
@@ -36,7 +34,6 @@ export default function systemHandlers(ctx) {
       const p = proposals.reject(msg.id);
       if (p) {
         plugins.callHook("onProposalRejected", ws, p);
-        send(ws, { type: "proposal_rejected", proposal: { id: p.id, status: p.status } });
       } else {
         send(ws, { type: "error", message: `proposal ${msg.id} not found or already decided` });
       }
@@ -72,19 +69,13 @@ export default function systemHandlers(ctx) {
       send(ws, { type: "fb_skill_get", ...fbCtrl.skillGet(String(msg.name ?? "")) });
     },
     async fb_skill_run(ws, msg) {
+      await registry.ready;
       const s = fbCtrl.skillGet(String(msg.name ?? ""));
       if (!s.ok) { send(ws, { type: "fb_skill_run", ok: false, error: s.error }); return; }
-      const m = registry.get(String(msg.harness ?? "claude"));
-      if (!m) { send(ws, { type: "fb_skill_run", ok: false, error: `unknown harness: ${msg.harness}` }); return; }
-      if (!chat.supported(m)) { send(ws, { type: "fb_skill_run", ok: false, error: `${m.name} has no chat adapter` }); return; }
-      if (!registry.isInstalled(m.id)) { send(ws, { type: "fb_skill_run", ok: false, error: `${m.name} is not installed` }); return; }
       const prompt = [`Skill: ${s.name}`, "", s.content, "", String(msg.args ?? "").trim() ? `Task: ${msg.args}` : ""].filter(Boolean).join("\n");
-      const ch = chat.create({ manifest: m, cwd: msg.cwd });
-      chat.attach(ch.id, ws);
-      send(ws, { type: "created", ...ch });
-      if (prompt.trim()) chat.sendUserMessage(chat.get(ch.id), prompt.trim());
-      broadcast({ type: "sessions", items: allSessions() });
-      send(ws, { type: "fb_skill_run", ok: true, skill: s.name, chatId: ch.id });
+      const r = startChat(ctx, ws, String(msg.harness ?? "claude"), msg.cwd, prompt);
+      if (r.error) { send(ws, { type: "fb_skill_run", ok: false, error: r.error }); return; }
+      send(ws, { type: "fb_skill_run", ok: true, skill: s.name, chatId: r.chat.id });
     },
     async fb_auth_status(ws, msg) {
       send(ws, { type: "fb_auth_status", ...fbCtrl.authStatus() });

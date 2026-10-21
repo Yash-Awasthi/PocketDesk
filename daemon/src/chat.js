@@ -9,6 +9,9 @@ import { EventEmitter } from "node:events";
 import { expand as expandMentions } from "./mentions.js";
 import * as toolApproval from "./tool_approval.js";
 import { writeFileAtomic } from "./atomic_write.js";
+import { configDir } from "./config.js";
+import { listCommands as pocketdeskCommands } from "./slash-commands.js";
+import * as agentPanel from "./agent_panel.js";
 
 // Chat lifecycle events (state transitions) — consumed by the activity monitor.
 export const chatEvents = new EventEmitter();
@@ -95,7 +98,7 @@ function lastAssistantPreview(c) {
   return "";
 }
 
-export function create({ manifest, cwd, resumeFirst = false, cliSession = null }) {
+export function create({ manifest, cwd, resumeFirst = false, cliSession = null, transcript = [] }) {
   const id = "c" + nextId++;
   const dir = cwd && String(cwd).trim()
     ? path.resolve(String(cwd).replace(/^~(?=$|\/|\\)/, os.homedir()))
@@ -122,7 +125,8 @@ export function create({ manifest, cwd, resumeFirst = false, cliSession = null }
     // conversation the daemon forgot via the CLI's own --continue history).
     turn: resumeFirst ? 1 : 0,
     state: "idle",
-    transcript: [],
+    // A resumed conversation starts with its saved turns, so the phone shows what came before.
+    transcript,
     created: Date.now(),
     proc: null,
     subs: new Set(),
@@ -163,12 +167,40 @@ export function forkChat(id, atMessageIndex = -1, { cwd, env } = {}) {
   return { ok: true, chat: { id: nc.id, harnessId: nc.harnessId, cwd: nc.cwd, kind: "chat", forkedFrom: nc.forkedFrom } };
 }
 
+// What an agent's last session start reported (its slash commands, model, permission mode), kept per
+// harness so a new chat can offer the commands before its first turn has run.
+const INFO_FILE = path.join(configDir, "agent-info.json");
+let agentInfo = null;
+function infoFor(harnessId) {
+  agentInfo ??= (() => { try { return JSON.parse(fs.readFileSync(INFO_FILE, "utf8")); } catch { return {}; } })();
+  return agentInfo[harnessId] ?? {};
+}
+
+function chatInfo(c) {
+  const known = { ...infoFor(c.harnessId), ...(c.info ?? {}) };
+  // Before the agent's first session start, the skills and commands on disk stand in for its own list.
+  const disk = () => { const p = agentPanel.panel(c.harnessId); return p.ok ? [...p.skills, ...p.commands].map((x) => x.name) : []; };
+  return { type: "chat_info", id: c.id, model: known.model ?? null, permissionMode: known.permissionMode ?? null, commands: known.commands ?? disk(), pocketdesk: pocketdeskCommands() };
+}
+
+/** Claude's init event: remember what it offers and tell the chat's viewers. */
+function noteInit(c, obj) {
+  c.info = { model: obj.model ?? null, permissionMode: obj.permissionMode ?? null, commands: Array.isArray(obj.slash_commands) ? obj.slash_commands : [] };
+  infoFor(c.harnessId);
+  agentInfo[c.harnessId] = c.info;
+  try { writeFileAtomic(INFO_FILE, JSON.stringify(agentInfo)); } catch {}
+  push(c, chatInfo(c));
+}
+
 export function attach(id, ws) {
   const c = chats.get(id);
   if (!c) return false;
   c.subs.add(ws);
   ws._subs.add("chat:" + id);
-  if (ws.readyState === 1) ws.send(JSON.stringify({ type: "chatreplay", id, items: c.transcript }));
+  if (ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: "chatreplay", id, items: c.transcript }));
+    ws.send(JSON.stringify(chatInfo(c)));
+  }
   return true;
 }
 
@@ -188,7 +220,8 @@ export function detach(ws, id) {
   }
 }
 
-export function sendUserMessage(c, rawText) {
+/** [once] overrides the chat's model and permission mode for this turn only (null model = the CLI default). */
+export function sendUserMessage(c, rawText, once = {}) {
   // @file mentions (hermes-android/mobvibe): inline PC-side files before the
   // prompt reaches the agent, anchored at the chat's cwd.
   let text = String(rawText ?? "");
@@ -202,22 +235,24 @@ export function sendUserMessage(c, rawText) {
   c.transcript.push({ role: "user", text });
   push(c, { type: "chatuser", id: c.id, text });
   if (mentionReport?.length) push(c, { type: "chatmentions", id: c.id, mentions: mentionReport });
-  runTurn(c, text);
+  runTurn(c, text, once);
   return true;
 }
 
 // Phone and browser names for Claude Code permission modes; unset keeps the user's own setting.
 const CLAUDE_MODES = { default: "default", ask: "default", autopilot: "acceptEdits", acceptEdits: "acceptEdits", readonly: "plan", plan: "plan", yolo: "bypassPermissions", bypassPermissions: "bypassPermissions" };
 
-function runTurn(c, prompt) {
+function runTurn(c, prompt, once = {}) {
   if (c.proc && c.state === "running") return false;
   const continuing = c.turn > 0 && c.resumeArgs && c.resumeArgs.length > 0;
-  const modelCfg = !c.model ? null : c.models?.[c.model] ?? (c.modelArg ? { args: [...c.modelArg, c.model] } : null);
+  const model = once.model !== undefined ? once.model : c.model;
+  const modelCfg = !model ? null : c.models?.[model] ?? (c.modelArg ? { args: [...c.modelArg, model] } : null);
   const byId = c.turn > 0 && c.cliSession && c.resumeIdArgs;
   const base = byId ? c.resumeIdArgs.map((a) => a.replaceAll("{id}", c.cliSession)) : continuing ? c.resumeArgs : c.args;
   if (c.inlineHistory && c.turn > 0) prompt = withHistory(c, prompt);
   const claude = c.format === "claude-stream-json";
-  const mode = claude && Object.hasOwn(CLAUDE_MODES, c.permissionMode) && CLAUDE_MODES[c.permissionMode];
+  const permission = once.permissionMode ?? c.permissionMode;
+  const mode = claude && Object.hasOwn(CLAUDE_MODES, permission) && CLAUDE_MODES[permission];
   const approvals = claude ? [...toolApproval.claudeArgs(), ...(mode ? ["--permission-mode", mode] : [])] : [];
   const argv = [...base, ...approvals, ...(modelCfg?.args || []), ...(c.promptArg ? [prompt] : [])];
   c.turn++;
@@ -345,11 +380,25 @@ function npmShimScript(bin) {
 function parseClaude(c, obj, emitText) {
   if (typeof obj.session_id === "string" && obj.session_id) c.cliSession = obj.session_id;
   switch (obj.type) {
+    case "system":
+      if (obj.subtype === "init") noteInit(c, obj);
+      break;
+    // --include-partial-messages: text arrives token by token, then once more whole in "assistant".
+    case "stream_event": {
+      const ev = obj.event ?? {};
+      if (ev.type === "message_start") c.streamedText = false;
+      else if (ev.type === "content_block_start" && ev.content_block?.type === "tool_use") toolUse(c, ev.content_block.name, "…", ev.content_block.id);
+      else if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) {
+        c.streamedText = true;
+        emitText(ev.delta.text);
+      }
+      break;
+    }
     case "assistant": {
       const content = obj.message?.content ?? [];
       for (const part of content) {
-        if (part.type === "text") emitText(part.text);
-        else if (part.type === "tool_use") toolUse(c, part.name, JSON.stringify(part.input ?? {}));
+        if (part.type === "text") { if (!c.streamedText) emitText(part.text); }
+        else if (part.type === "tool_use") toolUse(c, part.name, JSON.stringify(part.input ?? {}), part.id);
         else if (part.type === "tool_result") {
           // arrives inside user messages in stream-json; ignore
         }
@@ -516,9 +565,13 @@ function emitUsage(c, usage, costUsd) {
   chatEvents.emit("usage", { id: c.id, usage: usage ?? {}, cost: Number(costUsd) || 0 });
 }
 
-function toolUse(c, name, detail) {
-  c.transcript.push({ role: "tool", name, detail: String(detail).slice(0, 300) });
-  push(c, { type: "chartool", id: c.id, name, detail: String(detail).slice(0, 300) });
+/** A tool call; one seen again under the same [toolId] (started, then complete) is updated in place. */
+function toolUse(c, name, detail, toolId) {
+  const d = String(detail).slice(0, 300);
+  const known = toolId && c.transcript.find((t) => t.role === "tool" && t.toolId === toolId);
+  if (known) known.detail = d;
+  else c.transcript.push({ role: "tool", name, detail: d, ...(toolId ? { toolId } : {}) });
+  push(c, { type: "chartool", id: c.id, name, detail: d, ...(toolId ? { toolId } : {}) });
 }
 
 function toolResult(c, text) {
@@ -541,8 +594,11 @@ function finishTurn(c, state, finalText) {
     // The final message usually arrives both as streamed deltas and again as
     // `last_agent_message` on task_complete — append only the missing tail so
     // the transcript/UI never double the assistant text.
-    const last = c.transcript[c.transcript.length - 1];
-    const lastText = last && last.role === "assistant" ? last.text : "";
+    // This turn's last assistant text, even when a tool call came after it.
+    let lastText = "";
+    for (let i = c.transcript.length - 1; i >= 0 && c.transcript[i].role !== "user"; i--) {
+      if (c.transcript[i].role === "assistant") { lastText = c.transcript[i].text; break; }
+    }
     if (lastText && lastText.endsWith(finalText)) {
       // already fully streamed via deltas — no-op
     } else if (lastText && finalText.startsWith(lastText) && lastText.length < finalText.length) {
@@ -593,10 +649,15 @@ export function listModels(id) {
 // Model names reach a cmd.exe command line on Windows, so only plain identifiers pass.
 const MODEL_NAME = /^[\w.:/-]{1,80}$/;
 
+/** Whether [model] is one this chat may run with: listed by its manifest, or any plain name when the CLI takes one. */
+export function modelAllowed(c, model) {
+  return model == null || Boolean(c.models[model]) || Boolean(c.modelArg && MODEL_NAME.test(model));
+}
+
 export function setModel(id, model) {
   const c = chats.get(id);
   if (!c) return { ok: false, error: `no such chat: ${id}` };
-  if (model != null && !c.models[model] && !(c.modelArg && MODEL_NAME.test(model))) {
+  if (!modelAllowed(c, model)) {
     return { ok: false, error: `unknown model: ${model} (available: ${Object.keys(c.models).join(", ") || "none"})` };
   }
   c.model = model || null;

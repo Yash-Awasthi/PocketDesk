@@ -91,6 +91,9 @@ export function approve(id) {
       proposal: serialize(p),
     });
   }
+  // Like reject: a decided proposal leaves `pending` even when nothing waits on it.
+  pending.delete(id);
+  decided.set(id, "approved");
   return p;
 }
 
@@ -172,6 +175,8 @@ export function requiresApproval(type) {
  */
 function expireStale() {
   const now = Date.now();
+  // A decision nobody waited for would stay here forever; waiters read theirs within 200 ms.
+  if (decided.size > 1000) decided.clear();
   for (const [id, p] of pending) {
     if (p.status === "pending" && now - p.created > TTL_MS) {
       p.status = "expired";

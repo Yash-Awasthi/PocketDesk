@@ -316,16 +316,17 @@ fun DesktopScreen(
                 power?.let { PowerConfirmDialog(ws, it) { power = null } }
             }
         }
-        DesktopTransferBar(ws, transfer)
-        if (ws.desktopNotice.isNotEmpty()) {
+        // Fullscreen is the picture alone: no bars, notices or keyboard, only the two overlay buttons.
+        if (!fullscreen) DesktopTransferBar(ws, transfer)
+        if (!fullscreen && ws.desktopNotice.isNotEmpty()) {
             Text(ws.desktopNotice, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp))
         }
-        if (desktopError.isNotEmpty()) {
+        if (!fullscreen && desktopError.isNotEmpty()) {
             Text(desktopError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
                 modifier = Modifier.padding(horizontal = 12.dp))
         }
-        if (calNote.isNotEmpty()) {
+        if (!fullscreen && calNote.isNotEmpty()) {
             Text(calNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp))
         }
@@ -521,10 +522,21 @@ fun DesktopScreen(
                 }
             }
             if (fullscreen) {
-                TextButton(onClick = { onFullscreen(false) }, modifier = Modifier.align(Alignment.TopEnd)) { Text("Exit ⛶") }
+                LaunchedEffect(Unit) { onShowKeys(false) }
+                Row(Modifier.align(Alignment.TopEnd).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val overlay = androidx.compose.material3.ButtonDefaults.filledTonalButtonColors(containerColor = Color(0x99161B22), contentColor = Color(0xFFE6EDF3))
+                    FilledTonalButton(onClick = { ws.desktopInputPaused = !ws.desktopInputPaused }, colors = overlay,
+                        modifier = Modifier.height(36.dp), contentPadding = PaddingValues(horizontal = 10.dp)) {
+                        Text(if (ws.desktopInputPaused) "Mouse off" else "Mouse on", style = MaterialTheme.typography.labelMedium)
+                    }
+                    FilledTonalButton(onClick = { onFullscreen(false) }, colors = overlay,
+                        modifier = Modifier.height(36.dp), contentPadding = PaddingValues(horizontal = 10.dp)) {
+                        Text("✕", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
             }
             // With several monitors, which one is showing and how to change it must be visible, not buried in the menu.
-            if (video && ws.desktopMonitors.size > 1) {
+            if (video && !fullscreen && ws.desktopMonitors.size > 1) {
                 var picking by remember { mutableStateOf(false) }
                 Box(Modifier.align(Alignment.TopStart).padding(6.dp)) {
                     FilledTonalButton(onClick = { picking = true }, modifier = Modifier.height(32.dp),
@@ -559,9 +571,9 @@ fun DesktopScreen(
             }
         }
 
-        if (shortcuts && !ws.desktopViewOnly) ShortcutBar(ws)
-        // Mouse bar: always visible, in fullscreen too.
-        Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        // The keyboard bar has its own Esc, Tab and clipboard keys, and the picture needs the room.
+        if (!fullscreen && !showKeys && shortcuts && !ws.desktopViewOnly) ShortcutBar(ws)
+        if (!fullscreen) Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val pad = PaddingValues(horizontal = 4.dp)
             FilledTonalButton(onClick = { cursor?.let { leftClick(it) } },
                 modifier = Modifier.weight(2f).fillMaxHeight(), contentPadding = pad) { Text("L") }
@@ -586,8 +598,10 @@ fun DesktopScreen(
             OutlinedButton(onClick = { showApps = true }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("▦") }
             OutlinedButton(onClick = { onFullscreen(!fullscreen) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("⛶") }
         }
-        if (showKeys) DesktopKeyboard(ws)
+        if (showKeys && !fullscreen) DesktopKeyboard(ws)
     }
+    // The mouse switch belongs to fullscreen; leaving it must never leave the PC unreachable.
+    LaunchedEffect(fullscreen) { if (!fullscreen) ws.desktopInputPaused = false }
 
     if (showApps) AppLauncher(ws, onDismiss = { showApps = false })
 }
@@ -666,9 +680,16 @@ fun DesktopFullscreenEffect(fullscreen: Boolean) {
         if (fullscreen) {
             controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             controller.hide(WindowInsetsCompat.Type.systemBars())
+            // Into the camera cutout too, so the picture really fills the screen.
+            activity.window.attributes = activity.window.attributes.apply {
+                layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+            }
             activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         } else {
             controller.show(WindowInsetsCompat.Type.systemBars())
+            activity.window.attributes = activity.window.attributes.apply {
+                layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+            }
             activity.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
     }
@@ -679,7 +700,7 @@ private val PRESETS = listOf("saver", "balanced", "quality")
 @Composable
 private fun AppLauncher(ws: WsClient, onDismiss: () -> Unit) {
     var q by remember { mutableStateOf("") }
-    LaunchedEffect(q) { ws.discoverApps(q, guiOnly = true) }
+    LaunchedEffect(q) { delay(250); ws.discoverApps(q, guiOnly = true) }
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },

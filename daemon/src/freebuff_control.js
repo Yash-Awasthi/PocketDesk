@@ -21,6 +21,7 @@ import os from "node:os";
 import path from "node:path";
 import { execSync, execFileSync, spawn } from "node:child_process";
 import { writeFileAtomic } from "./atomic_write.js";
+import { docDescription } from "./agent_panel.js";
 
 const PROFILE_DIR = process.env.FB_PROFILE_DIR || (process.env.APPDATA
   ? path.join(process.env.APPDATA, "Freebuff")
@@ -69,7 +70,7 @@ function appBasename() {
   return path.basename(APP_EXE) || "Freebuff.exe";
 }
 
-function isRunning(exeName = appBasename()) {
+export function isRunning(exeName = appBasename()) {
   try {
     if (process.platform === "win32") {
       const out = execSync(`tasklist /FI "IMAGENAME eq ${exeName}" /NH`, {
@@ -204,13 +205,7 @@ export function skillList() {
 }
 
 function readDescription(md) {
-  try {
-    const first = fs.readFileSync(md, "utf8").split(/\r?\n/).find((l) => l.trim());
-    if (!first) return "";
-    return first.replace(/^#+\s*/, "").slice(0, 120);
-  } catch {
-    return "";
-  }
+  try { return docDescription(fs.readFileSync(md, "utf8")); } catch { return ""; }
 }
 
 function skillDirFor(name) {

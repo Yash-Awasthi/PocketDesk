@@ -51,7 +51,8 @@ class IrohLink(
         scope.launch {
             try {
                 val addr = EndpointTicket.fromString(ticket).endpointAddr()
-                val c = Node.endpoint(addr.relayUrl()).connect(addr, ALPN)
+                // An unreachable PC or dead network never fails on its own; the timeout hands over to the reconnect.
+                val c = kotlinx.coroutines.withTimeout(CONNECT_TIMEOUT_MS) { Node.endpoint(addr.relayUrl()).connect(addr, ALPN) }
                 conn = c
                 val bi = c.openBi()
                 val send = bi.send()
@@ -144,7 +145,17 @@ class IrohLink(
             }
         }
 
+        @Volatile private var stale = false
+
+        /** Android denies iroh the netlink socket it watches interfaces with, so a network change is told to it. */
+        fun networkChanged() { stale = true }
+
         suspend fun endpoint(relay: String?): Endpoint = lock.withLock {
+            if (stale) {
+                stale = false
+                eps.values.forEach { runCatching { it.shutdown() } }
+                eps.clear()
+            }
             val k = relay ?: ""
             eps[k] ?: Endpoint.bind(
                 // n0's relays come with its address lookup, which follows the PC across relay changes.
@@ -157,6 +168,7 @@ class IrohLink(
     companion object {
         val ALPN = "pocketdesk/1".toByteArray()
         private const val MAX_MESSAGE = 8 shl 20
+        private const val CONNECT_TIMEOUT_MS = 15_000L
 
         private fun frame(msg: ByteArray): ByteArray =
             java.nio.ByteBuffer.allocate(4 + msg.size).putInt(msg.size).put(msg).array()

@@ -118,7 +118,7 @@ fun rememberSendFiles(ws: WsClient, transfer: DesktopTransfer): () -> Unit {
                 remotePath = remote,
                 openSource = { context.contentResolver.openInputStream(uris[i]) },
                 sizeHint = null,
-                onProgress = { n -> transfer.status = "Sending $name (${i + 1}/${uris.size}) · ${n shr 10} KB" },
+                onProgress = { n -> transfer.status = "Sending $name (${i + 1}/${uris.size}) · ${sizeText(n)}" },
                 onDone = { err ->
                     if (err != null) transfer.status = "Sending $name failed: $err"
                     else { sent += remote; next(i + 1) }
@@ -146,22 +146,7 @@ fun DesktopTransferBar(ws: WsClient, transfer: DesktopTransfer) {
         )
         if (files.isNotEmpty()) TextButton(onClick = {
             transfer.pcFiles = emptyList()
-            fun next(i: Int) {
-                if (i == files.size) { transfer.status = "Saved ${files.size} to Downloads"; return }
-                val f = files[i]
-                saveToDownloads(context, f.name) { out, finish ->
-                    ws.downloadFile(
-                        remotePath = f.path,
-                        sink = out::write,
-                        onProgress = { n, _ -> transfer.status = "Saving ${f.name} (${i + 1}/${files.size}) · ${n shr 10} KB" },
-                        onDone = { err ->
-                            finish(err)
-                            if (err != null) transfer.status = "Saving ${f.name} failed: $err" else next(i + 1)
-                        },
-                    )
-                }?.let { transfer.status = "Saving ${f.name} failed: $it" }
-            }
-            next(0)
+            saveAllToDownloads(context, ws, files.map { it.path to it.name }, { transfer.status = it })
         }) { Text("Save to phone") }
         TextButton(onClick = { transfer.pcFiles = emptyList(); transfer.status = "" }) { Text("✕") }
     }

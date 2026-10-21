@@ -20,6 +20,10 @@ $ErrorActionPreference = "Stop"
 $csc = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 if (-not (Test-Path $csc)) { throw "csc.exe not found at $csc" }
 
+# Smart App Control (state 1 = enforcing) refuses the unsigned launcher compiled below; then the task and
+# the Start-menu entry run signed binaries only, through run-daemon.ps1 and open-pairing.ps1.
+$sac = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy" -ErrorAction SilentlyContinue).VerifiedAndReputablePolicyState -eq 1
+
 function Assert-Elevated($what) {
     $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltinRole]::Administrator)) { throw "$what must run elevated." }
@@ -43,7 +47,11 @@ if ($Protect) {
     # elevated daemon with no per-logon UAC prompt; RestartCount brings it back if it crashes.
     $exe      = Join-Path $Protect "PocketDeskLauncher.exe"
     $me       = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $action   = New-ScheduledTaskAction -Execute $exe -Argument "--supervise"
+    $action   = if ($sac) {
+        $run = Join-Path $Protect "daemon\scripts\run-daemon.ps1"
+        New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot "System32\conhost.exe") `
+            -Argument "--headless powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$run`""
+    } else { New-ScheduledTaskAction -Execute $exe -Argument "--supervise" }
     $trigger  = New-ScheduledTaskTrigger -AtLogOn -User $me
     $prin     = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
@@ -190,7 +198,11 @@ foreach ($f in "PocketDeskLauncher.exe", "PocketDesk.exe", "PocketDesk.ini") { R
 # No desktop icon, so outside Task Manager the daemon leaves nothing on screen.
 $shell = New-Object -ComObject WScript.Shell
 $lnk = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath("Programs")) "PocketDesk.lnk"))
-$lnk.TargetPath = $exe
+if ($sac) {
+    $lnk.TargetPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+    $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $protected 'daemon\scripts\open-pairing.ps1')`""
+    $lnk.IconLocation = Join-Path $protected "PocketDesk.exe"
+} else { $lnk.TargetPath = $exe }
 $lnk.WorkingDirectory = $InstallDir
 $lnk.Description = "Open PocketDesk pairing and settings"
 $lnk.Save()

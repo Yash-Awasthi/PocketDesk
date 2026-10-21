@@ -49,9 +49,11 @@ fun FreebuffScreen(ws: WsClient, openDesktop: () -> Unit) {
     var configContent by remember { mutableStateOf<String?>(null) }
     var configError by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(Unit) {
-        ws.fbStatus(); ws.fbSkillList(); ws.fbConfigList(); ws.fbAuthStatus()
-    }
+    // fb_status carries the account too; FreebuffAccounts asks for the saved accounts itself.
+    fun load() { ws.fbStatus(); ws.fbSkillList(); ws.fbConfigList() }
+    LaunchedEffect(Unit) { load() }
+    LaunchedEffect(Unit) { ws.skillContent.collect { skillContent = it } }
+    LaunchedEffect(Unit) { ws.configContent.collect { configContent = it } }
 
     LazyColumn(
         Modifier.fillMaxSize().padding(16.dp),
@@ -60,7 +62,7 @@ fun FreebuffScreen(ws: WsClient, openDesktop: () -> Unit) {
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Freebuff", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                IconButton(onClick = { ws.fbStatus(); ws.fbSkillList(); ws.fbConfigList(); ws.fbAuthStatus() }) {
+                IconButton(onClick = { load(); ws.fbAccountsList() }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "Refresh")
                 }
             }
@@ -172,6 +174,7 @@ fun FreebuffScreen(ws: WsClient, openDesktop: () -> Unit) {
  */
 @Composable
 fun FreebuffAccounts(ws: WsClient, openDesktop: () -> Unit) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
     var confirm by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { ws.fbAuthStatus(); ws.fbAccountsList() }
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -188,12 +191,12 @@ fun FreebuffAccounts(ws: WsClient, openDesktop: () -> Unit) {
                 Text(acc.email, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f),
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                 TextButton(onClick = { ws.fbAccountSwitch(acc.email) }) { Text("Switch") }
-                TextButton(onClick = { confirm = "forget:${acc.email}" }) { Text("Forget") }
+                TextButton(onClick = { withOwner(ctx, "Forget ${acc.email} on the PC?") { ws.fbAccountForget(acc.email) } }) { Text("Forget") }
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { confirm = "add" }) { Text("Add account") }
-            if (ws.fbAuthLoggedIn == true) OutlinedButton(onClick = { confirm = "logout" }) { Text("Log out") }
+            if (ws.fbAuthLoggedIn == true) OutlinedButton(onClick = { withOwner(ctx, "Log out of Freebuff on the PC?") { ws.fbAuthLogout() } }) { Text("Log out") }
         }
     }
     confirm?.let { op ->

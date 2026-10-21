@@ -132,6 +132,16 @@ export function allow(clientId) {
   return { ok: true, device: d };
 }
 
+// Revoked-only: deleting a live device's record would drop the token hash that keeps it paired.
+export function remove(clientId) {
+  const d = devices.get(String(clientId));
+  if (!d) return { ok: false, error: `unknown device: ${clientId}` };
+  if (!d.revoked) return { ok: false, error: "revoke the device before removing it" };
+  devices.delete(String(clientId));
+  save();
+  return { ok: true };
+}
+
 export function list() {
   const now = Date.now();
   return [...devices.values()].map(({ tokenHash, ...d }) => ({ ...d, online: now - d.lastSeen < 5 * 60_000 }));

@@ -8,17 +8,20 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,13 +30,22 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,7 +54,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private enum class Layer { Letters, Numbers, Symbols }
 private enum class Mod(val wire: String) { Ctrl("ctrl"), Shift("shift"), Alt("alt"), Win("win") }
 
 /** Off, held for the next key only, or locked until tapped again. */
@@ -59,6 +70,7 @@ private val LOCKED_BG = Color(0xFFF0883E)
 /** Windows virtual keys for the US layout; the Boolean says whether Shift produces the character. */
 internal val CHAR_VK: Map<Char, Pair<Int, Boolean>> = buildMap {
     for (c in 'a'..'z') put(c, c.uppercaseChar().code to false)
+    for (c in 'A'..'Z') put(c, c.code to true)
     for (c in '0'..'9') put(c, c.code to false)
     val base = mapOf('-' to 0xBD, '=' to 0xBB, '[' to 0xDB, ']' to 0xDD, '\\' to 0xDC, ';' to 0xBA,
         '\'' to 0xDE, ',' to 0xBC, '.' to 0xBE, '/' to 0xBF, '`' to 0xC0)
@@ -66,39 +78,56 @@ internal val CHAR_VK: Map<Char, Pair<Int, Boolean>> = buildMap {
     "!@#$%^&*()".forEachIndexed { i, c -> put(c, ('1' + i).let { if (it > '9') '0' else it }.code to true) }
     mapOf('_' to '-', '+' to '=', '{' to '[', '}' to ']', '|' to '\\', ':' to ';', '"' to '\'',
         '<' to ',', '>' to '.', '?' to '/', '~' to '`').forEach { (c, b) -> put(c, base.getValue(b) to true) }
+    put(' ', VK_SPACE to false)
+    put('\n', VK_ENTER to false)
+    put('\t', VK_TAB to false)
 }
 
-private const val VK_BACK = 8
+internal const val VK_BACK = 8
 private const val VK_TAB = 9
 private const val VK_ENTER = 13
-private const val VK_ESC = 27
 private const val VK_SPACE = 32
-private const val VK_DEL = 46
 
+/** What one change of the phone keyboard's text means on the PC. */
+internal sealed interface Stroke {
+    /** A key press; modifiers held on the bar apply to it. */
+    data class Vk(val vk: Int, val shift: Boolean = false) : Stroke
+    /** Text with no key on a US layout (accents, emoji): typed as it is. */
+    data class Text(val text: String) : Stroke
+}
+
+/** The input field always holds [IME_SENTINEL]; text added after it is typed, and each character removed from it is a Backspace. */
+internal const val IME_SENTINEL = "        "
+
+internal fun imeStrokes(text: String): List<Stroke> = when {
+    text.length < IME_SENTINEL.length -> List(IME_SENTINEL.length - text.length) { Stroke.Vk(VK_BACK) }
+    // Anything else (an autocorrect rewriting the sentinel) is not a keystroke.
+    !text.startsWith(IME_SENTINEL) -> emptyList()
+    else -> text.drop(IME_SENTINEL.length).map { c -> CHAR_VK[c]?.let { (vk, shift) -> Stroke.Vk(vk, shift) } ?: Stroke.Text(c.toString()) }
+}
+
+/** Keys a phone keyboard lacks compared with a full-size PC keyboard. */
 private val NAV_KEYS = listOf(
-    "Esc" to VK_ESC, "Tab" to VK_TAB, "Del" to VK_DEL, "Home" to 36, "End" to 35, "PgUp" to 33, "PgDn" to 34,
-    "PrtSc" to 44, "Vol−" to 0xAE, "Vol+" to 0xAF, "Mute" to 0xAD, "⏯" to 0xB3,
-) + (1..12).map { "F$it" to 111 + it }
-private val ARROWS = listOf("←" to 37, "↑" to 38, "↓" to 40, "→" to 39)
-private val REPEATING = setOf(VK_BACK, VK_DEL, VK_SPACE, 37, 38, 39, 40, 0xAE, 0xAF)
-
-private val LETTER_ROWS = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
-private val NUMBER_ROWS = listOf("789/", "456*", "123-", "0.=+")
-private val SYMBOL_ROWS = listOf("!@#$%^&*()", "-_=+[]{}\\|", ";:'\",.<>/?", "`~")
+    "←" to 37, "↑" to 38, "↓" to 40, "→" to 39, "Home" to 36, "End" to 35, "PgUp" to 33, "PgDn" to 34,
+    "Ins" to 45, "Del" to 46, "PrtSc" to 44, "Caps" to 20, "NumLk" to 144, "ScrLk" to 145, "Pause" to 19,
+    "Menu" to 93, "⏮" to 0xB1, "⏯" to 0xB3, "⏭" to 0xB0, "Vol−" to 0xAE, "Vol+" to 0xAF, "Mute" to 0xAD,
+)
+private val F_KEYS = (1..12).map { "F$it" to 111 + it }
+private val REPEATING = setOf(VK_BACK, 37, 38, 39, 40, 33, 34, 46, 0xAE, 0xAF)
 
 /**
- * The desktop keyboard: every key goes to the PC as a virtual key, so shortcuts
- * work like on a real keyboard. Letters, a numpad and symbols are separate layers;
- * the modifier row stays on every layer (tap: next key only, tap again: locked).
+ * Desktop typing: the phone's own keyboard types into a hidden field and every keystroke goes to
+ * the PC at once, as a virtual key so shortcuts work. The bar above adds sticky Ctrl, Shift, Alt and
+ * Win (tap: next key only, tap again: locked), Fn for F1–F12, and the navigation, lock and media keys.
  */
 @Composable
 fun DesktopKeyboard(ws: WsClient) {
-    var layer by remember { mutableStateOf(Layer.Letters) }
     var latches by remember { mutableStateOf(Mod.entries.associateWith { Latch.Off }) }
-    var typing by remember { mutableStateOf(false) }
-    var text by remember { mutableStateOf("") }
+    var fn by remember { mutableStateOf(false) }
     val clipboard = LocalClipboard.current
     val clipScope = rememberCoroutineScope()
+    val focus = remember { FocusRequester() }
+    val ime = LocalSoftwareKeyboardController.current
 
     fun active(m: Mod) = latches.getValue(m) != Latch.Off
     fun send(vk: Int, extraShift: Boolean = false) {
@@ -106,34 +135,32 @@ fun DesktopKeyboard(ws: WsClient) {
         ws.desktopKey(vk, mods)
         latches = latches.mapValues { (_, l) -> if (l == Latch.Once) Latch.Off else l }
     }
-    fun sendChar(c: Char) {
-        val (vk, shifted) = CHAR_VK[c] ?: return
-        send(vk, shifted)
+    fun apply(s: Stroke) = when (s) {
+        is Stroke.Vk -> send(s.vk, s.shift)
+        is Stroke.Text -> { ws.desktopType(s.text) }
     }
-    val upper = active(Mod.Shift)
 
-    Column(Modifier.fillMaxWidth().background(Color(0xFF0D1117)).padding(horizontal = 3.dp, vertical = 2.dp)) {
-        // Navigation, function keys and clipboard: one scrollable row.
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Key("✎", Modifier.width(52.dp), height = 44.dp, special = true, highlight = typing) { typing = !typing }
-            Key("Paste", Modifier.width(64.dp), height = 44.dp, special = true) {
-                clipScope.launch {
-                    val clip = clipboard.getClipEntry()?.clipData?.takeIf { it.itemCount > 0 } ?: return@launch
-                    clip.getItemAt(0).text?.toString()?.let { ws.clipboardSet(it, paste = true) }
-                }
-            }
-            Key("Copy", Modifier.width(60.dp), height = 44.dp, special = true) { ws.clipboardGet() }
-            NAV_KEYS.forEach { (label, vk) -> Key(label, Modifier.width(56.dp), height = 44.dp, special = true, repeat = vk in REPEATING) { send(vk) } }
-        }
-        if (typing) {
-            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                OutlinedTextField(value = text, onValueChange = { text = it }, modifier = Modifier.weight(1f),
-                    placeholder = { Text("Type a line to send to the PC") }, singleLine = true)
-                TextButton(onClick = { if (text.isNotEmpty()) { ws.desktopType(text); text = "" } }) { Text("Send") }
-            }
-        }
-        // Modifiers are on every layer.
-        KeyRow {
+    var field by remember { mutableStateOf(TextFieldValue(IME_SENTINEL, TextRange(IME_SENTINEL.length))) }
+    LaunchedEffect(Unit) { focus.requestFocus(); ime?.show() }
+
+    // imePadding keeps the bar right above the phone keyboard, with the picture shrinking to fit.
+    Column(Modifier.fillMaxWidth().background(Color(0xFF0D1117)).imePadding().padding(horizontal = 3.dp, vertical = 2.dp)) {
+        // Password type: no suggestions, autocorrect or composing, so every key reaches onValueChange as typed.
+        BasicTextField(
+            value = field,
+            onValueChange = { v ->
+                imeStrokes(v.text).forEach(::apply)
+                field = TextFieldValue(IME_SENTINEL, TextRange(IME_SENTINEL.length))
+            },
+            modifier = Modifier.size(1.dp).alpha(0f).focusRequester(focus),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Password, autoCorrectEnabled = false,
+                capitalization = KeyboardCapitalization.None, imeAction = ImeAction.Send,
+            ),
+            keyboardActions = KeyboardActions(onSend = { send(VK_ENTER) }),
+        )
+        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Mod.entries.forEach { m ->
                 val l = latches.getValue(m)
                 Key(modLabel(ws.hostOs, m.wire) + if (l == Latch.Locked) " ■" else "", Modifier.weight(1f), special = true,
@@ -141,51 +168,24 @@ fun DesktopKeyboard(ws: WsClient) {
                     latches = latches + (m to when (l) { Latch.Off -> Latch.Once; Latch.Once -> Latch.Locked; Latch.Locked -> Latch.Off })
                 }
             }
-            ARROWS.forEach { (label, vk) -> Key(label, Modifier.weight(0.8f), special = true, repeat = true) { send(vk) } }
+            Key("Fn", Modifier.weight(0.8f), special = true, highlight = fn) { fn = !fn }
+            Key("Esc", Modifier.weight(0.9f), special = true) { send(27) }
+            Key("Tab", Modifier.weight(0.9f), special = true) { send(VK_TAB) }
+            Key("⌨", Modifier.weight(0.8f), special = true) { focus.requestFocus(); ime?.show() }
         }
-        when (layer) {
-            Layer.Letters -> LETTER_ROWS.forEachIndexed { i, row ->
-                KeyRow {
-                    // Every row spans ten key widths so the columns line up.
-                    if (i == 1) Box(Modifier.weight(0.5f))
-                    if (i == 2) Box(Modifier.weight(1f))
-                    row.forEach { c -> Key(if (upper) c.uppercase() else c.toString(), Modifier.weight(1f), big = true) { sendChar(c) } }
-                    if (i == 1) Box(Modifier.weight(0.5f))
-                    if (i == 2) Key("⌫", Modifier.weight(2f), big = true, special = true, repeat = true) { send(VK_BACK) }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            (if (fn) F_KEYS else NAV_KEYS).forEach { (label, vk) ->
+                Key(label, Modifier.width(54.dp), special = true, repeat = vk in REPEATING) { send(vk) }
+            }
+            Key("Paste", Modifier.width(64.dp), special = true) {
+                clipScope.launch {
+                    val clip = clipboard.getClipEntry()?.clipData?.takeIf { it.itemCount > 0 } ?: return@launch
+                    clip.getItemAt(0).text?.toString()?.let { ws.clipboardSet(it, paste = true) }
                 }
             }
-            Layer.Numbers -> NUMBER_ROWS.forEachIndexed { i, row ->
-                KeyRow {
-                    row.forEach { c -> Key(c.toString(), Modifier.weight(1f), big = true) { sendChar(c) } }
-                    if (i == 0) Key("⌫", Modifier.weight(1f), big = true, special = true, repeat = true) { send(VK_BACK) }
-                    if (i == 1) Key(",", Modifier.weight(1f), big = true) { sendChar(',') }
-                    if (i == 2) Key("(", Modifier.weight(1f), big = true) { sendChar('(') }
-                    if (i == 3) Key(")", Modifier.weight(1f), big = true) { sendChar(')') }
-                }
-            }
-            Layer.Symbols -> SYMBOL_ROWS.forEachIndexed { i, row ->
-                KeyRow {
-                    row.forEach { c -> Key(c.toString(), Modifier.weight(1f), big = true) { sendChar(c) } }
-                    if (i == 3) {
-                        Box(Modifier.weight(6.5f))
-                        Key("⌫", Modifier.weight(1.5f), big = true, special = true, repeat = true) { send(VK_BACK) }
-                    }
-                }
-            }
-        }
-        KeyRow {
-            listOf(Layer.Letters to "abc", Layer.Numbers to "123", Layer.Symbols to "#+=").forEach { (l, label) ->
-                if (l != layer) Key(label, Modifier.weight(1.2f), special = true) { layer = l }
-            }
-            Key("space", Modifier.weight(4f), special = true, repeat = true) { send(VK_SPACE) }
-            Key("⏎", Modifier.weight(1.4f), big = true, special = true) { send(VK_ENTER) }
+            Key("Copy", Modifier.width(60.dp), special = true) { ws.clipboardGet() }
         }
     }
-}
-
-@Composable
-private fun KeyRow(content: @Composable RowScope.() -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), content = content)
 }
 
 /**
@@ -196,8 +196,7 @@ private fun KeyRow(content: @Composable RowScope.() -> Unit) {
 private fun Key(
     label: String,
     modifier: Modifier,
-    height: Dp = 48.dp,
-    big: Boolean = false,
+    height: Dp = 44.dp,
     special: Boolean = false,
     highlight: Boolean = false,
     repeat: Boolean = false,
@@ -232,8 +231,7 @@ private fun Key(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, maxLines = 1, color = KEY_TEXT,
-            fontSize = if (big) 20.sp else 15.sp, fontWeight = if (big) FontWeight.Normal else FontWeight.Medium)
+        Text(label, maxLines = 1, color = KEY_TEXT, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }
 

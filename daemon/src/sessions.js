@@ -170,11 +170,12 @@ export function detach(ws, id) {
     ws._subs.delete(id);
     return;
   }
+  // Chat keys ("chat:<id>") share the set and are left for chat.detach, which runs next.
   for (const sid of ws._subs) {
-    const s = sessions.get(sid);
-    if (s) s.subs.delete(ws);
+    if (sid.startsWith("chat:")) continue;
+    sessions.get(sid)?.subs.delete(ws);
+    ws._subs.delete(sid);
   }
-  ws._subs.clear();
 }
 
 export function write(id, text) {

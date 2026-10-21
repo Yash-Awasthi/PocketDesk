@@ -47,11 +47,26 @@ Plaintext never leaves the PC. A daemon without TLS (certificate generation fail
 a pairing QR without TLS yields an iroh-only entry when it carries an iroh ticket, and an older
 saved `ws://` entry connects over its iroh fallback or asks the user to re-scan the QR.
 
+## Android 17 local network access
+
+Apps targeting Android 17 (SDK 37) need the `ACCESS_LOCAL_NETWORK` runtime permission to open any
+socket to a LAN address. Without it the system drops the SYN silently, the LAN dial times out after
+3 s and the app falls back to iroh, so a phone on the PC's own Wi-Fi still ends up on the relay.
+The app declares the permission and asks for it at first launch and again before a connect.
+
 ## Behaviour on network change
 
-`WsClient.onNetworkChanged`: an iroh connection is left alone and migrates paths itself. A LAN
-socket with an iroh fallback is cancelled and reconnected at once on the new network, which
-fails in-flight transfers. A pending retry runs immediately and resets backoff.
+`WsClient.onNetworkChanged` runs for every change of the default network (Wi-Fi, mobile data,
+Ethernet). Android denies iroh the netlink socket it watches interfaces with, so the iroh endpoint
+never learns about the change and keeps sockets bound to the old network. On a change the app
+therefore marks its endpoints stale (`IrohLink.Node.networkChanged`), cancels the LAN socket and the
+iroh link alike, fails in-flight transfers and redials at once with backoff reset; the next iroh
+dial binds a fresh endpoint. An iroh connect gives up after 15 s and hands over to the retry loop.
+
+`ConnectRoute.pick` chooses the address: the LAN url on Wi-Fi or Ethernet, iroh on mobile data and
+on a Wi-Fi where the LAN url already failed. When the iroh attempt fails as well, the PC itself is
+down rather than off this LAN, so the LAN pin is cleared and retries alternate again; a PC that
+comes back after a restart is reached on its LAN address instead of staying on the relay.
 
 ## Timing
 

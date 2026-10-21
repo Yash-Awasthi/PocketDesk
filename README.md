@@ -22,7 +22,10 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | Feature | Description |
 |---------|-------------|
 | 🖥️ **Live Terminal** | Real-time PTY streaming with extra keys (Esc, Tab, Ctrl+C/D/Z, arrows) — seq-numbered output with missed-output backfill after reconnect |
-| 💬 **AI Chat** | ChatGPT-style conversation with streaming responses and tool indicators |
+| 💬 **AI Chat** | ChatGPT-style conversation, streamed token by token (Claude Code runs with `--include-partial-messages`), with tool calls shown the moment the agent starts them, approvals answered inside the chat, a model and permission mode for the next message only, and a **slash command picker**: type `/` to list the agent's built-in commands, skills (plugin skills included) and your custom commands |
+| 📚 **Agent history** | Every conversation the coding agents saved on the PC, grouped by agent and app: Claude Code (CLI and VS Code extension), Codex (CLI and VS Code extension), Copilot Chat, Cline and Roo Code in VS Code and its forks, Cursor and Antigravity. Read any transcript; **continue** a Claude Code or Codex conversation as a phone chat or in its terminal UI; open the project in the IDE it came from (`history_*`) |
+| 👥 **Account switching** | Save each login of Claude Code, Codex, Gemini, Cursor and Antigravity on the PC and switch between them from the phone; the replaced login is always kept. Tokens stay on the PC. Switching asks first, logging out or forgetting a login takes your fingerprint, and Cursor and Antigravity must be closed while they switch (`accounts_list`, `account_save`, `account_switch`, `account_forget`) |
+| 🧩 **Agent panel** | One screen per agent (Claude Code, Codex, Gemini, Qwen, OpenCode, Copilot, Cline): recent conversations, skills, custom slash commands and its settings and memory files (`settings.json`, `CLAUDE.md`, `config.toml`, `AGENTS.md`, …; tokens and API keys inside them are masked before they leave the PC and kept when you save) — view, edit, or run a skill or command as a chat (`agent_panel`, `agent_doc`, `agent_file_set`) |
 | 📊 **Dashboard** | Real-time stats, activity timeline, plugin status, connected clients |
 | 📁 **Files** | A Files tab for your home folder: open or share a file in any phone app, save it to Downloads, upload, rename, create folders, delete to the Recycle Bin, search by name, copy a path. Long press to select several files for download or delete, download a folder as a .zip, sort by name, date or size, and see thumbnails of images (`fs_op`, `fs_search`, `fs_zip`, `fs_thumb`) |
 | 🔐 **TLS + Pinning** | Self-signed cert support with SHA-256 fingerprint pinning |
@@ -36,7 +39,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states |
 | 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware video up to 60 fps, negotiated to the best codec both ends support — AV1 or HEVC where the phone can decode them (about 30–50% less data than H.264), H.264 otherwise (NVENC, Quick Sync, AMD AMF, Apple VideoToolbox or VA-API; the browser decodes H.264 with WebCodecs), the PC's sound streamed alongside as AAC, any monitor, the PC pointer drawn on the viewer as a small dot centred on the click point; touch gestures (two-finger scroll in both directions, two-finger tap for right click, three-finger tap for middle click, three-finger swipes to switch desktops or Spaces and show every window, hold then move to drag, pinch to zoom), a screen switcher on the picture when the PC has several monitors, pointer placement that is exact on Retina and mixed-DPI setups plus a manual corner calibration in the menu, a one-tap shortcut bar that follows the PC's OS (Ctrl shortcuts, Win and Task Manager on Windows; Cmd shortcuts, Spotlight, Mission Control and Force Quit on a Mac), media and volume keys, an app drawer of every installed program, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows, macOS and Linux/X11). |
 | 📋 **Clipboard & file drop** | Text, images and copied files move between the PC and the viewer while the desktop is open; files sent from the phone or browser are pasted straight into the focused PC window. |
-| 👁 **Access control** | A connection password is required on every connect; the PC owner can pause control (view-only) from the pairing page, and viewers can join view-only. |
+| 👁 **Access control** | A connection password is required on every connect; the PC owner can pause control (view-only) from the pairing page, and viewers can join view-only. A **Remote access** switch at the top of the pairing page disconnects and refuses every phone and browser until it is switched back on, and **Uninstall PocketDesk** at the bottom right removes it after a confirmation (optionally with its settings). |
 | 🎥 **Session recording** | Optional MP4 of the watched screen, asciicast of terminals, and a log of every viewer, approval and file sent. |
 | ⏰ **Wake-on-LAN** | Wake a sleeping PC from the phone on the same network. |
 | 🟥 **Viewing frame** | A red edge around every monitor while someone is connected, seen only at the PC |
@@ -55,7 +58,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 🩺 **Doctor** | One message returns a full self-diagnosis of the daemon and its agents |
 | ⏱️ **Approval Auto-Deny** | Unattended agents never stall — unanswered approvals are auto-denied on a timer |
 | 💰 **Usage Dashboard** | Per-session token + cost aggregates straight from the agent's stream events |
-| 📶 **Auto-Reconnect** | The app reconnects with exponential backoff + jitter and replays only missed output |
+| 📶 **Auto-Reconnect** | The app reconnects with exponential backoff + jitter and replays only missed output. Switching between Wi-Fi and mobile data moves the link to iroh (or back to the LAN) by itself, and after a PC restart the phone returns to the LAN address rather than staying on the relay |
 
 ---
 
@@ -71,6 +74,11 @@ Or the same installer from PowerShell:
 ```powershell
 irm https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/install.ps1 | iex
 ```
+
+On a PC with **Smart App Control** on, Windows refuses the small launcher the installer compiles,
+so the installer detects it and runs the daemon from signed programs only (`conhost`, PowerShell and
+the bundled Node.js, through `run-daemon.ps1`); the Start Menu shortcut then opens pairing through
+`open-pairing.ps1`. Nothing to do on your side.
 
 It downloads the daemon with its own Node.js and ffmpeg, starts it hidden at logon (it shows only
 in Task Manager, as PocketDesk.exe), adds a **PocketDesk** shortcut to the Start Menu, and opens the
@@ -130,6 +138,10 @@ Pick one:
 - **Build it yourself**: `cd app && ./gradlew assembleDebug` → APK at
   `app/app/build/outputs/apk/debug/app-debug.apk`.
 
+On first launch the app asks for **notifications** and, on Android 17 and later, for access to
+**devices on your local network**. Allow the second one: without it Android drops every connection
+to the PC's LAN address and the app can only reach the PC through the iroh relay, which is slower.
+
 ### Step 2 — Start the daemon on the PC
 
 ```bash
@@ -145,7 +157,7 @@ auth token (also persisted to `~/.pocketdesk/config.json` —
 
 1. **QR pairing (easiest)** — on the PC, open the pairing link from the banner
    (`https://localhost:8765/pair?k=<token>`; the **PocketDesk** Start Menu shortcut opens it) and
-   scan the QR **with the PocketDesk app** (tap **＋ → Scan QR**). The app
+   scan the QR **with the PocketDesk app** (tap **Scan QR** on the PC list). The app
    receives the URL, token and (with TLS) the cert fingerprint automatically.
    > Note: the QR page is loopback-only by design — open it on the PC itself,
    not on the phone.
@@ -165,10 +177,10 @@ When the app's status bar shows **Connected**, you're paired.
 
 | App screen | What you can do |
 |---|---|
-| **Tools** | See every managed agent CLI (Claude Code, Codex, OpenCode, Antigravity, Copilot, Cline, ZCode, Gemini, Qwen, Aider) — install/uninstall, versions — plus the desktop IDEs found on the PC, each with an **Open** button |
+| **Tools** | See every managed agent CLI (Claude Code, Codex, OpenCode, Antigravity, Copilot, Cline, ZCode, Gemini, Qwen, Aider) — install/uninstall, versions, account login — plus the desktop IDEs found on the PC, each with an **Open** button. **Skills, commands & settings** on an agent's card opens its agent panel |
 | **Sessions** | Live PTY terminals of any session — full keyboard streaming, like SSH |
-| **Chats** | Create agent chats, stream replies token-by-token, pick the **model** (opus/sonnet/haiku…) per chat, cancel a running turn |
-| **Desktop** | AnyDesk-style view of the whole PC screen (~3 fps): tap = move+click, long-press = right-click, drag = move, two-finger/▲▼ = scroll, type into any window |
+| **Chats** | Create agent chats, stream replies token-by-token, `/` for the command picker, pick the **model** (opus/sonnet/haiku…) and the permission mode per chat, cancel a running turn. **On this PC** lists every agent's saved conversations, filterable by agent and app, with **Continue in chat**, **Resume in terminal** and **Open in <IDE>** |
+| **Desktop** | AnyDesk-style view of the whole PC screen: tap = move+click, long-press = right-click, drag = move, two-finger/▲▼ = scroll. **⌨** types with the phone's own keyboard, plus a bar for what it lacks against a full PC keyboard: sticky Ctrl/Shift/Alt/Win, Fn for F1–F12, Esc, Tab, arrows, Ins/Del/Home/End/PgUp/PgDn, PrtSc, Caps/Num/Scroll Lock, Pause, Menu, media and volume. **⛶** is true fullscreen: the picture alone, taps still click, with only an exit button and a switch that turns mouse and keys off |
 | **Freebuff** | The Freebuff desktop app itself: open/quit, login state and **logout**, browse & run all skills, view & edit allowlisted configs (each edit backed up) |
 
 Install agents from the phone too: any tool card marked "not installed" has an
@@ -178,6 +190,21 @@ Install agents from the phone too: any tool card marked "not installed" has an
 trust prompt whose default option is *No, exit* — pressing Enter straight away
 quits it. Use the **↓** key in the terminal key row to select *Yes, I trust this
 folder*, then Enter. After that the REPL appears and typing works normally.
+
+### 🧠 Claude Code from the phone
+
+Claude Code is the agent the app is built around. Its card sits first on the Tools screen, with
+**New chat**, **Terminal** and **Continue** (the newest Claude Code conversation on the PC that is not
+still open there), plus **Skills, commands & settings**. In a chat:
+
+- replies stream token by token, and each tool call shows the moment Claude starts it;
+- `/` lists Claude's commands and skills, plugin skills included, and your custom commands;
+- **Next message** picks a model and permission mode for one message; the header sets the chat's own;
+- with **Ask on phone**, every permission prompt is answered by a card inside the chat (Deny, Allow,
+  Allow all), or from the notification when the app is in the background;
+- every Claude Code conversation on the PC, from the CLI or the VS Code extension, is listed under
+  **On this PC** and continues as a chat or in the terminal UI. One written to in the last two minutes
+  counts as still open on the PC and is not offered, so a running session is never forked.
 
 ### 🦾 Controlling Freebuff itself from the phone
 
@@ -202,6 +229,24 @@ finds the ones installed on the PC and the Tools screen offers **Open** for
 each: **VS Code, Zed, Antigravity, OpenCode Desktop** and **Freebuff Desktop**.
 There is no PTY behind them, so opening starts the window on the PC and the
 **Desktop** screen is how you see and drive it from the phone.
+
+### 📚 Every agent's past conversations
+
+The Chats screen has an **On this PC** section: the conversations each coding agent saved on the PC,
+newest first, with a chip per agent and app.
+
+| Agent | Where it is read from | Continue from the phone |
+|---|---|---|
+| Claude Code (CLI and VS Code extension) | `~/.claude/projects/*/*.jsonl` | Yes: as a chat (`--resume <id>`) or in the terminal UI |
+| Codex (CLI and VS Code extension) | `~/.codex/sessions/**/rollout-*.jsonl` | Yes: as a chat or `codex resume <id>` |
+| GitHub Copilot Chat | `<editor>/User/workspaceStorage/*/chatSessions` | Read only; **Open in <IDE>** |
+| Cline, Roo Code | `<editor>/User/globalStorage/<extension>/tasks` | Read only; **Open in <IDE>** |
+| Cursor | `Cursor/User/globalStorage/state.vscdb` | Read only; **Open in Cursor** |
+| Antigravity | `~/.gemini/antigravity/conversation_summaries.db` | Read only; **Open in Antigravity** |
+
+`<editor>` is any VS Code family app: VS Code, Insiders, Cursor, Windsurf, Antigravity, VSCodium,
+Trae, Kiro. Only titles and text reach the phone; file paths stay on the PC. The chat panels inside
+those editors have no outside API, so typing into them is done on the **Desktop** screen.
 
 ---
 
@@ -241,7 +286,7 @@ Authentication is always the same: the app sends the token once at connect
 
 | Mode | Phone URL | When to use | PC needs |
 |---|---|---|---|
-| **LAN** | `ws://<pc-ip>:8765/ws` | Phone on same Wi-Fi | Nothing special |
+| **LAN** | `wss://<pc-ip>:8765/ws` | Phone on same Wi-Fi | Nothing special |
 | **Anywhere (iroh)** | `iroh://<ticket>`, saved by the pairing QR | Any network, no setup | Outbound internet only |
 | **Tailscale/VPN** | `ws://<tailscale-ip>:8765/ws` | You manage a tailnet | Tailscale on both ends |
 | **Port-forward** | `wss://your.domain:8765/ws` (TLS!) | You control the router | Forwarded port + TLS cert |
@@ -260,6 +305,10 @@ per GOP, so a bad link skips ahead instead of falling seconds behind, and the
 quality preset steps down while the link cannot keep up. By default n0's free
 public relays are used; [docs/RELAY.md](docs/RELAY.md) sets up your own.
 Measurements: [docs/TRANSPORT-BENCH.md](docs/TRANSPORT-BENCH.md).
+
+**Switching networks.** Turning Wi-Fi off mid-session moves the link to iroh within a few seconds,
+and turning it back on returns to the LAN address, with no app restart. Android hides interface
+changes from iroh, so the app rebuilds its iroh endpoint on every network change.
 
 **Tailscale** still works if you already run it on both ends:
 `ws://<tailscale-ip>:8765/ws` behaves exactly like LAN. It is not needed any more.
@@ -434,7 +483,7 @@ Proposals auto-expire after 5 minutes.
 JSON frames; binary payloads are base64.
 
 **Client → Server:**
-`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg` · `chatcancel` · `fs_op {op: mkdir|rename|delete}` · `fs_search {path, q}` · `propose` · `approve {id, all?}` · `reject` · `proposal_list` · `pc_power {action}` · `totp_status` · `totp_setup` · `totp_enable {code}` · `totp_disable {code}` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
+`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg {id, text, model?, mode?}` (model and mode for this message only) · `chatcancel` · `history_list {agent?}` · `history_get {agent, id}` · `history_resume {agent, id, mode?: "terminal"}` · `agent_panel {agent}` · `agent_doc {agent, kind: skill|command|file, name}` · `agent_file_set {agent, name, content}` · `fs_op {op: mkdir|rename|delete}` · `fs_search {path, q}` · `propose` · `approve {id, all?}` · `reject` · `proposal_list` · `pc_power {action}` · `totp_status` · `totp_setup` · `totp_enable {code}` · `totp_disable {code}` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
 <details>
 <summary>Absorbed-feature messages</summary>
 
@@ -453,7 +502,7 @@ JSON frames; binary payloads are base64.
 </details>
 
 **Server → Client:**
-`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `fs_result` · `fs_found` · `chatreplay` · `chatuser` · `chatdelta` · `chartool` · `chatstate` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `proposal_expired` · `pc_power` · `totp_status` · `totp_setup` · `activity` · `gui_opened` · `apps` · `error`
+`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `fs_result` · `fs_found` · `chatreplay` · `chatuser` · `chatdelta` · `chartool {toolId?}` (same toolId again = the call's completed input) · `chatstate` · `chat_info {model, permissionMode, commands, pocketdesk}` · `history` · `history_item` · `agent_panel` · `agent_doc` · `agent_file_saved` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `proposal_expired` · `pc_power` · `totp_status` · `totp_setup` · `activity` · `gui_opened` · `apps` · `error`
 
 Every `out` frame carries a monotonic `seq`; on reconnect send `attach {id, since: <last seq>}` and the daemon replays only what you missed.
 

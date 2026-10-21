@@ -51,7 +51,7 @@ try {
     Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:4679/shutdown" -Headers @{ Authorization = "Bearer $tok" } -TimeoutSec 3 | Out-Null
     Start-Sleep -Seconds 2
 } catch {}
-try { schtasks /End /TN "PocketDeskConsole" 2>$null | Out-Null } catch {}
+foreach ($task in "PocketDesk", "PocketDeskConsole") { try { schtasks /End /TN $task 2>$null | Out-Null } catch {} }
 Stop-PocketDesk
 Start-Sleep -Milliseconds 500
 Stop-PocketDesk
@@ -62,7 +62,9 @@ foreach ($dir in @([Environment]::GetFolderPath("Programs"), [Environment]::GetF
 }
 Remove-Item "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PocketDesk" -Recurse -ErrorAction SilentlyContinue
 
-try { Unregister-ScheduledTask -TaskName "PocketDeskConsole" -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+foreach ($task in "PocketDesk", "PocketDeskConsole") {
+    try { Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+}
 # The protected bin holds no secrets; the console token dir is kept unless -RemoveData (below).
 $consoleBin = Join-Path $consoleRoot "bin"
 if (Test-Path $consoleBin) { Remove-Item -Recurse -Force $consoleBin -ErrorAction SilentlyContinue }

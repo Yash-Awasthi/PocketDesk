@@ -67,12 +67,16 @@ async function run() {
     await new Promise((res, rej) => { ws.on("open", res); ws.on("error", rej); });
     pump(ws);
     send(ws, { type: "hello", token: TOKEN });
-    await next((m) => m.type === "welcome");
+    const welcome = await next((m) => m.type === "welcome");
+    // Under the parallel suite the startup registry scan can finish after the hello; wait for it.
+    const nodeReady = (list) => (list ?? []).some((r) => r.manifest?.id === "node" && r.installed);
+    if (!nodeReady(welcome.manifests)) await next((m) => m.type === "manifests" && nodeReady(m.items), 30000);
 
     // Create a session
     send(ws, { type: "create", harness: "node", cwd: os.tmpdir() });
-    const created = await next((m) => m.type === "created" || m.type === "error");
-    check("session created for shutdown test", created.type === "created");
+    // Spawning a PTY can take well over 8 s while the other suites run in parallel.
+    const created = await next((m) => m.type === "created" || m.type === "error", 30000);
+    check("session created for shutdown test" + (created.type === "error" ? `: ${created.message}` : ""), created.type === "created");
 
     // Kill it — the kill flow is what the shutdown handler uses per-session
     send(ws, { type: "kill", id: created.id });

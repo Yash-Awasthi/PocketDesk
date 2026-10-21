@@ -19,6 +19,19 @@ export function createAccess(cfg) {
     get controlAllowed() {
       return cfg.controlAllowed !== false;
     },
+    /** The PC owner's master switch: off refuses every phone and browser, LAN and iroh alike. */
+    get remoteOn() {
+      return cfg.remoteOn !== false;
+    },
+    /** Set by the server to drop every connected client when remote access is switched off. */
+    onRemoteChange: null,
+    setRemoteOn(on) {
+      const next = Boolean(on);
+      const changed = next !== (cfg.remoteOn !== false);
+      cfg.remoteOn = next;
+      saveConfig(cfg);
+      if (changed) this.onRemoteChange?.(next);
+    },
     /** Set by the remote handlers to drop live controllers to view-only when control is paused. */
     onControlChange: null,
     setControlAllowed(on) {

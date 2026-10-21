@@ -12,6 +12,15 @@ process.env.USERPROFILE = tmp;
 const IS_WIN = process.platform === "win32";
 
 const FIXTURES = {
+  // --include-partial-messages: text and tool starts stream first, then the whole message repeats them.
+  claude: [
+    { type: "system", subtype: "init", session_id: "cl-1", model: "m", permissionMode: "default", slash_commands: ["review"] },
+    { type: "stream_event", event: { type: "message_start" } },
+    { type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text: "x" } } },
+    { type: "stream_event", event: { type: "content_block_start", content_block: { type: "tool_use", id: "tu1", name: "Read" } } },
+    { type: "assistant", session_id: "cl-1", message: { content: [{ type: "text", text: "x" }, { type: "tool_use", id: "tu1", name: "Read", input: { file_path: "a.txt" } }] } },
+    { type: "result", session_id: "cl-1", result: "x", usage: { input_tokens: 5, output_tokens: 1 } },
+  ],
   codex: [
     { type: "thread.started", thread_id: "cx-thread-1" },
     { type: "turn.started" },
@@ -80,6 +89,7 @@ process.env.PATH = binDir + path.delimiter + process.env.PATH;
 const chat = await import("../src/chat.js");
 
 const manifests = {
+  claude: { args: [agentJs, "claude", "-p"], resumeIdArgs: [agentJs, "claude", "--resume", "{id}"], format: "claude-stream-json", models: { opus: { args: ["--model", "opus"] } } },
   codex: { args: [agentJs, "codex", "exec"], resumeIdArgs: [agentJs, "codex", "resume", "{id}", "-"], format: "codex-json" },
   opencode: { args: [agentJs, "opencode", "run"], resumeIdArgs: [agentJs, "opencode", "run", "--session", "{id}"], format: "opencode-json" },
   gemini: { args: [agentJs, "gemini"], resumeIdArgs: [agentJs, "gemini", "--resume", "{id}"], format: "gemini-json" },
@@ -87,16 +97,18 @@ const manifests = {
   cline: { bin: "fakecline", args: ["cline", "--json"], format: "cline-json", promptArg: true, inlineHistory: true },
 };
 // Cline has no headless resume, so its second prompt carries the first exchange instead.
-const expectedId = { codex: "cx-thread-1", opencode: "ses_oc1", gemini: "gm-uuid-1", copilot: "cp-uuid-1", cline: "Assistant: x" };
+const expectedId = { claude: "cl-1", codex: "cx-thread-1", opencode: "ses_oc1", gemini: "gm-uuid-1", copilot: "cp-uuid-1", cline: "Assistant: x" };
 
-function turn(c, text) {
+const seen = [];
+function turn(c, text, once) {
   return new Promise((resolve) => {
     const ws = { readyState: 1, _subs: new Set(), send(raw) {
       const m = JSON.parse(raw);
+      seen.push(m);
       if (m.type === "chatstate" && m.state !== "running") { chat.detach(ws, c.id); resolve(m.state); }
     } };
     chat.attach(c.id, ws);
-    chat.sendUserMessage(c, text);
+    chat.sendUserMessage(c, text, once);
   });
 }
 const lastCall = () => JSON.parse(fs.readFileSync(calls, "utf8").trim().split("\n").pop());
@@ -117,6 +129,26 @@ for (const [kind, m] of Object.entries(manifests)) {
   const state2 = await turn(c, "again");
   check(`${kind}: second turn ends idle`, state2 === "idle");
   check(`${kind}: second turn resumes its own session`, lastCall().argv.join(" ").includes(expectedId[kind]));
+}
+
+// Claude: a tool call shows when it starts and is filled in, not repeated, when its input arrives.
+{
+  const { id } = chat.create({ manifest: { id: "claude", bin: "node", chat: manifests.claude }, cwd: workdir });
+  const c = chat.get(id);
+  seen.length = 0;
+  await turn(c, "hi");
+  const tools = c.transcript.filter((t) => t.role === "tool");
+  check("claude: one tool item, completed in place", tools.length === 1 && tools[0].detail.includes("a.txt"));
+  check("claude: the tool reached the phone before its input was known", seen.some((m) => m.type === "chartool" && m.detail === "…"));
+  check("claude: init commands reach the phone", seen.some((m) => m.type === "chat_info" && m.commands.includes("review")));
+  // A model and permission mode sent with one message apply to that turn only.
+  await turn(c, "plan it", { model: "opus", permissionMode: "readonly" });
+  const once = lastCall().argv.join(" ");
+  check("per-message model and mode reach the CLI", once.includes("--model opus") && once.includes("--permission-mode plan"));
+  await turn(c, "again");
+  const after = lastCall().argv.join(" ");
+  check("the next message is back on the chat's settings", !after.includes("--model") && !after.includes("--permission-mode"));
+  check("modelAllowed refuses an unlisted model where no name is free", !chat.modelAllowed(c, "gpt") && chat.modelAllowed(c, "opus") && chat.modelAllowed(c, null));
 }
 
 // Any model name works where the CLI takes one by flag; the name reaches a cmd.exe command line, so it is charset-checked.

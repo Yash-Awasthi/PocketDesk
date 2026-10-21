@@ -91,18 +91,12 @@ fun FilesScreen(ws: WsClient) {
     var deletingMany by remember { mutableStateOf(false) }
 
     fun refresh() { listing?.path?.let { ws.browse(it, hidden) } }
+    // A batch of operations refreshes the listing once, after the last result.
+    var pendingOps by remember { mutableStateOf(0) }
+    fun fileOp(op: String, path: String, to: String? = null) { pendingOps++; ws.fileOp(op, path, to) }
     fun open(path: String?) { selected.clear(); searching = false; ws.fsFound = null; ws.browse(path, hidden) }
 
-    /** Saves PC files to the phone's Downloads one after another, then reports once. */
-    fun saveAll(items: List<Pair<String, String>>, i: Int = 0) {
-        if (i == items.size) { status = "Saved ${items.size} to Downloads"; return }
-        val (path, name) = items[i]
-        saveToDownloads(ctx, name) { out, finish ->
-            ws.downloadFile(path, out::write,
-                onProgress = { n, _ -> status = "Saving $name (${i + 1}/${items.size}) · ${sizeText(n)}" },
-                onDone = { err -> finish(err); if (err != null) status = "Saving $name failed: $err" else saveAll(items, i + 1) })
-        }?.let { status = "Saving $name failed: $it" }
-    }
+    fun saveAll(items: List<Pair<String, String>>) = saveAllToDownloads(ctx, ws, items, { status = it })
     // A folder is zipped on the PC first; the zip then downloads like any file.
     LaunchedEffect(Unit) {
         ws.fsZips.collect { (folder, zip, err) ->
@@ -124,7 +118,8 @@ fun FilesScreen(ws: WsClient) {
                 "rename" -> "Renamed $name"
                 else -> "Created $name"
             } else "Could not ${r.op} $name: ${r.error}"
-            refresh()
+            pendingOps = (pendingOps - 1).coerceAtLeast(0)
+            if (pendingOps == 0) refresh()
         }
     }
     BackHandler(enabled = searching) { searching = false; ws.fsFound = null }
@@ -135,9 +130,10 @@ fun FilesScreen(ws: WsClient) {
 
     val upload = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         val dir = listing?.path ?: return@rememberLauncherForActivityResult
+        val taken = listing.items.mapTo(mutableListOf()) { it.name }
         fun next(i: Int) {
             if (i == uris.size) { status = "Uploaded ${uris.size} to ${dir.substringAfterLast('\\').substringAfterLast('/')}"; refresh(); return }
-            val name = queryDisplayName(ctx, uris[i])
+            val name = freeName(queryDisplayName(ctx, uris[i]), taken).also { taken += it }
             ws.uploadFile(
                 remotePath = childPath(dir, name),
                 openSource = { ctx.contentResolver.openInputStream(uris[i]) },
@@ -328,13 +324,13 @@ fun FilesScreen(ws: WsClient) {
     renaming?.let { row ->
         NameDialog("Rename", row.name, onDismiss = { renaming = null }) { name ->
             renaming = null
-            ws.fileOp("rename", row.path, childPath(row.path.substring(0, row.path.length - row.name.length).trimEnd('\\', '/'), name))
+            fileOp("rename", row.path, childPath(row.path.substring(0, row.path.length - row.name.length).trimEnd('\\', '/'), name))
         }
     }
     if (creating) {
         NameDialog("New folder", "", onDismiss = { creating = false }) { name ->
             creating = false
-            listing?.path?.let { ws.fileOp("mkdir", childPath(it, name)) }
+            listing?.path?.let { fileOp("mkdir", childPath(it, name)) }
         }
     }
     deleting?.let { row ->
@@ -342,7 +338,7 @@ fun FilesScreen(ws: WsClient) {
             onDismissRequest = { deleting = null },
             title = { Text("Delete ${row.name}?") },
             text = { Text(if (row.dir) "The folder and everything in it goes to the Recycle Bin on a Windows PC, and is deleted outright elsewhere." else "The file goes to the Recycle Bin on a Windows PC, and is deleted outright elsewhere.") },
-            confirmButton = { TextButton(onClick = { deleting = null; ws.fileOp("delete", row.path) }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
+            confirmButton = { TextButton(onClick = { deleting = null; fileOp("delete", row.path) }) { Text("Delete", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("Cancel") } },
         )
     }
@@ -354,7 +350,7 @@ fun FilesScreen(ws: WsClient) {
             confirmButton = {
                 TextButton(onClick = {
                     deletingMany = false
-                    selected.toList().forEach { ws.fileOp("delete", it) }
+                    selected.toList().forEach { fileOp("delete", it) }
                     selected.clear()
                 }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
             },

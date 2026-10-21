@@ -10,12 +10,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -69,7 +66,9 @@ class WsClient(
     val thumbs = androidx.compose.runtime.mutableStateMapOf<String, ByteArray>()
     /** (folder, zip path on the PC or null, error) once a folder is packed for download. */
     val fsZips = MutableSharedFlow<Triple<String, String?, String?>>(extraBufferCapacity = 8)
-    fun requestThumb(path: String, size: Int): Boolean = send(Proto.fsThumb(path, size))
+    /** Thumbnails asked for on this link; a row scrolled back into view does not ask again. */
+    private val thumbsAsked: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    fun requestThumb(path: String, size: Int): Boolean = !thumbsAsked.add(path) || send(Proto.fsThumb(path, size))
     fun zipFolder(path: String): Boolean = send(Proto.fsZip(path))
     /** Mkdir, rename and delete outcomes, for the file manager to report. */
     val fsResults = MutableSharedFlow<FsResult>(extraBufferCapacity = 16)
@@ -98,14 +97,42 @@ class WsClient(
     /** Sessions attached before the drop — reattached automatically. */
     private val attachedSessions = LinkedHashSet<String>()
 
+    /** Conversations agents saved on the PC, newest first, and the one opened for reading. */
+    var history by mutableStateOf<List<HistoryEntry>>(emptyList())
+        private set
+    var historyOpen by mutableStateOf<Pair<HistoryEntry, List<ChatItem>>?>(null)
+    fun historyList() = send(Proto.historyList())
+    fun historyGet(e: HistoryEntry) { historyOpen = e to emptyList(); send(Proto.historyGet(e.agent, e.id)) }
+    fun historyResume(e: HistoryEntry, terminal: Boolean) = send(Proto.historyResume(e.agent, e.id, terminal))
+
+    /** A chat this phone just started or resumed, for the chat screen to open whichever screen asked. */
+    var pendingChat by mutableStateOf<String?>(null)
+
+    /** agent id -> its skills, commands and settings files; [agentDocs] carries one opened doc. */
+    var agentPanels by mutableStateOf<Map<String, AgentPanel>>(emptyMap())
+        private set
+    val agentDocs = MutableSharedFlow<AgentDoc>(extraBufferCapacity = 4)
+    fun agentPanel(agent: String) = send(Proto.agentPanel(agent))
+    fun agentDoc(agent: String, kind: String, name: String) = send(Proto.agentDoc(agent, kind, name))
+    fun agentFileSet(agent: String, name: String, content: String) = send(Proto.agentFileSet(agent, name, content))
+
+    /** agent id -> its login on the PC and the accounts saved for switching. */
+    var agentAccounts by mutableStateOf<Map<String, AgentAccounts>>(emptyMap())
+        private set
+    fun accountsList(agent: String) = send(Proto.accountsList(agent))
+    fun accountSave(agent: String, label: String) = send(Proto.accountSave(agent, label))
+    fun accountSwitch(agent: String, id: String) = send(Proto.accountSwitch(agent, id))
+    fun accountForget(agent: String, id: String) = send(Proto.accountForget(agent, id))
+
+    /** chat id -> what its agent offers (model, permission mode, slash commands). */
+    var chatInfo by mutableStateOf<Map<String, ChatInfo>>(emptyMap())
+        private set
+
     /** Live transcript for an open chat: id -> list of items. */
     var chatTranscript by mutableStateOf<Map<String, List<ChatItem>>>(emptyMap())
         private set
     /** Chat state: id -> "idle" | "running" | "error". */
     var chatStates by mutableStateOf<Map<String, String>>(emptyMap())
-        private set
-    /** Streaming delta accumulator for active chat turn. */
-    var chatStreamBuf by mutableStateOf<Map<String, StringBuilder>>(emptyMap())
         private set
 
     // ── Freebuff control state ──
@@ -123,9 +150,9 @@ class WsClient(
         private set
     var fbAccounts by mutableStateOf<List<FbAccount>>(emptyList())
         private set
-    /** Last fb_skill_get / fb_config_get payload, consumed by dialogs. */
-    val _skillContent = kotlinx.coroutines.flow.MutableStateFlow("")
-    val _configContent = kotlinx.coroutines.flow.MutableStateFlow("")
+    /** fb_skill_get / fb_config_get payloads, for the dialog that asked. */
+    val skillContent = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val configContent = MutableSharedFlow<String>(extraBufferCapacity = 1)
 
     // ── Desktop control state (AnyDesk-style screen viewer) ──
     /** The PC's OS as Node names it (win32, darwin, linux); empty from a daemon too old to say. */
@@ -269,21 +296,20 @@ class WsClient(
     }
 
     /**
-     * The phone changed networks. A pending retry runs at once on the new network,
-     * and a LAN socket is replaced, since it cannot survive leaving that network.
-     * An iroh connection is left alone: it moves paths by itself.
+     * The phone changed networks: every live or pending link is redialled on the new one.
+     * An iroh link goes too, since its endpoint cannot see the change and keeps dead sockets.
      */
     fun onNetworkChanged(net: NetInfo) {
         if (net == network) return
         network = net
-        if (userClosed || lanUrl == null) return
-        val onLan = activeUrl == lanUrl && socket.get() != null
-        if (status == Status.Reconnecting || (status == Status.Connected && onLan && fallbackUrl != null)) {
-            retryJob?.cancel()
-            socket.getAndSet(null)?.let { it.cancel(); failTransfers("network changed") }
-            policy.reset()
-            reconnectNow()
-        }
+        IrohLink.Node.networkChanged()
+        if (userClosed || lanUrl == null || status == Status.Disconnected || status == Status.AwaitingTrust) return
+        retryJob?.cancel()
+        socket.getAndSet(null)?.cancel()
+        irohLink.getAndSet(null)?.close()
+        failTransfers("network changed")
+        policy.reset()
+        reconnectNow()
     }
 
     /** Opens the transport for [url] with the current token and pin; retries reuse it without resetting backoff. */
@@ -334,7 +360,7 @@ class WsClient(
         // Reopen pinned rather than reuse the probe socket: the daemon drops a
         // socket that sent no hello within 10 s, and a retry must not re-prompt.
         if (accepted && fp != null && url != null && token != null) {
-            connect(url, token, fp)
+            connect(url, token, fp, fallbackUrl)
         } else {
             close()
             lastError = "certificate rejected"
@@ -484,7 +510,6 @@ class WsClient(
         desktopResume = { send(Proto.desktopStart(quality)) }
         send(Proto.desktopStart(quality))
     }
-    /** Also the resync request: the daemon answers with a fresh config + keyframe. */
     /** What the connected PC reported for waking it later; saved with its entry. */
     var wakeInfo: WakeInfo? = null
         private set
@@ -524,7 +549,9 @@ class WsClient(
     var desktopNotice by mutableStateOf("")
         private set
     /** Desktop input; a view-only session sends none. */
-    private fun control(line: String): Boolean = !desktopViewOnly && send(line)
+    private fun control(line: String): Boolean = !desktopViewOnly && !desktopInputPaused && send(line)
+    /** Set on the phone only (fullscreen's mouse switch): taps and keys stop reaching the PC, the picture keeps going. */
+    var desktopInputPaused by mutableStateOf(false)
     /** saver / balanced / quality; sent with every start so a daemon restart keeps it. */
     var desktopPreset by mutableStateOf("balanced")
     /** Codecs this device can decode, best first; computed once and offered to the daemon. */
@@ -607,7 +634,10 @@ class WsClient(
     fun createChat(harness: String, cwd: String, prompt: String? = null): Boolean =
         send(Proto.chatSession(harness, cwd, prompt))
 
-    fun sendChatMessage(id: String, text: String): Boolean = send(Proto.chatMsg(id, text))
+    fun sendChatMessage(id: String, text: String, model: String? = null, mode: String? = null): Boolean = send(Proto.chatMsg(id, text, model, mode))
+
+    /** The chat on screen: its approvals show inside it, so the overlay card leaves them out. */
+    var viewingChat by mutableStateOf<String?>(null)
 
     fun cancelChat(id: String): Boolean = send(Proto.chatCancel(id))
 
@@ -750,7 +780,7 @@ class WsClient(
         val m = runCatching {
             Json.parseToJsonElement(text) as? JsonObject
         }.getOrNull() ?: return
-        when (val type = m["type"]?.jsonPrimitive?.contentOrNull) {
+        when (val type = str(m, "type")) {
             "welcome" -> {
                 str(m, "deviceToken")?.let { t ->
                     lastToken = t
@@ -764,9 +794,10 @@ class WsClient(
                 }
                 (m["wake"] as? JsonObject)?.let { w ->
                     val macs = (w["macs"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.let { o -> str(o, "mac") } } ?: emptyList()
-                    val bc = (w["broadcasts"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                    val bc = (w["broadcasts"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
                     if (macs.isNotEmpty()) wakeInfo = WakeInfo(macs, bc)
                 }
+                thumbsAsked.clear()
                 hostOs = str(m, "os") ?: ""
                 tools = Proto.parseTools(m)
                 sessions = Proto.parseSessions(m)
@@ -847,10 +878,21 @@ class WsClient(
                 sessions = Proto.parseSessions(m)
                 chats = Proto.parseChats(m)
             }
-            "created" -> str(m, "id")?.let { events.tryEmit(RhEvent.Created(it)) }
+            "created" -> str(m, "id")?.let { if (str(m, "kind") == "chat") pendingChat = it else events.tryEmit(RhEvent.Created(it)) }
+            "agent_panel" -> if (bool(m, "ok") == true) Proto.parseAgentPanel(m)?.let { agentPanels = agentPanels + (it.agent to it) } else failure(str(m, "error") ?: "no panel")
+            "agent_doc" -> if (bool(m, "ok") == true) agentDocs.tryEmit(AgentDoc(str(m, "agent") ?: "", str(m, "kind") ?: "", str(m, "name") ?: "", str(m, "content") ?: ""))
+                else failure(str(m, "error") ?: "could not open")
+            "agent_file_saved" -> if (bool(m, "ok") == true) str(m, "agent")?.let { send(Proto.agentPanel(it)) } else failure(str(m, "error") ?: "not saved")
+            "history" -> history = Proto.parseHistory(m)
+            "accounts" -> if (bool(m, "ok") == false) failure(str(m, "error") ?: "accounts unavailable")
+                else Proto.parseAccounts(m)?.let { agentAccounts = agentAccounts + (it.agent to it) }
+            "chat_info" -> str(m, "id")?.let { id -> chatInfo = chatInfo + (id to Proto.parseChatInfo(m)) }
+            "history_item" -> Proto.parseHistoryEntry(m)?.let { e ->
+                if (historyOpen?.first?.id == e.id) historyOpen = e to Proto.parseChatReplay(m["items"])
+            }
             "out", "replay" -> {
                 val id = str(m, "id") ?: return
-                m["seq"]?.jsonPrimitive?.longOrNull?.let { seq -> if (seq > (lastSeq[id] ?: 0L)) lastSeq[id] = seq }
+                num(m, "seq")?.let { seq -> if (seq > (lastSeq[id] ?: 0L)) lastSeq[id] = seq }
                 val data = str(m, "data") ?: return
                 onTerminalData?.invoke(id, data)
             }
@@ -864,11 +906,9 @@ class WsClient(
                 // The window opens on the PC, out of sight: success moves the
                 // phone to the desktop view, a refusal only reports itself.
                 val app = str(m, "harness") ?: ""
-                if (m["ok"]?.jsonPrimitive?.booleanOrNull == false) {
+                if (bool(m, "ok") == false) {
                     val reason = str(m, "reason") ?: "could not open the app"
-                    val msg = if (app.isEmpty()) reason else "$app: $reason"
-                    lastError = msg
-                    events.tryEmit(RhEvent.Failure(msg))
+                    failure(if (app.isEmpty()) reason else "$app: $reason")
                 } else {
                     events.tryEmit(RhEvent.GuiOpened(app))
                 }
@@ -914,11 +954,7 @@ class WsClient(
             )
             "fchunk" -> onFChunk(m)
             "fwritten" -> onFWritten(m)
-            "error" -> {
-                val msg = str(m, "message") ?: "unknown error"
-                lastError = msg
-                events.tryEmit(RhEvent.Failure(msg))
-            }
+            "error" -> failure(str(m, "message") ?: "unknown error")
             "chatreplay" -> {
                 val id = str(m, "id") ?: return
                 val items = Proto.parseChatReplay(m["items"])
@@ -933,19 +969,17 @@ class WsClient(
             "chatdelta" -> {
                 val id = str(m, "id") ?: return
                 val text = str(m, "text") ?: return
-                // Accumulate streaming deltas into the assistant message
-                val bufs = chatStreamBuf.toMutableMap()
-                val buf = bufs.getOrPut(id) { StringBuilder() }
-                buf.append(text)
-                chatStreamBuf = bufs
-                // Merge into transcript: update or create the trailing assistant item
                 mergeAssistantDelta(id, text)
             }
             "chartool" -> {
                 val id = str(m, "id") ?: return
                 val name = str(m, "name") ?: ""
                 val detail = str(m, "detail") ?: ""
-                appendChatItem(id, ChatItem.Tool(name, detail))
+                val item = ChatItem.Tool(name, detail, str(m, "toolId"))
+                val list = chatTranscript[id].orEmpty()
+                val at = item.toolId?.let { tid -> list.indexOfFirst { it is ChatItem.Tool && it.toolId == tid } } ?: -1
+                if (at < 0) appendChatItem(id, item)
+                else chatTranscript = chatTranscript + (id to list.toMutableList().also { it[at] = item })
             }
             "chattoolresult" -> {
                 val id = str(m, "id") ?: return
@@ -955,11 +989,7 @@ class WsClient(
             "chatstate" -> {
                 val id = str(m, "id") ?: return
                 val state = str(m, "state") ?: "idle"
-                chatStates = chatStates.toMutableMap().apply { put(id, state) }
-                if (state == "idle" || state == "error") {
-                    // Reset stream buffer for next turn
-                    chatStreamBuf = chatStreamBuf.toMutableMap().apply { remove(id) }
-                }
+                chatStates = chatStates + (id to state)
             }
             "fb_status" -> {
                 fbRunning = bool(m, "running")
@@ -983,7 +1013,7 @@ class WsClient(
                     val o = el as? JsonObject ?: return@mapNotNull null
                     FbConfig(
                         name = str(o, "name") ?: return@mapNotNull null,
-                        size = (o["size"] as? JsonPrimitive)?.longOrNull ?: 0L,
+                        size = num(o, "size") ?: 0L,
                         mtime = str(o, "mtime") ?: "",
                     )
                 } ?: emptyList()
@@ -1001,24 +1031,17 @@ class WsClient(
                 if (bool(m, "ok") == true) {
                     send(Proto.fbStatus()); send(Proto.fbAccounts())
                 } else {
-                    val msg = str(m, "error") ?: "Freebuff account change failed"
-                    lastError = msg
-                    events.tryEmit(RhEvent.Failure(msg))
+                    failure(str(m, "error") ?: "Freebuff account change failed")
                 }
             }
-            "fb_skill_get" -> {
-                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
-                    _skillContent.value = str(m, "content") ?: ""
-                }
-            }
-            "fb_config_get" -> {
-                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
-                    _configContent.value = m["content"]?.toString() ?: ""
-                }
-            }
+            "fb_skill_get" -> skillContent.tryEmit(if (bool(m, "ok") == true) str(m, "content") ?: "" else "Could not load: ${str(m, "error")}")
+            "fb_config_get" -> if (bool(m, "ok") == true) configContent.tryEmit(m["content"]?.toString() ?: "") else failure(str(m, "error") ?: "config unreadable")
+            "fb_config_set", "fb_skill_run", "fb_app_open", "fb_app_quit" ->
+                if (bool(m, "ok") == false) failure(str(m, "error") ?: "${type.removePrefix("fb_").replace('_', ' ')} failed")
+                else if (type == "fb_config_set") send(Proto.fbConfigList()) else if (type != "fb_skill_run") send(Proto.fbStatus())
             "desktop_started" -> {
                 desktopNotice = ""
-                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                if (bool(m, "ok") == true) {
                     desktopStreaming = true
                     desktopMode = str(m, "mode") ?: "jpeg"
                     desktopCodec = str(m, "codec") ?: "h264"
@@ -1062,17 +1085,17 @@ class WsClient(
                 val pic = if (fx != null && fy != null) desktopCalibration?.toPicture(fx, fy) ?: (fx to fy) else null
                 desktopCursor = DesktopCursor(x, y, str(m, "shape") ?: "arrow", pic?.first, pic?.second)
             }
-            "desktop_monitors" -> if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+            "desktop_monitors" -> if (bool(m, "ok") == true) {
                 desktopMonitors = (m["monitors"] as? JsonArray)?.mapIndexed { i, e ->
                     val o = e as? JsonObject
                     val w = (o?.get("w") as? JsonPrimitive)?.intOrNull
                     val h = (o?.get("h") as? JsonPrimitive)?.intOrNull
                     "${i + 1}" + (if (w != null && h != null) " · ${w}×$h" else "") +
-                        (if ((o?.get("primary") as? JsonPrimitive)?.booleanOrNull == true) " · main" else "")
+                        (if (o?.let { bool(it, "primary") } == true) " · main" else "")
                 } ?: emptyList()
             }
             "clipboard", "clipboard_changed" ->
-                if (type == "clipboard_changed" || m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                if (type == "clipboard_changed" || bool(m, "ok") == true) {
                     val files = (m["files"] as? JsonArray)?.mapNotNull { e ->
                         val o = e as? JsonObject ?: return@mapNotNull null
                         PcFile(str(o, "path") ?: return@mapNotNull null, str(o, "name") ?: "", num(o, "size"), bool(o, "dir") ?: false)
@@ -1080,7 +1103,7 @@ class WsClient(
                     pcClip.tryEmit(PcClip(str(m, "kind") ?: "text", str(m, "text"), str(m, "png"), files, type == "clipboard"))
                 } else _desktopError.value = "PC clipboard: " + (str(m, "error") ?: "failed")
             "clipboard_set_ok" ->
-                if (m["ok"]?.jsonPrimitive?.booleanOrNull != true) _desktopError.value = "PC clipboard: " + (str(m, "error") ?: "failed")
+                if (bool(m, "ok") != true) _desktopError.value = "PC clipboard: " + (str(m, "error") ?: "failed")
             "desktop_frame" -> {
                 val b64 = str(m, "base64") ?: return
                 desktopFrame = DesktopFrame(
@@ -1092,29 +1115,32 @@ class WsClient(
             "desktop_frame_error" ->
                 _desktopError.value = str(m, "reason") ?: "capture failed"
             "desktop_input_ok" ->
-                if (m["ok"]?.jsonPrimitive?.booleanOrNull == false)
+                if (bool(m, "ok") == false)
                     _desktopError.value = str(m, "error") ?: "input rejected"
             "model_list" -> {
                 val id = str(m, "id") ?: return
-                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
-                    val models = (m["models"] as? JsonArray)?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                if (bool(m, "ok") == true) {
+                    val models = (m["models"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
                     chatModels = chatModels.toMutableMap().apply { put(id, models) }
                     chatCurrentModel = chatCurrentModel.toMutableMap().apply { put(id, str(m, "current")) }
-                    chatModelCustom = if (m["custom"]?.jsonPrimitive?.booleanOrNull == true) chatModelCustom + id else chatModelCustom - id
+                    chatModelCustom = if (bool(m, "custom") == true) chatModelCustom + id else chatModelCustom - id
                 }
             }
             "chat_model_set" -> {
-                if (m["ok"]?.jsonPrimitive?.booleanOrNull == true) {
+                if (bool(m, "ok") == true) {
                     val id = str(m, "id") ?: return
                     chatCurrentModel = chatCurrentModel.toMutableMap().apply { put(id, str(m, "current")) }
                 } else {
-                    val msg = str(m, "error") ?: "model rejected"
-                    lastError = msg
-                    events.tryEmit(RhEvent.Failure(msg))
+                    failure(str(m, "error") ?: "model rejected")
                 }
             }
             else -> {}
         }
+    }
+
+    private fun failure(msg: String) {
+        lastError = msg
+        events.tryEmit(RhEvent.Failure(msg))
     }
 
     private fun appendChatItem(chatId: String, item: ChatItem) {
@@ -1138,12 +1164,6 @@ class WsClient(
         }
     }
 
-    private fun bool(o: JsonObject, key: String): Boolean? = o[key]?.jsonPrimitive?.booleanOrNull
-
-    private fun num(o: JsonObject, key: String): Long? = o[key]?.jsonPrimitive?.contentOrNull?.toLongOrNull()
-
-    private fun str(o: JsonObject, key: String): String? = o[key]?.jsonPrimitive?.contentOrNull
-
     /** Re-attach every session the UI had open, replaying only missed seqs. */
     private fun reattachAll() {
         for (id in attachedSessions.toList()) {
@@ -1164,7 +1184,10 @@ class WsClient(
 
     private fun scheduleReconnectOnMain() {
         // A LAN url that failed here is skipped on this network from now on.
+        // When the fallback fails too, the PC is down rather than off this LAN: retries alternate again,
+        // or a PC that comes back would stay on the relay while the phone sits on its Wi-Fi.
         if (activeUrl != null && activeUrl == lanUrl) lanFailedOn = network.id ?: ""
+        else if (activeUrl != null && activeUrl == fallbackUrl) lanFailedOn = null
         if (userClosed || route() == null || lastToken == null) {
             status = Status.Disconnected
             return

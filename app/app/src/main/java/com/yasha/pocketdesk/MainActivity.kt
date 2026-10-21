@@ -38,6 +38,7 @@ import androidx.navigation3.runtime.NavKey
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
+import com.yasha.pocketdesk.ui.AgentScreen
 import com.yasha.pocketdesk.ui.ChatScreen
 import com.yasha.pocketdesk.ui.DesktopScreen
 import com.yasha.pocketdesk.ui.ConnectScreen
@@ -64,6 +65,7 @@ sealed interface Screen : NavKey {
     @Serializable data object Files : Screen
     @Serializable data object Ssh : Screen
     @Serializable data class Terminal(val sessionId: String) : Screen
+    @Serializable data class Agent(val id: String) : Screen
 }
 
 // Generated serializers per subclass, so a saved back stack survives R8 renaming without reflection.
@@ -157,7 +159,8 @@ class MainActivity : ComponentActivity() {
         fun back() = if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) else showTab(Screen.Sessions)
         var desktopFullscreen by rememberSaveable { mutableStateOf(false) }
         var desktopKeys by rememberSaveable { mutableStateOf(false) }
-        LaunchedEffect(screen) { if (screen != Screen.Desktop) desktopFullscreen = false }
+        // Fullscreen and the desktop keyboard are per visit: the Desktop tab opens with neither.
+        LaunchedEffect(screen) { if (screen != Screen.Desktop) { desktopFullscreen = false; desktopKeys = false } }
         com.yasha.pocketdesk.ui.DesktopFullscreenEffect(desktopFullscreen)
 
         if (locked) {
@@ -170,6 +173,9 @@ class MainActivity : ComponentActivity() {
         val connected = client.status == Status.Connected
 
         Scaffold(
+            // Fullscreen desktop reaches every edge, cutout included.
+            contentWindowInsets = if (desktopFullscreen) androidx.compose.foundation.layout.WindowInsets(0)
+                else androidx.compose.material3.ScaffoldDefaults.contentWindowInsets,
             bottomBar = {
                 // The desktop keyboard needs the room, so the tabs step aside while it is open.
                 if (connected && screen !is Screen.Terminal && !desktopFullscreen && !(screen == Screen.Desktop && desktopKeys)) {
@@ -252,11 +258,13 @@ class MainActivity : ComponentActivity() {
                                 openTerminal = { open(Screen.Terminal(it)) },
                                 openSsh = { open(Screen.Ssh) },
                                 openFreebuff = { open(Screen.Freebuff) },
+                                openAgent = { open(Screen.Agent(it)) },
+                                openChats = { showTab(Screen.Chats) },
                                 lock = lock,
                             )
                         }
                         entry<Screen.Sessions> { SessionsScreen(client, openTerminal = { open(Screen.Terminal(it)) }) }
-                        entry<Screen.Chats> { ChatScreen(client) }
+                        entry<Screen.Chats> { ChatScreen(client, openTerminal = { open(Screen.Terminal(it)) }) }
                         entry<Screen.Files> { FilesScreen(client) }
                         entry<Screen.Freebuff> { FreebuffScreen(client, openDesktop = { open(Screen.Desktop) }) }
                         entry<Screen.Desktop> {
@@ -270,6 +278,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         entry<Screen.Ssh> { SshScreen(client, onClose = { back() }) }
+                        entry<Screen.Agent> { AgentScreen(client, it.id, onClose = { back() }, openChats = { showTab(Screen.Chats) }) }
                         entry<Screen.Terminal> { TerminalScreen(client, it.sessionId, onClose = { back() }) }
                     },
                 )

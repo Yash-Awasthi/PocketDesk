@@ -5,6 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 import { WebSocketServer } from "ws";
 import * as registry from "./registry.js";
 import * as sessions from "./sessions.js";
@@ -58,7 +59,7 @@ const PAUSE_ALLOWED = new Set([
   "bastion_user_list", "bastion_host_list", "bastion_sessions", "bastion_stats", "bastion_stop", "sshserver_user_list",
   "sshserver_sessions", "sshserver_stats", "sshserver_stop", "profile_list", "profile_disconnect", "hostkey_list", "sshkey_list", "mproto_status",
   "proposal_list", "reject", "stats", "fb_status", "fb_config_list", "fb_config_get", "fb_skill_list", "fb_skill_get",
-  "fb_auth_status", "fb_accounts", "stream_parse", "stream_stats", "doctor", "device_list",
+  "fb_auth_status", "fb_accounts", "stream_parse", "stream_stats", "doctor", "device_list", "history_list", "history_get", "agent_panel", "agent_doc", "accounts_list",
 ]);
 const AUDIT_SKIP = new Set(["in", "resize", "video_ack", "desktop_ping", "desktop_frame", "desktop_mouse", "desktop_key", "desktop_type"]);
 
@@ -168,7 +169,7 @@ export function start(config, { onTokenRotated } = {}) {
         res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
         res.end(JSON.stringify(obj));
       };
-      const status = () => ({ hasPassword: access.hasPassword, controlAllowed: access.controlAllowed, totpEnabled: totp.enabled(), recording: recorder.enabled });
+      const status = () => ({ hasPassword: access.hasPassword, controlAllowed: access.controlAllowed, totpEnabled: totp.enabled(), recording: recorder.enabled, remoteOn: access.remoteOn });
       if (req.method === "GET") {
         if (path0 === "/access") return reply(200, status());
         if (path0 === "/access/devices") return reply(200, { items: devices.list() });
@@ -183,6 +184,15 @@ export function start(config, { onTokenRotated } = {}) {
           const id = String(msg.clientId ?? "");
           if (path0 === "/access/control") access.setControlAllowed(msg.allowed !== false);
           else if (path0 === "/access/password") access.setPassword(typeof msg.password === "string" ? msg.password : "");
+          else if (path0 === "/access/remote") access.setRemoteOn(msg.on !== false);
+          else if (path0 === "/access/uninstall") {
+            // Detached, because the uninstaller stops this daemon; it may ask for elevation on the PC.
+            const script = path.join(process.env.LOCALAPPDATA || "", "PocketDesk", "uninstall.ps1");
+            if (process.platform !== "win32" || !fs.existsSync(script)) return reply(400, { ok: false, error: "no installed copy to uninstall; run uninstall.sh or remove the checkout" });
+            spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, ...(msg.removeData ? ["-RemoveData"] : [])],
+              { detached: true, stdio: "ignore" }).unref();
+            return reply(200, { ok: true });
+          }
           else if (path0 === "/access/record") {
             if (msg.on) fs.writeFileSync(RECORD_FLAG, "");
             else fs.rmSync(RECORD_FLAG, { force: true });
@@ -196,6 +206,9 @@ export function start(config, { onTokenRotated } = {}) {
           } else if (path0 === "/access/devices/allow") {
             const r = devices.allow(id);
             return reply(r.ok ? 200 : 404, r);
+          } else if (path0 === "/access/devices/remove") {
+            const r = devices.remove(id);
+            return reply(r.ok ? 200 : 400, r);
           } else if (path0 === "/access/totp/setup") return reply(200, { ok: true, ...totp.setup(os.hostname()) });
           else if (path0 === "/access/totp/enable" || path0 === "/access/totp/disable") {
             const ok = path0 === "/access/totp/enable" ? totp.enable(String(msg.code ?? "")) : totp.disable(String(msg.code ?? ""));
@@ -263,6 +276,8 @@ export function start(config, { onTokenRotated } = {}) {
 
   wss.on("connection", (ws, req) => {
     if (stopping) return ws.close(stopping.code, stopping.reason);
+    // 4100: the phone shows why and does not keep retrying until it is switched back on.
+    if (!access.remoteOn) return ws.close(4100, "remote access is switched off on the PC");
     // Read off `req`: ws exposes the socket as `_socket`, so `ws.socket?.remoteAddress` was always
     // undefined and every client shared one rate-limit counter, locking out the whole LAN.
     const clientIp = (req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
@@ -444,6 +459,7 @@ export function start(config, { onTokenRotated } = {}) {
   // to each watching ws, too heavy to broadcast; the capture loop runs only while a watcher is attached.
   const desktop = new DesktopController();
   const access = createAccess(config);
+  access.onRemoteChange = (on) => { if (!on) for (const ws of wss.clients) try { ws.close(4100, "remote access is switched off on the PC"); } catch {} };
   const recorder = new Recorder();
   const desktopWatchers = new Set();
   desktop.on("frame", (frame) => {

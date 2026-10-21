@@ -65,6 +65,12 @@ Status legend:
 |---|---|---|
 | Chat streaming w/ tool events (claude stream-json, codex-json, text) | claude-code, claude-stream-json-parser | ⚙️ |
 | Conversation resume | claude-code `--continue`, codex `exec resume --last` | ⚙️ |
+| Token-by-token Claude replies | claude-code `--include-partial-messages` | ✅ `stream_event` text deltas become `chatdelta`; the whole message that follows is not repeated |
+| Past conversations of every agent, per app | claude-code `~/.claude/projects`, codex `~/.codex/sessions`, VS Code chatSessions, Cline tasks, Cursor `state.vscdb`, Antigravity summaries db | ✅ `history_list`/`history_get`; Claude Code and Codex continue by session id (`history_resume`, chat or terminal) |
+| Live tool calls and in-chat approvals | claude-code stream-json `content_block_start` | ✅ `chartool` with `toolId`, sent at block start and updated when the input completes; a chat's own approvals render inside it |
+| Model and permission mode per message | claude-code `--model`, `--permission-mode` | ✅ `chatmsg {model?, mode?}` applies to that turn only |
+| Slash command picker | claude-code init `slash_commands` | ✅ `chat_info` carries the agent's commands and skills (cached per agent, from disk before the first turn) plus the daemon's own |
+| Per-agent skills, commands and settings | claude-code skills/commands/plugins, codex prompts, gemini commands | ✅ `agent_panel`/`agent_doc`/`agent_file_set`; files are an allowlist per agent, JSON must parse before it is written |
 | SDK adapter (launch/prompt/approve/interrupt/subscribe) | claude-code SDK, codex SDK | ⚙️ |
 | Queued follow-ups while agent runs | 1code, ccpocket, oc-remote | ✅ `prompt_enqueue`/`prompt_queue`/`prompt_remove` — server-side queue drains automatically when the turn finishes (phone can enqueue and walk away) |
 | Permission-mode switching per run | agent-tmux-web, claude-threads, control-room | ✅ `chat_permission` runtime switch per chat |

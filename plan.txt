@@ -1,0 +1,36 @@
+PocketDesk follow-ups
+
+Done
+- Android 17 local network permission; in-app QR scanner.
+- Wi-Fi <-> mobile data switch redials (LAN or iroh) without restarting the app.
+- History of every agent's saved conversations, per agent and app (Claude Code CLI/VS Code, Codex,
+  Copilot Chat, Cline, Roo, Cursor, Antigravity); Claude Code and Codex continue as a chat or a terminal.
+- Claude Code replies stream token by token; slash command picker with the agent's commands and skills.
+- Agent panel (Tools > agent > Skills, commands & settings): skills incl. plugin skills, custom
+  commands, settings and memory files (view, edit, run as a chat).
+- Under Smart App Control the scheduled task and Start-menu entry run signed binaries only
+  (run-daemon.ps1, open-pairing.ps1); the compiled launcher is blocked there.
+- After the PC daemon restarts, the phone returns to the LAN address instead of staying on the relay.
+- Claude Code tool calls show the moment they start; a chat's approvals are answered inside it.
+- A model and permission mode can be picked for the next message only.
+- Starting a tool, chat or app waits for the daemon's first registry scan (no "not installed" right after start).
+
+- Settings files shown in the agent panel have tokens and API keys masked; saving keeps the real values.
+- Checked on the phone: tool calls stream once each, an approval is answered inside its chat (Deny
+  reached Claude), "Next message" model and mode reach the CLI and reset after sending.
+
+Open
+- Copilot, Cline, Roo, Cursor and Antigravity conversations are read-only: none of them can be
+  resumed from outside their editor. Continue them on the Desktop view (Open in <IDE>).
+- VS Code extension chat panels (Claude Code, Codex, Copilot, Cline) have no external API to drive;
+  the Desktop view is the only way to type into them.
+- Codex, Cline, Roo and Cursor history readers are verified against fixtures only; check them on a PC
+  that has those stores.
+- Antigravity transcripts come from its search index: turns are grouped by chunk, not by step.
+- Slash commands of agents other than Claude Code are sent as the chat prompt; confirm Gemini, Qwen
+  and OpenCode expand them in headless mode.
+- Freebuff keeps its own screen; fold it into the agent panel once Freebuff stores skills elsewhere
+  than ~/.claude/skills.
+- desktop_mouse/desktop_key answer every input with desktop_input_ok; replying only on failure would
+  save the relay link bandwidth, but the browser client and tests expect the replies.
+- SSH (server, bastion, client) works but is outside the agent workflow; keep it under Tools.

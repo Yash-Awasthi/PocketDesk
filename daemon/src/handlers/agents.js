@@ -12,6 +12,28 @@ import * as scheduler from "../scheduler.js";
 import * as approvalGuard from "../approval_guard.js";
 import * as statsUsage from "../stats_usage.js";
 import * as planMode from "../plan_mode.js";
+import * as agentHistory from "../agent_history.js";
+import * as agentPanel from "../agent_panel.js";
+import * as accounts from "../accounts.js";
+import { isRunning } from "../freebuff_control.js";
+
+/** Starts a chat attached to [ws] and sends its first prompt; returns { error } when the harness cannot chat. */
+export function startChat({ send, broadcast, allSessions, plugins, power }, ws, harness, cwd, prompt, resume = {}) {
+  const m = registry.get(harness);
+  if (!m) return { error: `unknown harness: ${harness}` };
+  if (!chat.supported(m)) return { error: `${m.name} has no chat adapter` };
+  if (!registry.isInstalled(m.id)) return { error: `${m.name} is not installed` };
+  const s = chat.create({ manifest: m, cwd, ...resume });
+  sessionStore.upsert(s.id, { name: m.name, project: cwd || "", type: "chat", status: "idle" });
+  plugins.callHook("onChatCreated", s);
+  power.addStatus({ agentId: s.id, state: "running", receivedAt: Date.now() });
+  chat.attach(s.id, ws);
+  send(ws, { type: "created", ...s });
+  // A sent prompt changes the chat's state, and every state change already broadcasts the list.
+  const text = String(prompt ?? "").trim();
+  if (!text || !chat.sendUserMessage(chat.get(s.id), text)) broadcast({ type: "sessions", items: allSessions() });
+  return { chat: s };
+}
 
 export default function agentsHandlers(ctx) {
   const { send, broadcast, allSessions, plugins, power, activity } = ctx;
@@ -57,6 +79,7 @@ export default function agentsHandlers(ctx) {
       registry.install(msg.id, broadcast).catch((e) => send(ws, { type: "error", message: `install failed: ${e?.message || e}` }));
     },
     async create(ws, msg) {
+      await registry.ready;
       // A discovered CLI tool has no manifest, so the phone sends its path
       // instead of a harness id; the PTY does not care which it was.
       // The path reaches the PTY's `cmd /c`, so only a discovered tool is
@@ -76,26 +99,16 @@ export default function agentsHandlers(ctx) {
       send(ws, { type: "created", ...s });
     },
     async chatsession(ws, msg) {
-      const m = registry.get(msg.harness);
-      if (!m) return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
-      if (!chat.supported(m)) return send(ws, { type: "error", message: `${m.name} has no chat adapter` });
-      if (!registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
-      const s = chat.create({ manifest: m, cwd: msg.cwd });
-      sessionStore.upsert(s.id, { name: m.name, project: msg.cwd || "", type: "chat", status: "idle" });
-      plugins.callHook("onChatCreated", s);
-      power.addStatus({ agentId: s.id, state: "running", receivedAt: Date.now() });
-      chat.attach(s.id, ws);
-      send(ws, { type: "created", ...s });
-      if (String(msg.prompt || "").trim()) {
-        chat.sendUserMessage(chat.get(s.id), String(msg.prompt));
-      }
-      broadcast({ type: "sessions", items: allSessions() });
+      await registry.ready;
+      const r = startChat(ctx, ws, msg.harness, msg.cwd, msg.prompt);
+      if (r.error) send(ws, { type: "error", message: r.error });
     },
     async chatmsg(ws, msg) {
       const c = chat.get(msg.id);
       if (!c) return send(ws, { type: "error", message: `no such chat: ${msg.id}` });
       if (c.state === "running") return send(ws, { type: "error", message: "still working on the previous prompt" });
-      chat.attach(msg.id, ws);
+      // Attaching again would replay the whole transcript on every message.
+      if (!ws._subs.has("chat:" + msg.id)) chat.attach(msg.id, ws);
       let text = String(msg.text || "");
       const result = text ? slashCommands.handle(text, msg.id) : null;
       if (result !== null) {
@@ -104,8 +117,15 @@ export default function agentsHandlers(ctx) {
       }
       const imagePaths = chat.saveAttachments(msg.id, msg.images);
       if (imagePaths.length) text = `${text}\n\nAttached image(s): ${imagePaths.join(", ")}`.trim();
-      chat.sendUserMessage(c, text);
-      broadcast({ type: "sessions", items: allSessions() });
+      // A model or permission mode sent with the message applies to this turn only.
+      const once = {};
+      if ("model" in msg) {
+        const model = msg.model ? String(msg.model) : null;
+        if (!chat.modelAllowed(c, model)) return send(ws, { type: "error", message: `unknown model: ${model}` });
+        once.model = model;
+      }
+      if (msg.mode) once.permissionMode = String(msg.mode);
+      chat.sendUserMessage(c, text, once);
     },
     // ── Chat forking (1code): clone transcript up to a message into a sub-chat ──
     // ── Sessions list on request (phone reconnect asks for current state) ──
@@ -150,12 +170,10 @@ export default function agentsHandlers(ctx) {
       }).filter(Boolean).join("\n\n");
       send(ws, { type: "chat_text", id: c.id, text });
     },
+    // Cancelling a running turn changes its state, which broadcasts the list.
     async chatcancel(ws, msg) {
       const c = chat.get(msg.id);
-      if (c) {
-        chat.cancel(c);
-        broadcast({ type: "sessions", items: allSessions() });
-      }
+      if (c) chat.cancel(c);
     },
     async attach(ws, msg) {
       if (!chat.attach(msg.id, ws) && !sessions.attach(msg.id, ws, { since: msg.since })) {
@@ -210,13 +228,10 @@ export default function agentsHandlers(ctx) {
       sessions.resize(msg.id, msg.cols, msg.rows);
     },
     async kill(ws, msg) {
-      if (chat.get(msg.id)) {
-        chat.cancel(chat.get(msg.id));
-        sessionStore.setStatus(msg.id, "killed");
-      } else {
-        sessions.kill(msg.id);
-        sessionStore.setStatus(msg.id, "killed");
-      }
+      const c = chat.get(msg.id);
+      if (c) chat.cancel(c);
+      else sessions.kill(msg.id);
+      sessionStore.setStatus(msg.id, "killed");
       power.removeStatus(msg.id);
       broadcast({ type: "sessions", items: allSessions() });
     },
@@ -235,6 +250,7 @@ export default function agentsHandlers(ctx) {
     // GUI apps have no PTY to stream, so this only starts the process. The
     // phone then watches and drives it through the desktop frame stream.
     async gui_open(ws, msg) {
+      await registry.ready;
       // `path` is a discovered application with no manifest behind it.
       const label = String(msg.harness || msg.path || "");
       const known = msg.path ? appDiscovery.find(String(msg.path)) : null;
@@ -341,6 +357,56 @@ export default function agentsHandlers(ctx) {
         if (hits.length >= 50) break;
       }
       send(ws, { type: "chat_search", query: msg.query, items: hits });
+    },
+    // ── Agent history: conversations every agent on this PC saved, per agent and app ──
+    async history_list(ws, msg) {
+      send(ws, { type: "history", agent: msg.agent ?? null, items: await agentHistory.list(msg.agent ? String(msg.agent) : null) });
+    },
+    async history_get(ws, msg) {
+      const h = await agentHistory.get(String(msg.agent ?? ""), String(msg.id ?? ""));
+      send(ws, h ? { type: "history_item", ...h } : { type: "error", message: "that conversation is no longer on the PC" });
+    },
+    // Continues a saved Claude Code or Codex conversation by its own id: as a phone chat, or in the agent's terminal UI.
+    async history_resume(ws, msg) {
+      await registry.ready;
+      const h = await agentHistory.get(String(msg.agent ?? ""), String(msg.id ?? ""));
+      if (!h?.resumable) return send(ws, { type: "error", message: "only Claude Code and Codex conversations can be continued" });
+      if (msg.mode === "terminal") {
+        const args = h.agent === "codex" ? ["resume", h.id] : ["--resume", h.id];
+        return self.create(ws, { harness: h.agent, cwd: h.cwd, args });
+      }
+      const transcript = h.items.map((it) => (it.role === "tool" ? { role: "tool", name: it.name, detail: it.detail } : { role: it.role, text: it.text }));
+      const r = startChat(ctx, ws, h.agent, h.cwd, null, { cliSession: h.id, resumeFirst: true, transcript });
+      if (r.error) send(ws, { type: "error", message: r.error });
+    },
+    // ── Agent panel: skills, custom commands and settings files of any agent ──
+    async agent_panel(ws, msg) {
+      send(ws, { type: "agent_panel", ...agentPanel.panel(String(msg.agent ?? "")) });
+    },
+    async agent_doc(ws, msg) {
+      send(ws, { type: "agent_doc", ...agentPanel.readDoc(String(msg.agent ?? ""), String(msg.kind ?? ""), String(msg.name ?? "")) });
+    },
+    async agent_file_set(ws, msg) {
+      send(ws, { type: "agent_file_saved", ...agentPanel.writeFile(String(msg.agent ?? ""), String(msg.name ?? ""), msg.content) });
+    },
+    // ── Account switching: saved logins per agent, restored on the PC; tokens never leave it ──
+    async accounts_list(ws, msg) {
+      send(ws, { type: "accounts", ...(await accounts.list(String(msg.agent ?? ""))) });
+    },
+    async account_save(ws, msg) {
+      const agent = String(msg.agent ?? "");
+      const r = await accounts.save(agent, msg.label);
+      send(ws, r.ok ? { type: "accounts", ...(await accounts.list(agent)) } : { type: "error", message: r.error });
+    },
+    async account_switch(ws, msg) {
+      const agent = String(msg.agent ?? "");
+      const r = await accounts.switchTo(agent, String(msg.id ?? ""), isRunning);
+      send(ws, r.ok ? { type: "accounts", ...(await accounts.list(agent)) } : { type: "error", message: r.error });
+    },
+    async account_forget(ws, msg) {
+      const agent = String(msg.agent ?? "");
+      const r = accounts.forget(agent, String(msg.id ?? ""));
+      send(ws, r.ok ? { type: "accounts", ...(await accounts.list(agent)) } : { type: "error", message: r.error });
     },
     // ── Hot manifest reload (frp: config reload without restart) ─────
     async manifest_reload(ws, msg) {
