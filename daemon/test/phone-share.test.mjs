@@ -48,15 +48,24 @@ try {
   await wait(300);
   check("phone video reaches the watcher as kinds 16-18", pcVideo.map((b) => b[0]).join() === "16,17,18");
   check("video from a socket that is not sharing is ignored", pcVideo.every((b) => b[1] !== 7));
+  // A rooted phone adds live panes: slot n sends kinds 4n..4n+2; slots past 3 are dropped.
+  for (const b of [4, 5, 6, 13, 16]) phone.ws.send(Buffer.from([b, 0, 0, 0, 1, 9]));
+  await wait(300);
+  check("pane video keeps its slot", pcVideo.slice(3).map((b) => b[0]).join() === "20,21,22,29");
 
   pc.send({ type: "phone_input", kind: "tap", fx: 0.25, fy: 0.75 });
   const tap = await phone.next((m) => m.type === "phone_input");
   check("watcher input reaches the phone", tap.kind === "tap" && tap.fx === 0.25 && tap.fy === 0.75);
+  pc.send({ type: "phone_input", kind: "tap", fx: 0.5, fy: 0.5, slot: 2 });
+  check("pane input keeps its slot", (await phone.next((m) => m.type === "phone_input" && m.slot != null)).slot === 2);
   other.send({ type: "phone_input", kind: "key", key: "home" });
   check("input from a socket that is not watching is refused", /not watching/.test((await other.next((m) => m.type === "error")).message));
 
   phone.send({ type: "phone_apps", apps: [{ pkg: "com.google.android.gm", label: "Gmail" }, { pkg: "com.google.android.apps.maps", label: "Maps" }] });
   check("recent apps reach the watcher", (await pc.next((m) => m.type === "phone_apps")).apps.length === 2);
+  phone.send({ type: "phone_apps", apps: [{ pkg: "a", label: "A", slot: 1 }, { pkg: "b", label: "B", slot: 9 }] });
+  const slots = (await pc.next((m) => m.type === "phone_apps" && m.apps[0]?.pkg === "a")).apps.map((a) => a.slot);
+  check("live panes name their slot, bad slots are dropped", slots[0] === 1 && slots[1] === undefined);
   pc.send({ type: "phone_switch", pkg: "com.google.android.apps.maps" });
   check("an app switch reaches the phone", (await phone.next((m) => m.type === "phone_switch")).pkg === "com.google.android.apps.maps");
 
@@ -76,6 +85,14 @@ try {
   await wait(300);
   phone.send({ type: "phone_fs_result", rid: again.rid, items: [{ name: "real" }] });
   check("only the phone can answer", (await pc.next((m) => m.type === "phone_fs_result" && m.rid === 8)).items[0].name === "real");
+  const phone2 = await phoneHello();
+  pc.send({ type: "phone_fs", op: "list", path: "/x", rid: 10 });
+  const ask2 = await phone.next((m) => m.type === "phone_fs" && m.path === "/x");
+  phone2.send({ type: "phone_fs_result", rid: ask2.rid, items: [{ name: "forged" }] });
+  await wait(300);
+  phone.send({ type: "phone_fs_result", rid: ask2.rid, items: [{ name: "asked" }] });
+  check("another phone cannot answer for the one asked", (await pc.next((m) => m.type === "phone_fs_result" && m.rid === 10)).items[0].name === "asked");
+  await phone2.close();
 
   pc.send({ type: "phone_share_end" });
   check("swapping back from the PC stops the phone", !!(await phone.next((m) => m.type === "phone_share_stop")));

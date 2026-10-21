@@ -213,11 +213,12 @@ object Proto {
         put("type", "phone_fs_result"); put("rid", rid)
         for ((k, v) in reply) put(k, v)
     }
-    fun phoneApps(active: Pair<String, String>?, apps: List<Pair<String, String>>) = obj {
+    /** [apps] are (package, label, live pane slot or null). */
+    fun phoneApps(active: Pair<String, String>?, apps: List<Triple<String, String, Int?>>) = obj {
         put("type", "phone_apps")
         active?.let { (pkg, label) -> put("active", buildJsonObject { put("pkg", pkg); put("label", label) }) }
         put("apps", kotlinx.serialization.json.buildJsonArray {
-            for ((pkg, label) in apps) add(buildJsonObject { put("pkg", pkg); put("label", label) })
+            for ((pkg, label, slot) in apps) add(buildJsonObject { put("pkg", pkg); put("label", label); slot?.let { put("slot", it) } })
         })
     }
     fun install(id: String) = obj { put("type", "install"); put("id", id) }
@@ -233,8 +234,9 @@ object Proto {
         put("type", "gui_open"); put("path", path); put("cwd", cwd)
     }
 
-    fun create(harness: String, cwd: String) = obj {
+    fun create(harness: String, cwd: String, worktree: Boolean = false) = obj {
         put("type", "create"); put("harness", harness); put("cwd", cwd)
+        if (worktree) put("worktree", true)
     }
 
     fun createPath(path: String, cwd: String) = obj {
@@ -326,8 +328,9 @@ object Proto {
         if (model != null) put("model", model)
     }
 
-    fun chatSession(harness: String, cwd: String, prompt: String?) = obj {
+    fun chatSession(harness: String, cwd: String, prompt: String?, worktree: Boolean = false) = obj {
         put("type", "chatsession"); put("harness", harness); put("cwd", cwd)
+        if (worktree) put("worktree", true)
         if (!prompt.isNullOrBlank()) put("prompt", prompt)
     }
 
@@ -356,6 +359,8 @@ object Proto {
         put("type", "agent_file_set"); put("agent", agent); put("name", name); put("content", content)
     }
     fun historyList() = obj { put("type", "history_list") }
+    fun recordingsList() = obj { put("type", "recordings_list") }
+    fun recordingGet(name: String) = obj { put("type", "recording_get"); put("name", name) }
     fun historyGet(agent: String, id: String) = obj { put("type", "history_get"); put("agent", agent); put("id", id) }
     fun historyResume(agent: String, id: String, terminal: Boolean) = obj {
         put("type", "history_resume"); put("agent", agent); put("id", id); if (terminal) put("mode", "terminal")

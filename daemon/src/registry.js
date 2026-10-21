@@ -11,6 +11,18 @@ const userDir = process.env.RH_MANIFESTS || path.join(process.env.USERPROFILE ||
 
 export const registry = new Map();
 
+/**
+ * A manifest as this OS sees it: `platforms.<os>` (or `platforms.unix` off Windows) overrides its fields,
+ * and a bin of `$SHELL` is the login shell.
+ */
+export function forPlatform(m, platform = process.platform, env = process.env) {
+  if (!m.platforms) return m;
+  const { platforms, ...base } = m;
+  const out = { ...base, ...(platforms[platform] ?? (platform !== "win32" ? platforms.unix : null) ?? {}) };
+  if (out.bin === "$SHELL") out.bin = env.SHELL || "/bin/sh";
+  return out;
+}
+
 function loadManifests() {
   registry.clear();
   for (const dir of [builtinDir, userDir]) {
@@ -18,7 +30,7 @@ function loadManifests() {
     for (const f of fs.readdirSync(dir)) {
       if (!f.endsWith(".json")) continue;
       try {
-        const m = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+        const m = forPlatform(JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")));
         m.adapter = m.adapter || "terminal";
         registry.set(m.id, m);
       } catch (e) {

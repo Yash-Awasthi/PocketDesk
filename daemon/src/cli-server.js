@@ -13,7 +13,7 @@ function allSessions() {
 let cliServer = null;
 
 /** `broadcast` reaches every connected client, so a terminal started here shows up on the phone too. */
-export function start(getToken, { broadcast = () => {}, allSessions: listAll = allSessions } = {}, port = Number(process.env.RH_CLI_PORT) || 4679) {
+export function start(getToken, { broadcast = () => {}, allSessions: listAll = allSessions, pairLink = () => "" } = {}, port = Number(process.env.RH_CLI_PORT) || 4679) {
   cliServer = http.createServer((req, res) => {
     // A DNS-rebound web page reaches 127.0.0.1 under its own Host.
     if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(req.headers.host || "")) {
@@ -68,7 +68,9 @@ export function start(getToken, { broadcast = () => {}, allSessions: listAll = a
         }
         const json = () => (body ? JSON.parse(body) : {});
 
-        if (path === "/term" && req.method === "GET") {
+        if (path === "/pair" && req.method === "GET") {
+          result = { link: pairLink() };
+        } else if (path === "/term" && req.method === "GET") {
           result = sessions.summary();
         } else if (path === "/term" && req.method === "POST") {
           const { harness = "shell", cwd } = json();

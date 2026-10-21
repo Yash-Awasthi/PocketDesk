@@ -2,11 +2,14 @@ using System;
 using System.Diagnostics;
 using System.ComponentModel;
 using System.IO;
+using System.Net;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
+using System.Text;
 
 // Windowless launcher for the hidden daemon. Three uses:
 //   PocketDeskLauncher.exe            — a person opening the app: start the daemon if it is not
@@ -70,8 +73,28 @@ namespace PocketDeskLauncher
             // The URL carries the master token; a program squatting the port must not receive it. A
             // plaintext daemon cannot be told from a squatter, and only exists when TLS setup failed.
             if (tls && !IsOurDaemon(port)) return;
+            // The loopback page (port + 10) opens without a certificate warning, once it proves it holds the token.
+            int n;
+            if (tls && int.TryParse(port, out n) && ProvesToken(n + 10, token)) { tls = false; port = (n + 10).ToString(); }
             string url = (tls ? "https" : "http") + "://localhost:" + port + "/pair?k=" + Uri.EscapeDataString(token);
             try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
+        }
+
+        /** True when the port answers a fresh nonce with the token's HMAC, which only the daemon can compute. */
+        static bool ProvesToken(int port, string token)
+        {
+            try
+            {
+                string nonce = Guid.NewGuid().ToString("N");
+                var req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:" + port + "/prove?n=" + nonce);
+                req.Timeout = 3000;
+                string got;
+                using (var res = req.GetResponse())
+                using (var r = new StreamReader(res.GetResponseStream())) got = r.ReadToEnd();
+                using (var h = new HMACSHA256(Encoding.UTF8.GetBytes(token)))
+                    return got == BitConverter.ToString(h.ComputeHash(Encoding.UTF8.GetBytes(nonce))).Replace("-", "").ToLowerInvariant();
+            }
+            catch { return false; }
         }
 
         static bool IsElevated()

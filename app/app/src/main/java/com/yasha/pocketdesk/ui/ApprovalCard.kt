@@ -1,5 +1,9 @@
 package com.yasha.pocketdesk.ui
 
+import android.content.Intent
+import android.speech.RecognizerIntent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -48,6 +52,19 @@ fun ApprovalCard(ws: WsClient, modifier: Modifier = Modifier) {
 @Composable
 fun ProposalCard(ws: WsClient, p: Proposal, more: Int = 0, modifier: Modifier = Modifier) {
     var expanded by remember(p.id) { mutableStateOf(false) }
+    var heard by remember(p.id) { mutableStateOf<String?>(null) }
+    val decide = { d: Decision ->
+        when (d) {
+            Decision.Allow -> ws.approve(p.id)
+            Decision.All -> if (p.agentSession.isNotEmpty()) ws.approve(p.id, all = true) else ws.approve(p.id)
+            Decision.Deny -> ws.reject(p.id)
+        }
+    }
+    val listen = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val said = r.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS).orEmpty()
+        val d = said.firstNotNullOfOrNull(::voiceDecision)
+        if (d != null) decide(d) else heard = said.firstOrNull()?.let { "Heard \"$it\": say allow, deny or allow all" } ?: "Nothing heard"
+    }
     val chat = ws.chats.firstOrNull { it.id == p.owner }
     Card(
         modifier.fillMaxWidth().padding(8.dp),
@@ -70,6 +87,14 @@ fun ProposalCard(ws: WsClient, p: Proposal, more: Int = 0, modifier: Modifier = 
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = { ws.reject(p.id) }) { Text("Deny") }
+                OutlinedButton(onClick = {
+                    heard = null
+                    runCatching {
+                        listen.launch(Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                            .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            .putExtra(RecognizerIntent.EXTRA_PROMPT, "Allow, deny or allow all?"))
+                    }.onFailure { heard = "No speech recognizer on this phone" }
+                }) { Text("Voice") }
                 Button(onClick = { ws.approve(p.id) }) { Text("Allow") }
                 if (p.agentSession.isNotEmpty()) {
                     Button(
@@ -78,7 +103,29 @@ fun ProposalCard(ws: WsClient, p: Proposal, more: Int = 0, modifier: Modifier = 
                     ) { Text("Allow all") }
                 }
             }
+            heard?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
+    }
+}
+
+enum class Decision { Allow, All, Deny }
+
+private val NEGATE = setOf("don't", "dont", "not", "never")
+private val NO = setOf("no", "nope", "deny", "reject", "stop", "cancel")
+private val YES = setOf("yes", "yeah", "yep", "allow", "approve", "accept", "ok", "okay", "sure", "go", "always")
+
+/** What a spoken answer means for a waiting tool call; null when unclear, so a mishearing runs nothing. */
+fun voiceDecision(said: String): Decision? {
+    val w = said.lowercase().replace(Regex("[^a-z' ]"), " ").split(" ").filter { it.isNotBlank() }
+    val yes = w.any { it in YES }
+    val no = w.any { it in NO }
+    return when {
+        w.any { it in NEGATE } -> Decision.Deny
+        no && yes -> null
+        no -> Decision.Deny
+        yes && ("all" in w || "always" in w) -> Decision.All
+        yes -> Decision.Allow
+        else -> null
     }
 }
 

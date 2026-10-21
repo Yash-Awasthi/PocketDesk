@@ -19,4 +19,13 @@ if ($cfg.tls.enabled) {
     try { $ssl.AuthenticateAsClient("localhost") } finally { $ssl.Dispose(); $tcp.Close() }
     if ($script:seen -ne $want) { throw "port $port is not this PC's PocketDesk" }
 }
+# The loopback page (port + 10) opens without a certificate warning, but only once it proves it holds the token.
+if ($cfg.tls.enabled) {
+    $local = $port + 10
+    $n = [guid]::NewGuid().ToString("N")
+    $h = New-Object Security.Cryptography.HMACSHA256 (,[Text.Encoding]::UTF8.GetBytes($cfg.token))
+    $want = -join ($h.ComputeHash([Text.Encoding]::UTF8.GetBytes($n)) | ForEach-Object { $_.ToString("x2") })
+    try { $got = (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 "http://127.0.0.1:$local/prove?n=$n").Content } catch { $got = "" }
+    if ($got -eq $want) { $scheme = "http"; $port = $local }
+}
 Start-Process ("{0}://localhost:{1}/pair?k={2}" -f $scheme, $port, $cfg.token)

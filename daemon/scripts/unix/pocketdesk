@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # PocketDesk control CLI for macOS and Linux.
 # The daemon has no window; this is how you start, stop, and pair it where there is no Task Manager.
-#   pocketdesk start | stop | restart | status | pair | logs
+#   pocketdesk start | stop | restart | status | pair | logs | record on|off
+#   pocketdesk list | new | attach | send | read | resize | kill   (shared terminals)
 set -euo pipefail
 
 HOME_DIR="${POCKETDESK_HOME:-$HOME/.pocketdesk}"
@@ -20,7 +21,6 @@ has_unit() { command -v systemctl >/dev/null 2>&1 && [ -f "$HOME/.config/systemd
 
 json_field() { node -e "try{process.stdout.write(String(JSON.parse(require('fs').readFileSync('$CONFIG','utf8')).$1||''))}catch(e){}" 2>/dev/null; }
 port() { local p; p=$(json_field port); echo "${p:-8765}"; }
-scheme() { node -e "try{process.stdout.write(JSON.parse(require('fs').readFileSync('$CONFIG','utf8')).tls&&JSON.parse(require('fs').readFileSync('$CONFIG','utf8')).tls.enabled?'https':'http')}catch(e){process.stdout.write('http')}" 2>/dev/null; }
 
 running_pid() {
   # The listener on the daemon port is the daemon, whichever shell started it.
@@ -57,12 +57,8 @@ status() {
   if [ -n "$pid" ]; then echo "running (pid $pid, port $(port))"; else echo "stopped"; fi
 }
 
-pair() {
-  local url="$(scheme)://localhost:$(port)/pair?k=$(json_field token)"
-  echo "$url"
-  if command -v open >/dev/null 2>&1; then open "$url" 2>/dev/null || true
-  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$url" 2>/dev/null || true; fi
-}
+# The QR goes to this terminal (a TTY has no browser); a desktop session also gets the page.
+pair() { node "$DAEMON_DIR/src/index.js" pair; }
 
 case "${1:-status}" in
   start)   start ;;
@@ -71,5 +67,6 @@ case "${1:-status}" in
   status)  status ;;
   pair)    pair ;;
   logs)    tail -n "${2:-50}" "$LOG" 2>/dev/null || echo "no log yet" ;;
-  *) echo "usage: pocketdesk {start|stop|restart|status|pair|logs}" >&2; exit 1 ;;
+  list|new|attach|send|read|resize|kill|record) exec node "$DAEMON_DIR/src/index.js" "$@" ;;
+  *) echo "usage: pocketdesk {start|stop|restart|status|pair|logs|record on|off|list|new|attach|send|read|resize|kill}" >&2; exit 1 ;;
 esac

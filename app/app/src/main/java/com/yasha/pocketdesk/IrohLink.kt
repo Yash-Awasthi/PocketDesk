@@ -86,10 +86,12 @@ class IrohLink(
 
     private val uploads = Channel<ByteArray>(Channel.UNLIMITED)
     private var uploading = false
+    /** Video bytes queued but not yet written, so a slow link can skip to the next keyframe. */
+    val uploadBacklog = java.util.concurrent.atomic.AtomicLong()
 
     /**
-     * One phone-screen packet [kind, ...annexB] to the PC, the way the daemon sends its desktop:
-     * a keyframe opens a new uni stream (u32 GOP number, then the held config), deltas follow it.
+     * One phone-screen packet [slot * 4 + kind, ...annexB] to the PC, the way the daemon sends its desktop:
+     * per slot, a keyframe opens a new uni stream (u32 GOP number, then the held config), deltas follow it.
      */
     fun sendVideo(pkt: ByteArray): Boolean {
         if (closed.get()) return false
@@ -97,25 +99,28 @@ class IrohLink(
             uploading = true
             scope.launch {
                 var gop = 0
-                var config: ByteArray? = null
-                var stream: computer.iroh.SendStream? = null
+                val configs = HashMap<Int, ByteArray>()
+                val streams = HashMap<Int, computer.iroh.SendStream>()
                 for (p in uploads) {
-                    when (p[0].toInt()) {
-                        0 -> config = p
+                    uploadBacklog.addAndGet(-p.size.toLong())
+                    val slot = p[0].toInt() shr 2
+                    when (p[0].toInt() and 3) {
+                        0 -> configs[slot] = p
                         1 -> {
-                            stream?.let { old -> runCatching { old.finish() } }
-                            stream = conn?.openUni()?.also { s ->
+                            streams.remove(slot)?.let { old -> runCatching { old.finish() } }
+                            conn?.openUni()?.also { s ->
                                 s.writeAll(java.nio.ByteBuffer.allocate(4).putInt(++gop).array())
-                                config?.let { s.writeAll(frame(it)) }
+                                configs[slot]?.let { s.writeAll(frame(it)) }
                                 s.writeAll(frame(p))
+                                streams[slot] = s
                             }
                         }
-                        else -> stream?.let { s -> runCatching { s.writeAll(frame(p)) } }
+                        else -> streams[slot]?.let { s -> runCatching { s.writeAll(frame(p)) } }
                     }
                 }
             }
         }
-        return uploads.trySend(pkt).isSuccess
+        return uploads.trySend(pkt).isSuccess.also { if (it) uploadBacklog.addAndGet(pkt.size.toLong()) }
     }
 
     fun close() {
@@ -175,9 +180,9 @@ class IrohLink(
         fun init(context: Context) {
             computer.iroh.IrohAndroid.installAndroidContext(context)
             val prefs = context.getSharedPreferences("pocketdesk", Context.MODE_PRIVATE)
-            val saved = prefs.getString("iroh_key", null)
+            val saved = Vault.get(prefs, "iroh_key")
             key = saved?.let { java.util.Base64.getDecoder().decode(it) } ?: SecretKey.generate().toBytes().also {
-                prefs.edit().putString("iroh_key", java.util.Base64.getEncoder().encodeToString(it)).apply()
+                Vault.put(prefs, "iroh_key", java.util.Base64.getEncoder().encodeToString(it))
             }
         }
 

@@ -46,6 +46,7 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
     // One project folder for everything started from this screen: an IDE opens
     // it, a CLI tool runs in it.
     var cwd by remember { mutableStateOf("") }
+    var worktree by remember { mutableStateOf(false) }
     var browsing by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
 
@@ -97,11 +98,12 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
                     singleLine = true,
                 )
                 OutlinedButton(onClick = { browsing = true }) { Text("Browse") }
+                WorktreeSwitch(worktree) { worktree = it }
             }
         }
         // Claude Code leads; the rest keep the daemon's order.
         items(ws.tools.sortedBy { it.manifest.id != CLAUDE }, key = { it.manifest.id }) { tool ->
-            ToolCard(tool, ws, cwd, openDesktop, openFreebuff, openAgent, openChats)
+            ToolCard(tool, ws, cwd, worktree, openDesktop, openFreebuff, openAgent, openChats)
         }
         item { PowerRow(ws) }
         if (lock.available) item {
@@ -169,7 +171,7 @@ private fun AppCard(app: AppEntry, ws: WsClient, cwd: String) {
 }
 
 @Composable
-private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String, openDesktop: () -> Unit, openFreebuff: () -> Unit, openAgent: (String) -> Unit, openChats: () -> Unit) {
+private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String, worktree: Boolean, openDesktop: () -> Unit, openFreebuff: () -> Unit, openAgent: (String) -> Unit, openChats: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -206,7 +208,7 @@ private fun ToolCard(tool: ToolInfo, ws: WsClient, cwd: String, openDesktop: () 
                     }
                 }
             }
-            if (tool.manifest.id == CLAUDE && tool.installed == true) ClaudeActions(ws, cwd, openChats)
+            if (tool.manifest.id == CLAUDE && tool.installed == true) ClaudeActions(ws, cwd, worktree, openChats)
             // Accounts show without the CLI too: an editor extension can share its login (Codex keeps ~/.codex/auth.json).
             if ((tool.manifest.id in AGENT_PANELS && tool.installed == true) || tool.manifest.id in ACCOUNT_AGENTS) {
                 TextButton(onClick = { openAgent(tool.manifest.id) }) {
@@ -339,16 +341,25 @@ private fun DoctorSection(ws: WsClient) {
 
 private const val CLAUDE = "claude"
 
+/** Starts the next chat or terminal in a fresh git worktree beside the project, on a branch of its own. */
+@Composable
+fun WorktreeSwitch(on: Boolean, onChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Own git worktree (new branch)", modifier = Modifier.weight(1f))
+        Switch(checked = on, onCheckedChange = onChange)
+    }
+}
+
 /**
  * One tap into Claude Code from the Tools screen: a new phone chat or terminal in the project folder
  * above, or the most recent Claude Code conversation on the PC, continued as a chat.
  */
 @Composable
-private fun ClaudeActions(ws: WsClient, cwd: String, openChats: () -> Unit) {
+private fun ClaudeActions(ws: WsClient, cwd: String, worktree: Boolean, openChats: () -> Unit) {
     val last = ws.history.firstOrNull { it.agent == CLAUDE && !it.inUse() }
     androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        androidx.compose.material3.Button(onClick = { ws.createChat(CLAUDE, cwd.trim()); openChats() }) { Text("New chat") }
-        OutlinedButton(onClick = { ws.createSession(CLAUDE, cwd.trim()) }) { Text("Terminal") }
+        androidx.compose.material3.Button(onClick = { ws.createChat(CLAUDE, cwd.trim(), worktree = worktree); openChats() }) { Text("New chat") }
+        OutlinedButton(onClick = { ws.createSession(CLAUDE, cwd.trim(), worktree) }) { Text("Terminal") }
         if (last != null) OutlinedButton(onClick = { ws.historyResume(last, terminal = false); openChats() }) {
             Text("Continue: " + last.title.take(24), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }

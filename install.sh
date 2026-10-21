@@ -173,6 +173,9 @@ case "$(uname -s)" in
       systemctl --user enable pocketdesk 2>/dev/null || true
       systemctl --user restart pocketdesk && ok "Daemon runs now and at login (systemd user service)" \
         || { warn "systemd --user unavailable — starting directly"; "$BIN_DIR/pocketdesk" start || true; }
+      # Without lingering the user manager, and the daemon with it, stops at logout: a TTY box would drop off.
+      loginctl enable-linger "$USER" 2>/dev/null && ok "Keeps running after logout and from boot (lingering on)" \
+        || warn "Could not turn on lingering; run 'sudo loginctl enable-linger $USER' to keep PocketDesk up after logout"
     else
       "$BIN_DIR/pocketdesk" start || true
     fi

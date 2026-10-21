@@ -1,5 +1,7 @@
 // One terminal shared by a phone, the PC and the local CLI: the CLI drives it, every viewer sees it.
 import { execFile } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { check, connect, finish, makeTmp, REPO, startDaemon, teardown } from "./helpers.mjs";
 
@@ -8,11 +10,12 @@ const CLI_PORT = 46873;
 const TOKEN = "termtoken";
 const tmp = makeTmp("rh-term-");
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const HOME = path.join(os.tmpdir(), "rh-home-" + PORT);
 
 /** Runs `pocketdesk <args>` against the test daemon; resolves stdout. */
 function cli(...args) {
   return new Promise((resolve, reject) => execFile(process.execPath, [path.join(REPO, "daemon", "src", "index.js"), ...args],
-    { env: { ...process.env, RH_CLI_PORT: String(CLI_PORT), RH_TOKEN: TOKEN }, timeout: 15000 },
+    { env: { ...process.env, RH_CLI_PORT: String(CLI_PORT), RH_TOKEN: TOKEN, RH_HOME: HOME }, timeout: 15000 },
     (e, out, err) => (e ? reject(new Error(err || e.message)) : resolve(out))));
 }
 
@@ -27,6 +30,14 @@ async function screenHas(id, text, ms = 15000) {
 try {
   const d = startDaemon(PORT, CLI_PORT, { token: TOKEN, manifests: tmp });
   await d.ready;
+  // Pairing from a bare TTY: the QR is drawn in the terminal, with the link for when it does not fit.
+  const pair = await cli("pair");
+  check("pair prints the link and a terminal QR", /pocketdesk:\/\/pair#[\w-]+/.test(pair) && /[█▀▄]{8}/.test(pair));
+  await cli("record", "on");
+  const flag = path.join(HOME, "record-sessions");
+  const on = fs.existsSync(flag);
+  await cli("record", "off");
+  check("record on/off flips the recording flag", on && !fs.existsSync(flag));
   const phone = connect(PORT, TOKEN);
   await new Promise((res, rej) => { phone.ws.on("open", res); phone.ws.on("error", rej); });
   phone.send({ type: "hello", token: TOKEN, platform: "android", name: "test phone" });

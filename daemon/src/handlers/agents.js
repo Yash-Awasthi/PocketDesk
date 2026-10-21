@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import * as worktree from "../worktree.js";
 import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as registry from "../registry.js";
@@ -23,6 +26,8 @@ export function startChat({ send, broadcast, allSessions, plugins, power }, ws, 
   if (!m) return { error: `unknown harness: ${harness}` };
   if (!chat.supported(m)) return { error: `${m.name} has no chat adapter` };
   if (!registry.isInstalled(m.id)) return { error: `${m.name} is not installed` };
+  // Windows reports a missing working folder as the shell itself missing (spawn cmd.exe ENOENT).
+  if (cwd && !fs.statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) return { error: `folder not found: ${cwd}` };
   const s = chat.create({ manifest: m, cwd, ...resume });
   sessionStore.upsert(s.id, { name: m.name, project: cwd || "", type: "chat", status: "idle" });
   plugins.callHook("onChatCreated", s);
@@ -43,6 +48,16 @@ export default function agentsHandlers(ctx) {
     execFile(bin, argv, { timeout: 30000, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) =>
       resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, text: `${stdout}${stderr}`.trim().slice(0, 2000) }));
   });
+  /** The folder a new chat or terminal runs in: its own worktree when asked for; null after reporting an error. */
+  const inWorktree = (ws, msg) => {
+    if (!msg.worktree) return msg.cwd;
+    try {
+      return worktree.add(msg.cwd || os.homedir(), typeof msg.worktree === "string" ? msg.worktree : msg.harness || "session");
+    } catch (e) {
+      send(ws, { type: "error", message: e.message });
+      return null;
+    }
+  };
   const authManifest = (ws, msg, op) => {
     const m = registry.get(msg.harness);
     if (!m?.auth?.[op]) {
@@ -91,8 +106,10 @@ export default function agentsHandlers(ctx) {
         : registry.get(msg.harness);
       if (!m || m.adapter !== "terminal") return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
       if (!msg.path && !registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
-      const s = sessions.create({ harnessId: m.id, bin: m.bin, cwd: msg.cwd, args: msg.args }, broadcast);
-      sessionStore.upsert(s.id, { name: m.name, project: msg.cwd || "", type: "terminal", status: "working" });
+      const cwd = inWorktree(ws, msg);
+      if (cwd === null) return;
+      const s = sessions.create({ harnessId: m.id, bin: m.bin, cwd, args: msg.args }, broadcast);
+      sessionStore.upsert(s.id, { name: m.name, project: cwd || "", type: "terminal", status: "working" });
       plugins.callHook("onSessionCreated", s);
       power.addStatus({ agentId: s.id, state: "running", receivedAt: Date.now() });
       broadcast({ type: "sessions", items: allSessions() });
@@ -100,7 +117,9 @@ export default function agentsHandlers(ctx) {
     },
     async chatsession(ws, msg) {
       await registry.ready;
-      const r = startChat(ctx, ws, msg.harness, msg.cwd, msg.prompt);
+      const cwd = inWorktree(ws, msg);
+      if (cwd === null) return;
+      const r = startChat(ctx, ws, msg.harness, cwd, msg.prompt);
       if (r.error) send(ws, { type: "error", message: r.error });
     },
     async chatmsg(ws, msg) {

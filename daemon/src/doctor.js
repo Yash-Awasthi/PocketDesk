@@ -13,6 +13,13 @@ import path from "node:path";
 import https from "node:https";
 import { execSync, spawn } from "node:child_process";
 import { wakeArmedAdapters } from "./wake.js";
+import { forPlatform } from "./registry.js";
+
+/** How to ask a tool its version: through cmd.exe on Windows, where npm installs .cmd shims; directly elsewhere. */
+export function versionProbe(m, platform = process.platform) {
+  const { bin } = forPlatform(m, platform);
+  return platform === "win32" ? ["cmd.exe", ["/c", bin, "--version"]] : [bin, ["--version"]];
+}
 
 const DATA_DIR = process.env.POCKETDESK_DATA || ".pocketdesk";
 
@@ -87,7 +94,9 @@ export async function diagnose({ tls, manifests } = {}) {
       // its presence by path, so there is nothing for this probe to test.
       if (m.adapter === "gui" || !m.bin) continue;
       const r = await new Promise((resolve) => {
-        const p = spawn("cmd.exe", ["/c", m.bin, "--version"], { windowsHide: true });
+        const [cmd, args] = versionProbe(m);
+        const p = spawn(cmd, args, { windowsHide: true });
+        p.on("error", () => resolve(false));
         let out = "";
         const t = setTimeout(() => { p.kill(); resolve(false); }, 6000);
         p.stdout.on("data", (d) => (out += d));

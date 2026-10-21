@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,6 +59,7 @@ fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit) {
     }
 
     var cwd by remember { mutableStateOf("") }
+    var worktree by remember { mutableStateOf(false) }
     var browsing by remember { mutableStateOf(false) }
     LaunchedEffect(browsing) {
         if (browsing) ws.browse(cwd.ifBlank { null })
@@ -87,10 +89,11 @@ fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit) {
                     placeholder = { Text("blank = home directory") },
                     singleLine = true,
                 )
+                WorktreeSwitch(worktree) { worktree = it }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { browsing = true }, enabled = tool != null) { Text("Browse") }
                     Button(
-                        onClick = { ws.createSession(tool!!.manifest.id, cwd.trim()) },
+                        onClick = { ws.createSession(tool!!.manifest.id, cwd.trim(), worktree) },
                         enabled = tool != null,
                     ) { Text("Start session") }
                 }
@@ -125,7 +128,23 @@ fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit) {
                 }
             }
         }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Recordings", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                TextButton(onClick = { ws.recordingsList() }) { Text("Refresh") }
+            }
+        }
+        if (ws.recordings.isEmpty()) {
+            item { Text("None. Turn on session recording from the PocketDesk tray icon on the PC.", style = MaterialTheme.typography.bodySmall) }
+        }
+        items(ws.recordings, key = { "rec:$it" }) { name ->
+            Card(Modifier.fillMaxWidth().clickable { ws.recordingGet(name) }) {
+                Text(name, Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+            }
+        }
     }
+    LaunchedEffect(Unit) { ws.recordingsList() }
+    ws.playing?.let { (name, cast) -> RecordingPlayer(name, cast) { ws.playing = null } }
 
     if (browsing) {
         DirPickerDialog(

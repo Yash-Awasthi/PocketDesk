@@ -1,13 +1,15 @@
 // The PC views and controls the phone. The phone owns consent: it starts and stops the share,
 // and the daemon only relays its video to watchers and their input back to it.
 const STALE_MS = 3000;
-const PHONE_KIND = 16; // phone video kinds 16-18 sit apart from PC desktop kinds 0-3 on the same socket
+const PHONE_KIND = 16; // phone video kinds 16-30 sit apart from PC desktop kinds 0-3 on the same socket
+// A rooted phone streams up to 3 extra live panes: byte = slot * 4 + kind, slot 0 being the screen itself.
+const MAX_SLOT = 3;
 // control: the phone has its accessibility service on, so input can act; off means view only.
 const share = { phone: null, watchers: new Set(), w: 0, h: 0, control: false, active: null, apps: [] };
 
-/** One phone video packet [kind, ...annexB] from whichever socket sent it; only the sharing phone's are relayed. */
+/** One phone video packet [slot * 4 + kind, ...annexB] from whichever socket sent it; only the sharing phone's are relayed. */
 export function phoneBinary(ws, buf) {
-  if (ws !== share.phone || !buf.length || buf[0] > 2) return;
+  if (ws !== share.phone || !buf.length || (buf[0] & 3) > 2 || buf[0] >> 2 > MAX_SLOT) return;
   share.lastPacket = Date.now();
   const out = Buffer.from(buf);
   out[0] += PHONE_KIND;
@@ -89,15 +91,16 @@ export default function phoneHandlers(ctx) {
     },
     async phone_apps(ws, msg) {
       if (share.phone !== ws) return;
-      const app = (a) => ({ pkg: String(a?.pkg || ""), label: String(a?.label || "") });
+      const slot = (n) => (Number.isInteger(n) && n >= 1 && n <= MAX_SLOT ? { slot: n } : {});
+      const app = (a) => ({ pkg: String(a?.pkg || ""), label: String(a?.label || ""), ...slot(a?.slot) });
       // active is what the phone shows now (maybe the home screen); apps are the other recent ones.
       share.active = msg.active ? app(msg.active) : null;
       share.apps = (Array.isArray(msg.apps) ? msg.apps : []).slice(0, 20).map(app);
       for (const w of share.watchers) send(w, { type: "phone_apps", active: share.active, apps: share.apps });
     },
     async phone_input(ws, msg) {
-      const { kind, fx, fy, tx, ty, ms, key, text } = msg;
-      relay(ws, { type: "phone_input", kind: String(kind), fx, fy, tx, ty, ms, key, text });
+      const { kind, fx, fy, tx, ty, ms, key, text, slot } = msg;
+      relay(ws, { type: "phone_input", kind: String(kind), fx, fy, tx, ty, ms, key, text, slot });
     },
     // The phone's own storage, behind Android's "All files access" that its owner grants.
     async phone_fs(ws, msg) {
@@ -105,14 +108,15 @@ export default function phoneHandlers(ctx) {
       if (!phone) return send(ws, { type: "phone_fs_result", rid: msg.rid, error: "the phone is not connected" });
       if (!FS_OPS.has(msg.op)) return send(ws, { type: "phone_fs_result", rid: msg.rid, error: `unknown op: ${msg.op}` });
       const id = nextAsk++;
-      asked.set(id, { ws, rid: msg.rid });
+      asked.set(id, { ws, rid: msg.rid, phone });
       setTimeout(() => asked.delete(id), 120_000).unref?.();
       const { op, path, to, offset, data, append } = msg;
       send(phone, { type: "phone_fs", rid: id, op, path: String(path ?? "/"), to, offset, data, append });
     },
     async phone_fs_result(ws, msg) {
       const a = asked.get(msg.rid);
-      if (!ws._android || !a) return;
+      // Only the phone that was asked may answer; another paired phone could otherwise forge its files.
+      if (!a || ws !== a.phone) return;
       asked.delete(msg.rid);
       send(a.ws, { ...msg, rid: a.rid });
     },

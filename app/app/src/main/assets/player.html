@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes" />
+<link rel="stylesheet" href="vendor/xterm.min.css" />
+<style>
+  html, body { margin: 0; height: 100%; background: #14161a; color: #e6edf3; font: 14px sans-serif; }
+  #term { position: absolute; inset: 0 0 52px 0; }
+  #bar { position: absolute; left: 0; right: 0; bottom: 0; height: 52px; display: flex; gap: 8px; align-items: center; padding: 0 8px; }
+  button { background: #30363d; color: #e6edf3; border: 0; border-radius: 6px; padding: 8px 14px; font: inherit; }
+  #pos { flex: 1; text-align: right; color: #8b949e; }
+</style>
+</head>
+<body>
+<div id="term"></div>
+<div id="bar"><button id="pp">Pause</button><button id="sp">1x</button><button id="re">Restart</button><span id="pos"></span></div>
+<script src="vendor/xterm.min.js"></script>
+<script>
+// Plays an asciicast recording: v2 event times are absolute, v3 times are gaps since the previous event.
+const IDLE = 2; // seconds; longer pauses are cut, like asciinema's idle_time_limit
+let term, events = [], i = 0, clock = 0, speed = 1, paused = false, timer = null;
+const $ = (id) => document.getElementById(id);
+const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+window.load = function (text) {
+  const lines = text.split('\n').filter((l) => l.trim());
+  const head = JSON.parse(lines.shift());
+  let t = 0;
+  events = lines.map((l) => JSON.parse(l)).filter((e) => e[1] === 'o' || e[1] === 'r')
+    .map((e) => ({ t: head.version >= 3 ? (t += e[0]) : e[0], kind: e[1], data: e[2] }));
+  term = new Terminal({ cols: head.width ?? head.term?.cols ?? 80, rows: head.height ?? head.term?.rows ?? 24, fontSize: 13, theme: { background: '#14161a' } });
+  term.open($('term'));
+  fitFont();
+  restart();
+};
+
+function restart() {
+  clearTimeout(timer);
+  term.reset();
+  i = 0; clock = 0; paused = false;
+  $('pp').textContent = 'Pause';
+  step();
+}
+
+function step() {
+  while (i < events.length && events[i].t <= clock) {
+    const e = events[i++];
+    if (e.kind === 'o') term.write(e.data);
+    else { const [c, r] = String(e.data).split('x').map(Number); if (c && r) { term.resize(c, r); fitFont(); } }
+  }
+  $('pos').textContent = `${fmt(clock)} / ${fmt(events.at(-1)?.t ?? 0)}`;
+  if (i >= events.length) { $('pp').textContent = 'Done'; return; }
+  if (paused) return;
+  const next = events[i].t;
+  timer = setTimeout(() => { clock = next; step(); }, (Math.min(next - clock, IDLE) / speed) * 1000);
+}
+
+$('pp').onclick = () => {
+  if (i >= events.length) return restart();
+  paused = !paused;
+  $('pp').textContent = paused ? 'Play' : 'Pause';
+  clearTimeout(timer);
+  if (!paused) step();
+};
+$('sp').onclick = () => { speed = speed >= 8 ? 1 : speed * 2; $('sp').textContent = speed + 'x'; };
+$('re').onclick = () => restart();
+
+// The recording keeps the PC's grid; the font shrinks until it fits the phone.
+function fitFont() {
+  const box = $('term');
+  const screen = box.querySelector('.xterm-screen');
+  if (!screen || !screen.offsetWidth) return;
+  const k = Math.min(box.clientWidth / screen.offsetWidth, box.clientHeight / screen.offsetHeight);
+  const size = Math.max(4, Math.min(20, term.options.fontSize * k));
+  if (Math.abs(size - term.options.fontSize) > 0.25) { term.options.fontSize = size; requestAnimationFrame(fitFont); }
+}
+window.addEventListener('resize', fitFont);
+</script>
+</body>
+</html>

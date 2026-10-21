@@ -53,7 +53,7 @@ const AUDIT_LOG = path.join(configDir, "console-audit.log");
 const PAUSE_ALLOWED = new Set([
   "sessions", "sessions_get", "sessions_scan", "attach", "detach", "chat_history", "chat_search", "auth_status", "detect",
   "plan_get", "apps_discover", "model_list", "activity_list", "prompt_queue", "todos_get", "todos_status", "schedule_list",
-  "approval_waiting", "usage_list", "usage_get",
+  "approval_waiting", "usage_list", "usage_get", "recordings_list", "recording_get",
   "fs", "fread", "fs_search", "fs_zip", "fs_thumb", "git_status", "git_diff", "git_log", "git_branches", "mention",
   "desktop_start", "desktop_ping", "desktop_monitors", "video_ack", "desktop_stop", "desktop_frame", "desktop_quality",
   "desktop_status", "desktop_permissions", "desktop_mouse", "desktop_key", "desktop_type",
@@ -108,6 +108,7 @@ export function start(config, { onTokenRotated } = {}) {
   }
 
   let pairPage = "";
+  let pairLink = "";
   let pairFp = "";
   let irohTicket = "";
   let irohEp = null;
@@ -121,8 +122,9 @@ export function start(config, { onTokenRotated } = {}) {
       JSON.stringify({ u: url, t: token, f: fingerprint || "", i: irohTicket || undefined, n: process.env.RH_LABEL || undefined }),
       "utf8",
     ).toString("base64url");
+    pairLink = `pocketdesk://pair#${payload}`;
     pairPage = pairTemplate
-      .replaceAll("__RH_PAYLOAD__", `pocketdesk://pair#${payload}`)
+      .replaceAll("__RH_PAYLOAD__", pairLink)
       .replaceAll("__RH_URL__", url)
       .replaceAll("__RH_TOKEN__", token)
       .replaceAll("__RH_FP__", fingerprint || "n/a");
@@ -157,6 +159,13 @@ export function start(config, { onTokenRotated } = {}) {
       res.writeHead(200, { "content-type": "application/json" });
       // Anyone on the network may probe liveness; only this machine learns what answers and how busy it is.
       res.end(JSON.stringify(loopback ? { status: "healthy", service: "pocketdesk", sessions: allSessions().length } : { status: "healthy" }));
+      return;
+    }
+    // The launcher's check before it hands the token to a plain-HTTP page: only the daemon can sign its nonce.
+    if (req.url.startsWith("/prove?") && loopback) {
+      const n = new URL(req.url, "http://x").searchParams.get("n") || "";
+      res.writeHead(200, { "content-type": "text/plain" });
+      res.end(crypto.createHmac("sha256", token).update(n).digest("hex"));
       return;
     }
     // Loopback alone admits every local account, and the console endpoint's token is SYSTEM;
@@ -254,7 +263,7 @@ export function start(config, { onTokenRotated } = {}) {
   // socket opens; native clients send none. Max payload is a clipboard image (24 MB base64).
   const wss = new WebSocketServer({ noServer: true, maxPayload: 32 << 20 });
   liveWss = wss;
-  server.on("upgrade", (req, socket, head) => {
+  const onUpgrade = (req, socket, head) => {
     const samePath = req.url === "/ws";
     let originOk = true;
     if (req.headers.origin) {
@@ -274,7 +283,15 @@ export function start(config, { onTokenRotated } = {}) {
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
-  });
+  };
+  server.on("upgrade", onUpgrade);
+  // The PC's own browser: plain HTTP bound to loopback, which browsers treat as a secure context, so the
+  // phone page opens without a certificate warning while phones keep the pinned TLS port.
+  const localPort = Number(process.env.RH_LOCAL_PORT) || port + 10;
+  const local = useTls ? http.createServer(requestHandler) : null;
+  local?.on("upgrade", onUpgrade);
+  local?.on("error", (e) => console.warn(`  local page unavailable on ${localPort}: ${e.message}`));
+  local?.listen(localPort, "127.0.0.1");
 
   wss.on("connection", (ws, req) => {
     if (stopping) return ws.close(stopping.code, stopping.reason);
@@ -726,7 +743,7 @@ export function start(config, { onTokenRotated } = {}) {
       }).catch((e) => { irohStarting = false; console.log(`  iroh      failed to start: ${e?.message || e}`); });
     }
     sessionStore.init();
-    cliServer.start(() => token, { broadcast, allSessions });
+    cliServer.start(() => token, { broadcast, allSessions, pairLink: () => pairLink });
     proposals.init(broadcast);
     await registry.scanAll(broadcast);
     console.log("  registry scanned");

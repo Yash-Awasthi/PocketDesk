@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import WebSocket from "ws";
 
 const PORT = 8796;
@@ -142,6 +142,19 @@ async function run() {
     await next((m) => m.type === "chatstate" && m.state === "idle");
 
     send({ type: "detach", id });
+    const repo = path.join(tmp, "repo");
+    fs.mkdirSync(repo);
+    const git = (...a) => execFileSync("git", a, { cwd: repo });
+    git("init", "-q");
+    fs.writeFileSync(path.join(repo, "a.txt"), "x");
+    git("add", ".");
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init");
+    send({ type: "chatsession", harness: "fakechat", cwd: repo, worktree: true });
+    const wt = await next((m) => (m.type === "created" && m.cwd?.includes("repo-")) || (m.type === "error" && /git|worktree/.test(m.message)));
+    check("a chat can start in its own worktree", wt.type === "created" && wt.cwd === path.join(tmp, "repo-fakechat") && fs.existsSync(path.join(wt.cwd, "a.txt")));
+    send({ type: "chatsession", harness: "fakechat", cwd: path.join(tmp, "missing"), prompt: "hi" });
+    const bad = await next((m) => (m.type === "created" && m.cwd?.endsWith("missing")) || (m.type === "error" && /folder/.test(m.message)));
+    check("a chat in a missing folder says so", bad.type === "error" && /folder not found/.test(bad.message));
     ws.close();
   } catch (e) {
     console.error("SMOKE ERROR:", e.message);

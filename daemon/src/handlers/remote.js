@@ -142,6 +142,7 @@ export default function remoteHandlers(ctx) {
       const r = await desktop.getFrame();
       send(ws, r.ok ? { type: "desktop_frame", ...r } : { type: "desktop_frame_error", reason: r.reason });
     },
+    // Input replies only on failure: a busy pointer would otherwise echo every move over the relay.
     async desktop_mouse(ws, msg) {
       if (!mayControl(ws)) return send(ws, { type: "desktop_input_ok", ok: false, error: "view only" });
       // fx/fy, a fraction of the picture, maps straight onto the monitor it shows, whatever pixel
@@ -169,19 +170,19 @@ export default function remoteHandlers(ctx) {
       const click = ["left", "right", "middle", "double"].includes(msg.click) ? msg.click : undefined;
       if (press) hold(ws, "b:" + button, press);
       const r = await desktop.inputMouse({ x, y, click, press, button, wheel, hwheel });
-      send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
+      if (!r.ok) send(ws, { type: "desktop_input_ok", ok: false, error: r.error });
     },
     async desktop_key(ws, msg) {
       if (!mayControl(ws)) return send(ws, { type: "desktop_input_ok", ok: false, error: "view only" });
       const press = msg.press === "down" || msg.press === "up" ? msg.press : undefined;
       if (press) hold(ws, "k:" + Number(msg.key), press);
       const r = await desktop.inputKey({ key: msg.key, press, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
-      send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
+      if (!r.ok) send(ws, { type: "desktop_input_ok", ok: false, error: r.error });
     },
     async desktop_type(ws, msg) {
       if (!mayControl(ws)) return send(ws, { type: "desktop_input_ok", ok: false, error: "view only" });
       const r = await desktop.inputType(String(msg.text ?? ""));
-      send(ws, { type: "desktop_input_ok", ok: !!r.ok, error: r.error });
+      if (!r.ok) send(ws, { type: "desktop_input_ok", ok: false, error: r.error });
     },
     async clipboard_get(ws, msg) {
       if (!watching(ws)) return send(ws, { type: "clipboard", ok: false, error: "open the desktop first" });

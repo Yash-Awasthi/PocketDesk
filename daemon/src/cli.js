@@ -1,8 +1,11 @@
 // pocketdesk list | new [--cwd DIR] [tool] | attach ID | send ID KEYS... | read ID | resize ID COLS ROWS | kill ID
+//            pair | record on|off
 // Talks to the daemon on 127.0.0.1; the terminals are the same ones the phone and the browser watch.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
+import { spawn } from "node:child_process";
 
 const port = Number(process.env.RH_CLI_PORT) || 4679;
 const home = process.env.RH_HOME || path.join(os.homedir(), ".pocketdesk");
@@ -31,6 +34,20 @@ const KEYS = {
 };
 function keys(args) {
   return args.map((a) => KEYS[a] ?? (/^C-[a-zA-Z@\[\]\\^_]$/.test(a) ? String.fromCharCode(a[2].toUpperCase().charCodeAt(0) & 31) : a)).join("");
+}
+
+/**
+ * The pairing page in this PC's browser: over loopback HTTP (no certificate warning) once that port signs
+ * a nonce with the token, which only the daemon can; otherwise over the daemon's own TLS port.
+ */
+async function pageUrl() {
+  let cfg = {};
+  try { cfg = JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8")); } catch {}
+  const main = Number(cfg.port) || 8765, local = main + 10, nonce = crypto.randomBytes(16).toString("hex");
+  const want = crypto.createHmac("sha256", token).update(nonce).digest("hex");
+  const got = await fetch(`http://127.0.0.1:${local}/prove?n=${nonce}`, { signal: AbortSignal.timeout(3000) }).then((r) => r.text()).catch(() => "");
+  const k = encodeURIComponent(token);
+  return got === want ? `http://localhost:${local}/pair?k=${k}` : `${cfg.tls?.enabled ? "https" : "http"}://localhost:${main}/pair?k=${k}`;
 }
 
 const [cmd, id, ...rest] = process.argv.slice(2);
@@ -74,6 +91,36 @@ if (cmd === "list") {
   process.stdout.write("\x1b[2J\x1b[H");
   for await (const chunk of stream) process.stdout.write(chunk);
   done("terminal ended");
+} else if (cmd === "pair") {
+  // A bare TTY has no browser for the pairing page, so the QR is drawn here.
+  const { link } = await (await call("GET", "/pair")).json();
+  if (!link) fail("the daemon has no pairing link yet; try again in a few seconds");
+  // The page vendor copy is CommonJS inside an ESM package, so it is run as a plain script here.
+  const mod = { exports: {} };
+  new Function("module", "exports", fs.readFileSync(new URL("../public/vendor/qrcode.min.js", import.meta.url), "utf8"))(mod, mod.exports);
+  const qr = mod.exports(0, "L");
+  qr.addData(link);
+  qr.make();
+  // Light modules are drawn, two rows per line, so the code scans on the usual dark terminal.
+  const n = qr.getModuleCount(), quiet = 2;
+  const light = (r, c) => r < 0 || c < 0 || r >= n || c >= n || !qr.isDark(r, c);
+  for (let r = -quiet; r < n + quiet; r += 2) {
+    let line = "";
+    for (let c = -quiet; c < n + quiet; c++) line += [" ", "▄", "▀", "█"][(light(r, c) ? 2 : 0) + (light(r + 1, c) ? 1 : 0)];
+    console.log(line);
+  }
+  console.log(`\nScan with the PocketDesk app. If the code does not fit, widen the terminal or open this on the phone:\n${link}`);
+  // A desktop session also gets the settings page. Windows has its launcher for that.
+  if (process.platform === "darwin" || (process.platform === "linux" && (process.env.DISPLAY || process.env.WAYLAND_DISPLAY))) {
+    const url = await pageUrl();
+    spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+  }
+} else if (cmd === "record") {
+  const flag = path.join(home, "record-sessions");
+  if (id === "on") fs.writeFileSync(flag, "");
+  else if (id === "off") fs.rmSync(flag, { force: true });
+  else fail("record: say on or off");
+  console.log(`session recording ${fs.existsSync(flag) ? "on" : "off"}: terminals are saved to ${path.join(home, "recordings")}`);
 } else {
   fail(`unknown command: ${cmd}`);
 }

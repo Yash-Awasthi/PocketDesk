@@ -118,8 +118,10 @@ export function connectRaw(url, token) {
         if (pred(log[i])) return Promise.resolve(log[i]);
       }
       return new Promise((resolve, reject) => {
-        const t = setTimeout(() => reject(new Error("timeout waiting for: " + String(pred).slice(0, 120))), timeoutMs);
-        waiters.push({ pred, resolve, timer: t });
+        // A timed-out waiter must leave the list, or it swallows the next matching message.
+        const w = { pred, resolve };
+        w.timer = setTimeout(() => { waiters.splice(waiters.indexOf(w), 1); reject(new Error("timeout waiting for: " + String(pred).slice(0, 120))); }, timeoutMs);
+        waiters.push(w);
       });
     },
     close: () => new Promise((res) => { ws.close(); setTimeout(res, 100); }),

@@ -100,6 +100,12 @@ class WsClient(
     /** Conversations agents saved on the PC, newest first, and the one opened for reading. */
     var history by mutableStateOf<List<HistoryEntry>>(emptyList())
         private set
+    /** Terminal sessions the PC recorded (asciicast file names, newest first). */
+    var recordings by mutableStateOf<List<String>>(emptyList())
+    /** The recording being played: its name and asciicast text. */
+    var playing by mutableStateOf<Pair<String, String>?>(null)
+    fun recordingsList() = send(Proto.recordingsList())
+    fun recordingGet(name: String) = send(Proto.recordingGet(name))
     var historyOpen by mutableStateOf<Pair<HistoryEntry, List<ChatItem>>?>(null)
     fun historyList() = send(Proto.historyList())
     fun historyGet(e: HistoryEntry) { historyOpen = e to emptyList(); send(Proto.historyGet(e.agent, e.id)) }
@@ -575,13 +581,13 @@ class WsClient(
     fun phoneShareStart(w: Int, h: Int, control: Boolean) = send(Proto.phoneShareStart(w, h, control))
     fun phoneShareStop() = send(Proto.phoneShareStop())
     fun phoneFsResult(rid: Long, reply: JsonObject) = send(Proto.phoneFsResult(rid, reply))
-    fun phoneApps(active: Pair<String, String>?, apps: List<Pair<String, String>>) = send(Proto.phoneApps(active, apps))
+    fun phoneApps(active: Pair<String, String>?, apps: List<Triple<String, String, Int?>>) = send(Proto.phoneApps(active, apps))
     fun sendPhoneVideo(pkt: ByteArray): Boolean {
         irohLink.get()?.let { return it.sendVideo(pkt) }
         return socket.get()?.send(okio.ByteString.of(*pkt)) ?: false
     }
-    /** Bytes the socket has not sent yet; OkHttp closes a socket whose queue passes 16 MB. */
-    fun uploadBacklog(): Long = socket.get()?.queueSize() ?: 0L
+    /** Bytes not sent yet on whichever link carries the video; OkHttp closes a socket whose queue passes 16 MB. */
+    fun uploadBacklog(): Long = irohLink.get()?.uploadBacklog?.get() ?: socket.get()?.queueSize() ?: 0L
 
     fun desktopStop() { desktopStreaming = false; desktopResume = null; send(Proto.desktopStop()) }
     fun desktopSnapshot() = send(Proto.desktopFrame())
@@ -622,7 +628,7 @@ class WsClient(
 
     /** Start a discovered application, by the path the daemon reported for it. */
     fun guiOpenPath(path: String, cwd: String = ""): Boolean = send(Proto.guiOpenPath(path, cwd))
-    fun createSession(harness: String, cwd: String): Boolean = send(Proto.create(harness, cwd))
+    fun createSession(harness: String, cwd: String, worktree: Boolean = false): Boolean = send(Proto.create(harness, cwd, worktree))
     fun createSessionAt(path: String, cwd: String): Boolean = send(Proto.createPath(path, cwd))
     fun discoverApps(q: String, refresh: Boolean = false, guiOnly: Boolean = false): Boolean = send(Proto.appsDiscover(q, refresh, guiOnly))
     fun attach(id: String): Boolean {
@@ -644,8 +650,9 @@ class WsClient(
     fun reject(id: String): Boolean = send(Proto.reject(id))
     fun setChatPermission(id: String, mode: String): Boolean = send(Proto.chatPermission(id, mode))
 
-    fun createChat(harness: String, cwd: String, prompt: String? = null): Boolean =
-        send(Proto.chatSession(harness, cwd, prompt))
+    /** [worktree]: the PC gives the chat its own git worktree and branch beside the project. */
+    fun createChat(harness: String, cwd: String, prompt: String? = null, worktree: Boolean = false): Boolean =
+        send(Proto.chatSession(harness, cwd, prompt, worktree))
 
     fun sendChatMessage(id: String, text: String, model: String? = null, mode: String? = null): Boolean = send(Proto.chatMsg(id, text, model, mode))
 
@@ -897,6 +904,8 @@ class WsClient(
                 else failure(str(m, "error") ?: "could not open")
             "agent_file_saved" -> if (bool(m, "ok") == true) str(m, "agent")?.let { send(Proto.agentPanel(it)) } else failure(str(m, "error") ?: "not saved")
             "history" -> history = Proto.parseHistory(m)
+            "recordings_list" -> recordings = (m["items"] as? JsonArray)?.mapNotNull { (it as? JsonObject)?.let { o -> str(o, "name") } }.orEmpty()
+            "recording_get" -> str(m, "text")?.let { playing = (str(m, "name") ?: "") to it } ?: failure(str(m, "error") ?: "no recording")
             "accounts" -> if (bool(m, "ok") == false) failure(str(m, "error") ?: "accounts unavailable")
                 else Proto.parseAccounts(m)?.let { agentAccounts = agentAccounts + (it.agent to it) }
             "chat_info" -> str(m, "id")?.let { id -> chatInfo = chatInfo + (id to Proto.parseChatInfo(m)) }

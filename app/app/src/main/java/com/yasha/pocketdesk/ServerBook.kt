@@ -25,45 +25,51 @@ data class ServerEntry(
 class ServerBook(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("pocketdesk", Context.MODE_PRIVATE)
 
-    fun load(): List<ServerEntry> {
-        val raw = prefs.getString("servers", null) ?: return emptyList()
-        val arr = runCatching { Json.parseToJsonElement(raw) as? JsonArray }.getOrNull() ?: return emptyList()
-        return arr.mapNotNull { el ->
-            val o = el as? JsonObject ?: return@mapNotNull null
-            fun s(k: String): String? = (o[k] as? JsonPrimitive)?.contentOrNull
-            val url = s("url") ?: return@mapNotNull null
-            ServerEntry(
-                name = s("name") ?: url,
-                url = url,
-                token = s("token") ?: "",
-                pinnedFingerprint = s("fp")?.takeIf { it.isNotBlank() },
-                fallback = s("fallback")?.takeIf { it.isNotBlank() },
-                wake = (o["wake"] as? JsonObject)?.let { w ->
-                    fun list(k: String) = (w[k] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
-                    WakeInfo(list("macs"), list("bc")).takeIf { it.macs.isNotEmpty() }
-                },
-            )
-        }
-    }
+    fun load(): List<ServerEntry> = decode(Vault.get(prefs, "servers"))
 
-    fun save(entries: List<ServerEntry>) {
-        val arr = buildJsonArray {
-            entries.forEach { e ->
-                add(buildJsonObject {
-                    put("name", e.name)
-                    put("url", e.url)
-                    put("token", e.token)
-                    put("fp", e.pinnedFingerprint ?: "")
-                    e.fallback?.let { put("fallback", it) }
-                    e.wake?.let { w ->
-                        put("wake", buildJsonObject {
-                            put("macs", JsonArray(w.macs.map { JsonPrimitive(it) }))
-                            put("bc", JsonArray(w.broadcasts.map { JsonPrimitive(it) }))
-                        })
-                    }
-                })
+    fun save(entries: List<ServerEntry>) = Vault.put(prefs, "servers", encode(entries))
+
+    companion object {
+        fun decode(raw: String?): List<ServerEntry> {
+            if (raw == null) return emptyList()
+            val arr = runCatching { Json.parseToJsonElement(raw) as? JsonArray }.getOrNull() ?: return emptyList()
+            return arr.mapNotNull { el ->
+                val o = el as? JsonObject ?: return@mapNotNull null
+                fun s(k: String): String? = (o[k] as? JsonPrimitive)?.contentOrNull
+                val url = s("url") ?: return@mapNotNull null
+                ServerEntry(
+                    name = s("name") ?: url,
+                    url = url,
+                    token = s("token") ?: "",
+                    pinnedFingerprint = s("fp")?.takeIf { it.isNotBlank() },
+                    fallback = s("fallback")?.takeIf { it.isNotBlank() },
+                    wake = (o["wake"] as? JsonObject)?.let { w ->
+                        fun list(k: String) = (w[k] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
+                        WakeInfo(list("macs"), list("bc")).takeIf { it.macs.isNotEmpty() }
+                    },
+                )
             }
         }
-        prefs.edit().putString("servers", arr.toString()).apply()
+
+        fun encode(entries: List<ServerEntry>): String {
+            val arr = buildJsonArray {
+                entries.forEach { e ->
+                    add(buildJsonObject {
+                        put("name", e.name)
+                        put("url", e.url)
+                        put("token", e.token)
+                        put("fp", e.pinnedFingerprint ?: "")
+                        e.fallback?.let { put("fallback", it) }
+                        e.wake?.let { w ->
+                            put("wake", buildJsonObject {
+                                put("macs", JsonArray(w.macs.map { JsonPrimitive(it) }))
+                                put("bc", JsonArray(w.broadcasts.map { JsonPrimitive(it) }))
+                            })
+                        }
+                    })
+                }
+            }
+            return arr.toString()
+        }
     }
 }

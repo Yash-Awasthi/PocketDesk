@@ -7,10 +7,30 @@ import * as fbCtrl from "../freebuff_control.js";
 import * as doctor from "../doctor.js";
 import * as devices from "../devices.js";
 import { startChat } from "./agents.js";
+import fs from "node:fs";
+import path from "node:path";
+import { RECORDINGS } from "../recorder.js";
 
 export default function systemHandlers(ctx) {
   const { send, plugins, streamParser, tls, desktop } = ctx;
   return {
+    // Recorded terminal sessions (asciicast) for the phone's player; the folder is flat, so a bare name is all it takes.
+    async recordings_list(ws) {
+      let names = [];
+      try { names = fs.readdirSync(RECORDINGS).filter((n) => n.endsWith(".cast")); } catch {}
+      const items = names.map((name) => {
+        const st = fs.statSync(path.join(RECORDINGS, name));
+        return { name, size: st.size, mtime: st.mtimeMs };
+      }).sort((a, b) => b.mtime - a.mtime);
+      send(ws, { type: "recordings_list", items });
+    },
+    async recording_get(ws, msg) {
+      const name = String(msg.name || "");
+      const file = path.join(RECORDINGS, name);
+      if (name !== path.basename(name) || !name.endsWith(".cast") || !fs.existsSync(file)) return send(ws, { type: "recording_get", name, error: `no such recording: ${name}` });
+      // ponytail: whole file in one message; stream it in chunks if recordings outgrow the socket's message cap.
+      send(ws, { type: "recording_get", name, text: fs.readFileSync(file, "utf8") });
+    },
     async propose(ws, msg) {
       const p = proposals.create({
         type: msg.proposalType || "command_execute",

@@ -11,6 +11,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const IS_WIN = process.platform === "win32";
 const IS_MAC = process.platform === "darwin";
 const keyDown = (vk) => execFileSync("powershell.exe", ["-NoProfile", "-Command",
@@ -99,8 +101,8 @@ async function main() {
     check("desktop_frame pushed while streaming", Buffer.from(pushed.base64, "base64")[0] === 0xff);
     // Input round-trips while watching (no throw; real effect not asserted — CI safety).
     c.send({ type: "desktop_key", key: 65 });
-    const ik = await c.next((m) => m.type === "desktop_input_ok", 15000);
-    check("desktop_key ok", ik.ok === true);
+    const ik = await c.next((m) => m.type === "desktop_input_ok", 1500).catch(() => null);
+    check("input that lands sends no reply", ik === null);
 
     // A point given as a fraction of the picture comes back from the PC pointer as the same fraction.
     // Park the pointer elsewhere first: the cursor watcher only emits on a change, so a repeat run
@@ -108,9 +110,9 @@ async function main() {
     c.send({ type: "desktop_monitors" });
     await c.next((m) => m.type === "desktop_monitors", 20000);
     c.send({ type: "desktop_mouse", fx: 0.05, fy: 0.05 });
-    await c.next((m) => m.type === "desktop_input_ok", 15000);
+    await sleep(500);
     c.send({ type: "desktop_mouse", fx: 0.3, fy: 0.6 });
-    await c.next((m) => m.type === "desktop_input_ok", 15000);
+    await sleep(500);
     const fc = await c.next((m) => m.type === "desktop_cursor" && Math.abs(m.fx - 0.3) < 0.01, 5000).catch(() => ({}));
     check("pointer lands where the picture fraction says", Math.abs(fc.fx - 0.3) < 0.01 && Math.abs(fc.fy - 0.6) < 0.01);
 
@@ -255,7 +257,7 @@ async function main() {
     h.send({ type: "desktop_start", quality: 30 });
     await h.next((m) => m.type === "desktop_started", 20000);
     h.send({ type: "desktop_key", key: 0x87, press: "down" });
-    await h.next((m) => m.type === "desktop_input_ok", 15000);
+    await sleep(500);
     check("held key is down", keyDown(0x87));
     await h.close();
     await new Promise((r) => setTimeout(r, 1500));
@@ -266,7 +268,7 @@ async function main() {
     s.send({ type: "desktop_start", quality: 30 });
     await s.next((m) => m.type === "desktop_started", 20000);
     s.send({ type: "desktop_key", key: 0x87, press: "down" });
-    await s.next((m) => m.type === "desktop_input_ok", 15000);
+    await sleep(500);
     s.send({ type: "desktop_stop" });
     await s.next((m) => m.type === "desktop_stopped", 10000);
     await new Promise((r) => setTimeout(r, 1000));
@@ -274,8 +276,8 @@ async function main() {
     s.send({ type: "desktop_start", quality: 30 });
     await s.next((m) => m.type === "desktop_started", 20000);
     s.send({ type: "desktop_mouse", hwheel: 120 });
-    const hw = await s.next((m) => m.type === "desktop_input_ok", 15000);
-    check("horizontal wheel is accepted", hw.ok === true);
+    const hw = await s.next((m) => m.type === "desktop_input_ok", 1500).catch(() => null);
+    check("horizontal wheel is accepted", hw === null);
     await s.close();
   }
 
