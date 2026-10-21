@@ -1,4 +1,4 @@
-# 🔧 PocketDesk
+# PocketDesk
 
 > **Run AI coding agents on your PC, control them from your phone.**
 

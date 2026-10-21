@@ -590,7 +590,6 @@ class WsClient(
     fun uploadBacklog(): Long = irohLink.get()?.uploadBacklog?.get() ?: socket.get()?.queueSize() ?: 0L
 
     fun desktopStop() { desktopStreaming = false; desktopResume = null; send(Proto.desktopStop()) }
-    fun desktopSnapshot() = send(Proto.desktopFrame())
     /** Width and height of the picture on screen; positions also go out as fractions of it. */
     @Volatile var desktopFrameSize: Pair<Int, Int>? = null
     /** The user's pointer calibration for the PC and screen in view; null sends and reads fractions as they are. */

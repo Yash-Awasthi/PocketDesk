@@ -1,33 +1,3 @@
-PocketDesk: what is left
+PocketDesk: open tasks
 
-Scope as agreed: Windows PC + Android phone first. The PC browser page is the phone only (Phone
-screen and Phone storage tabs); the phone app keeps every feature (Tools, Chats, Desktop, Files, SSH).
-No outside programs (no tmux, WSL, scrcpy or adb on the user's side).
-
-To do
-1. Release. Merge branch reverse-bridge-shared-terminals into master, bump the version, build the
-   release APK and publish, when the user says so (nothing is pushed yet).
-2. Root live panes on public displays. Panes are private virtual displays owned by the app, which
-   other apps' processes cannot see: an app on a pane that opens another app's screen (Settings
-   search) crashes it and loses the pane's task. Public displays need CAPTURE_VIDEO_OUTPUT, so an
-   app_process server started through su would create them. A real rooted phone stays untested.
-3. Later: Linux (GUI and TTY) and macOS parity for every feature.
-
-Agents: PocketDesk stays a universal worker and every agent keeps what it has; nothing is removed.
-Claude Code is the favoured one: new agent features land there first and go furthest. Other agents'
-open checks (history readers, headless slash commands, Freebuff's agents/skills folder) are not
-chased.
-
-Known limits (nothing to fix)
-- Android ends a screen share when the phone locks; Swap asks again after unlocking.
-- Apps that mark their content sensitive (Gmail, Chrome pages) show black in any screen share.
-- PC control needs "PocketDesk PC control" on in Accessibility (sideloaded installs: App info >
-  Allow restricted settings first); under Android 17 Advanced Protection it stays view only.
-  ColorOS clears that setting when the app is force-stopped.
-- Phone storage needs "All files access" for PocketDesk and covers shared storage only.
-- Root live panes: at most 3, at half the shared size; text typed into a pane is ASCII only.
-- Copilot, Cline, Roo, Cursor and Antigravity conversations are read-only outside their editor;
-  VS Code extension chat panels have no external API.
-- Antigravity transcripts are grouped by search-index chunk, not by step.
-- `pocketdesk read` rebuilds the screen from scrollback on each call; wide CJK/emoji cells shift a line.
-- Terminals open at 120x32 until the PC's monitors have been listed once (a Desktop view on the phone).
+1. Check Linux (Arch: TTY, X11, wlroots Wayland) and macOS on real machines.

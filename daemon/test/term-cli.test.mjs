@@ -51,7 +51,7 @@ try {
   const replay = await phone.next((m) => m.type === "replay" && m.id === id);
   check("a viewer learns the terminal size from the replay", replay.cols > 0 && replay.rows > 0);
 
-  await cli("send", id, "echo pocket-$(40+2)", "Enter");
+  await cli("send", id, "echo pocket-$((40+2))", "Enter");
   const screen = await screenHas(id, "pocket-42");
   check("send types into the shell and read shows the rendered screen", screen.includes("pocket-42"));
   const seen = await phone.next((m) => m.type === "out" && m.id === id && Buffer.from(m.data, "base64").toString().includes("pocket-42"));

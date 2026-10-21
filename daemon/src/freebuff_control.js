@@ -90,10 +90,6 @@ export function isRunning(exeName = appBasename()) {
   }
 }
 
-export function getProfileDir() {
-  return PROFILE_DIR;
-}
-
 export function status() {
   const running = isRunning();
   const skills = skillList();

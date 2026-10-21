@@ -7,7 +7,8 @@ import WebSocket from "ws";
 const PORT = 8796;
 const TOKEN = "chattoken";
 
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "rh-chat-"));
+// Real path as git reports it: macOS tmp sits behind a /var symlink, Windows CI tmp is an 8.3 short name.
+const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "rh-chat-")));
 const agentJs = path.join(tmp, "fakeagent.js");
 fs.writeFileSync(agentJs, `
 let input = "";

@@ -82,11 +82,3 @@ export function observeTurnEnd(sessionId, transcript) {
   }
   return getTodos(sessionId);
 }
-
-export function summary() {
-  const out = [];
-  for (const [sid, list] of boards) {
-    if (list.length) out.push({ sessionId: sid, total: list.length, completed: list.filter((t) => t.status === "completed").length });
-  }
-  return out;
-}
