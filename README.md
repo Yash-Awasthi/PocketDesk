@@ -17,6 +17,12 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 
 ---
 
+## 📸 Screenshots
+
+<a href="docs/screenshots/showcase.jpg"><img src="docs/screenshots/showcase.jpg" width="100%" alt="PocketDesk add PC, chats, new session, coding tools, remote desktop and files"></a>
+
+---
+
 ## ✨ Features
 
 | Feature | Description |
