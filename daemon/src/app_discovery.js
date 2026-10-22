@@ -154,7 +154,9 @@ export function discover({ refresh = false } = {}) {
   const apps = [];
   const seen = new Set();
   for (const a of [...guiApps(), ...cliTools()]) {
-    const key = `${a.kind}:${a.name.toLowerCase()}`;
+    // Store (MSIX) apps use their unique path as key so a Start Menu shortcut with
+    // the same display name cannot shadow them in the cache.
+    const key = a.path.startsWith("shell:AppsFolder\\") ? `store:${a.path.toLowerCase()}` : `${a.kind}:${a.name.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
     apps.push(a);

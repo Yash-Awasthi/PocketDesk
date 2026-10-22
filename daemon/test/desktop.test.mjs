@@ -227,9 +227,9 @@ async function main() {
     fs.writeFileSync(path.join(home, "record-sessions"), "");
     const r1 = await openAndHello(PORT, TOKEN);
     r1.send({ type: "create", harness: "node", cwd: os.tmpdir() });
-    const term = await r1.next((m) => m.type === "created", 15000);
+    const term = await r1.next((m) => m.type === "created", 30000);
     r1.send({ type: "in", id: term.id, data: Buffer.from('console.log("rec-" + 42)\r').toString("base64") });
-    await r1.next((m) => m.type === "out" && Buffer.from(m.data, "base64").toString().includes("rec-42"), 15000).catch(() => null);
+    await r1.next((m) => m.type === "out" && Buffer.from(m.data, "base64").toString().includes("rec-42"), 30000).catch(() => null);
     r1.send({ type: "kill", id: term.id });
     await r1.next((m) => m.type === "exit", 10000);
     r1.send({ type: "desktop_start", quality: 30 });

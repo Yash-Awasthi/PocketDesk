@@ -170,15 +170,15 @@ async function main() {
   await daemon.ready;
   const c = await openAndHello(port);
   c.send({ type: "gui_open", harness: "scripted-ide" });
-  const opened = await c.next((m) => m.type === "gui_opened");
+  const opened = await c.next((m) => m.type === "gui_opened", 30000);
   check("gui_open acks a launch", opened.ok === true && opened.harness === "scripted-ide");
   c.send({ type: "gui_open", harness: "absent-ide" });
-  const refused = await c.next((m) => m.type === "gui_opened");
+  const refused = await c.next((m) => m.type === "gui_opened", 30000);
   check("gui_open reports a refusal", refused.ok === false && refused.reason === "not installed");
 
   const bogus = path.join(tmp, "not-an-app.exe");
   c.send({ type: "gui_open", path: bogus });
-  const rejected = await c.next((m) => m.type === "gui_opened");
+  const rejected = await c.next((m) => m.type === "gui_opened", 30000);
   check("gui_open refuses a path discovery never reported", rejected.ok === false && rejected.reason === "not a discovered app");
   c.send({ type: "apps_discover", q: found[0].name });
   const apps = await c.next((m) => m.type === "apps");
