@@ -179,10 +179,11 @@ object Mms {
 object Calls {
     @Volatile private var last: String? = null
     // Android holds the callback weakly; without this reference it stops firing after a GC.
-    private var callback: TelephonyCallback? = null
+    private var callback: Any? = null
 
     fun start(ctx: Context) {
-        if (callback != null || !Hub.granted(Manifest.permission.READ_PHONE_STATE)) return
+        // Call state through TelephonyCallback needs Android 12; Android 11 phones go without the ring alert.
+        if (callback != null || !Hub.granted(Manifest.permission.READ_PHONE_STATE) || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
         val tm = ctx.getSystemService(TelephonyManager::class.java)
         runCatching {
             val cb = object : TelephonyCallback(), TelephonyCallback.CallStateListener {

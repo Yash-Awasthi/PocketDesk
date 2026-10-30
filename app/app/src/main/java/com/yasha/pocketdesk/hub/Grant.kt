@@ -11,8 +11,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.NotificationCompat
 import com.yasha.pocketdesk.Notifier
 
@@ -49,6 +47,8 @@ object Grant {
             .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
             .setContentTitle(title).setContentText(text)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            // A group of its own, so Android never folds it into the app's bundle where a tap opens the app.
+            .setGroup(CHANNEL)
             .setContentIntent(PendingIntent.getActivity(ctx, 0, intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
             .setAutoCancel(true)
             .build())
@@ -65,21 +65,23 @@ object Grant {
 }
 
 /** Asks for one feature's permissions, or opens its settings page, then goes away. */
-class GrantActivity : ComponentActivity() {
-    private val ask = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        // Listeners that need these start now rather than on the next launch.
-        Calls.start(applicationContext)
-        Sms.start(applicationContext)
-        finish()
-    }
-
+class GrantActivity : android.app.Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState != null) return
         val what = intent.getStringExtra("what").orEmpty()
         val perms = Grant.permissions(what)
-        if (perms != null) return ask.launch(perms)
+        // A plain Activity: the result API wants a newer fragment library than one dependency pulls in.
+        if (perms != null) return requestPermissions(perms, 1)
         Grant.intentFor(this, what)?.let { startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        finish()
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        // Listeners that need these start now rather than on the next launch.
+        Calls.start(applicationContext)
+        Sms.start(applicationContext)
         finish()
     }
 }
