@@ -182,29 +182,42 @@ object Calls {
     private var callback: Any? = null
 
     fun start(ctx: Context) {
-        // Call state through TelephonyCallback needs Android 12; Android 11 phones go without the ring alert.
-        if (callback != null || !Hub.granted(Manifest.permission.READ_PHONE_STATE) || android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) return
+        if (callback != null || !Hub.granted(Manifest.permission.READ_PHONE_STATE)) return
         val tm = ctx.getSystemService(TelephonyManager::class.java)
         runCatching {
-            val cb = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
-                override fun onCallStateChanged(state: Int) {
-                    val s = when (state) { TelephonyManager.CALL_STATE_RINGING -> "ringing"; TelephonyManager.CALL_STATE_OFFHOOK -> "active"; else -> "idle" }
-                    if (s == last) return
-                    last = s
-                    if (s == "idle") return Hub.event("call") { put("state", s) }
-                    // Android gives the ringing number only to the dialer; its call notification's title, posted
-                    // a moment after the ring, stands in.
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        val caller = HubNotifications.instance?.let { l -> runCatching { l.activeNotifications }.getOrNull()
-                            ?.firstOrNull { it.notification.category == android.app.Notification.CATEGORY_CALL } }
-                            ?.notification?.extras?.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()
-                        if (last == s) Hub.event("call") { put("state", s); putNullable("name", caller) }
-                    }, 700)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                val cb = object : TelephonyCallback(), TelephonyCallback.CallStateListener {
+                    override fun onCallStateChanged(state: Int) = changed(state)
                 }
+                tm.registerTelephonyCallback(ctx.mainExecutor, cb)
+                callback = cb
+            } else {
+                // Android 11 has only the older listener for call state.
+                @Suppress("DEPRECATION")
+                val l = object : android.telephony.PhoneStateListener() {
+                    @Deprecated("Deprecated in Java")
+                    override fun onCallStateChanged(state: Int, phoneNumber: String?) = changed(state)
+                }
+                @Suppress("DEPRECATION")
+                tm.listen(l, android.telephony.PhoneStateListener.LISTEN_CALL_STATE)
+                callback = l
             }
-            tm.registerTelephonyCallback(ctx.mainExecutor, cb)
-            callback = cb
         }
+    }
+
+    private fun changed(state: Int) {
+        val s = when (state) { TelephonyManager.CALL_STATE_RINGING -> "ringing"; TelephonyManager.CALL_STATE_OFFHOOK -> "active"; else -> "idle" }
+        if (s == last) return
+        last = s
+        if (s == "idle") return Hub.event("call") { put("state", s) }
+        // Android gives the ringing number only to the dialer; its call notification's title, posted
+        // a moment after the ring, stands in.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            val caller = HubNotifications.instance?.let { l -> runCatching { l.activeNotifications }.getOrNull()
+                ?.firstOrNull { it.notification.category == android.app.Notification.CATEGORY_CALL } }
+                ?.notification?.extras?.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()
+            if (last == s) Hub.event("call") { put("state", s); putNullable("name", caller) }
+        }, 700)
     }
 
     private fun telecom(ctx: Context) = ctx.getSystemService(TelecomManager::class.java)
