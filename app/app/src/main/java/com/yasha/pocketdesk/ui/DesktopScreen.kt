@@ -565,6 +565,33 @@ fun DesktopScreen(
                     }
                 }
             }
+            // Any screen the PC reaches: itself, its phones, other PCs and theirs.
+            if (video && !fullscreen) {
+                var choosing by remember { mutableStateOf(false) }
+                Box(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
+                    val now = ws.desktopSources.firstOrNull { it.id == ws.desktopSource }
+                    FilledTonalButton(onClick = { choosing = true; ws.sourcesRefresh() }, modifier = Modifier.height(32.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp)) {
+                        Text("${now?.name ?: if (ws.desktopSource == "local") "This PC" else "Device"} ▾", style = MaterialTheme.typography.labelMedium)
+                    }
+                    androidx.compose.material3.DropdownMenu(expanded = choosing, onDismissRequest = { choosing = false }) {
+                        if (ws.desktopSources.isEmpty()) androidx.compose.material3.DropdownMenuItem(text = { Text("Looking…") }, onClick = {}, enabled = false)
+                        ws.desktopSources.forEach { s ->
+                            val what = when {
+                                s.kind == "phone" -> "phone"
+                                s.os == "darwin" -> "Mac"
+                                s.os == "win32" -> "Windows"
+                                s.os == "linux" -> "Linux"
+                                else -> "PC"
+                            }
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text((if (s.id == ws.desktopSource) "● " else "   ") + (if ('/' in s.id) "    " else "") + "${s.name} · $what") },
+                                onClick = { choosing = false; ws.pickSource(s.id) },
+                            )
+                        }
+                    }
+                }
+            }
             // In the middle, so both corners being marked stay in view.
             if (calibrating) {
                 Column(

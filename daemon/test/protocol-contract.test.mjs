@@ -9,6 +9,7 @@ import remoteHandlers from "../src/handlers/remote.js";
 import sshHandlers from "../src/handlers/ssh.js";
 import systemHandlers from "../src/handlers/system.js";
 import phoneHandlers from "../src/handlers/phone.js";
+import { withSources } from "../src/handlers/sources.js";
 
 const APP = path.join(REPO, "app", "app", "src", "main", "java", "com", "yasha", "pocketdesk");
 const DAEMON = path.join(REPO, "daemon", "src");
@@ -22,6 +23,7 @@ const handled = new Set(["hello"]);
 for (const make of [agentsHandlers, filesHandlers, remoteHandlers, sshHandlers, systemHandlers, phoneHandlers]) {
   for (const k of Object.keys(make({}))) handled.add(k);
 }
+for (const k of Object.keys(withSources({}, {}))) handled.add(k);
 
 const protocol = fs.readFileSync(path.join(APP, "Protocol.kt"), "utf8");
 const sent = new Set([...protocol.matchAll(/put\("type", "([a-z_]+)"\)/g)].map((m) => m[1]));

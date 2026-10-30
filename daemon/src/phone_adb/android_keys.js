@@ -55,4 +55,21 @@ class KeyState {
   }
 }
 
-export { KEYCODE, META, ANDROID, KeyState };
+// Windows virtual-key codes, which every desktop viewer sends, to DOM codes.
+const VK_CODE = {
+  0x08: "Backspace", 0x09: "Tab", 0x0d: "Enter", 0x10: "ShiftLeft", 0x11: "ControlLeft", 0x12: "AltLeft", 0x14: "CapsLock",
+  0x1b: "Escape", 0x20: "Space", 0x21: "PageUp", 0x22: "PageDown", 0x23: "End", 0x24: "Home",
+  0x25: "ArrowLeft", 0x26: "ArrowUp", 0x27: "ArrowRight", 0x28: "ArrowDown", 0x2d: "Insert", 0x2e: "Delete",
+  0x5b: "MetaLeft", 0x5c: "MetaRight", 0x5d: "ContextMenu", 0x6a: "NumpadMultiply", 0x6b: "NumpadAdd", 0x6d: "NumpadSubtract",
+  0x6e: "NumpadDecimal", 0x6f: "NumpadDivide", 0xa0: "ShiftLeft", 0xa1: "ShiftRight", 0xa2: "ControlLeft", 0xa3: "ControlRight",
+  0xa4: "AltLeft", 0xa5: "AltRight", 0xad: "AudioVolumeMute", 0xae: "AudioVolumeDown", 0xaf: "AudioVolumeUp",
+  0xb0: "MediaTrackNext", 0xb1: "MediaTrackPrevious", 0xb3: "MediaPlayPause",
+  0xba: "Semicolon", 0xbb: "Equal", 0xbc: "Comma", 0xbd: "Minus", 0xbe: "Period", 0xbf: "Slash", 0xc0: "Backquote",
+  0xdb: "BracketLeft", 0xdc: "Backslash", 0xdd: "BracketRight", 0xde: "Quote",
+};
+for (let i = 0; i < 26; i++) VK_CODE[0x41 + i] = `Key${String.fromCharCode(65 + i)}`;
+for (let i = 0; i < 10; i++) { VK_CODE[0x30 + i] = `Digit${i}`; VK_CODE[0x60 + i] = `Numpad${i}`; }
+for (let i = 1; i <= 12; i++) VK_CODE[0x6f + i] = `F${i}`;
+const MOD_CODE = { ctrl: "ControlLeft", shift: "ShiftLeft", alt: "AltLeft", win: "MetaLeft" };
+
+export { KEYCODE, META, ANDROID, KeyState, VK_CODE, MOD_CODE };

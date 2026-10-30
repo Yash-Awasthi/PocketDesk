@@ -19,9 +19,41 @@ export function phoneBinary(ws, buf) {
     if (w._phoneNeedKey) continue;
     // A backed-up watcher waits for a fresh keyframe, which the phone makes on request.
     if (w.bufferedAmount > 1_500_000) { w._phoneNeedKey = true; keyframe(); continue; }
+    // A desktop viewer gets the screen alone, in the desktop framing it already speaks.
+    if (w._shareFeed) { if (buf[0] >> 2 === 0) w.send(buf); continue; }
     w.send(out);
   }
 }
+
+/** The shared phone for any desktop viewer (see sources.js): its owner still says yes on the phone. */
+export const shareFeed = {
+  phone: () => share.phone,
+  size: () => ({ w: share.w, h: share.h }),
+  input(ws, type, m) {
+    if (!share.phone || !share.watchers.has(ws)) return;
+    const go = (o) => share.phone.send(JSON.stringify({ type: "phone_input", ...o }));
+    const fin = (v) => Number.isFinite(Number(v));
+    if (type === "desktop_type") return m.text && go({ kind: "text", text: String(m.text) });
+    if (type === "desktop_key") {
+      const k = { 0x0d: "enter", 0x08: "backspace", 0x1b: "back" }[Number(m.key)];
+      if (k && m.press !== "up") go({ kind: "key", key: k });
+      return;
+    }
+    const button = m.button || m.click;
+    if ((m.click || m.press === "down") && (button === "right" || button === "middle")) return go({ kind: "key", key: button === "right" ? "back" : "home" });
+    if (!fin(m.fx) || !fin(m.fy)) return;
+    // Accessibility gestures are whole strokes: a press is held until release, then sent as a tap or swipe.
+    if (m.click) return go({ kind: "tap", fx: m.fx, fy: m.fy });
+    if (m.press === "down") ws._shareDown = { fx: m.fx, fy: m.fy, at: Date.now() };
+    else if (m.press === "up" && ws._shareDown) {
+      const d = ws._shareDown;
+      ws._shareDown = null;
+      const ms = Date.now() - d.at;
+      if (Math.hypot(m.fx - d.fx, m.fy - d.fy) < 0.01) go({ kind: ms > 500 ? "press" : "tap", fx: d.fx, fy: d.fy });
+      else go({ kind: "swipe", fx: d.fx, fy: d.fy, tx: m.fx, ty: m.fy, ms: Math.max(80, Math.min(3000, ms)) });
+    }
+  },
+};
 
 function keyframe() {
   if (share.phone?.readyState === 1) share.phone.send(JSON.stringify({ type: "phone_keyframe" }));
@@ -76,7 +108,7 @@ export default function phoneHandlers(ctx) {
     share.phone = null;
     share.apps = [];
     share.active = null;
-    for (const w of share.watchers) send(w, { type: "phone_stopped" });
+    for (const w of share.watchers) send(w, w._shareFeed ? { type: "desktop_stopped", source: "share", why: "the phone stopped sharing" } : { type: "phone_stopped" });
     broadcast({ type: "swap", direction: "phone" });
   }
   function relay(ws, msg) {
@@ -84,7 +116,14 @@ export default function phoneHandlers(ctx) {
     if (!share.watchers.has(ws)) return send(ws, { type: "error", message: `${msg.type}: not watching the phone` });
     send(share.phone, msg);
   }
-  return {
+  shareFeed.open = async (ws) => {
+    ws._shareFeed = true;
+    await this_.phone_watch(ws, { ask: false });
+    // Only the other phones are asked; the viewer is a phone too.
+    if (!share.phone) for (const w of shareFeed.phones()) if (w !== ws) send(w, { type: "phone_share_request" });
+  };
+  shareFeed.close = (ws) => { ws._shareFeed = false; share.watchers.delete(ws); };
+  const this_ = {
     async phone_watch(ws, msg = {}) {
       if (!share.watchers.has(ws)) {
         share.watchers.add(ws);
@@ -195,4 +234,6 @@ export default function phoneHandlers(ctx) {
       send(ws, { type: "phone_hub", online: !!storagePhone(), name: storagePhone()?._name || null, last: Object.fromEntries(hub.last) });
     },
   };
+  shareFeed.phones = () => [...clients()].filter((w) => w._android && w._authed && w.readyState === 1);
+  return this_;
 }

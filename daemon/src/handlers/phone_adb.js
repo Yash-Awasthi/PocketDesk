@@ -10,7 +10,7 @@ import { ensureTools, findAdb, serverPath } from "../phone_adb/tools.js";
 import { Adb } from "../phone_adb/adb.js";
 import { startAdbQr } from "../phone_adb/adbqr.js";
 import { Session, ACTION, TYPE } from "../phone_adb/scrcpy.js";
-import { KeyState, ANDROID } from "../phone_adb/android_keys.js";
+import { KeyState, ANDROID, VK_CODE, MOD_CODE } from "../phone_adb/android_keys.js";
 import * as timeline from "../timeline.js";
 import { Webcam } from "../webcam.js";
 
@@ -58,7 +58,7 @@ const st = { adb: null, serial: null, error: "", qr: null, apps: new Map(), clip
 let nextView = 1;
 const webcam = new Webcam();
 /** For clipboard sync: whether a phone is set up, and its clipboard both ways. */
-export const bridge = { ready: () => !!st.serial, setClipboard: null, onPhoneClip: null };
+export const bridge = { ready: () => !!st.serial, setClipboard: null, onPhoneClip: null, phones: null, openFeed: null, feedInput: null, closeFeed: null };
 
 function packet(kind, id, flags, pts, data) {
   const b = Buffer.allocUnsafe(HEAD + data.length);
@@ -78,6 +78,14 @@ export default function phoneAdbHandlers(ctx) {
   bridge.setClipboard = async (text) => (await control()).setClipboard(text, false);
   // A live control session is what streams the phone's clipboard changes here.
   bridge.keep = async () => { if (st.serial) await control(); };
+  // Feeds: a phone's screen for any desktop viewer (the phone app, another PC), in desktop framing.
+  bridge.phones = async () => (st.adb || findAdb() ? (await devices().catch(() => [])).filter((d) => d.state === "device") : []);
+  bridge.openFeed = async (ws, serial, m = {}) => {
+    if (!(await bridge.phones()).some((d) => d.serial === serial)) throw new Error("that phone is not connected to this PC");
+    return open(ws, { kind: "screen", serial, feed: true, codec: "h264", maxSize: Number(m.maxSize) || 1920, mbps: 8 });
+  };
+  bridge.closeFeed = (v) => close(v);
+  bridge.feedInput = (v, type, m) => feedInput(v, type, m);
 
   async function adb() {
     if (st.adb) return st.adb;
@@ -122,11 +130,11 @@ export default function phoneAdbHandlers(ctx) {
   }
 
   async function open(ws, m) {
-    const serial = needSerial();
+    const serial = m.serial || needSerial();
     if (st.views.size >= MAX_VIEWS) throw new Error(`at most ${MAX_VIEWS} phone windows`);
     const kind = ["screen", "app", "camera", "sound", "mic"].includes(m.kind) ? m.kind : "screen";
     if (kind === "app" && !/^[\w.]+$/.test(String(m.pkg || ""))) throw new Error("app: package name required");
-    const reuse = [...st.views.values()].find((v) => v.owner === ws && v.kind === kind && (kind !== "app" || v.pkg === m.pkg));
+    const reuse = m.feed ? null : [...st.views.values()].find((v) => v.owner === ws && v.kind === kind && (kind !== "app" || v.pkg === m.pkg));
     if (reuse && kind !== "camera") { send(ws, { type: "adb_view", ...viewInfo(reuse) }); reuse.session?.simple(TYPE.RESET_VIDEO); return; }
     const codec = ["h264", "h265", "av1"].includes(m.codec) ? m.codec : "h264";
     const base = { video: kind !== "sound", control: kind !== "sound", maxFps: Math.min(120, Number(m.fps) || 60), videoBitRate: Math.min(40, Number(m.mbps) || 8) * 1e6, videoCodec: codec };
@@ -145,22 +153,24 @@ export default function phoneAdbHandlers(ctx) {
     }
     let id;
     do id = (nextView++ % 250) + 1; while (st.views.has(id));
-    const v = { id, kind, pkg: kind === "app" ? m.pkg : null, label: String(m.label || m.pkg || kind).slice(0, 80), owner: ws, keys: new KeyState(), size: null, needKey: true, screenOff: false, torch: false, facing: opts.cameraFacing };
+    const v = { id, kind, feed: !!m.feed, serial, pkg: kind === "app" ? m.pkg : null, label: String(m.label || m.pkg || kind).slice(0, 80), owner: ws, keys: new KeyState(), size: null, needKey: true, screenOff: false, torch: false, facing: opts.cameraFacing };
     st.views.set(id, v);
     if (!ws._adbHooked) { ws._adbHooked = true; ws.once?.("close", () => { for (const x of [...st.views.values()]) if (x.owner === ws) close(x); }); }
-    send(ws, { type: "adb_view", ...viewInfo(v) });
+    if (!v.feed) send(ws, { type: "adb_view", ...viewInfo(v) });
     try { await start(v, serial, opts); } catch (e) {
       v.error = e.message;
-      send(ws, { type: "adb_view_closed", id, why: e.message });
       st.views.delete(id);
+      if (v.feed) throw e;
+      send(ws, { type: "adb_view_closed", id, why: e.message });
     }
+    return v;
   }
 
   async function start(v, serial, opts) {
     const s = new Session(await adb(), serial, opts);
     v.session = s;
     const ws = v.owner;
-    s.on("size", (size) => { v.size = size; send(ws, { type: "adb_view", ...viewInfo(v) }); });
+    s.on("size", (size) => { v.size = size; if (!v.feed) send(ws, { type: "adb_view", ...viewInfo(v) }); });
     s.on("video", (p) => {
       if (ws.readyState !== 1) return;
       if (p.config) v.needKey = true;
@@ -168,7 +178,9 @@ export default function phoneAdbHandlers(ctx) {
       else if (v.needKey) return;
       // A viewer that fell behind skips to a fresh keyframe rather than smearing.
       if (!p.config && ws.bufferedAmount > BEHIND) { v.needKey = true; s.simple(TYPE.RESET_VIDEO); return; }
-      ws.send(packet(BIN_VIDEO, v.id, (p.config ? 1 : 0) | (p.key ? 2 : 0), p.pts, p.data));
+      // A feed speaks the desktop stream's framing (0 config, 1 key, 2 delta), for any desktop viewer.
+      if (v.feed) ws.send(Buffer.concat([Buffer.from([p.config ? 0 : p.key ? 1 : 2]), p.data]));
+      else ws.send(packet(BIN_VIDEO, v.id, (p.config ? 1 : 0) | (p.key ? 2 : 0), p.pts, p.data));
     });
     s.on("audioCodec", (c) => send(ws, { type: "adb_audio", id: v.id, codec: c === 0x6f707573 ? "opus" : c === 0x00726177 ? "raw" : c <= 1 ? null : "other" }));
     s.on("audio", (p) => { if (ws.readyState === 1 && ws.bufferedAmount < BEHIND) ws.send(packet(BIN_AUDIO, v.id, p.config ? 1 : 0, p.pts, p.data)); });
@@ -176,7 +188,8 @@ export default function phoneAdbHandlers(ctx) {
     s.on("closed", (why) => {
       if (v.session !== s) return;
       st.views.delete(v.id);
-      send(ws, { type: "adb_view_closed", id: v.id, why });
+      if (v.feed) send(ws, { type: "desktop_stopped", source: `adb:${v.serial}`, why });
+      else send(ws, { type: "adb_view_closed", id: v.id, why });
     });
     await s.start();
     if (v.pkg) setTimeout(() => s.startApp(v.pkg), 300);
@@ -258,6 +271,41 @@ export default function phoneAdbHandlers(ctx) {
       case "resize": if (v.kind === "app") s.resizeDisplay(num(m.w), num(m.h)); break;
       case "paste": if (typeof m.text === "string") s.setClipboard(m.text, true); break;
     }
+  }
+
+  /** desktop_mouse/desktop_key/desktop_type, as any desktop viewer sends them, on a phone feed. */
+  function feedInput(v, type, m) {
+    const size = v.size;
+    if (!size) return;
+    const at = () => {
+      if (Number.isFinite(Number(m.fx)) && Number.isFinite(Number(m.fy))) v.at = { x: Math.max(0, Math.min(1, m.fx)) * size.width, y: Math.max(0, Math.min(1, m.fy)) * size.height };
+      return v.at || { x: size.width / 2, y: size.height / 2 };
+    };
+    if (type === "desktop_type") return input(v, { t: "text", text: String(m.text ?? "") });
+    if (type === "desktop_key") {
+      const code = VK_CODE[Number(m.key)];
+      if (!code) return;
+      const mods = (Array.isArray(m.modifiers) ? m.modifiers : []).map((x) => MOD_CODE[x]).filter(Boolean);
+      const key = (c, down) => input(v, { t: "key", code: c, down, enterSends: false });
+      if (m.press) return key(code, m.press === "down");
+      mods.forEach((c) => key(c, true)); key(code, true); key(code, false); mods.reverse().forEach((c) => key(c, false));
+      return;
+    }
+    if (m.wheel != null || m.hwheel != null) {
+      const p = at();
+      return input(v, { t: "scroll", x: p.x, y: p.y, vs: Math.max(-16, Math.min(16, (Number(m.wheel) || 0) / 120)), hs: Math.max(-16, Math.min(16, -(Number(m.hwheel) || 0) / 120)) });
+    }
+    const p = at();
+    const button = m.button || m.click;
+    // On a phone the right button is Back and the middle one Home, as in scrcpy.
+    if ((m.press === "down" || m.click) && button === "right") return input(v, { t: "nav", key: "back" });
+    if ((m.press === "down" || m.click) && button === "middle") return input(v, { t: "nav", key: "home" });
+    if (button === "right" || button === "middle") return;
+    const touch = (action) => input(v, { t: "touch", action, pointer: -2, x: p.x, y: p.y });
+    if (m.click) { touch(ACTION.DOWN); touch(ACTION.UP); if (m.click === "double") { touch(ACTION.DOWN); touch(ACTION.UP); } }
+    else if (m.press === "down") { v.down = true; touch(ACTION.DOWN); }
+    else if (m.press === "up") { v.down = false; touch(ACTION.UP); }
+    else if (v.down) touch(ACTION.MOVE);
   }
 
   const APP = "com.yasha.pocketdesk";

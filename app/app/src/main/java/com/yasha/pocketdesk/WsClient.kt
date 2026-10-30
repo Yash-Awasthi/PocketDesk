@@ -185,6 +185,11 @@ class WsClient(
     var desktopMonitors by mutableStateOf<List<String>>(emptyList())
         private set
     var desktopMonitor by mutableStateOf(0)
+    /** What the viewer shows: "local" (this PC), "adb:<serial>" (a phone on it) or "pc:<id>[/…]" (another PC). */
+    var desktopSource by mutableStateOf("local")
+    /** Everything the PC offers to view, its linked PCs' own screens included once they answer. */
+    var desktopSources by mutableStateOf<List<DesktopSource>>(emptyList())
+        private set
     /** Receives binary video packets (kinds 0-2); called on the socket thread. */
     @Volatile var videoSink: ((ByteArray) -> Unit)? = null
     /** Receives PC audio packets (kind 3, an ADTS frame); called on the socket thread. */
@@ -579,7 +584,7 @@ class WsClient(
     private val decodable by lazy { com.yasha.pocketdesk.ui.decodableCodecs() }
     fun desktopStartVideo() {
         desktopStreaming = true
-        val start = { Proto.desktopStartVideo(desktopPreset, desktopMonitor, desktopViewOnly, decodable, desktopAudio) }
+        val start = { Proto.desktopStartVideo(desktopPreset, desktopMonitor, desktopViewOnly, decodable, desktopAudio, desktopSource) }
         desktopResume = { send(start()) }
         send(start())
         send(Proto.desktopMonitors())
@@ -603,6 +608,15 @@ class WsClient(
     fun uploadBacklog(): Long = irohLink.get()?.uploadBacklog?.get() ?: socket.get()?.queueSize() ?: 0L
 
     fun desktopStop() { desktopStreaming = false; desktopResume = null; send(Proto.desktopStop()) }
+    fun sourcesRefresh() = send(Proto.sourcesList())
+    /** Shows another device in the viewer; the stream restarts on it. */
+    fun pickSource(id: String) {
+        if (id == desktopSource) return
+        desktopSource = id
+        desktopMonitor = 0
+        desktopMonitors = emptyList()
+        if (desktopStreaming) desktopStartVideo()
+    }
     /** Width and height of the picture on screen; positions also go out as fractions of it. */
     @Volatile var desktopFrameSize: Pair<Int, Int>? = null
     /** The user's pointer calibration for the PC and screen in view; null sends and reads fractions as they are. */
@@ -1111,6 +1125,17 @@ class WsClient(
                 desktopNotice = if (bool(m, "allowed") == false) "The PC owner paused control. You can watch only." else ""
             }
             "pc_power" -> events.tryEmit(RhEvent.PowerDone(str(m, "action") ?: "", bool(m, "ok") == true, str(m, "error")))
+            "sources_list" -> {
+                val of = str(m, "of")
+                val got = (m["items"] as? JsonArray)?.mapNotNull { e ->
+                    val o = e as? JsonObject ?: return@mapNotNull null
+                    DesktopSource(str(o, "id") ?: return@mapNotNull null, str(o, "name") ?: "?", str(o, "os"), str(o, "kind") ?: "pc", bool(o, "online") != false)
+                } ?: emptyList()
+                // A linked PC's list replaces what it said before; the PC itself is already listed.
+                desktopSources = if (of == null) got + desktopSources.filter { it.id.contains('/') }
+                else desktopSources.filter { !it.id.startsWith("$of/") } + got.filter { it.id != of }
+                if (of == null) got.filter { it.id.startsWith("pc:") }.forEach { send(Proto.sourcesList(it.id)) }
+            }
             "desktop_stopped" -> {
                 desktopStreaming = false
                 str(m, "reason")?.let { desktopResume = null; _desktopError.value = "Session $it" }

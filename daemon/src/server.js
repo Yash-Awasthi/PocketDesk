@@ -43,6 +43,8 @@ import phoneAdbHandlers from "./handlers/phone_adb.js";
 import phoneSyncHandlers from "./handlers/phone_sync.js";
 import pcPadHandlers from "./handlers/pc_pad.js";
 import displayHandlers from "./handlers/display.js";
+import computersHandlers from "./handlers/computers.js";
+import { withSources } from "./handlers/sources.js";
 import { startIroh } from "./iroh_link.js";
 import { configDir, configPath } from "./config.js";
 
@@ -60,7 +62,7 @@ const PAUSE_ALLOWED = new Set([
   "approval_waiting", "usage_list", "usage_get", "recordings_list", "recording_get",
   "fs", "fread", "fs_search", "fs_zip", "fs_thumb", "git_status", "git_diff", "git_log", "git_branches", "mention",
   "desktop_start", "desktop_ping", "desktop_monitors", "video_ack", "desktop_stop", "desktop_frame", "desktop_quality",
-  "desktop_status", "desktop_permissions", "desktop_mouse", "desktop_key", "desktop_type",
+  "desktop_status", "desktop_permissions", "desktop_mouse", "desktop_key", "desktop_type", "sources_list", "pc_list",
   "bastion_user_list", "bastion_host_list", "bastion_sessions", "bastion_stats", "bastion_stop", "sshserver_user_list",
   "sshserver_sessions", "sshserver_stats", "sshserver_stop", "profile_list", "profile_disconnect", "hostkey_list", "sshkey_list", "mproto_status",
   "phone_watch", "phone_unwatch", "phone_share_start", "phone_share_stop", "phone_share_end", "phone_apps", "phone_input", "phone_switch", "phone_fs", "phone_fs_result",
@@ -307,6 +309,7 @@ export function start(config, { onTokenRotated } = {}) {
     // undefined and every client shared one rate-limit counter, locking out the whole LAN.
     const clientIp = (req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
     ws._subs = new Set();
+    ws._loopback = clientIp === "127.0.0.1" || clientIp === "::1";
     ws._authed = false;
     ws._alive = true;
     ws.on("pong", () => { ws._alive = true; });
@@ -694,9 +697,11 @@ export function start(config, { onTokenRotated } = {}) {
     desktop, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
     activity, tls, syncAudio, audioListeners, clients: () => wss.clients,
   };
-  const handlers = {
-    ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx), ...phoneHandlers(ctx), ...phoneAdbHandlers(ctx), ...phoneSyncHandlers(ctx), ...pcPadHandlers(ctx), ...displayHandlers(ctx),
-  };
+  const handlers = withSources({
+    ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx), ...phoneHandlers(ctx), ...phoneAdbHandlers(ctx), ...phoneSyncHandlers(ctx), ...pcPadHandlers(ctx), ...displayHandlers(ctx), ...computersHandlers(ctx),
+  }, ctx);
+  // The link another PC adds this one with; it carries the pairing token, so only this machine's page gets it.
+  handlers.pc_pairing_link = async (ws) => send(ws, ws._loopback && pairLink ? { type: "pc_pairing_link", link: pairLink } : { type: "pc_error", message: "open this page on the PC itself to copy its link" });
 
 
   server.listen(port, async () => {

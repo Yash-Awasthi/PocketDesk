@@ -131,6 +131,9 @@ data class PcFile(val path: String, val name: String, val size: Long?, val dir: 
 /** PC clipboard content; [requested] is false when the PC copied something on its own. */
 data class PcClip(val kind: String, val text: String?, val png: String?, val files: List<PcFile>, val requested: Boolean)
 
+/** A screen the PC can show: itself, a phone on it, another PC, or one of that PC's own (id "pc:<id>/adb:<serial>"). */
+data class DesktopSource(val id: String, val name: String, val os: String?, val kind: String, val online: Boolean)
+
 /** The PC pointer in picture pixels; [shape] is a CSS cursor name such as "arrow" or "text". */
 data class DesktopCursor(val x: Int, val y: Int, val shape: String, val fx: Double? = null, val fy: Double? = null)
 
@@ -261,13 +264,15 @@ object Proto {
 
     // ── Desktop control (AnyDesk-style watch + full input) ──
     fun desktopStart(quality: Int) = obj { put("type", "desktop_start"); put("quality", quality) }
-    fun desktopStartVideo(preset: String, monitor: Int, viewOnly: Boolean, codecs: List<String> = emptyList(), audio: Boolean = false) = obj {
+    fun desktopStartVideo(preset: String, monitor: Int, viewOnly: Boolean, codecs: List<String> = emptyList(), audio: Boolean = false, source: String = "local") = obj {
         put("type", "desktop_start"); put("video", true); put("preset", preset); put("monitor", monitor)
+        if (source != "local") put("source", source)
         if (viewOnly) put("viewOnly", true)
         if (codecs.isNotEmpty()) put("codecs", JsonArray(codecs.map { JsonPrimitive(it) }))
         if (audio) put("audio", true)
     }
     fun desktopMonitors() = obj { put("type", "desktop_monitors") }
+    fun sourcesList(of: String? = null) = obj { put("type", "sources_list"); if (of != null) put("of", of) }
     fun desktopPing(t: Long) = obj { put("type", "desktop_ping"); put("t", t) }
     fun clipboardGet() = obj { put("type", "clipboard_get") }
     fun clipboardSet(text: String?, png: String? = null, files: List<String>? = null, paste: Boolean = false) = obj {
