@@ -248,7 +248,9 @@ class MainActivity : ComponentActivity() {
                     )
                     else -> {}
                 }
-                if (client.status == Status.Disconnected) {
+                if (Peer.open) {
+                    com.yasha.pocketdesk.ui.PeerScreen(onClose = { Peer.open = false })
+                } else if (client.status == Status.Disconnected) {
                     ConnectScreen(client) { showTab(Screen.Sessions) }
                 } else NavDisplay(
                     backStack = backStack,

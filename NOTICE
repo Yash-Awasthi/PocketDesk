@@ -27,6 +27,7 @@ Bundled with the Windows helpers:
 
   Figtree font (native/vcam/assets), SIL Open Font License 1.1; see OFL-Figtree.txt.
   vigem-client (Rust crate), MIT License, for native/pad.
+  ZXing core, Apache License 2.0, draws the app's phone-to-phone QR code.
   The UHID gamepad report descriptor in daemon/src/handlers/phone_adb.js is scrcpy's
   (app/src/hid/hid_gamepad.c), Apache License 2.0.
 

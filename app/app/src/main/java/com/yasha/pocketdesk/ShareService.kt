@@ -56,7 +56,7 @@ class ShareService : Service() {
         }, main)
         size = captureSize()
         val enc = Encoder(size, BITRATE, sink::send).also { encoder = it }
-        Link.client.phoneShareStart(size.first, size.second, ControlService.instance != null)
+        PhoneShare.started(size.first, size.second)
         display = p.createVirtualDisplay("PocketDesk", size.first, size.second, resources.displayMetrics.densityDpi,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, enc.surface, null, null)
         getSystemService(DisplayManager::class.java).registerDisplayListener(displayChanged, main)
@@ -88,7 +88,7 @@ class ShareService : Service() {
             display?.resize(next.first, next.second, resources.displayMetrics.densityDpi)
             display?.surface = enc.surface
             old?.stop()
-            Link.client.phoneShareStart(next.first, next.second, ControlService.instance != null)
+            PhoneShare.started(next.first, next.second)
         }
     }
 
@@ -108,7 +108,7 @@ class ShareService : Service() {
     }
 
     fun announce() {
-        Link.client.phoneShareStart(size.first, size.second, ControlService.instance != null)
+        PhoneShare.started(size.first, size.second)
         keyframe()
         ControlService.instance?.sendApps()
     }
@@ -130,7 +130,7 @@ class ShareService : Service() {
         projection?.stop()
         projection = null
         PhoneShare.service = null
-        if (PhoneShare.sharing) Link.client.phoneShareStop()
+        if (PhoneShare.sharing) { if (Peer.hostChannel != null) Peer.announceStop() else Link.client.phoneShareStop() }
         PhoneShare.sharing = false
         super.onDestroy()
     }
@@ -143,8 +143,8 @@ class ShareService : Service() {
         val stop = PendingIntent.getService(this, 0, Intent(this, ShareService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(android.R.drawable.ic_menu_view)
-            .setContentTitle("Your PC is viewing this phone")
-            .setContentText(if (ControlService.instance != null) "It can also tap and type here" else "View only: PC control is off")
+            .setContentTitle(if (Peer.hostChannel != null) "Another phone is viewing this phone" else "Your PC is viewing this phone")
+            .setContentText(if (ControlService.instance != null) "It can also tap and type here" else "View only: PocketDesk control is off in Accessibility")
             .setOngoing(true)
             // Shown in full while Android masks notifications during the share, so Stop stays reachable.
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -232,6 +232,13 @@ class LinkSink(private val slot: Int, private val requestKey: () -> Unit) {
     fun send(kind: Int, data: ByteArray) {
         if (kind == 1) dropping = false
         if (kind == 2 && dropping) return
+        // A phone viewing this one takes the main screen alone.
+        Peer.hostChannel?.let { ch ->
+            if (slot != 0) return
+            if (kind != 0 && ch.backlog.get() > MAX_BACKLOG) { dropping = true; requestKey(); return }
+            ch.sendVideo(byteArrayOf(kind.toByte()) + data)
+            return
+        }
         if (kind != 0 && Link.client.uploadBacklog() > MAX_BACKLOG) { dropping = true; requestKey(); return }
         Link.client.sendPhoneVideo(byteArrayOf((slot * 4 + kind).toByte()) + data)
     }

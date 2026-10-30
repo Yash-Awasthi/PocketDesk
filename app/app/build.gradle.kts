@@ -88,6 +88,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.core.ktx)
     implementation(libs.code.scanner)
+    implementation(libs.zxing.core)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.navigation3.runtime)
     implementation(libs.navigation3.ui)

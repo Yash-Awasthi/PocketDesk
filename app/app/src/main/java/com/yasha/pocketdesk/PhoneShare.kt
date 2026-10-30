@@ -33,6 +33,12 @@ object PhoneShare {
         ctx.startActivity(Intent(ctx, ShareConsentActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
+    /** The share started or changed size: told to the phone viewing this one, else to the PC. */
+    fun started(w: Int, h: Int) {
+        val control = ControlService.instance != null
+        if (Peer.hostChannel != null) Peer.announce(w, h, control) else Link.client.phoneShareStart(w, h, control)
+    }
+
     fun stop(ctx: Context) {
         ctx.stopService(Intent(ctx, ShareService::class.java))
     }

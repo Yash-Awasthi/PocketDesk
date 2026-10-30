@@ -184,6 +184,7 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
     Scaffold(
         floatingActionButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                androidx.compose.material3.ExtendedFloatingActionButton(onClick = { com.yasha.pocketdesk.Peer.open = true }) { Text("Phone to phone") }
                 androidx.compose.material3.ExtendedFloatingActionButton(onClick = { scanQr() }) { Text("Scan QR") }
                 FloatingActionButton(onClick = { adding = true }) {
                     Icon(Icons.Filled.Add, contentDescription = "Add server")

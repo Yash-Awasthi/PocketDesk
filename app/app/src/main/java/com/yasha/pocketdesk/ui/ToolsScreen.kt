@@ -95,6 +95,7 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
                 OutlinedButton(onClick = { ws.sendRaw("""{"type":"phone_show"}""") }) { Text("Show on PC") }
             }
         }
+        item { OutlinedButton(onClick = { com.yasha.pocketdesk.Peer.open = true }) { Text("Phone to phone (no PC)") } }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
