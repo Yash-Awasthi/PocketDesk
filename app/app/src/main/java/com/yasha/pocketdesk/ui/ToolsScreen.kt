@@ -42,7 +42,7 @@ import com.yasha.pocketdesk.WsClient
 import kotlinx.coroutines.delay
 
 @Composable
-fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit, openSsh: () -> Unit, openFreebuff: () -> Unit, openAgent: (String) -> Unit, openChats: () -> Unit, lock: AppLock) {
+fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit, openSsh: () -> Unit, openGamepad: () -> Unit, openDeck: () -> Unit, openFreebuff: () -> Unit, openAgent: (String) -> Unit, openChats: () -> Unit, lock: AppLock) {
     // One project folder for everything started from this screen: an IDE opens
     // it, a CLI tool runs in it.
     var cwd by remember { mutableStateOf("") }
@@ -85,6 +85,14 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
                 }) {
                     Icon(Icons.Filled.Refresh, contentDescription = "Rescan")
                 }
+            }
+        }
+        item {
+            // The PC from the phone, and the phone on the PC.
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = openDeck) { Text("Deck") }
+                OutlinedButton(onClick = openGamepad) { Text("Controller") }
+                OutlinedButton(onClick = { ws.sendRaw("""{"type":"phone_show"}""") }) { Text("Show on PC") }
             }
         }
         item {

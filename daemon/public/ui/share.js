@@ -160,7 +160,7 @@ PD.onBinary((buf) => {
   try { d.decode(new EncodedVideoChunk({ type: kind === 1 ? "key" : "delta", timestamp: (st.ts += 33333), data: payload })); } catch { st.needKey = true; }
   return true;
 });
-PD.on("welcome", () => PD.send({ type: "phone_watch" }));
+PD.on("welcome", () => PD.send({ type: "phone_watch", ask: false }));
 
 // ── phone storage, through the phone app ──
 const fs = { path: "", rid: 0, waiting: new Map() };

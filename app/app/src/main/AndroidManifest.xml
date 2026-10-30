@@ -125,6 +125,25 @@
             </intent-filter>
         </service>
 
+        <!-- "Send to PC" in other apps' share menus: links, text and files. -->
+        <activity
+            android:name=".SendToPcActivity"
+            android:exported="true"
+            android:label="Send to PC"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".hub.GrantActivity"
             android:exported="false"

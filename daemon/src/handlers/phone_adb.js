@@ -12,6 +12,7 @@ import { startAdbQr } from "../phone_adb/adbqr.js";
 import { Session, ACTION, TYPE } from "../phone_adb/scrcpy.js";
 import { KeyState, ANDROID } from "../phone_adb/android_keys.js";
 import * as timeline from "../timeline.js";
+import { Webcam } from "../webcam.js";
 
 // Binary to the viewer: [kind, view id, flags, pts f64 (µs), ...data]; kinds sit apart from the
 // PC desktop's 0-3 and the phone app's 16-30 on the same socket.
@@ -55,6 +56,7 @@ const CHATS = new Set(["com.whatsapp", "com.whatsapp.w4b", "com.instagram.androi
 
 const st = { adb: null, serial: null, error: "", qr: null, apps: new Map(), clip: null, views: new Map() };
 let nextView = 1;
+const webcam = new Webcam();
 /** For clipboard sync: whether a phone is set up, and its clipboard both ways. */
 export const bridge = { ready: () => !!st.serial, setClipboard: null, onPhoneClip: null };
 
@@ -357,6 +359,58 @@ export default function phoneAdbHandlers(ctx) {
         if (!s._pads.has(id)) { s._pads.add(id); s.uhidCreate(id, 0x045e, 0x028e, "Microsoft X-Box 360 Pad", PAD_DESC); }
         s.uhidInput(id, padReport(msg.buttons, msg.axes));
       } catch (e) { err(ws, "gamepad", e); }
+    },
+    /** Everything the phone features depend on, checked at once for the Connect page. */
+    async phone_doctor(ws) {
+      const fsMod = await import("node:fs");
+      const { findNative, runOut } = await import("../native.js");
+      const win = process.platform === "win32";
+      const checks = [];
+      const add = (name, ok, detail) => checks.push({ name, ok: !!ok, detail });
+      const toolsReady = !!findAdb() && fsMod.existsSync(serverPath());
+      add("adb and scrcpy-server", toolsReady, toolsReady ? "ready" : "fetched on first use from the Connect page");
+      let list = [];
+      try { if (toolsReady) list = await devices({ reconnect: true }); } catch {}
+      const ready = list.filter((d) => d.state === "device");
+      add("Phone control", ready.length, ready.length ? ready.map((d) => `${d.model || d.serial} (${d.wireless ? "Wi-Fi" : "USB"})`).join(", ")
+        : list.some((d) => d.state === "unauthorized") ? "allow USB debugging on the phone" : "pair with wireless debugging or plug in a USB cable");
+      const app = [...clients()].some((w) => w._authed && w._android && w.readyState === 1);
+      add("PocketDesk app on the phone", app, app ? "connected" : "open the app and connect it to this PC");
+      const ff = process.env.FFMPEG_PATH || "ffmpeg";
+      add("ffmpeg", !process.env.FFMPEG_PATH || fsMod.existsSync(ff), "decodes the phone camera for the webcam");
+      if (win) {
+        const ws2 = await webcam.status();
+        add("Webcam helper", ws2.supported && ws2.registered, !ws2.supported ? ws2.reason : ws2.registered ? "PocketDesk Webcam registered" : "set it up on the Camera page");
+        const pad = findNative("pocketdesk-pad");
+        const vigem = (await runOut("powershell.exe", ["-NoProfile", "-Command", "(Get-Service ViGEmBus -ErrorAction SilentlyContinue).Status"])) === "Running";
+        add("Controller (ViGEmBus)", pad && vigem, !pad ? "the controller helper is not installed" : vigem ? "ready" : "install the ViGEmBus driver");
+        const vdd = (await runOut("powershell.exe", ["-NoProfile", "-Command", "@(Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -contains 'Root\\MttVDD' }).Count"])) !== "0";
+        add("Extra screen driver", vdd, vdd ? "installed" : "installed on first use (one administrator prompt)");
+      }
+      send(ws, { type: "phone_doctor", checks });
+    },
+    async adb_webcam_status(ws) {
+      send(ws, { type: "adb_webcam", ...(await webcam.status()) });
+    },
+    async adb_webcam_register(ws) {
+      try { await webcam.register(); } catch (e) { err(ws, "webcam", e); }
+      send(ws, { type: "adb_webcam", ...(await webcam.status()) });
+    },
+    /** The phone's camera as the PC's webcam, until turned off or the phone goes. */
+    async adb_webcam(ws, msg) {
+      try {
+        if (!msg.on) { webcam.stop(); return send(ws, { type: "adb_webcam", ...(await webcam.status()) }); }
+        const facing = msg.facing === "front" ? "front" : "back";
+        const opts = { video: true, audio: false, control: true, videoSource: "camera", cameraFacing: facing, cameraFps: 30, maxSize: 1920, videoBitRate: 8e6 };
+        if (/^[0-9]{2,5}x[0-9]{2,5}$/.test(String(msg.size || ""))) opts.cameraSize = msg.size;
+        const serial = needSerial();
+        const s = new Session(await adb(), serial, opts);
+        webcam.facing = facing;
+        webcam.start(s, (await devices().catch(() => [])).find((d) => d.serial === serial)?.model || "Phone");
+        webcam.once("change", async () => { for (const w of viewers()) send(w, { type: "adb_webcam", ...(await webcam.status()) }); });
+        await s.start();
+        send(ws, { type: "adb_webcam", ...(await webcam.status()) });
+      } catch (e) { webcam.stop(); err(ws, "webcam", e); }
     },
     async adb_clipboard_set(ws, msg) {
       try { (await control()).setClipboard(String(msg.text ?? "").slice(0, 200_000), !!msg.paste); } catch (e) { err(ws, "clipboard", e); }

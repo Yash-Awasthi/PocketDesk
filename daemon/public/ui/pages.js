@@ -160,11 +160,19 @@ PD.page("apps", {
       const f = q.value.trim().toLowerCase();
       const apps = PD.adb.apps.filter((a) => (!sys.checked || !a.system) && (!f || a.label.toLowerCase().includes(f) || a.pkg.includes(f)));
       grid.replaceChildren(...apps.map((a) => h("button", { className: "app", title: a.pkg, onclick: () => PD.adb.open("app", { pkg: a.pkg, label: a.label }) },
-        h("span", { className: "app-ico", textContent: a.label.slice(0, 1).toUpperCase(), style: `background:hsl(${[...a.pkg].reduce((x, c) => x + c.charCodeAt(0), 0) % 360} 55% 45%)` }),
+        PD.adb.icons?.[a.pkg] ? h("img", { className: "app-ico", src: img(PD.adb.icons[a.pkg]), alt: "" })
+          : h("span", { className: "app-ico", textContent: a.label.slice(0, 1).toUpperCase(), style: `background:hsl(${[...a.pkg].reduce((x, c) => x + c.charCodeAt(0), 0) % 360} 55% 45%)` }),
         h("span", { className: "app-name", textContent: a.label }))));
       if (!apps.length) grid.append(empty(PD.adb.apps.length ? "No app matches." : "Loading the phone's apps…"));
     };
-    PD.on("adb_apps_changed", draw);
+    PD.on("adb_apps_changed", () => {
+      draw();
+      // Real icons come from the phone app when it is connected; letters stand in until then.
+      if (PD.hub.online && PD.adb.apps.length && !PD.adb.icons) {
+        PD.adb.icons = {};
+        PD.ask("apps", "icons", { pkgs: PD.adb.apps.map((a) => a.pkg) }, 60000).then((r) => { PD.adb.icons = r.icons || {}; draw(); }).catch(() => { PD.adb.icons = null; });
+      }
+    });
     PD.on("adb_changed", () => { if (PD.current === "apps" && phoneReady() && !PD.adb.apps.length) PD.send({ type: "adb_apps" }); draw(); });
     this.draw = draw;
   },
@@ -186,9 +194,24 @@ PD.page("camera", {
     sec.append(h("div", { className: "card" },
       h("h3", { textContent: "The phone's camera on this PC" }),
       h("p", { className: "dim", textContent: "Shows the camera in a window you can pop out over a video call, screenshot or record. Light and zoom are in its bar. Android 12 or later." }),
-      h("div", { className: "actions" }, facing, size, btn("Open camera", () => (phoneReady() ? PD.adb.open("camera", { facing: facing.value, size: size.value }) : PD.go("connect")), "primary"))));
+      h("div", { className: "actions" }, facing, size, btn("Open camera", () => (phoneReady() ? PD.adb.open("camera", { facing: facing.value, size: size.value }) : PD.go("connect")), "primary"))),
+      h("div", { className: "card", id: "webcamCard" }));
+    const draw = (st) => {
+      const box = $("#webcamCard");
+      const on = st?.state === "on" || st?.state === "starting";
+      box.replaceChildren(h("h3", { textContent: "Use it as this PC's webcam" }),
+        h("p", { className: "dim", textContent: "Zoom, Teams, Meet, OBS and the Camera app see \"PocketDesk Webcam\". Windows 11 only." }),
+        !st ? h("div", { className: "dim", textContent: "Checking…" })
+          : !st.supported ? h("div", { className: "bad", textContent: st.reason })
+          : !st.registered ? h("div", { className: "actions" }, btn("Set up the webcam (asks for administrator rights once)", () => PD.send({ type: "adb_webcam_register" }), "primary"))
+          : h("div", { className: "actions" },
+            btn(on ? `Stop (${st.facing} camera ${st.state === "on" ? "live" : "starting"})` : "Start the webcam", () => PD.send({ type: "adb_webcam", on: !on, facing: facing.value, size: size.value }), on ? "danger" : "primary"),
+            st.error ? h("span", { className: "bad", textContent: st.error }) : ""));
+    };
+    PD.on("adb_webcam", draw);
+    draw(null);
   },
-  show() { if (phoneReady()) PD.send({ type: "adb_cameras" }); },
+  show() { if (phoneReady()) PD.send({ type: "adb_cameras" }); PD.send({ type: "adb_webcam_status" }); },
 });
 
 // ── Messages ──
@@ -298,7 +321,7 @@ PD.on("evt_call", (e) => {
       e.state === "ringing" && btn("Answer", () => run(() => PD.ask("calls", "answer")), "primary"),
       btn(e.state === "ringing" ? "Decline" : "Hang up", () => run(() => PD.ask("calls", "end")), "danger"),
       e.state === "ringing" && btn("Silence", () => run(() => PD.ask("calls", "silence")))));
-  if (e.state === "ringing" && Notification?.permission === "granted") new Notification(`Call from ${e.name || e.number}`, { tag: "pd-call" });
+  if (e.state === "ringing" && !PD.sync?.phoneToasts && Notification?.permission === "granted") new Notification(`Call from ${e.name || e.number}`, { tag: "pd-call" });
 });
 
 // ── Notifications ──
@@ -317,6 +340,7 @@ function notifRow(n) {
         (n.code ? [btn(`Copy ${n.code}`, () => navigator.clipboard.writeText(n.code).then(() => PD.toast("Code copied")))] : []),
         (n.actions || []).map((a) => btn(a.title, () => { if (a.reply) { reply.hidden = false; reply.dataset.action = a.id; reply.focus(); } else run(() => PD.ask("notif", "action", { key: n.key, action: a.id })); })),
         btn("Dismiss", () => run(() => PD.ask("notif", "dismiss", { key: n.key }))),
+        btn(`Mute ${n.appName}`, () => { PD.send({ type: "phone_sync_set", muted: [...new Set([...(PD.sync.muted || []), n.app])] }); PD.toast(`${n.appName} no longer pops up on this PC`); }),
         phoneReady() && btn("Open", () => PD.adb.open("app", { pkg: n.app, label: n.appName }))),
       reply));
 }
@@ -343,7 +367,7 @@ PD.on("evt_notif", (e) => {
   if (e.op === "posted") {
     const i = PD.notifs.list.findIndex((n) => n.key === e.item.key);
     if (i >= 0) PD.notifs.list[i] = e.item; else PD.notifs.list.unshift(e.item);
-    if (!e.item.silent && document.hidden && Notification?.permission === "granted") new Notification(e.item.title || e.item.appName, { body: e.item.text || "", tag: e.item.key, icon: img(e.item.icon) });
+    if (!e.item.silent && document.hidden && !PD.sync?.phoneToasts && Notification?.permission === "granted") new Notification(e.item.title || e.item.appName, { body: e.item.text || "", tag: e.item.key, icon: img(e.item.icon) });
   } else if (e.op === "removed") PD.notifs.list = PD.notifs.list.filter((n) => n.key !== e.key);
   else if (e.op === "all") PD.notifs.list = e.items || [];
   PD.emit("notifs_changed");
@@ -415,6 +439,7 @@ PD.page("clipboard", {
     const list = h("div", { className: "list", id: "clipList" });
     sec.append(PD.syncCard("clip"), h("div", { className: "card" }, text, h("div", { className: "actions" },
       btn("Send to phone", () => sendClip(text.value), "primary"),
+      btn("Open link on phone", () => openOnPhone(text.value.trim())),
       btn("Send this PC's clipboard", async () => { try { sendClip(await navigator.clipboard.readText()); } catch (e) { PD.toast(e.message, true); } }),
       btn("Get the phone's clipboard", () => (phoneReady() ? PD.send({ type: "adb_clipboard_get" }) : run(async () => { const r = await PD.ask("clip", "get"); if (r.text) PD.emit("phone_clip", r.text); }))))), h("h3", { textContent: "History" }), list);
     const draw = () => list.replaceChildren(...PD.clips.map((c) => h("div", { className: "item row" }, h("span", { className: "dim small", textContent: c.from === "phone" ? "from phone" : "to phone" }),
@@ -422,6 +447,13 @@ PD.page("clipboard", {
     PD.on("clips_changed", draw);
   },
 });
+/** A link opens on the phone: right away through phone control, else as a notification there. */
+function openOnPhone(url) {
+  if (!/^https?:[/][/][^ ]+$/i.test(url)) return PD.toast("Paste an http(s) link first", true);
+  if (phoneReady()) PD.send({ type: "adb_action", action: "open_url", value: url });
+  else run(() => PD.ask("link", "open", { url }), "Sent: tap the notification on the phone");
+}
+PD.openOnPhone = openOnPhone;
 function sendClip(t) {
   if (!t) return;
   if (phoneReady()) PD.send({ type: "adb_clipboard_set", text: t });
@@ -440,7 +472,11 @@ PD.on("evt_clip", (e) => { if (e.text) { addClip(e.text, "phone"); navigator.cli
 PD.page("connect", {
   title: "Connect", icon: I.connect,
   render(sec) {
-    sec.append(h("div", { className: "card", id: "adbCard" }), h("div", { className: "card", id: "appCard" }));
+    const doc = h("div", { className: "list" });
+    sec.append(h("div", { className: "card" }, h("div", { className: "row" }, h("h3", { className: "grow", textContent: "Check everything" }), btn("Run checks", () => { doc.replaceChildren(empty("Checking…")); PD.send({ type: "phone_doctor" }); })), doc),
+      h("div", { className: "card", id: "adbCard" }), h("div", { className: "card", id: "appCard" }));
+    PD.on("phone_doctor", (m) => doc.replaceChildren(...m.checks.map((c) => h("div", { className: "item row" },
+      h("span", { className: c.ok ? "pill ok" : "pill", textContent: c.ok ? "ok" : "to do" }), h("b", { textContent: c.name }), h("span", { className: "dim grow", textContent: c.detail })))));
     PD.on("adb_changed", drawAdb);
     PD.on("hub_changed", drawApp);
     PD.on("adb_qr", (m) => {

@@ -39,7 +39,7 @@ object Grant {
     }
 
     /** A settings page the PC wants open: through a notification, since the app may be in the background. */
-    fun open(ctx: Context, intent: Intent) = notify(ctx, "Your PC asks to open a setting", "Tap to open it", intent)
+    fun open(ctx: Context, intent: Intent, title: String = "Your PC asks to open a setting", text: String = "Tap to open it") = notify(ctx, title, text, intent)
 
     private fun notify(ctx: Context, title: String, text: String, intent: Intent) {
         if (!Notifier.canNotify(ctx)) error("the phone app may not show notifications; open it on the phone")

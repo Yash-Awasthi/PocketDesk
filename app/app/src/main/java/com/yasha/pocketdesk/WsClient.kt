@@ -471,6 +471,17 @@ class WsClient(
     fun rescan(): Boolean = send(Proto.detect())
     /** A ready JSON line, for the phone hub's requests and events. */
     fun sendRaw(line: String): Boolean = send(line)
+    /** What the PC says about the phone-as-controller: null until it answers. */
+    val gamepadStatus = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    private var onExtended: (() -> Unit)? = null
+    /** What the PC plays (title to artist and playing), while the Deck watches it. */
+    var pcMedia by mutableStateOf<Triple<String, String, Boolean>?>(null)
+    private var pendingExtend: (() -> Unit)? = null
+    /** Asks the PC for a virtual monitor of [w]×[h]; [then] runs once the monitor list has it. */
+    fun displayExtend(w: Int, h: Int, then: () -> Unit) {
+        onExtended = then
+        send("""{"type":"display_extend","w":$w,"h":$h}""")
+    }
 
     // ── SSH ──
     fun sshRefresh() {
@@ -1121,6 +1132,7 @@ class WsClient(
                     "${i + 1}" + (if (w != null && h != null) " · ${w}×$h" else "") +
                         (if (o?.let { bool(it, "primary") } == true) " · main" else "")
                 } ?: emptyList()
+                pendingExtend?.let { pendingExtend = null; android.os.Handler(android.os.Looper.getMainLooper()).post(it) }
             }
             "clipboard", "clipboard_changed" ->
                 if (type == "clipboard_changed" || bool(m, "ok") == true) {
@@ -1162,6 +1174,10 @@ class WsClient(
                     failure(str(m, "error") ?: "model rejected")
                 }
             }
+            "display_extend" -> if (bool(m, "ok") == true) { send(Proto.desktopMonitors()); pendingExtend = onExtended; onExtended = null }
+                else { onExtended = null; _desktopError.value = str(m, "error") ?: "The PC could not add a screen" }
+            "pc_media" -> pcMedia = str(m, "title")?.takeIf { it.isNotBlank() }?.let { Triple(it, str(m, "artist").orEmpty(), bool(m, "playing") == true) }
+            "pc_gamepad_status" -> gamepadStatus.value = if (bool(m, "ok") == true) "The PC sees an Xbox controller" else (str(m, "error") ?: "The PC's controller is not ready")
             "phone_share_request", "phone_share_stop", "phone_keyframe", "phone_input", "phone_switch", "phone_fs", "phone_req", "pc_notif", "pc_clip" ->
                 events.tryEmit(RhEvent.Phone(type, m))
             else -> {}

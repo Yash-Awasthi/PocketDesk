@@ -31,12 +31,15 @@ function keyframe() {
 const asked = new Map();
 let nextAsk = 1;
 import * as timeline from "../timeline.js";
+import { toast } from "../toast.js";
+import { syncSettings } from "./phone_sync.js";
 
 const FS_OPS = new Set(["list", "read", "write", "mkdir", "delete", "rename"]);
 // The newest event per phone service, for a PC page that opens later.
 const hub = { last: new Map() };
 // What each notification last said, so an update that changes nothing is not recorded twice.
 const said = new Map();
+let desktopRef = null;
 
 function record(e) {
   if (e.svc === "notif" && e.op === "posted" && e.item) {
@@ -45,13 +48,26 @@ function record(e) {
     said.set(n.key, line);
     if (said.size > 500) said.delete(said.keys().next().value);
     timeline.add("notif", n.title || n.appName, n.text || "", { app: n.appName });
+    const code = syncSettings().otpCopy && n.code;
+    if (code) desktopRef?.clipboardSet({ text: n.code }).catch?.(() => {});
+    if (syncSettings().phoneToasts && !n.silent && !syncSettings().muted.includes(n.app)) {
+      toast({ title: n.title || n.appName, body: code ? `Code ${n.code} is on this PC's clipboard
+${n.text || ""}` : n.text, app: n.appName, tag: n.key });
+    }
   } else if (e.svc === "call" && e.state === "ringing") {
     timeline.add("call", e.name || "Incoming call", "Rang on the phone");
+    if (syncSettings().phoneToasts) toast({ title: e.name || "Incoming call", body: "Your phone is ringing. Answer or decline on the Calls page.", app: "Phone", tag: "call", call: true });
+  } else if (e.svc === "battery" && e.level <= 15 && !e.charging && hub.lowWarned !== true) {
+    hub.lowWarned = true;
+    if (syncSettings().phoneToasts) toast({ title: `Phone battery ${e.level}%`, body: "Plug it in soon.", app: "Phone", tag: "battery" });
+  } else if (e.svc === "battery" && (e.charging || e.level > 20)) {
+    hub.lowWarned = false;
   }
 }
 
 export default function phoneHandlers(ctx) {
   const { send, broadcast, clients = () => [] } = ctx;
+  desktopRef = ctx.desktop;
   /** The phone answering storage requests: the sharing one, else the latest connected phone. */
   const storagePhone = () => (share.phone?.readyState === 1 ? share.phone
     : [...clients()].filter((w) => w._android && w._authed && w.readyState === 1).at(-1));
@@ -69,7 +85,7 @@ export default function phoneHandlers(ctx) {
     send(share.phone, msg);
   }
   return {
-    async phone_watch(ws) {
+    async phone_watch(ws, msg = {}) {
       if (!share.watchers.has(ws)) {
         share.watchers.add(ws);
         ws.once?.("close", () => share.watchers.delete(ws));
@@ -80,7 +96,8 @@ export default function phoneHandlers(ctx) {
       send(ws, { type: "phone_state", sharing: !!share.phone, w: share.w, h: share.h, control: share.control, active: share.active, apps: share.apps });
       if (share.phone) return keyframe();
       // Consent is the phone's: it asks its owner, then answers with phone_share_start.
-      broadcast({ type: "phone_share_request" });
+      // A page that only opened (ask: false) listens for a share without prompting the phone.
+      if (msg.ask !== false) broadcast({ type: "phone_share_request" });
     },
     async phone_unwatch(ws) {
       share.watchers.delete(ws);
@@ -167,6 +184,11 @@ export default function phoneHandlers(ctx) {
       hub.last.set(msg.svc, msg);
       record(msg);
       for (const w of clients()) if (w._authed && !w._android) send(w, msg);
+    },
+    /** The phone asks the PC pages to open its screen (phone control, else the app's own share). */
+    async phone_show(ws) {
+      if (!ws._android) return;
+      for (const w of clients()) if (w._authed && !w._android) send(w, { type: "phone_show" });
     },
     /** A PC page opening: the phone's last known state, and whether its app is there to ask. */
     async phone_hub(ws) {

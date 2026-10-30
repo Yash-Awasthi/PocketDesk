@@ -8,6 +8,12 @@ const PD = window.PD;
 const { h, $ } = PD;
 const btn = (label, onclick, cls = "") => h("button", { className: cls, textContent: label, onclick });
 
+// The phone's own "Show on the PC": its screen opens here.
+PD.on("phone_show", () => {
+  if (PD.adb.state?.serial) PD.adb.open("screen");
+  else { PD.send({ type: "phone_watch" }); PD.go("screen"); }
+});
+
 // ── what flows by itself ──
 PD.sync = { clipSync: false, pcNotifs: false };
 PD.on("phone_sync", (m) => { Object.assign(PD.sync, m); PD.emit("sync_changed"); });
@@ -21,7 +27,10 @@ PD.syncCard = (which) => {
       h("span", {}, h("b", { textContent: label }), h("span", { className: "dim", textContent: ` ${note}` })));
     card.replaceChildren(which === "clip"
       ? row("clipSync", "Sync the clipboard", "Copy on the PC, paste on the phone, and back. Text both ways; pictures to the phone through its app. Things password managers copy stay on the phone.", s.clipSupported !== false)
-      : row("pcNotifs", "Show this PC's notifications on the phone", s.pcNotifsSupported === false ? "Windows only." : "Through the phone app; each one appears in its own Android notification.", s.pcNotifsSupported !== false));
+      : h("div", { className: "col" },
+        row("phoneToasts", "Show the phone's notifications and calls as Windows notifications", "Even with this page closed. Low battery too."),
+        row("otpCopy", "Copy one-time codes to this PC's clipboard", "When a text or app notification on the phone carries a sign-in code."),
+        row("pcNotifs", "Show this PC's notifications on the phone", s.pcNotifsSupported === false ? "Windows only." : "Through the phone app; each one appears in its own Android notification.", s.pcNotifsSupported !== false)));
   };
   PD.on("sync_changed", draw);
   draw();
@@ -99,6 +108,8 @@ function render() {
     const n = q.replace(/[^\d+]/g, "");
     picks.unshift({ label: `Call ${n}`, run: () => PD.ask("calls", "dial", { number: n }) }, { label: `Text ${n}`, run: () => { PD.go("messages"); PD.newText?.(n); } });
   }
+  const raw = input.value.trim();
+  if (/^https?:[/][/][^ ]+$/i.test(raw)) picks.unshift({ label: "Open this link on the phone", run: () => PD.openOnPhone(raw) });
   sel = Math.min(sel, Math.max(0, picks.length - 1));
   results.replaceChildren(...picks.map((c, i) => h("button", { className: `item${i === sel ? " on" : ""}`, onclick: () => pick(i) },
     c.label, c.hint ? h("span", { className: "dim small", textContent: ` ${c.hint}` }) : "")));

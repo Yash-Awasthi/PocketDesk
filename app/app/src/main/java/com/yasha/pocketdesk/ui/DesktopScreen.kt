@@ -538,7 +538,7 @@ fun DesktopScreen(
                 }
             }
             // With several monitors, which one is showing and how to change it must be visible, not buried in the menu.
-            if (video && !fullscreen && ws.desktopMonitors.size > 1) {
+            if (video && !fullscreen && ws.desktopMonitors.isNotEmpty()) {
                 var picking by remember { mutableStateOf(false) }
                 Box(Modifier.align(Alignment.TopStart).padding(6.dp)) {
                     FilledTonalButton(onClick = { picking = true }, modifier = Modifier.height(32.dp),
@@ -552,6 +552,16 @@ fun DesktopScreen(
                                 onClick = { picking = false; pickScreen(i) },
                             )
                         }
+                        // A virtual monitor on the PC at this phone's size: an extra screen to move windows onto.
+                        val ctx = LocalContext.current
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text("＋ Use this phone as an extra screen") },
+                            onClick = {
+                                picking = false
+                                val (w, h) = com.yasha.pocketdesk.PhoneShare.screenSize(ctx)
+                                ws.displayExtend(maxOf(w, h), minOf(w, h)) { pickScreen(ws.desktopMonitors.size - 1) }
+                            },
+                        )
                     }
                 }
             }

@@ -64,6 +64,8 @@ sealed interface Screen : NavKey {
     @Serializable data object Desktop : Screen
     @Serializable data object Files : Screen
     @Serializable data object Ssh : Screen
+    @Serializable data object Gamepad : Screen
+    @Serializable data object Deck : Screen
     @Serializable data class Terminal(val sessionId: String) : Screen
     @Serializable data class Agent(val id: String) : Screen
 }
@@ -180,7 +182,7 @@ class MainActivity : ComponentActivity() {
                 else androidx.compose.material3.ScaffoldDefaults.contentWindowInsets,
             bottomBar = {
                 // The desktop keyboard needs the room, so the tabs step aside while it is open.
-                if (connected && screen !is Screen.Terminal && !desktopFullscreen && !(screen == Screen.Desktop && desktopKeys)) {
+                if (connected && screen !is Screen.Terminal && screen != Screen.Gamepad && !desktopFullscreen && !(screen == Screen.Desktop && desktopKeys)) {
                     NavigationBar {
                         NavigationBarItem(
                             selected = screen == Screen.Tools,
@@ -259,6 +261,8 @@ class MainActivity : ComponentActivity() {
                                 openDesktop = { open(Screen.Desktop) },
                                 openTerminal = { open(Screen.Terminal(it)) },
                                 openSsh = { open(Screen.Ssh) },
+                                openGamepad = { open(Screen.Gamepad) },
+                                openDeck = { open(Screen.Deck) },
                                 openFreebuff = { open(Screen.Freebuff) },
                                 openAgent = { open(Screen.Agent(it)) },
                                 openChats = { showTab(Screen.Chats) },
@@ -280,6 +284,8 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         entry<Screen.Ssh> { SshScreen(client, onClose = { back() }) }
+                        entry<Screen.Deck> { com.yasha.pocketdesk.ui.DeckScreen(client, onClose = { back() }) }
+                        entry<Screen.Gamepad> { com.yasha.pocketdesk.ui.GamepadScreen(client, onClose = { back() }) }
                         entry<Screen.Agent> { AgentScreen(client, it.id, onClose = { back() }, openChats = { showTab(Screen.Chats) }) }
                         entry<Screen.Terminal> { TerminalScreen(client, it.sessionId, onClose = { back() }) }
                     },

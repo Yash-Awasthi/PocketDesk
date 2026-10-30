@@ -22,6 +22,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
+import androidx.core.graphics.drawable.toBitmap
 
 /**
  * This phone's own features for the PC: notifications, texts, calls, contacts, quick settings,
@@ -83,6 +84,22 @@ object Hub {
         "photos" -> Photos.answer(app, m)
         "find" -> Find.answer(app, m)
         "clip" -> Clip.answer(app, m)
+        "link" -> {
+            val url = m.str("url")?.takeIf { Regex("""^https?://\S+$""").matches(it) } ?: error("http(s) link required")
+            // Android lets a background app open nothing itself; the link waits as a notification.
+            Grant.open(app, android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)), "A link from your PC", url)
+            obj {}
+        }
+        "apps" -> obj {
+            val pm = app.packageManager
+            put("icons", kotlinx.serialization.json.buildJsonObject {
+                for (pkg in (m["pkgs"] as? kotlinx.serialization.json.JsonArray).orEmpty().take(400)) {
+                    val p = (pkg as? JsonPrimitive)?.content ?: continue
+                    runCatching { pm.getApplicationIcon(p).toBitmap(72, 72, android.graphics.Bitmap.Config.ARGB_8888) }.getOrNull()
+                        ?.let { put(p, HubNotifications.b64(it, android.graphics.Bitmap.CompressFormat.PNG, 100)) }
+                }
+            })
+        }
         else -> unknown(m)
     }
 

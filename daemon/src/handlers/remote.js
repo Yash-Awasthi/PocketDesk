@@ -1,6 +1,10 @@
 import { resolvePath } from "../fs_ops.js";
 import * as devices from "../devices.js";
 import { centerFor, fromFraction } from "../desktop_capture.js";
+import { PcMedia } from "../pc_media.js";
+import { spawn } from "node:child_process";
+
+const pcMedia = new PcMedia();
 
 export default function remoteHandlers(ctx) {
   const { send, desktop, desktopWatchers, video, videoWatchers, recorder, access, syncAudio } = ctx;
@@ -178,6 +182,39 @@ export default function remoteHandlers(ctx) {
       if (press) hold(ws, "k:" + Number(msg.key), press);
       const r = await desktop.inputKey({ key: msg.key, press, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
       if (!r.ok) send(ws, { type: "desktop_input_ok", ok: false, error: r.error });
+    },
+    /** Handoff from the phone: a link opens in this PC's browser, other text lands on its clipboard. */
+    async handoff(ws, msg) {
+      if (!access.controlAllowed || ws._viewOnlyForced) return send(ws, { type: "handoff", ok: false, error: "control is paused on the PC" });
+      const text = String(msg.text ?? "").trim().slice(0, 200_000);
+      if (!text) return send(ws, { type: "handoff", ok: false, error: "nothing to send" });
+      if (/^https?:\/\/\S+$/i.test(text)) {
+        const [cmd, args] = process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", text]]
+          : process.platform === "darwin" ? ["open", [text]] : ["xdg-open", [text]];
+        spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: true }).on("error", () => {}).unref();
+        return send(ws, { type: "handoff", ok: true, opened: true });
+      }
+      const r = await desktop.clipboardSet({ text });
+      send(ws, { type: "handoff", ok: r.ok, error: r.error, copied: true });
+    },
+    /** What this PC plays, pushed to the asking phone while its Deck is open. */
+    async pc_media_watch(ws, msg) {
+      const on = !!msg.on;
+      if (on === !!ws._pcMedia) return;
+      ws._pcMedia = on;
+      if (on) {
+        ws._pcMediaFn = (m) => send(ws, { type: "pc_media", ...m });
+        pcMedia.on("change", ws._pcMediaFn);
+        if (pcMedia.last) try { send(ws, { type: "pc_media", ...JSON.parse(pcMedia.last) }); } catch {}
+        ws.once?.("close", () => { if (ws._pcMedia) { ws._pcMedia = false; pcMedia.off("change", ws._pcMediaFn); pcMedia.watch(false); } });
+      } else pcMedia.off("change", ws._pcMediaFn);
+      pcMedia.watch(on);
+    },
+    /** The phone's Deck: one shortcut or media key, without the desktop open. Paused control still refuses. */
+    async deck_key(ws, msg) {
+      if (!access.controlAllowed || ws._viewOnlyForced) return send(ws, { type: "deck_result", ok: false, error: "control is paused on the PC" });
+      const r = await desktop.inputKey({ key: msg.key, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
+      send(ws, { type: "deck_result", ok: r.ok, error: r.error });
     },
     async desktop_type(ws, msg) {
       if (!mayControl(ws)) return send(ws, { type: "desktop_input_ok", ok: false, error: "view only" });

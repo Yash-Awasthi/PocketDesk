@@ -8,17 +8,22 @@ import { configDir } from "../config.js";
 import { PcNotifications } from "../pc_notifs.js";
 import { bridge } from "./phone_adb.js";
 import * as timeline from "../timeline.js";
+import { ours } from "../toast.js";
 
 const FILE = path.join(configDir, "phone.json");
-const DEFAULTS = { clipSync: false, pcNotifs: false, muted: [] };
+const DEFAULTS = { clipSync: false, pcNotifs: false, phoneToasts: process.platform === "win32", otpCopy: false, muted: [] };
 
 function load() {
   try { return { ...DEFAULTS, ...JSON.parse(fs.readFileSync(FILE, "utf8")) }; } catch { return { ...DEFAULTS }; }
 }
 
+// Read by the phone handler, which shows toasts for the phone's events.
+let live = load();
+export const syncSettings = () => live;
+
 export default function phoneSyncHandlers(ctx) {
   const { send, desktop, clients = () => [] } = ctx;
-  let cfg = load();
+  let cfg = live;
   const notifs = new PcNotifications();
   const phones = () => [...clients()].filter((w) => w._authed && w._android && w.readyState === 1);
   const viewers = () => [...clients()].filter((w) => w._authed && !w._android && w.readyState === 1);
@@ -63,7 +68,7 @@ export default function phoneSyncHandlers(ctx) {
   };
 
   notifs.on("notification", (n) => {
-    if (cfg.muted.includes(n.app)) return;
+    if (cfg.muted.includes(n.app) || ours(n.title, n.body)) return;
     for (const p of phones()) send(p, { type: "pc_notif", ...n });
     for (const w of viewers()) send(w, { type: "pc_notif", ...n });
   });
@@ -85,6 +90,8 @@ export default function phoneSyncHandlers(ctx) {
     async phone_sync_set(ws, msg) {
       if (typeof msg.clipSync === "boolean") cfg.clipSync = msg.clipSync;
       if (typeof msg.pcNotifs === "boolean") cfg.pcNotifs = msg.pcNotifs;
+      if (typeof msg.phoneToasts === "boolean") cfg.phoneToasts = msg.phoneToasts;
+      if (typeof msg.otpCopy === "boolean") cfg.otpCopy = msg.otpCopy;
       if (Array.isArray(msg.muted)) cfg.muted = msg.muted.filter((x) => typeof x === "string").slice(0, 200);
       fs.mkdirSync(configDir, { recursive: true });
       fs.writeFileSync(FILE, JSON.stringify(cfg, null, 2));
