@@ -84,6 +84,14 @@ PD.onBinary((b) => {
 PD.adb.open = (kind, extra = {}) => {
   const s = PD.adb.settings;
   const o = { type: "adb_open", kind, codec: s.codec, mbps: s.mbps, fps: s.fps, maxSize: s.maxSize, audio: s.audio, ...extra };
+  if (kind === "app" && extra.pkg) {
+    // The last few apps opened in windows, for one-click reopening from Home.
+    let recent = [];
+    try { recent = JSON.parse(localStorage.getItem("pd_recent_apps") || "[]"); } catch {}
+    recent = [{ pkg: extra.pkg, label: extra.label || extra.pkg }, ...recent.filter((a) => a.pkg !== extra.pkg)].slice(0, 8);
+    try { localStorage.setItem("pd_recent_apps", JSON.stringify(recent)); } catch {}
+    PD.emit("adb_changed");
+  }
   if (kind === "app") {
     const scale = Math.max(2, devicePixelRatio);
     o.w = Math.round(412 * scale); o.h = Math.round(860 * scale); o.dpi = Math.round(160 * scale);

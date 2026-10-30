@@ -59,7 +59,16 @@ function drawPhoneCard() {
     h("div", { className: "actions" },
       a?.serial ? [btn("Show screen", () => PD.adb.open("screen"), "primary"), btn("Apps", () => PD.go("apps")), btn("Camera", () => PD.go("camera"))]
         : btn("Set up phone control", () => PD.go("connect"), "primary"),
-      hub.online && btn("Find my phone", () => run(() => PD.ask("find", "ring"), "Ringing the phone"))));
+      hub.online && btn("Find my phone", () => run(() => PD.ask("find", "ring"), "Ringing the phone"))),
+    a?.serial ? recentApps() : "");
+}
+function recentApps() {
+  let list = [];
+  try { list = JSON.parse(localStorage.getItem("pd_recent_apps") || "[]"); } catch {}
+  if (!list.length) return "";
+  return h("div", { className: "actions" }, h("span", { className: "dim small", textContent: "Recent apps:" }),
+    list.map((x) => h("button", { className: "tog", onclick: () => PD.adb.open("app", { pkg: x.pkg, label: x.label }) },
+      PD.adb.icons?.[x.pkg] ? h("img", { src: img(PD.adb.icons[x.pkg]), alt: "", style: "width:18px;height:18px;vertical-align:-4px;margin-right:6px;border-radius:4px" }) : "", x.label)));
 }
 function drawMedia() {
   const box = $("#homeMedia"), m = PD.hub.state.media;
