@@ -438,6 +438,53 @@ export default function phoneAdbHandlers(ctx) {
         send(ws, { type: "adb_progress", text: "Permissions granted to the phone app." });
       } catch (e) { err(ws, "grant", e); }
     },
+    /**
+     * The phone's shared storage over phone control, shaped like phone_fs so the Files page uses
+     * either: list, read (chunks), write (chunks, append), mkdir, delete, rename.
+     */
+    async adb_fs(ws, msg) {
+      const reply = (o) => send(ws, { type: "phone_fs_result", rid: msg.rid, ...o });
+      try {
+        const a = await adb(), serial = needSerial();
+        const root = "/sdcard";
+        const rel = String(msg.path || "/").replaceAll(String.fromCharCode(92), "/");
+        if (rel.split("/").includes("..")) throw new Error("bad path");
+        const abs = (p) => `${root}/${String(p).replace(/^\/+/, "")}`.replace(/\/+$/, "") || root;
+        const q = (s) => `'${String(s).replaceAll("'", `'"'"'`)}'`;
+        const sh = async (c) => { const r = await a.shell(serial, c, { timeout: 30000 }); if (r.code !== 0) throw new Error((r.err || r.out).trim().split("\n").pop() || "failed"); return r.out; };
+        switch (msg.op) {
+          case "list": {
+            // name<TAB>type<TAB>size<TAB>mtime per entry; toybox stat is on every Android since 6.
+            const out = await sh(`cd ${q(abs(rel))} && for f in * .[!.]*; do [ -e "$f" ] && stat -c '%n\t%F\t%s\t%Y' -- "$f"; done; true`);
+            const items = out.split("\n").filter(Boolean).map((l) => { const [name, type, size, mtime] = l.split("\t"); return { name, dir: /directory/.test(type), size: Number(size), mtime: Number(mtime) * 1000 }; })
+              .sort((x, y) => (y.dir - x.dir) || x.name.localeCompare(y.name));
+            return reply({ path: rel.startsWith("/") ? rel : `/${rel}`, items });
+          }
+          case "read": {
+            const CH = 512 << 10, off = Number(msg.offset) || 0;
+            const size = Number((await sh(`stat -c %s ${q(abs(rel))}`)).trim());
+            const r = await a.run(["-s", serial, "exec-out", `dd if=${q(abs(rel))} bs=4096 skip=${Math.floor(off / 4096)} count=${CH / 4096} 2>/dev/null`], { timeout: 60000 });
+            const data = r.raw.subarray(off % 4096);
+            return reply({ data: data.toString("base64"), size, eof: off + data.length >= size });
+          }
+          case "write": {
+            const tmp = path.join(os.tmpdir(), `pocketdesk-afs-${ws._clientId || "x"}`);
+            const buf = Buffer.from(String(msg.data || ""), "base64");
+            if (msg.append) fs.appendFileSync(tmp, buf); else fs.writeFileSync(tmp, buf);
+            // Gathered here and pushed once, with the last chunk.
+            if (msg.last === false) return reply({ ok: true });
+            const r = await a.push(serial, tmp, abs(rel));
+            fs.rmSync(tmp, { force: true });
+            if (r.code !== 0) throw new Error(r.err.trim() || "push failed");
+            return reply({ ok: true });
+          }
+          case "mkdir": await sh(`mkdir -p ${q(abs(rel))}`); return reply({ ok: true });
+          case "delete": await sh(`rm -rf ${q(abs(rel))}`); return reply({ ok: true });
+          case "rename": await sh(`mv ${q(abs(rel))} ${q(abs(String(msg.to || "")))}`); return reply({ ok: true });
+          default: throw new Error(`unknown op: ${msg.op}`);
+        }
+      } catch (e) { reply({ error: e.message }); }
+    },
     async adb_webcam_status(ws) {
       send(ws, { type: "adb_webcam", ...(await webcam.status()) });
     },

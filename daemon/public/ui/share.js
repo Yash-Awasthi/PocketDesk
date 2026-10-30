@@ -183,7 +183,8 @@ function call(o) {
   return new Promise((resolve, reject) => {
     const rid = ++fs.rid;
     fs.waiting.set(rid, { resolve, reject });
-    PD.send({ type: "phone_fs", rid, ...o });
+    // Phone control reaches all of the phone's storage; the app needs "All files access" for it.
+    PD.send({ type: PD.adb?.state?.serial ? "adb_fs" : "phone_fs", rid, ...o });
     setTimeout(() => { if (fs.waiting.delete(rid)) reject(new Error("the phone did not answer")); }, 60000);
   });
 }
@@ -245,7 +246,7 @@ async function upload(files) {
     try {
       for (let offset = 0; offset < f.size || offset === 0; offset += CHUNK) {
         const bytes = new Uint8Array(await f.slice(offset, offset + CHUNK).arrayBuffer());
-        await call({ op: "write", path: join(dir, f.name), data: PD.b64(bytes), append: offset > 0 });
+        await call({ op: "write", path: join(dir, f.name), data: PD.b64(bytes), append: offset > 0, last: offset + CHUNK >= f.size });
         fsSay(`uploading ${f.name}: ${Math.floor((Math.min(f.size, offset + CHUNK) / (f.size || 1)) * 100)}%`);
         if (!f.size) break;
       }
