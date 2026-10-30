@@ -45,6 +45,15 @@ PD.go = (id) => {
   try { localStorage.setItem("pd_page", id); } catch {}
   pages.get(id).show?.(PD.$(`#page-${id}`));
 };
+/** A count beside a page's name in the sidebar; 0 hides it. */
+PD.badge = (id, n) => {
+  const a = document.querySelector(`#nav a[data-page="${id}"]`);
+  if (!a) return;
+  let b = a.querySelector(".badge-n");
+  if (!b) a.append((b = PD.h("span", { className: "badge-n" })));
+  b.textContent = n > 99 ? "99+" : String(n);
+  b.hidden = !n;
+};
 PD.buildNav = () => {
   const nav = PD.$("#nav"), main = PD.$("#pages");
   for (const [id, p] of pages) {

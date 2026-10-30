@@ -165,3 +165,4 @@ body.pip { margin: 0; height: 100vh; background: #000; }
 .composer .grow { display: flex; flex-direction: column; gap: 4px; }
 .pwin.audio-only { min-height: 0; resize: none; }
 .pwin.audio-only .pwin-stage canvas { display: none; }
+.badge-n { margin-left: auto; background: var(--accent); color: var(--accent-text); border-radius: 99px; font-size: 11px; padding: 0 7px; line-height: 18px; }

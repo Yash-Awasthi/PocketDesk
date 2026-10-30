@@ -255,6 +255,7 @@ async function loadThreads() {
   // Chats from WhatsApp, Telegram, Signal and the like come from their notifications, beside the texts.
   const chats = PD.notifs.list.filter((n) => n.conv?.length).map((n) => ({ id: `n:${n.key}`, name: n.chat || n.title, app: n.appName, date: n.when, snippet: n.conv.at(-1).text, notif: n }));
   PD.sms.threads = [...chats, ...(r.threads || [])].sort((a, b) => b.date - a.date);
+  PD.badge("messages", (r.threads || []).filter((t) => t.unread).length);
   list.replaceChildren(...PD.sms.threads.map((t) => h("button", { className: `item${PD.sms.open?.id === t.id ? " on" : ""}`, onclick: () => openThread(t) },
     h("div", { className: "row" }, h("b", { className: "grow", textContent: t.name || t.address }), t.app ? h("span", { className: "pill", textContent: t.app }) : "", h("span", { className: "dim", textContent: rel(t.date) })),
     h("div", { className: `dim clip${t.unread ? " unread" : ""}`, textContent: t.snippet || "" }))));
@@ -398,6 +399,7 @@ PD.page("notifications", {
       box.replaceChildren(...PD.notifs.list.map(notifRow));
       if (!PD.notifs.list.length) box.append(PD.hub.online ? empty("No notifications on the phone.") : needApp());
       drawHomeNotifs();
+      PD.badge("notifications", PD.notifs.list.length);
     };
     PD.on("notifs_changed", draw);
   },
@@ -416,7 +418,8 @@ PD.on("evt_notif", (e) => {
   else if (e.op === "all") PD.notifs.list = e.items || [];
   PD.emit("notifs_changed");
 });
-PD.on("hub_changed", () => { if (PD.hub.online && !PD.notifs.loaded) { PD.notifs.loaded = true; loadNotifs(); } });
+PD.on("hub_changed", () => { if (PD.hub.online && !PD.notifs.loaded) { PD.notifs.loaded = true; loadNotifs(); loadThreads(); } });
+PD.on("evt_sms", () => { if (PD.current !== "messages") loadThreads(); });
 
 // ── Photos ──
 PD.page("photos", {
