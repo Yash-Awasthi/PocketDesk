@@ -276,6 +276,20 @@ export default function phoneAdbHandlers(ctx) {
     await sh(`appops set ${APP} ACCESS_RESTRICTED_SETTINGS allow`);
   }
 
+  // Wireless debugging moves to a new port when the phone sleeps or changes network; while a PC
+  // page is open and the phone is gone, it is looked for again so the page comes back by itself.
+  let lastSerial = null;
+  const rejoin = setInterval(async () => {
+    if (!st.adb || !viewers().length || rejoin.busy) return;
+    rejoin.busy = true;
+    try {
+      const had = st.serial;
+      await devices({ reconnect: !had });
+      if (st.serial !== lastSerial) { lastSerial = st.serial; await tellAll(); }
+    } catch {} finally { rejoin.busy = false; }
+  }, 20_000);
+  rejoin.unref?.();
+
   const err = (ws, op, e) => send(ws, { type: "adb_error", op, message: e?.message || String(e) });
   const viewOf = (ws, id) => { const v = st.views.get(Number(id)); return v && v.owner === ws ? v : null; };
 
