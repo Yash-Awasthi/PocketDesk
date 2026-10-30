@@ -74,6 +74,8 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
     }
 
     fun startConnect(entry: ServerEntry) {
+        // Remembered so the app reconnects by itself after a restart (AutoConnect).
+        ctx.getSharedPreferences("pocketdesk", android.content.Context.MODE_PRIVATE).edit().putString("last_pc", entry.url).apply()
         val wanted = buildList {
             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
             if (Build.VERSION.SDK_INT >= 37) add(Manifest.permission.ACCESS_LOCAL_NETWORK)

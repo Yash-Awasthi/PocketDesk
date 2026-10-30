@@ -71,6 +71,7 @@ class RhApp : android.app.Application() {
         super.onCreate()
         IrohLink.Node.init(this)
         com.yasha.pocketdesk.hub.Hub.start(this)
+        AutoConnect.run(this)
         Link.start(this)
     }
 }
@@ -91,6 +92,7 @@ class LinkService : Service() {
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_DISCONNECT) {
+            forgetAutoConnect(this)
             Link.client.close()
             stopSelf()
             return START_NOT_STICKY

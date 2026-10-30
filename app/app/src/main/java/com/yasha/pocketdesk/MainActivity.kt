@@ -217,7 +217,7 @@ class MainActivity : ComponentActivity() {
                         // Disconnects and shows the saved PCs, to switch to another one.
                         NavigationBarItem(
                             selected = false,
-                            onClick = { client.close(); backStack.clear(); backStack.add(Screen.Connect) },
+                            onClick = { forgetAutoConnect(this@MainActivity); client.close(); backStack.clear(); backStack.add(Screen.Connect) },
                             icon = { Icon(Icons.AutoMirrored.Filled.ExitToApp, contentDescription = null) },
                             label = { Text("PCs") },
                         )
