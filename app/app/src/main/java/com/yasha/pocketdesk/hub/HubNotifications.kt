@@ -103,6 +103,23 @@ class HubNotifications : NotificationListenerService() {
             picture(n)?.let { put("image", it) }
             if (max > 0) { put("progress", extras.getInt(Notification.EXTRA_PROGRESS, 0)); put("max", max) }
             otp(body.orEmpty())?.let { put("code", it) }
+            // A chat (WhatsApp, Telegram, Signal, RCS…): its recent messages, for the PC's Messages page.
+            // The texting app's own chats are already in Messages from the SMS store; only other chat apps add one.
+            if (style != null && style.messages.isNotEmpty() && n.category != Notification.CATEGORY_CALL && n.category != Notification.CATEGORY_MISSED_CALL && sbn.packageName != runCatching { android.provider.Telephony.Sms.getDefaultSmsPackage(this@HubNotifications) }.getOrNull()) {
+                put("chat", style.conversationTitle?.toString()?.takeIf { style.isGroupConversation } ?: last?.person?.name?.toString() ?: title.orEmpty())
+                put("conv", buildJsonArray {
+                    val me = style.user.name?.toString()
+                    for (msg in style.messages.takeLast(25)) {
+                        val text = msg.text?.toString()?.trim().orEmpty()
+                        if (text.isEmpty()) continue
+                        val who = msg.person?.name?.toString()
+                        add(obj {
+                            put("text", text); put("date", if (msg.timestamp > 0) msg.timestamp else sbn.postTime)
+                            put("out", msg.person == null || (me != null && who == me)); putNullable("from", who)
+                        })
+                    }
+                })
+            }
             put("actions", buildJsonArray {
                 n.actions.orEmpty().forEachIndexed { i, a ->
                     val t = a.title?.toString()?.trim()

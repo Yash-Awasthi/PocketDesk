@@ -225,22 +225,56 @@ PD.page("messages", {
     const conv = h("div", { className: "conv", id: "smsConv" });
     sec.append(h("div", { className: "col" }, h("div", { className: "bar" }, btn("New message", () => openThread(null), "primary"), btn("Refresh", () => loadThreads())), list), conv);
     PD.on("evt_sms", (e) => { loadThreads(); if (PD.sms.open && e.thread === PD.sms.open.id) openThread(PD.sms.open); });
+    // A new chat message arrives as an updated notification: the list and the open chat follow it.
+    let chatTimer;
+    PD.on("notifs_changed", () => {
+      if (PD.current !== "messages") return;
+      clearTimeout(chatTimer);
+      chatTimer = setTimeout(async () => {
+        await loadThreads();
+        const open = PD.sms.open?.notif && PD.sms.threads.find((t) => t.id === PD.sms.open.id);
+        if (open) { PD.sms.open = open; openChat(open); }
+      }, 400);
+    });
   },
   show() { loadThreads(); },
 });
 async function loadThreads() {
   const list = $("#smsList");
   if (!PD.hub.online) return list.replaceChildren(needApp());
-  const r = await run(() => PD.ask("sms", "threads"));
-  if (!r) return;
-  PD.sms.threads = r.threads || [];
+  const r = await PD.ask("sms", "threads").catch((e) => ({ threads: [], error: e.message }));
+  // Chats from WhatsApp, Telegram, Signal and the like come from their notifications, beside the texts.
+  const chats = PD.notifs.list.filter((n) => n.conv?.length).map((n) => ({ id: `n:${n.key}`, name: n.chat || n.title, app: n.appName, date: n.when, snippet: n.conv.at(-1).text, notif: n }));
+  PD.sms.threads = [...chats, ...(r.threads || [])].sort((a, b) => b.date - a.date);
   list.replaceChildren(...PD.sms.threads.map((t) => h("button", { className: `item${PD.sms.open?.id === t.id ? " on" : ""}`, onclick: () => openThread(t) },
-    h("div", { className: "row" }, h("b", { className: "grow", textContent: t.name || t.address }), h("span", { className: "dim", textContent: rel(t.date) })),
+    h("div", { className: "row" }, h("b", { className: "grow", textContent: t.name || t.address }), t.app ? h("span", { className: "pill", textContent: t.app }) : "", h("span", { className: "dim", textContent: rel(t.date) })),
     h("div", { className: `dim clip${t.unread ? " unread" : ""}`, textContent: t.snippet || "" }))));
   if (!PD.sms.threads.length) list.append(empty(r.error || "No conversations, or the app has no permission to read texts yet."));
 }
+/** A chat app's conversation, as its notification carries it; replies go through the notification's Reply. */
+function openChat(t) {
+  const conv = $("#smsConv");
+  const n = t.notif;
+  const reply = (n.actions || []).find((a) => a.reply);
+  const box = h("div", { className: "bubbles" }, n.conv.map((m) => h("div", { className: `bubble${m.out ? " out" : ""}` },
+    m.from && !m.out ? h("div", { className: "dim small", textContent: m.from }) : "", h("div", { textContent: m.text }), h("div", { className: "dim small", textContent: new Date(m.date).toLocaleString() }))));
+  const text = h("textarea", { rows: 2, placeholder: reply ? `Reply in ${n.appName}` : `${n.appName} offers no reply here` , disabled: !reply });
+  const sendIt = async () => {
+    if (!text.value.trim() || !reply) return;
+    const body = text.value;
+    text.value = "";
+    await run(() => PD.ask("notif", "reply", { key: n.key, action: reply.id, text: body }), "Sent");
+  };
+  text.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendIt(); } });
+  conv.replaceChildren(h("div", { className: "bar" }, h("b", { textContent: t.name }), h("span", { className: "pill", textContent: n.appName }),
+    phoneReady() ? btn(`Open ${n.appName}`, () => PD.adb.open("app", { pkg: n.app, label: n.appName })) : ""), box,
+    h("div", { className: "composer" }, h("div", { className: "grow" }, text), btn("Send", sendIt, "primary")));
+  box.scrollTop = box.scrollHeight;
+}
 async function openThread(t) {
   PD.sms.open = t;
+  for (const b of document.querySelectorAll("#smsList .item")) b.classList.remove("on");
+  if (t?.notif) return openChat(t);
   const conv = $("#smsConv");
   const to = h("input", { placeholder: "Phone number", value: t?.address || "" });
   const box = h("div", { className: "bubbles" });
