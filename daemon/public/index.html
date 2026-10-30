@@ -4,392 +4,44 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>PocketDesk Phone</title>
-<style>
-  :root { --bg: #0d1117; --panel: #161b22; --line: #30363d; --text: #e6edf3; --dim: #8b949e; --accent: #238636; --bad: #da3633; }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px system-ui, sans-serif; }
-  button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; font: inherit; }
-  button:hover { border-color: var(--dim); }
-  button.on, button.primary { background: var(--accent); border-color: var(--accent); }
-  input { background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font: inherit; }
-  #app { display: none; flex-direction: column; height: 100%; }
-  .bar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; padding: 6px 8px; border-bottom: 1px solid var(--line); }
-  .bar .gap { flex: 1; }
-  .dim { color: var(--dim); }
-  .pane { display: none; flex: 1; min-height: 0; flex-direction: column; }
-  .pane.show { display: flex; }
-  #phonePanes { flex: 1; min-height: 0; display: flex; gap: 8px; justify-content: center; padding: 8px; }
-  #login { display: flex; height: 100%; align-items: center; justify-content: center; flex-direction: column; gap: 10px; }
-  #files { flex: 1; overflow: auto; }
-  #files table { width: 100%; border-collapse: collapse; }
-  #files td { padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  #files td.name { width: 100%; white-space: normal; word-break: break-all; }
-  #files tr.dir td.name { cursor: pointer; color: #58a6ff; }
-  #files.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
-</style>
+<link rel="stylesheet" href="/ui/app.css" />
 </head>
 <body>
 <div id="login">
-  <div>PocketDesk: your phone on this PC</div>
-  <div><input id="token" size="52" placeholder="token from %USERPROFILE%\.pocketdesk\config.json" /> <button class="primary" onclick="connect()">Connect</button></div>
-  <div id="status" class="dim">disconnected</div>
+  <div class="login-card">
+    <div class="brand">PocketDesk</div>
+    <div class="dim">Your phone on this PC</div>
+    <input id="token" placeholder="Token from %USERPROFILE%\.pocketdesk\config.json" />
+    <button class="primary" onclick="PD.connect()">Connect</button>
+    <div id="loginStatus" class="dim">disconnected</div>
+  </div>
 </div>
 
-<div id="app">
-  <div class="bar">
-    <button id="tabScreen" class="on" onclick="showTab('screen')">Phone screen</button>
-    <button id="tabStorage" onclick="showTab('storage')">Phone storage</button>
-    <span class="gap"></span>
-    <span id="screenKeys">
-      <button id="phoneSwap" onclick="phoneSwap()">⇄ Swap: view the phone</button>
-      <button onclick="phoneKey('back')">◀ Back</button>
-      <button onclick="phoneKey('home')">● Home</button>
-      <button onclick="phoneKey('recents')">■ Recents</button>
-    </span>
-    <span id="phoneStatus" class="dim"></span>
-  </div>
-
-  <div class="pane show" id="paneScreen">
-    <div id="phonePanes"></div>
-  </div>
-
-  <div class="pane" id="paneStorage">
-    <div class="bar">
-      <button onclick="fsOpen(parentOf(fs.path))">↑ Up</button>
-      <span id="fsPath"></span>
+<div id="shell">
+  <nav id="side">
+    <div class="brand">PocketDesk</div>
+    <div id="nav"></div>
+  </nav>
+  <main>
+    <header>
+      <h1 id="pageTitle"></h1>
       <span class="gap"></span>
-      <button onclick="fsMkdir()">New folder</button>
-      <button onclick="document.getElementById('upload').click()">Upload</button>
-      <input id="upload" type="file" multiple hidden onchange="fsUpload(this.files); this.value = ''" />
-      <span id="fsStatus" class="dim"></span>
-    </div>
-    <div id="files"><table><tbody id="fsRows"></tbody></table></div>
-  </div>
+      <span id="conn" class="pill">Offline</span>
+      <button id="themeBtn" class="ic" title="Light, dark or system theme" aria-label="Theme"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/><path d="M10 4a6 6 0 0 0 0 12z" fill="currentColor"/></svg></button>
+    </header>
+    <div id="pages"></div>
+  </main>
 </div>
 
-<script>
-// ── Connection: the token comes from #t= in the link, this browser's last login, or the box ──
-let ws, reconnectTimer, reconnectDelay = 1000, pairCode;
-function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
-function setStatus(up, text) {
-  document.getElementById("login").style.display = up ? "none" : "flex";
-  document.getElementById("app").style.display = up ? "flex" : "none";
-  document.getElementById("status").textContent = text || (up ? "connected" : "disconnected");
-}
-function connect() {
-  if (ws) { ws.onclose = null; ws.close(); }
-  clearTimeout(reconnectTimer);
-  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
-  ws.binaryType = "arraybuffer";
-  ws.onopen = () => { reconnectDelay = 1000; send({ type: "hello", token: document.getElementById("token").value.trim(), totp: pairCode, name: "PC browser" }); pairCode = undefined; };
-  ws.onclose = (ev) => {
-    setStatus(false);
-    if (ev.code === 4011) { pairCode = prompt("Two-factor code from your authenticator app") || undefined; if (pairCode) connect(); return; }
-    // 4xxx is a refusal (wrong token, locked out, switched off): retrying only burns this PC's login attempts.
-    if (ev.code >= 4000) {
-      if (ev.code === 4003) { try { localStorage.removeItem("pd_token"); } catch {} }
-      setStatus(false, ev.code === 4029 ? "too many attempts: wait 10 minutes" : ev.reason || `refused (${ev.code})`);
-      return;
-    }
-    reconnectTimer = setTimeout(connect, reconnectDelay = Math.min(reconnectDelay * 2, 30000));
-  };
-  ws.onmessage = (ev) => {
-    if (typeof ev.data !== "string") { const b = new Uint8Array(ev.data); if (b[0] >= 16) phonePacket(b); return; }
-    const m = JSON.parse(ev.data);
-    if (m.type === "welcome") {
-      if (m.deviceToken) document.getElementById("token").value = m.deviceToken;
-      try { localStorage.setItem("pd_token", document.getElementById("token").value); } catch {}
-      setStatus(true);
-      send({ type: "phone_watch" });
-      if (fs.path) fsOpen(fs.path);
-    } else if (m.type.startsWith("phone_state") || m.type === "phone_started" || m.type === "phone_stopped" || m.type === "phone_apps") phoneMessage(m);
-    else if (m.type === "swap") phoneSwapLabel(m.direction === "pc");
-    else if (m.type === "phone_fs_result") fsResult(m);
-  };
-}
-{
-  const fromLink = new URLSearchParams(location.hash.slice(1)).get("t");
-  if (fromLink) history.replaceState(null, "", location.pathname);
-  let saved = null;
-  try { saved = localStorage.getItem("pd_token"); } catch {}
-  const t = fromLink || saved;
-  if (t) { document.getElementById("token").value = t; connect(); }
-}
-document.getElementById("token").addEventListener("keydown", (e) => { if (e.key === "Enter") connect(); });
+<div id="pwins"></div>
+<div id="callPop" class="card" hidden></div>
+<div id="toasts"></div>
 
-function showTab(t) {
-  document.getElementById("tabScreen").classList.toggle("on", t === "screen");
-  document.getElementById("tabStorage").classList.toggle("on", t === "storage");
-  document.getElementById("paneScreen").classList.toggle("show", t === "screen");
-  document.getElementById("paneStorage").classList.toggle("show", t === "storage");
-  document.getElementById("screenKeys").style.display = t === "screen" ? "" : "none";
-  document.getElementById("phoneStatus").style.display = t === "screen" ? "" : "none";
-  if (t === "storage" && !fs.path) fsOpen("/");
-  if (t === "screen") phoneRender();
-}
-
-// ── Phone screen: pane 0 is live; the others hold each recent app's last picture ──
-const phone = { sharing: false, w: 0, h: 0, control: false, active: null, apps: [], shots: {}, streams: [], switchTo: null, switchUntil: 0, live: null, ring: [], ringAt: 0 };
-function phoneSwap() {
-  if (phone.sharing) send({ type: "phone_share_end" });
-  else { send({ type: "phone_watch" }); phoneStatus("Asked the phone; its owner has to accept…"); }
-}
-function phoneSwapLabel(sharing) {
-  document.getElementById("phoneSwap").textContent = sharing ? "⇄ Swap: phone views the PC" : "⇄ Swap: view the phone";
-}
-function phoneStatus(t) { document.getElementById("phoneStatus").textContent = t; }
-function phoneMessage(m) {
-  if (m.type === "phone_stopped") {
-    phone.sharing = false; phone.active = null; phone.apps = [];
-    for (const s of phone.streams) try { s?.decoder?.close(); } catch {}
-    phone.streams = [];
-    phoneStatus("The phone stopped sharing. Swap asks it again.");
-  } else if (m.type === "phone_apps") {
-    // The app leaving the front keeps its last picture for its pane.
-    // phone_apps lands after the switch has already reached the video, so the picture is taken from before it.
-    const leaving = phone.active?.pkg, now = Date.now();
-    const shot = leaving !== m.active?.pkg && phone.ring.findLast((r) => r.pkg === leaving && now - r.t >= 700);
-    if (shot) {
-      const c = Object.assign(document.createElement("canvas"), { width: shot.b.width, height: shot.b.height });
-      c.getContext("2d").drawImage(shot.b, 0, 0);
-      phone.shots[leaving] = c.toDataURL("image/jpeg", 0.7);
-    }
-    phone.active = m.active || null;
-    phone.apps = m.apps || [];
-    if (phone.switchTo && phone.active?.pkg === phone.switchTo) phone.switchTo = null;
-  } else {
-    phone.sharing = m.type === "phone_started" || !!m.sharing;
-    if (phone.sharing) { phone.w = m.w; phone.h = m.h; phone.control = !!m.control; }
-    if ("apps" in m) { phone.active = m.active || null; phone.apps = m.apps || []; }
-    phoneStatus(!phone.sharing ? "Asked the phone; its owner has to accept…" : phone.control ? "" : "View only: PC control is off on the phone.");
-  }
-  phoneSwapLabel(phone.sharing);
-  phoneRender();
-}
-/** As many phone-shaped panes as fit side by side; pane 0 is what the phone shows now. */
-function phoneRender() {
-  const box = document.getElementById("phonePanes");
-  const live = phoneStream(0).canvas;
-  // Re-attaching a canvas drops its focus, and with it the typing into the phone.
-  const typing = document.activeElement;
-  box.replaceChildren();
-  if (!phone.sharing) return;
-  const ratio = phone.w && phone.h ? phone.w / phone.h : 0.5;
-  const n = Math.max(1, Math.min(1 + phone.apps.length, Math.floor(box.clientWidth / (box.clientHeight * ratio + 8))));
-  const pane = (label, body, onclick) => {
-    const p = document.createElement("div");
-    p.style.cssText = `height:100%;aspect-ratio:${ratio};display:flex;flex-direction:column;gap:4px;min-width:0`;
-    const t = document.createElement("div");
-    t.textContent = label;
-    t.className = "dim";
-    t.style.cssText = "font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis";
-    body.style.cssText += ";flex:1;min-height:0;width:100%;object-fit:contain;background:#000;border-radius:8px;cursor:pointer";
-    if (onclick) body.onclick = onclick;
-    p.append(t, body);
-    box.append(p);
-  };
-  pane(phone.active?.label || "Phone", live);
-  for (const a of phone.apps.slice(0, n - 1)) {
-    // A rooted phone runs this app on a display of its own: the pane is live and takes input as it is.
-    if (a.slot) { pane(a.label || a.pkg, phoneStream(a.slot).canvas); continue; }
-    const img = phone.shots[a.pkg] ? Object.assign(document.createElement("img"), { src: phone.shots[a.pkg] }) : document.createElement("div");
-    pane(a.label || a.pkg, img, () => {
-      // Input sent before the app is in front would land in the wrong app; it is dropped, not queued.
-      phone.switchTo = a.pkg; phone.switchUntil = Date.now() + 2000;
-      send({ type: "phone_switch", pkg: a.pkg });
-    });
-  }
-  if (typing?.tagName === "CANVAS" && typing.isConnected) typing.focus();
-}
-window.addEventListener("resize", () => { if (phone.sharing) phoneRender(); });
-function phoneInput(o) {
-  if (!phone.sharing || !phone.control) return;
-  if (!o.slot) {
-    if (phone.switchTo && Date.now() < phone.switchUntil) return;
-    phone.switchTo = null;
-  }
-  send({ type: "phone_input", ...o });
-}
-function phoneKey(key) { phoneInput({ kind: "key", key }); }
-/** Click taps, a held click long-presses, a drag swipes, the wheel scrolls, keys type into the focused field. */
-function phoneWire(c, slot) {
-  c._wired = true;
-  const input = (o) => phoneInput(slot ? { ...o, slot } : o);
-  const frac = (e) => { const r = c.getBoundingClientRect(); return { fx: (e.clientX - r.left) / r.width, fy: (e.clientY - r.top) / r.height }; };
-  let down = null;
-  c.addEventListener("pointerdown", (e) => { c.focus(); down = { ...frac(e), t: Date.now() }; });
-  c.addEventListener("pointerup", (e) => {
-    if (!down) return;
-    const up = frac(e), ms = Date.now() - down.t;
-    const moved = Math.hypot((up.fx - down.fx) * c.width, (up.fy - down.fy) * c.height) > 12;
-    if (moved) input({ kind: "swipe", fx: down.fx, fy: down.fy, tx: up.fx, ty: up.fy, ms: Math.max(80, ms) });
-    else input({ kind: ms >= 500 ? "press" : "tap", fx: down.fx, fy: down.fy });
-    down = null;
-  });
-  c.addEventListener("wheel", (e) => {
-    e.preventDefault();
-    const { fx, fy } = frac(e), d = e.deltaY > 0 ? -0.25 : 0.25;
-    input({ kind: "swipe", fx, fy, tx: fx, ty: Math.min(1, Math.max(0, fy + d)), ms: 150 });
-  }, { passive: false });
-  c.addEventListener("keydown", (e) => {
-    const key = { Enter: "enter", Backspace: "backspace", Escape: "back" }[e.key];
-    if (key) input({ kind: "key", key });
-    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) input({ kind: "text", text: e.key });
-    else return;
-    e.preventDefault();
-  });
-  c.addEventListener("paste", (e) => { const t = e.clipboardData.getData("text"); if (t) input({ kind: "text", text: t }); e.preventDefault(); });
-}
-/** One decoder and canvas per stream: slot 0 is the phone screen, slots 1-3 a rooted phone's live panes. */
-function phoneStream(slot) {
-  let st = phone.streams[slot];
-  if (!st) {
-    const canvas = slot ? Object.assign(document.createElement("canvas"), { tabIndex: 0 }) : (phone.live ||= Object.assign(document.createElement("canvas"), { tabIndex: 0 }));
-    if (!canvas._wired) phoneWire(canvas, slot);
-    st = phone.streams[slot] = { canvas, decoder: null, config: null, needKey: true, ts: 0 };
-  }
-  return st;
-}
-/** Phone video: byte - 16 is slot * 4 + kind, kinds 0-2 being config, keyframe and delta (H.264, Annex B). */
-function phonePacket(buf) {
-  const b = buf[0] - 16, slot = b >> 2, kind = b & 3, data = buf.subarray(1);
-  const st = phoneStream(slot);
-  if (kind === 0) {
-    st.config = data;
-    const codec = "avc1." + [data[5], data[6], data[7]].map((b) => b.toString(16).padStart(2, "0")).join("");
-    try { st.decoder?.close(); } catch {}
-    st.needKey = true;
-    st.decoder = new VideoDecoder({
-      output: (frame) => {
-        const c = st.canvas;
-        if (c.width !== frame.displayWidth || c.height !== frame.displayHeight) { c.width = frame.displayWidth; c.height = frame.displayHeight; }
-        c.getContext("2d").drawImage(frame, 0, 0);
-        frame.close();
-        const now = Date.now(), pkg = phone.active?.pkg;
-        if (!slot && pkg && now - phone.ringAt > 300) {
-          phone.ringAt = now;
-          createImageBitmap(c).then((b) => { phone.ring.push({ pkg, t: now, b }); if (phone.ring.length > 6) phone.ring.shift().b.close(); });
-        }
-      },
-      error: () => { st.decoder = null; },
-    });
-    st.decoder.configure({ codec, optimizeForLatency: true });
-    return;
-  }
-  const d = st.decoder;
-  if (!d || d.state !== "configured" || (kind === 2 && st.needKey)) return;
-  let payload = data;
-  if (kind === 1) { payload = new Uint8Array(st.config.length + data.length); payload.set(st.config); payload.set(data, st.config.length); }
-  st.needKey = false;
-  try { d.decode(new EncodedVideoChunk({ type: kind === 1 ? "key" : "delta", timestamp: (st.ts += 33333), data: payload })); }
-  catch { st.needKey = true; }
-}
-
-// ── Phone storage: everything under the phone's shared storage, through the phone itself ──
-const fs = { path: "", rid: 0, waiting: new Map() };
-const CHUNK = 256 << 10;
-function fsCall(o) {
-  return new Promise((resolve, reject) => {
-    const rid = ++fs.rid;
-    fs.waiting.set(rid, { resolve, reject });
-    send({ type: "phone_fs", rid, ...o });
-    setTimeout(() => { if (fs.waiting.delete(rid)) reject(new Error("the phone did not answer")); }, 60000);
-  });
-}
-function fsResult(m) {
-  const w = fs.waiting.get(m.rid);
-  if (!w) return;
-  fs.waiting.delete(m.rid);
-  m.error ? w.reject(new Error(m.error)) : w.resolve(m);
-}
-const join = (dir, name) => (dir.endsWith("/") ? dir : dir + "/") + name;
-const parentOf = (p) => p.replace(/\/[^/]*\/?$/, "") || "/";
-const human = (n) => n < 1024 ? `${n} B` : n < 1 << 20 ? `${(n / 1024).toFixed(1)} KB` : n < 1 << 30 ? `${(n / (1 << 20)).toFixed(1)} MB` : `${(n / (1 << 30)).toFixed(2)} GB`;
-function fsStatus(t) { document.getElementById("fsStatus").textContent = t; }
-async function fsOpen(path) {
-  fsStatus("loading…");
-  try {
-    const r = await fsCall({ op: "list", path });
-    fs.path = r.path;
-    document.getElementById("fsPath").textContent = r.path;
-    const rows = document.getElementById("fsRows");
-    rows.replaceChildren();
-    for (const it of r.items) {
-      const tr = document.createElement("tr");
-      if (it.dir) tr.className = "dir";
-      const cell = (text, cls) => { const td = document.createElement("td"); td.textContent = text; if (cls) td.className = cls; tr.append(td); return td; };
-      const name = cell((it.dir ? "📁 " : "") + it.name, "name");
-      if (it.dir) name.onclick = () => fsOpen(join(fs.path, it.name));
-      cell(it.dir ? "" : human(it.size), "dim");
-      cell(new Date(it.mtime).toLocaleString(), "dim");
-      const actions = cell("");
-      const btn = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.onclick = fn; actions.append(b, " "); };
-      if (!it.dir) btn("Download", () => fsDownload(join(fs.path, it.name), it.name));
-      btn("Rename", () => fsRename(it.name));
-      btn("Delete", () => fsDelete(it.name, it.dir));
-      rows.append(tr);
-    }
-    fsStatus(`${r.items.length} items`);
-  } catch (e) { fsStatus(e.message); }
-}
-async function fsDownload(path, name) {
-  const parts = [];
-  try {
-    for (let offset = 0; ; ) {
-      const r = await fsCall({ op: "read", path, offset });
-      const bin = atob(r.data);
-      const u = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
-      parts.push(u);
-      offset += u.length;
-      fsStatus(`downloading ${name}: ${Math.floor((offset / (r.size || 1)) * 100)}%`);
-      if (r.eof || !u.length) break;
-    }
-    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(new Blob(parts)), download: name });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    fsStatus(`downloaded ${name}`);
-  } catch (e) { fsStatus(`${name}: ${e.message}`); }
-}
-function b64(bytes) {
-  let s = "";
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  return btoa(s);
-}
-async function fsUpload(files) {
-  const dir = fs.path;
-  for (const f of files) {
-    try {
-      for (let offset = 0; offset < f.size || offset === 0; offset += CHUNK) {
-        const bytes = new Uint8Array(await f.slice(offset, offset + CHUNK).arrayBuffer());
-        await fsCall({ op: "write", path: join(dir, f.name), data: b64(bytes), append: offset > 0 });
-        fsStatus(`uploading ${f.name}: ${Math.floor((Math.min(f.size, offset + CHUNK) / (f.size || 1)) * 100)}%`);
-        if (!f.size) break;
-      }
-    } catch (e) { fsStatus(`${f.name}: ${e.message}`); return; }
-  }
-  fsOpen(dir);
-}
-async function fsMkdir() {
-  const name = prompt("New folder name");
-  if (!name) return;
-  try { await fsCall({ op: "mkdir", path: join(fs.path, name) }); fsOpen(fs.path); } catch (e) { fsStatus(e.message); }
-}
-async function fsRename(name) {
-  const to = prompt("New name", name);
-  if (!to || to === name) return;
-  try { await fsCall({ op: "rename", path: join(fs.path, name), to: join(fs.path, to) }); fsOpen(fs.path); } catch (e) { fsStatus(e.message); }
-}
-async function fsDelete(name, dir) {
-  if (!confirm(`Delete ${dir ? "the folder " : ""}${name} from the phone${dir ? " with everything in it" : ""}?`)) return;
-  try { await fsCall({ op: "delete", path: join(fs.path, name) }); fsOpen(fs.path); } catch (e) { fsStatus(e.message); }
-}
-{
-  const box = document.getElementById("files");
-  box.addEventListener("dragover", (e) => { e.preventDefault(); box.classList.add("drop"); });
-  box.addEventListener("dragleave", () => box.classList.remove("drop"));
-  box.addEventListener("drop", (e) => { e.preventDefault(); box.classList.remove("drop"); fsUpload(e.dataTransfer.files); });
-}
-</script>
+<script src="/vendor/qrcode.min.js"></script>
+<script src="/ui/core.js"></script>
+<script src="/ui/phone.js"></script>
+<script src="/ui/hub.js"></script>
+<script src="/ui/share.js"></script>
+<script src="/ui/pages.js"></script>
 </body>
 </html>

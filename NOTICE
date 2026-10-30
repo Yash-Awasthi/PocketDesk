@@ -1,0 +1,31 @@
+PocketDesk
+Copyright (C) 2026 yasha and the PocketDesk contributors.
+
+PocketDesk is free software: you can redistribute it and/or modify it under the terms of the
+GNU General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version. See LICENSE.
+
+Releases up to and including 0.9.1 were published under the MIT License.
+
+Parts of PocketDesk are adapted from the following projects. Their code is maintained here as
+part of PocketDesk and is not loaded from them at run time.
+
+  NectarLink (https://github.com/thtbee/nectarlink)
+    Copyright (C) 2026 The NectarLink contributors.
+    Android app: GPL-3.0-or-later. Protocol documentation: CC BY 4.0.
+    Used for: the phone's notifications, texts, calls, contacts, quick settings, media, photos
+    and ringing features of the Android app, and the design of the PC's phone hub.
+    "NectarLink" is a trademark of its project; PocketDesk is not affiliated with it.
+
+  TwinDesk (https://github.com/inukaasith/twindesk)
+    Copyright (C) 2026 inukaasith. GPL-3.0.
+    Used for: driving the phone from the PC over adb and scrcpy-server (daemon/src/phone_adb),
+    wireless-debugging pairing by QR code and mDNS, key mapping, and the phone window's input.
+
+Software fetched at run time, not distributed with PocketDesk:
+
+  scrcpy-server (https://github.com/Genymobile/scrcpy), Apache License 2.0,
+  Copyright (C) 2018 Genymobile, Copyright (C) 2018-2026 Romain Vimont.
+  Downloaded from its GitHub release and checked against a pinned SHA-256.
+
+  Android SDK Platform-Tools (adb), from Google, under its own license terms.

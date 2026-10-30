@@ -39,6 +39,7 @@ import remoteHandlers from "./handlers/remote.js";
 import sshHandlers from "./handlers/ssh.js";
 import systemHandlers from "./handlers/system.js";
 import phoneHandlers, { phoneBinary } from "./handlers/phone.js";
+import phoneAdbHandlers from "./handlers/phone_adb.js";
 import { startIroh } from "./iroh_link.js";
 import { configDir, configPath } from "./config.js";
 
@@ -141,10 +142,11 @@ export function start(config, { onTokenRotated } = {}) {
       res.writeHead(405).end();
       return;
     }
-    if (req.url.startsWith("/vendor/") && !req.url.includes("..")) {
+    if ((req.url.startsWith("/vendor/") || req.url.startsWith("/ui/")) && !req.url.includes("..") && /^[\w/.-]+$/.test(req.url)) {
       const file = path.join(publicDir, req.url);
       if (fs.existsSync(file)) {
-        res.writeHead(200, { "content-type": req.url.endsWith(".js") ? "text/javascript" : "text/plain" });
+        const type = req.url.endsWith(".js") ? "text/javascript" : req.url.endsWith(".css") ? "text/css" : "text/plain";
+        res.writeHead(200, { "content-type": type, "cache-control": "no-cache" });
         res.end(fs.readFileSync(file));
         return;
       }
@@ -361,6 +363,7 @@ export function start(config, { onTokenRotated } = {}) {
             clearTimeout(timer);
             ws._clientId = auth.id;
             ws._android = msg.platform === "android";
+            ws._name = typeof msg.name === "string" ? msg.name.slice(0, 80) : null;
             send(ws, hi);
             // The console token opens a SYSTEM daemon: once a phone holds its own token, the
             // master token (on screen, in a QR photo, in browser history) stops working.
@@ -686,7 +689,7 @@ export function start(config, { onTokenRotated } = {}) {
     activity, tls, syncAudio, clients: () => wss.clients,
   };
   const handlers = {
-    ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx), ...phoneHandlers(ctx),
+    ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx), ...phoneHandlers(ctx), ...phoneAdbHandlers(ctx),
   };
 
 

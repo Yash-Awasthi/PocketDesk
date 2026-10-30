@@ -31,6 +31,8 @@ function keyframe() {
 const asked = new Map();
 let nextAsk = 1;
 const FS_OPS = new Set(["list", "read", "write", "mkdir", "delete", "rename"]);
+// The newest event per phone service, for a PC page that opens later.
+const hub = { last: new Map() };
 
 export default function phoneHandlers(ctx) {
   const { send, broadcast, clients = () => [] } = ctx;
@@ -122,6 +124,34 @@ export default function phoneHandlers(ctx) {
     },
     async phone_switch(ws, msg) {
       relay(ws, { type: "phone_switch", pkg: String(msg.pkg || "") });
+    },
+    // The phone app's own features for the PC: notifications, texts, calls, contacts, quick
+    // settings, media, battery, photos, ringing. One request in, one answer back to who asked.
+    async phone_req(ws, msg) {
+      const phone = storagePhone();
+      if (!phone) return send(ws, { type: "phone_res", rid: msg.rid, ok: false, error: "the PocketDesk app on the phone is not connected" });
+      if (phone === ws) return;
+      if (!/^[a-z]{2,12}$/.test(String(msg.svc)) || !/^[a-z_]{2,20}$/.test(String(msg.op))) return send(ws, { type: "phone_res", rid: msg.rid, ok: false, error: "bad request" });
+      const id = nextAsk++;
+      asked.set(id, { ws, rid: msg.rid, phone });
+      setTimeout(() => asked.delete(id), 120_000).unref?.();
+      send(phone, { ...msg, type: "phone_req", rid: id });
+    },
+    async phone_res(ws, msg) {
+      const a = asked.get(msg.rid);
+      if (!a || ws !== a.phone) return;
+      asked.delete(msg.rid);
+      send(a.ws, { ...msg, rid: a.rid });
+    },
+    /** Something changed on the phone (a notification, a call, a text, a toggle): every PC viewer hears it. */
+    async phone_evt(ws, msg) {
+      if (!ws._android || !/^[a-z]{2,12}$/.test(String(msg.svc))) return;
+      hub.last.set(msg.svc, msg);
+      for (const w of clients()) if (w._authed && !w._android) send(w, msg);
+    },
+    /** A PC page opening: the phone's last known state, and whether its app is there to ask. */
+    async phone_hub(ws) {
+      send(ws, { type: "phone_hub", online: !!storagePhone(), name: storagePhone()?._name || null, last: Object.fromEntries(hub.last) });
     },
   };
 }

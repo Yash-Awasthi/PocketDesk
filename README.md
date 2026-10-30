@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/Yash-Awasthi/PocketDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/Yash-Awasthi/PocketDesk/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/Yash-Awasthi/PocketDesk)](https://github.com/Yash-Awasthi/PocketDesk/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/Node-≥24-brightgreen.svg)](https://nodejs.org)
 [![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-orange.svg)](#protocol-v1)
 [![Android](https://img.shields.io/badge/Android-Kotlin-purple.svg)](https://developer.android.com)
@@ -44,6 +44,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 🔔 **Background Notify** | Get notified when sessions end while the app is in background |
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states |
 | 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware video up to 60 fps, negotiated to the best codec both ends support — AV1 or HEVC where the phone can decode them (about 30–50% less data than H.264), H.264 otherwise (NVENC, Quick Sync, AMD AMF, Apple VideoToolbox or VA-API; the browser decodes H.264 with WebCodecs), the PC's sound streamed alongside as AAC, any monitor, the PC pointer drawn on the viewer as a small dot centred on the click point; touch gestures (two-finger scroll in both directions, two-finger tap for right click, three-finger tap for middle click, three-finger swipes to switch desktops or Spaces and show every window, hold then move to drag, pinch to zoom), a screen switcher on the picture when the PC has several monitors, pointer placement that is exact on Retina and mixed-DPI setups plus a manual corner calibration in the menu, a one-tap shortcut bar that follows the PC's OS (Ctrl shortcuts, Win and Task Manager on Windows; Cmd shortcuts, Spotlight, Mission Control and Force Quit on a Mac), media and volume keys, an app drawer of every installed program, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows, macOS and Linux/X11). |
+| 📲 **Phone on the PC** | The PC drives the phone through Android's wireless debugging or a USB cable, with no root: its screen in a window with real touch, mouse, keyboard and its sound (H.264 or H.265, up to 120 fps), **any phone app in a window of its own** on a virtual display that follows the window's size, the phone's cameras, screenshots and recordings, its clipboard both ways, files dropped onto it, typing on the phone without a window, Wi-Fi, Bluetooth and Do not disturb. Pair from the browser page with a QR code or a pairing code; adb and scrcpy-server are fetched on first use (`adb_*`) |
 | 📋 **Clipboard & file drop** | Text, images and copied files move between the PC and the viewer while the desktop is open; files sent from the phone or browser are pasted straight into the focused PC window. |
 | 👁 **Access control** | A connection password is required on every connect; the PC owner can pause control (view-only) from the pairing page, and viewers can join view-only. A **Remote access** switch at the top of the pairing page disconnects and refuses every phone and browser until it is switched back on, and **Uninstall PocketDesk** at the bottom right removes it after a confirmation (optionally with its settings). |
 | 🎥 **Session recording** | Optional MP4 of the watched screen, asciicast of terminals, and a log of every viewer, approval and file sent. |
@@ -666,4 +667,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## 📄 License
 
-[MIT](LICENSE) — Use it, fork it, ship it.
+[GPL-3.0-or-later](LICENSE). Earlier releases, up to 0.9.1, were published under the MIT License. Parts of the phone features are adapted from other GPL-3.0 projects; see [NOTICE](NOTICE).
