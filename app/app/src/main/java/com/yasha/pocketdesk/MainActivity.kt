@@ -112,6 +112,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         foreground = true
+        com.yasha.pocketdesk.hub.ClipSync.onForeground(this, true)
         if (lock.shouldLock()) {
             locked = true
             lock.prompt()
@@ -121,6 +122,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         foreground = false
+        com.yasha.pocketdesk.hub.ClipSync.onForeground(this, false)
         lock.onStop()
     }
 

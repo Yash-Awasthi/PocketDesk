@@ -52,9 +52,21 @@ object Sms {
         "send" -> {
             Hub.need(Manifest.permission.SEND_SMS, "Sending texts")
             val to = m.str("address")?.trim()?.takeIf { it.isNotEmpty() } ?: error("number required")
-            val text = m.str("text")?.takeIf { it.isNotEmpty() } ?: error("text required")
+            val text = m.str("text").orEmpty()
+            val image = m.str("image")?.let { android.util.Base64.decode(it, android.util.Base64.DEFAULT) }
             val sms = ctx.getSystemService(SmsManager::class.java)
-            sms.sendMultipartTextMessage(to, null, sms.divideMessage(text), null, null)
+            val recipients = to.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            if (image == null) {
+                if (text.isBlank()) error("text required")
+                for (r in recipients) sms.sendMultipartTextMessage(r, null, sms.divideMessage(text), null, null)
+            } else {
+                // A picture goes as MMS: an M-Send.req PDU handed to Android's MMS service.
+                val dir = java.io.File(ctx.cacheDir, "mms").apply { mkdirs() }
+                dir.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 3_600_000 }?.forEach { it.delete() }
+                val file = java.io.File(dir, "send-${System.currentTimeMillis()}.mms")
+                file.writeBytes(Mms.sendReq(recipients, text, m.str("mime") ?: "image/jpeg", image))
+                sms.sendMultimediaMessage(ctx, androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", file), null, null, null)
+            }
             obj {}
         }
         else -> error("unknown op")
@@ -92,7 +104,75 @@ object Sms {
                 if (c.getInt(2) == Tel.Sms.MESSAGE_TYPE_FAILED) put("failed", true)
             }) }
         }.orEmpty()
-        for (o in list.reversed()) add(o)
+        val all = (list + mms(ctx, thread, limit)).sortedBy { it.long("date") ?: 0 }.takeLast(limit)
+        for (o in all) add(o)
+    }
+
+    /** A thread's MMS: their text and a small copy of each picture. MMS dates are in seconds. */
+    private fun mms(ctx: Context, thread: Long, limit: Int): List<JsonObject> {
+        val r = ctx.contentResolver
+        return r.query(Tel.Mms.CONTENT_URI, arrayOf(Tel.Mms._ID, Tel.Mms.DATE, Tel.Mms.MESSAGE_BOX), "${Tel.Mms.THREAD_ID} = ?",
+            arrayOf(thread.toString()), "${Tel.Mms.DATE} DESC")?.use { c ->
+            buildList {
+                while (size < limit && c.moveToNext()) {
+                    val id = c.getLong(0)
+                    val out = c.getInt(2) != Tel.Mms.MESSAGE_BOX_INBOX
+                    val text = StringBuilder()
+                    var image: String? = null
+                    r.query(Uri.parse("content://mms/part"), arrayOf("_id", "ct", "text"), "mid = ?", arrayOf(id.toString()), null)?.use { p ->
+                        while (p.moveToNext()) {
+                            val mime = p.getString(1).orEmpty()
+                            if (mime == "text/plain") p.getString(2)?.let { if (text.isNotEmpty()) text.append('\n'); text.append(it) }
+                            else if (mime.startsWith("image/") && image == null) image = runCatching { thumb(ctx, Uri.parse("content://mms/part/${p.getLong(0)}")) }.getOrNull()
+                        }
+                    }
+                    add(obj {
+                        put("text", text.toString()); put("date", c.getLong(1) * 1000); put("out", out)
+                        putNullable("image", image)
+                        if (c.getInt(2) == Tel.Mms.MESSAGE_BOX_FAILED) put("failed", true)
+                    })
+                }
+            }
+        }.orEmpty()
+    }
+
+    private fun thumb(ctx: Context, uri: Uri): String? {
+        val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 640) sample *= 2
+        val bmp = ctx.contentResolver.openInputStream(uri)?.use { android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) } ?: return null
+        return HubNotifications.b64(bmp, android.graphics.Bitmap.CompressFormat.JPEG, 80)
+    }
+}
+
+/** OMA MMS M-Send.req, binary-encoded (WAP WSP). From NectarLink's PhoneSms (GPL-3.0). */
+object Mms {
+    fun sendReq(to: List<String>, body: String, mime: String, data: ByteArray): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        out.write(0x8C); out.write(0x80) // X-Mms-Message-Type: m-send-req
+        out.write(0x98); out.write("pd-${System.currentTimeMillis()}".toByteArray(Charsets.US_ASCII)); out.write(0) // Transaction-Id
+        out.write(0x8D); out.write(0x92) // MMS-Version 1.2
+        out.write(0x89); out.write(0x01); out.write(0x81) // From: insert-address-token
+        for (a in to) { out.write(0x97); out.write((if ('@' in a) a else "$a/TYPE=PLMN").toByteArray(Charsets.US_ASCII)); out.write(0) }
+        out.write(0x84); out.write(0xA3) // Content-Type: multipart/mixed
+        uintvar(out, (if (body.isNotBlank()) 1 else 0) + 1)
+        if (body.isNotBlank()) {
+            val t = body.toByteArray(Charsets.UTF_8)
+            uintvar(out, 1); uintvar(out, t.size); out.write(0x83); out.write(t) // text/plain
+        }
+        val type = mime.toByteArray(Charsets.US_ASCII) + byteArrayOf(0)
+        uintvar(out, type.size); uintvar(out, data.size); out.write(type); out.write(data)
+        return out.toByteArray()
+    }
+
+    /** WSP uintvar: 7 bits a byte, high bit set on all but the last. */
+    fun uintvar(out: java.io.ByteArrayOutputStream, value: Int) {
+        var v = value
+        val bytes = ArrayDeque<Int>()
+        do { bytes.addFirst(v and 0x7F); v = v ushr 7 } while (v > 0)
+        while (bytes.size > 1) out.write(bytes.removeFirst() or 0x80)
+        out.write(bytes.removeFirst())
     }
 }
 

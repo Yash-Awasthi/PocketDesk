@@ -1497,9 +1497,13 @@ export class DesktopController extends EventEmitter {
     return { ok: !!r?.ok, error: r?.error };
   }
 
-  /** While on, emits "clipboard" with the new content whenever something on the PC copies. */
-  watchClipboard(on) {
-    if (!on || (!IS_WIN && !IS_MAC)) { clearInterval(this.clipTimer); this.clipTimer = null; return; }
+  /**
+   * While anyone holds it on, emits "clipboard" with the new content whenever something on the PC
+   * copies. [who] keeps desktop viewers and phone clipboard sync from switching each other off.
+   */
+  watchClipboard(on, who = "viewer") {
+    (this.clipHolders ||= new Set())[on ? "add" : "delete"](who);
+    if (!this.clipHolders.size || (!IS_WIN && !IS_MAC)) { clearInterval(this.clipTimer); this.clipTimer = null; return; }
     if (this.clipTimer) return;
     let busy = false;
     this.clipTimer = setInterval(async () => {

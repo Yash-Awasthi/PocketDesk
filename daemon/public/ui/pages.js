@@ -139,6 +139,7 @@ PD.page("screen", {
           check("audio", "Phone sound (Android 11 and later)"),
           check("enterSends", "Enter sends in WhatsApp, Telegram and Signal"))),
       h("div", { className: "card" }, h("h3", { textContent: "Type on the phone" }), typeBox),
+      PD.padCard(),
       h("div", { className: "card", id: "legacyShare" }));
     PD.share?.render($("#legacyShare"));
   },
@@ -220,15 +221,18 @@ async function openThread(t) {
   const to = h("input", { placeholder: "Phone number", value: t?.address || "" });
   const box = h("div", { className: "bubbles" });
   const text = h("textarea", { rows: 2, placeholder: "Text message" });
+  let picture = null;
+  const chip = h("span", { className: "dim small" });
+  const file = h("input", { type: "file", accept: "image/*", hidden: true, onchange: async () => { picture = file.files[0] ? await shrink(file.files[0]) : null; chip.textContent = picture ? `Picture: ${file.files[0].name}` : ""; file.value = ""; } });
   const sendIt = async () => {
-    if (!text.value.trim() || !to.value.trim()) return;
-    const body = text.value;
-    text.value = "";
-    if (await run(() => PD.ask("sms", "send", { address: to.value.trim(), text: body }), "Sent")) setTimeout(() => (t ? openThread(t) : loadThreads()), 800);
+    if ((!text.value.trim() && !picture) || !to.value.trim()) return;
+    const body = text.value, image = picture;
+    text.value = ""; picture = null; chip.textContent = "";
+    if (await run(() => PD.ask("sms", "send", { address: to.value.trim(), text: body, ...(image ? { image, mime: "image/jpeg" } : {}) }, 60000), "Sent")) setTimeout(() => (t ? openThread(t) : loadThreads()), 1200);
   };
   text.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendIt(); } });
   conv.replaceChildren(h("div", { className: "bar" }, t ? h("b", { textContent: t.name || t.address }) : to, t ? h("span", { className: "dim", textContent: t.address }) : ""), box,
-    h("div", { className: "composer" }, text, btn("Send", sendIt, "primary")));
+    h("div", { className: "composer" }, btn("Picture", () => file.click()), file, h("div", { className: "grow" }, text, chip), btn("Send", sendIt, "primary")));
   for (const b of document.querySelectorAll("#smsList .item")) b.classList.remove("on");
   if (!t) return to.focus();
   const r = await run(() => PD.ask("sms", "messages", { thread: t.id }));
@@ -237,6 +241,19 @@ async function openThread(t) {
   box.scrollTop = box.scrollHeight;
   text.focus();
 }
+
+/** A picture small enough for MMS (carriers cap it near 300 KB), as base64 JPEG. */
+async function shrink(f) {
+  const bmp = await createImageBitmap(f);
+  for (const side of [1600, 1200, 900, 640]) {
+    const k = Math.min(1, side / Math.max(bmp.width, bmp.height));
+    const c = h("canvas", { width: Math.round(bmp.width * k), height: Math.round(bmp.height * k) });
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.8));
+    if (blob.size <= 290_000 || side === 640) return PD.b64(new Uint8Array(await blob.arrayBuffer()));
+  }
+}
+PD.newText = (n) => { openThread(null); setTimeout(() => { const i = $("#smsConv input"); if (i) i.value = n; }, 0); };
 
 // ── Calls ──
 PD.page("calls", {
@@ -308,7 +325,7 @@ PD.page("notifications", {
   render(sec) {
     const box = h("div", { id: "notifList" });
     sec.append(h("div", { className: "bar" }, btn("Clear all", () => run(() => PD.ask("notif", "dismiss_all"))), btn("Refresh", () => loadNotifs()),
-      "Notification" in window && Notification.permission === "default" ? btn("Show as desktop notifications", () => Notification.requestPermission()) : ""), box);
+      "Notification" in window && Notification.permission === "default" ? btn("Show as desktop notifications", () => Notification.requestPermission()) : ""), PD.syncCard("pcnotif"), box);
     const draw = () => {
       box.replaceChildren(...PD.notifs.list.map(notifRow));
       if (!PD.notifs.list.length) box.append(PD.hub.online ? empty("No notifications on the phone.") : needApp());
@@ -396,7 +413,7 @@ PD.page("clipboard", {
   render(sec) {
     const text = h("textarea", { rows: 3, placeholder: "Text to put on the phone's clipboard" });
     const list = h("div", { className: "list", id: "clipList" });
-    sec.append(h("div", { className: "card" }, text, h("div", { className: "actions" },
+    sec.append(PD.syncCard("clip"), h("div", { className: "card" }, text, h("div", { className: "actions" },
       btn("Send to phone", () => sendClip(text.value), "primary"),
       btn("Send this PC's clipboard", async () => { try { sendClip(await navigator.clipboard.readText()); } catch (e) { PD.toast(e.message, true); } }),
       btn("Get the phone's clipboard", () => (phoneReady() ? PD.send({ type: "adb_clipboard_get" }) : run(async () => { const r = await PD.ask("clip", "get"); if (r.text) PD.emit("phone_clip", r.text); }))))), h("h3", { textContent: "History" }), list);

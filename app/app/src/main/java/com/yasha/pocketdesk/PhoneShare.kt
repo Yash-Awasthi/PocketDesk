@@ -47,6 +47,8 @@ object PhoneShare {
             "phone_input" -> ControlService.instance?.input(ev.msg)
             "phone_fs" -> PhoneStorage.handle(app, ev.msg)
             "phone_req" -> com.yasha.pocketdesk.hub.Hub.handle(ev.msg)
+            "pc_notif" -> com.yasha.pocketdesk.hub.PcNotifs.post(app, ev.msg)
+            "pc_clip" -> com.yasha.pocketdesk.hub.ClipSync.fromPc(app, ev.msg)
             "phone_switch" -> (ev.msg["pkg"] as? JsonPrimitive)?.content?.let { ControlService.instance?.switchTo(it) }
         }
     }

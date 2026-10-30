@@ -30,9 +30,25 @@ function keyframe() {
 // Storage requests in flight: the daemon's id -> who asked and under which id.
 const asked = new Map();
 let nextAsk = 1;
+import * as timeline from "../timeline.js";
+
 const FS_OPS = new Set(["list", "read", "write", "mkdir", "delete", "rename"]);
 // The newest event per phone service, for a PC page that opens later.
 const hub = { last: new Map() };
+// What each notification last said, so an update that changes nothing is not recorded twice.
+const said = new Map();
+
+function record(e) {
+  if (e.svc === "notif" && e.op === "posted" && e.item) {
+    const n = e.item, line = `${n.title || ""}${n.text || ""}`;
+    if (said.get(n.key) === line) return;
+    said.set(n.key, line);
+    if (said.size > 500) said.delete(said.keys().next().value);
+    timeline.add("notif", n.title || n.appName, n.text || "", { app: n.appName });
+  } else if (e.svc === "call" && e.state === "ringing") {
+    timeline.add("call", e.name || "Incoming call", "Rang on the phone");
+  }
+}
 
 export default function phoneHandlers(ctx) {
   const { send, broadcast, clients = () => [] } = ctx;
@@ -135,6 +151,8 @@ export default function phoneHandlers(ctx) {
       const id = nextAsk++;
       asked.set(id, { ws, rid: msg.rid, phone });
       setTimeout(() => asked.delete(id), 120_000).unref?.();
+      if (msg.svc === "sms" && msg.op === "send") timeline.add("sms", `To ${String(msg.address || "")}`, String(msg.text || (msg.image ? "Picture" : "")));
+      if (msg.svc === "calls" && msg.op === "dial") timeline.add("call", `Called ${String(msg.number || "")}`, "from this PC");
       send(phone, { ...msg, type: "phone_req", rid: id });
     },
     async phone_res(ws, msg) {
@@ -147,6 +165,7 @@ export default function phoneHandlers(ctx) {
     async phone_evt(ws, msg) {
       if (!ws._android || !/^[a-z]{2,12}$/.test(String(msg.svc))) return;
       hub.last.set(msg.svc, msg);
+      record(msg);
       for (const w of clients()) if (w._authed && !w._android) send(w, msg);
     },
     /** A PC page opening: the phone's last known state, and whether its app is there to ask. */

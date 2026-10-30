@@ -315,3 +315,72 @@ object Clip {
         }
     }
 }
+
+/** What the PC copies lands on this phone's clipboard; what this phone copies goes back while the app is open. */
+object ClipSync {
+    private var last: String? = null
+
+    fun fromPc(ctx: Context, m: JsonObject) {
+        val cm = ctx.getSystemService(ClipboardManager::class.java)
+        val text = m.str("text")
+        val png = m.str("png")
+        main.post {
+            if (text != null) {
+                last = text
+                cm.setPrimaryClip(ClipData.newPlainText("PC", text))
+            } else if (png != null) {
+                val dir = java.io.File(ctx.cacheDir, "clip").apply { mkdirs() }
+                val file = java.io.File(dir, "pc.png").apply { writeBytes(Base64.decode(png, Base64.DEFAULT)) }
+                val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", file)
+                cm.setPrimaryClip(ClipData.newUri(ctx.contentResolver, "PC picture", uri))
+            }
+        }
+    }
+
+    /** Android hands the clipboard only to the app in front, so this runs while it is. */
+    private val listener = ClipboardManager.OnPrimaryClipChangedListener { sendIfNew() }
+
+    fun onForeground(ctx: Context, on: Boolean) {
+        val cm = ctx.getSystemService(ClipboardManager::class.java)
+        if (on) { cm.addPrimaryClipChangedListener(listener); main.postDelayed({ sendIfNew() }, 500) }
+        else cm.removePrimaryClipChangedListener(listener)
+    }
+
+    private fun sendIfNew() {
+        val ctx = Hub.app
+        val clip = ctx.getSystemService(ClipboardManager::class.java).primaryClip ?: return
+        // Password managers mark what they copy as sensitive; that never leaves the phone.
+        if (clip.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE") == true) return
+        val text = clip.getItemAt(0)?.coerceToText(ctx)?.toString()?.takeIf { it.isNotEmpty() } ?: return
+        if (text == last) return
+        last = text
+        com.yasha.pocketdesk.Link.client.sendRaw(obj { put("type", "phone_clip"); put("text", text.take(200_000)) }.toString())
+    }
+}
+
+/** This PC's notifications, shown on the phone. */
+object PcNotifs {
+    private const val CHANNEL = "pc_notifs"
+    private var next = 1000
+
+    fun post(ctx: Context, m: JsonObject) {
+        if (!com.yasha.pocketdesk.Notifier.canNotify(ctx)) return
+        val mgr = ctx.getSystemService(NotificationManager::class.java)
+        if (mgr.getNotificationChannel(CHANNEL) == null) {
+            mgr.createNotificationChannel(android.app.NotificationChannel(CHANNEL, "Notifications from your PC", NotificationManager.IMPORTANCE_DEFAULT))
+        }
+        val app = m.str("appName").orEmpty()
+        val n = androidx.core.app.NotificationCompat.Builder(ctx, CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_menu_info_details)
+            .setContentTitle(m.str("title") ?: app)
+            .setContentText(m.str("body"))
+            .setStyle(androidx.core.app.NotificationCompat.BigTextStyle().bigText(m.str("body")))
+            .setSubText(app.ifEmpty { null })
+            .setWhen(m.long("at") ?: System.currentTimeMillis())
+            .setShowWhen(true)
+            .setAutoCancel(true)
+            .build()
+        // One app's toasts stack per app; ids wrap so the shade never fills with old ones.
+        mgr.notify("pc:${m.str("app")}", next++ % 1000 + 1000, n)
+    }
+}

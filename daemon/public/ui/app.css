@@ -153,3 +153,13 @@ body.pip { margin: 0; height: 100vh; background: #000; }
   .page.split:not([hidden]) { grid-template-columns: 1fr; }
   #pages { padding: 14px 16px; }
 }
+
+#palette { position: fixed; inset: 0; z-index: 7000; background: rgba(0, 0, 0, .35); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; }
+#palette[hidden] { display: none; }
+.palette-card { width: min(640px, 100% - 32px); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 10px; }
+.palette-card input { width: 100%; font-size: 16px; padding: 10px 12px; margin-bottom: 6px; }
+.palette-card .list { max-height: 50vh; }
+.pill.k-notif { color: var(--accent); }
+.pill.k-call { color: var(--ok); }
+.pill.k-clip, .pill.k-file, .pill.k-shot { color: var(--dim); }
+.composer .grow { display: flex; flex-direction: column; gap: 4px; }

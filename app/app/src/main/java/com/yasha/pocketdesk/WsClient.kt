@@ -1162,7 +1162,7 @@ class WsClient(
                     failure(str(m, "error") ?: "model rejected")
                 }
             }
-            "phone_share_request", "phone_share_stop", "phone_keyframe", "phone_input", "phone_switch", "phone_fs", "phone_req" ->
+            "phone_share_request", "phone_share_stop", "phone_keyframe", "phone_input", "phone_switch", "phone_fs", "phone_req", "pc_notif", "pc_clip" ->
                 events.tryEmit(RhEvent.Phone(type, m))
             else -> {}
         }

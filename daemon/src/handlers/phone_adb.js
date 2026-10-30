@@ -11,6 +11,7 @@ import { Adb } from "../phone_adb/adb.js";
 import { startAdbQr } from "../phone_adb/adbqr.js";
 import { Session, ACTION, TYPE } from "../phone_adb/scrcpy.js";
 import { KeyState, ANDROID } from "../phone_adb/android_keys.js";
+import * as timeline from "../timeline.js";
 
 // Binary to the viewer: [kind, view id, flags, pts f64 (µs), ...data]; kinds sit apart from the
 // PC desktop's 0-3 and the phone app's 16-30 on the same socket.
@@ -19,10 +20,43 @@ export const BIN_AUDIO = 0x41;
 const HEAD = 11;
 const MAX_VIEWS = 8;
 const BEHIND = 2_000_000;
+// scrcpy's UHID gamepad (app/src/hid/hid_gamepad.c, Apache-2.0): Android takes it for an Xbox 360 pad.
+const PAD_DESC = Buffer.from([
+  0x05, 0x01, 0x09, 0x05, 0xa1, 0x01, 0xa1, 0x00,
+  0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x09, 0x33, 0x09, 0x34, 0x15, 0x00, 0x27, 0xff, 0xff, 0x00, 0x00, 0x75, 0x10, 0x95, 0x04, 0x81, 0x02,
+  0x05, 0x01, 0x09, 0x32, 0x09, 0x35, 0x15, 0x00, 0x26, 0xff, 0x7f, 0x75, 0x10, 0x95, 0x02, 0x81, 0x02,
+  0x05, 0x09, 0x19, 0x01, 0x29, 0x10, 0x15, 0x00, 0x25, 0x01, 0x95, 0x10, 0x75, 0x01, 0x81, 0x02,
+  0x05, 0x01, 0x09, 0x39, 0x15, 0x01, 0x25, 0x08, 0x75, 0x04, 0x95, 0x01, 0x81, 0x42,
+  0xc0, 0xc0,
+]);
+// W3C standard gamepad button index -> report bit: A B X Y LB RB, Back Start, L3 R3, Guide.
+const PAD_BITS = { 0: 0x0001, 1: 0x0002, 2: 0x0008, 3: 0x0010, 4: 0x0040, 5: 0x0080, 8: 0x0400, 9: 0x0800, 10: 0x2000, 11: 0x4000, 16: 0x1000 };
+
+/** One 15-byte report from a browser Gamepad's buttons (values 0-1) and axes (-1 to 1). */
+export function padReport(buttons = [], axes = []) {
+  const r = Buffer.alloc(15);
+  const axis = (v) => Math.max(0, Math.min(65535, Math.round((Number(v) || 0) * 32767) + 32768));
+  const trig = (v) => Math.max(0, Math.min(32767, Math.round((Number(v) || 0) * 32767)));
+  r.writeUInt16LE(axis(axes[0]), 0);
+  r.writeUInt16LE(axis(axes[1]), 2);
+  r.writeUInt16LE(axis(axes[2]), 4);
+  r.writeUInt16LE(axis(axes[3]), 6);
+  r.writeUInt16LE(trig(buttons[6]), 8);
+  r.writeUInt16LE(trig(buttons[7]), 10);
+  let bits = 0;
+  for (const [i, bit] of Object.entries(PAD_BITS)) if (Number(buttons[i]) > 0.5) bits |= bit;
+  r.writeUInt16LE(bits, 12);
+  const [u, d, l, rt] = [12, 13, 14, 15].map((i) => Number(buttons[i]) > 0.5);
+  r[14] = u ? (l ? 8 : rt ? 2 : 1) : d ? (l ? 6 : rt ? 4 : 5) : l ? 7 : rt ? 3 : 0;
+  return r;
+}
+
 const CHATS = new Set(["com.whatsapp", "com.whatsapp.w4b", "com.instagram.android", "org.telegram.messenger", "org.telegram.messenger.web", "org.thoughtcrime.securesms"]);
 
 const st = { adb: null, serial: null, error: "", qr: null, apps: new Map(), clip: null, views: new Map() };
 let nextView = 1;
+/** For clipboard sync: whether a phone is set up, and its clipboard both ways. */
+export const bridge = { ready: () => !!st.serial, setClipboard: null, onPhoneClip: null };
 
 function packet(kind, id, flags, pts, data) {
   const b = Buffer.allocUnsafe(HEAD + data.length);
@@ -35,6 +69,13 @@ function packet(kind, id, flags, pts, data) {
 export default function phoneAdbHandlers(ctx) {
   const { send, clients = () => [] } = ctx;
   const viewers = () => [...clients()].filter((w) => w._authed && !w._android && w.readyState === 1);
+  const phoneClip = (text) => {
+    for (const w of viewers()) send(w, { type: "adb_clipboard", text });
+    bridge.onPhoneClip?.(text);
+  };
+  bridge.setClipboard = async (text) => (await control()).setClipboard(text, false);
+  // A live control session is what streams the phone's clipboard changes here.
+  bridge.keep = async () => { if (st.serial) await control(); };
 
   async function adb() {
     if (st.adb) return st.adb;
@@ -127,7 +168,7 @@ export default function phoneAdbHandlers(ctx) {
     });
     s.on("audioCodec", (c) => send(ws, { type: "adb_audio", id: v.id, codec: c === 0x6f707573 ? "opus" : c === 0x00726177 ? "raw" : c <= 1 ? null : "other" }));
     s.on("audio", (p) => { if (ws.readyState === 1 && ws.bufferedAmount < BEHIND) ws.send(packet(BIN_AUDIO, v.id, p.config ? 1 : 0, p.pts, p.data)); });
-    s.on("clipboard", (text) => { for (const w of viewers()) send(w, { type: "adb_clipboard", text }); });
+    s.on("clipboard", phoneClip);
     s.on("closed", (why) => {
       if (v.session !== s) return;
       st.views.delete(v.id);
@@ -154,7 +195,7 @@ export default function phoneAdbHandlers(ctx) {
     if (st.clip && !st.clip.closed) return st.clip;
     const s = new Session(await adb(), needSerial(), { video: false, audio: false, control: true, clipboardAutosync: true });
     st.clip = s;
-    s.on("clipboard", (text) => { for (const w of viewers()) send(w, { type: "adb_clipboard", text }); });
+    s.on("clipboard", phoneClip);
     s.on("closed", () => { if (st.clip === s) st.clip = null; });
     await s.start();
     return s;
@@ -305,6 +346,18 @@ export default function phoneAdbHandlers(ctx) {
         }
       } catch (e) { err(ws, "type", e); }
     },
+    /** This PC's game controllers on the phone; [pad] is the browser's gamepad index. */
+    async adb_gamepad(ws, msg) {
+      try {
+        const s = await control();
+        const pad = Math.max(0, Math.min(3, Number(msg.pad) | 0));
+        const id = 3 + pad;
+        s._pads ||= new Set();
+        if (msg.connected === false) { if (s._pads.delete(id)) s.uhidDestroy(id); return; }
+        if (!s._pads.has(id)) { s._pads.add(id); s.uhidCreate(id, 0x045e, 0x028e, "Microsoft X-Box 360 Pad", PAD_DESC); }
+        s.uhidInput(id, padReport(msg.buttons, msg.axes));
+      } catch (e) { err(ws, "gamepad", e); }
+    },
     async adb_clipboard_set(ws, msg) {
       try { (await control()).setClipboard(String(msg.text ?? "").slice(0, 200_000), !!msg.paste); } catch (e) { err(ws, "clipboard", e); }
     },
@@ -315,6 +368,7 @@ export default function phoneAdbHandlers(ctx) {
       try {
         const png = await (await adb()).screencap(needSerial());
         if (!png?.length) throw new Error("screenshot failed");
+        timeline.add("shot", "Phone screenshot", "Saved on this PC");
         send(ws, { type: "adb_screenshot", png: png.toString("base64") });
       } catch (e) { err(ws, "screenshot", e); }
     },
@@ -332,6 +386,7 @@ export default function phoneAdbHandlers(ctx) {
         fs.rmSync(tmp, { force: true });
         if (r.code !== 0) throw new Error(r.err.trim() || r.out.trim() || "push failed");
         await (await adb()).shell(st.serial, `am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d 'file://${remote.replace(/'/g, "")}'`, { timeout: 8000 });
+        timeline.add("file", name, "Sent to the phone's Downloads");
         send(ws, { type: "adb_push", rid: msg.rid, ok: true, done: true, path: remote });
       } catch (e) { send(ws, { type: "adb_push", rid: msg.rid, ok: false, error: e.message }); }
     },

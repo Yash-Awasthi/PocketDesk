@@ -2,4 +2,6 @@
 <paths>
     <cache-path name="clip" path="clip/" />
     <cache-path name="open" path="open/" />
+    <!-- Pictures sent as MMS, handed to Android's MMS service. -->
+    <cache-path name="mms" path="mms/" />
 </paths>

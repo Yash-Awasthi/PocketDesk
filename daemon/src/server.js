@@ -40,6 +40,7 @@ import sshHandlers from "./handlers/ssh.js";
 import systemHandlers from "./handlers/system.js";
 import phoneHandlers, { phoneBinary } from "./handlers/phone.js";
 import phoneAdbHandlers from "./handlers/phone_adb.js";
+import phoneSyncHandlers from "./handlers/phone_sync.js";
 import { startIroh } from "./iroh_link.js";
 import { configDir, configPath } from "./config.js";
 
@@ -689,7 +690,7 @@ export function start(config, { onTokenRotated } = {}) {
     activity, tls, syncAudio, clients: () => wss.clients,
   };
   const handlers = {
-    ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx), ...phoneHandlers(ctx), ...phoneAdbHandlers(ctx),
+    ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx), ...phoneHandlers(ctx), ...phoneAdbHandlers(ctx), ...phoneSyncHandlers(ctx),
   };
 
 
