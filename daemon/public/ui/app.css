@@ -163,3 +163,5 @@ body.pip { margin: 0; height: 100vh; background: #000; }
 .pill.k-call { color: var(--ok); }
 .pill.k-clip, .pill.k-file, .pill.k-shot { color: var(--dim); }
 .composer .grow { display: flex; flex-direction: column; gap: 4px; }
+.pwin.audio-only { min-height: 0; resize: none; }
+.pwin.audio-only .pwin-stage canvas { display: none; }

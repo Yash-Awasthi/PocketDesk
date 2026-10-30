@@ -129,6 +129,19 @@ function makeView(info) {
     return b;
   };
   const navKey = (key) => PD.send({ type: "adb_input", id: v.id, t: "nav", key });
+  // Sound only (the phone's playback or its microphone): a small bar to record or stop.
+  if (info.kind === "sound" || info.kind === "mic") {
+    el.classList.add("audio-only");
+    status.textContent = info.kind === "mic" ? "Listening to the phone's microphone…" : "Playing the phone's sound…";
+    v.recBtn = btn("record", "Record to a file", () => record(v));
+    btn("close", "Close", () => PD.send({ type: "adb_close", id: v.id }));
+    title.textContent = info.kind === "mic" ? "Phone microphone" : "Phone sound";
+    place(v);
+    drag(v);
+    el.addEventListener("pointerdown", () => front(v), true);
+    PD.emit("adb_views_changed");
+    return v;
+  }
   if (info.kind === "camera") {
     btn("torch", "Light", () => PD.send({ type: "adb_input", id: v.id, t: "camera", what: "torch" }));
     btn("zoomIn", "Zoom in", () => PD.send({ type: "adb_input", id: v.id, t: "camera", what: "zoomIn" }));
@@ -180,9 +193,10 @@ function place(v) {
   host.append(v.el);
   const n = PD.adb.views.size - 1;
   const h = Math.max(420, Math.min(780, innerHeight - 80));
-  const w = v.info.kind === "camera" ? Math.round(h * 0.75 * 16 / 9 * 0.6) : Math.round(h * 0.48);
+  const audio = v.info.kind === "sound" || v.info.kind === "mic";
+  const w = audio ? 320 : v.info.kind === "camera" ? Math.round(h * 0.75 * 16 / 9 * 0.6) : Math.round(h * 0.48);
   v.el.style.width = `${w}px`;
-  v.el.style.height = `${h}px`;
+  v.el.style.height = `${audio ? 110 : h}px`;
   v.el.style.left = `${Math.min(innerWidth - w - 16, 240 + n * 36)}px`;
   v.el.style.top = `${Math.min(innerHeight - h - 16, 24 + n * 30)}px`;
 }
@@ -461,20 +475,22 @@ function shot(v) {
 }
 function record(v) {
   if (v.rec) { v.rec.stop(); return; }
-  const stream = v.canvas.captureStream(60);
+  const audioOnly = v.info.kind === "sound" || v.info.kind === "mic";
+  if (audioOnly && !v.player) return PD.toast("No sound yet from the phone", true);
+  const stream = audioOnly ? new MediaStream() : v.canvas.captureStream(60);
   if (v.actx && v.player) {
     const dest = v.actx.createMediaStreamDestination();
     v.player.connect(dest);
     for (const t of dest.stream.getAudioTracks()) stream.addTrack(t);
   }
-  const type = ["video/mp4;codecs=avc1", "video/webm;codecs=vp9,opus", "video/webm"].find((t) => MediaRecorder.isTypeSupported(t));
+  const type = (audioOnly ? ["audio/webm;codecs=opus", "audio/ogg;codecs=opus"] : ["video/mp4;codecs=avc1", "video/webm;codecs=vp9,opus", "video/webm"]).find((t) => MediaRecorder.isTypeSupported(t));
   const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 8e6 });
   const parts = [];
   rec.ondataavailable = (e) => e.data.size && parts.push(e.data);
   rec.onstop = () => {
     v.rec = null;
     v.recBtn.classList.remove("on");
-    saveBlob(new Blob(parts, { type: rec.mimeType }), `${v.info.label || "phone"}-${stamp()}.${type.includes("mp4") ? "mp4" : "webm"}`);
+    saveBlob(new Blob(parts, { type: rec.mimeType }), `${v.info.label || "phone"}-${stamp()}.${type.includes("mp4") ? "mp4" : type.includes("ogg") ? "ogg" : "webm"}`);
   };
   rec.start(1000);
   v.rec = rec;

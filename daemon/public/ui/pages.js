@@ -130,6 +130,7 @@ PD.page("screen", {
         h("div", { className: "actions" },
           btn("Show phone screen", () => (phoneReady() ? PD.adb.open("screen") : PD.go("connect")), "primary"),
           btn("Phone sound only", () => PD.adb.open("sound")),
+          btn("Phone microphone", () => PD.adb.open("mic")),
           btn("Screenshot", () => PD.send({ type: "adb_screenshot" }))),
         h("div", { className: "form" },
           h("label", {}, "Picture ", sel("codec", [["h264", "H.264"], ["h265", "H.265 (sharper, needs hardware support)"]])),

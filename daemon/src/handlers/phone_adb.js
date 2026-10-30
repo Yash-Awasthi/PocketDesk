@@ -124,7 +124,7 @@ export default function phoneAdbHandlers(ctx) {
   async function open(ws, m) {
     const serial = needSerial();
     if (st.views.size >= MAX_VIEWS) throw new Error(`at most ${MAX_VIEWS} phone windows`);
-    const kind = ["screen", "app", "camera", "sound"].includes(m.kind) ? m.kind : "screen";
+    const kind = ["screen", "app", "camera", "sound", "mic"].includes(m.kind) ? m.kind : "screen";
     if (kind === "app" && !/^[\w.]+$/.test(String(m.pkg || ""))) throw new Error("app: package name required");
     const reuse = [...st.views.values()].find((v) => v.owner === ws && v.kind === kind && (kind !== "app" || v.pkg === m.pkg));
     if (reuse && kind !== "camera") { send(ws, { type: "adb_view", ...viewInfo(reuse) }); reuse.session?.simple(TYPE.RESET_VIDEO); return; }
@@ -133,6 +133,8 @@ export default function phoneAdbHandlers(ctx) {
     let opts;
     if (kind === "screen") opts = { ...base, audio: !!m.audio, maxSize: Number(m.maxSize) | 0, stayAwake: true, clipboardAutosync: true };
     else if (kind === "sound") opts = { video: false, control: false, audio: true };
+    // The phone's microphone (Android 11+): heard here, and recorded from the window.
+    else if (kind === "mic") opts = { video: false, control: false, audio: true, audioSource: "mic" };
     else if (kind === "camera") {
       opts = { ...base, audio: false, videoSource: "camera", cameraFacing: m.facing === "front" ? "front" : "back", cameraFps: 30, maxSize: 1920 };
       if (/^\d{2,5}x\d{2,5}$/.test(String(m.size || ""))) opts.cameraSize = m.size;
