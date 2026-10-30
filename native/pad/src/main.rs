@@ -47,8 +47,12 @@ fn main() {
             let _ = t.wait_ready();
             t
         });
-        if let Err(e) = target.update(&state) {
-            eprintln!("pad {pad}: {e:?}");
+        // A controller plugged in a moment ago can refuse its first report while Windows sets it up.
+        if target.update(&state).is_err() {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            if let Err(e) = target.update(&state) {
+                eprintln!("pad {pad}: {e:?}");
+            }
         }
     }
     for (_, mut t) in pads {

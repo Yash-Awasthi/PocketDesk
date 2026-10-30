@@ -91,9 +91,18 @@ fn set_values(subkey: &str, values: &[(Option<&str>, &str)]) -> Result<(), Strin
     res
 }
 
-/// COM registration of the media source, and the Frame Server source entry that names it.
+/// COM registration of the media source, and the Frame Server source entry that names it. Windows
+/// loads the DLL in its Frame Server service (LocalService), which cannot read a user's profile,
+/// so it is copied under ProgramData first.
 fn register() -> Result<(), String> {
-    let dll = dll()?;
+    let src = dll()?;
+    let dir = PathBuf::from(std::env::var("ProgramData").unwrap_or_else(|_| r"C:\ProgramData".into())).join(r"PocketDesk\vcam");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    // A camera in use keeps the old copy locked; the new one then goes beside it.
+    let dll = [dir.join("pocketdesk_vcam.dll"), dir.join(format!("pocketdesk_vcam-{}.dll", std::process::id()))]
+        .into_iter()
+        .find(|d| std::fs::copy(&src, d).is_ok())
+        .ok_or_else(|| format!("cannot copy the camera into {}", dir.display()))?;
     set_values(&format!(r"{CLASSES}\{CLSID}"), &[(None, "PocketDesk Virtual Camera Media Source")])?;
     set_values(&format!(r"{CLASSES}\{CLSID}\InprocServer32"), &[(None, &dll.to_string_lossy()), (Some("ThreadingModel"), "Both")])?;
     set_values(&format!(r"{FRAMESERVER}\{CLSID}"), &[(Some("FriendlyName"), FRIENDLY_NAME)])

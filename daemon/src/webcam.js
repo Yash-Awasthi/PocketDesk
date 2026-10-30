@@ -43,13 +43,16 @@ export class Webcam extends EventEmitter {
     this.vcam.stdin.on("error", () => {});
     let size = null;
     session.on("size", (s) => {
-      // A new size (the phone turned, the other camera) needs a decoder that knows it.
+      // A new size (the phone turned, the other camera) needs a decoder that knows it. The same
+      // size again is only the encoder restarting, and the running decoder keeps going.
+      if (size && size.width === s.width && size.height === s.height) return;
       size = s;
       this.decoder(s);
     });
     session.on("video", (p) => {
-      if (!this.ff || this.ff.killed) return;
+      // Kept even before a decoder exists: the parameter sets can come ahead of the size.
       if (p.config) this.config = p.data;
+      if (!this.ff || this.ff.killed) return;
       // A fresh decoder needs the parameter sets in front of its first keyframe.
       const data = p.key && this.config && !this.fed ? Buffer.concat([this.config, p.data]) : p.data;
       if (!this.fed && !p.key && !p.config) return;
@@ -57,18 +60,19 @@ export class Webcam extends EventEmitter {
       this.ff.stdin.write(data);
     });
     session.on("closed", () => { if (this.session === session) this.stop(); });
-    if (size) this.decoder(size);
   }
 
   decoder({ width, height }) {
     try { this.ff?.kill(); } catch {}
     this.fed = false;
     const ff = spawn(process.env.FFMPEG_PATH || "ffmpeg", [
-      "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", "-flags", "low_delay", "-probesize", "32", "-analyzeduration", "0",
+      // A tiny probe size leaves ffmpeg waiting for more of the stream before it decodes anything.
+      "-hide_banner", "-loglevel", "error", "-flags", "low_delay",
       "-f", "h264", "-i", "pipe:0", "-f", "rawvideo", "-pix_fmt", "bgr0", "pipe:1",
     ], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     this.ff = ff;
     ff.stdin.on("error", () => {});
+    ff.stderr.on("data", (d) => { this.error = `ffmpeg: ${String(d).trim().split(/\r?\n/).pop()}`; });
     ff.on("error", (e) => { this.error = `ffmpeg: ${e.message}`; this.emit("change"); });
     const len = width * height * 4;
     const head = Buffer.alloc(12);
@@ -94,7 +98,6 @@ export class Webcam extends EventEmitter {
         if (this.state !== "on") { this.state = "on"; this.emit("change"); }
       }
     });
-    this.session?.simple?.(17); // RESET_VIDEO: a keyframe for the new decoder
   }
 
   stop() {
