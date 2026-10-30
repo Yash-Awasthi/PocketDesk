@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["vcam", "vcam-host", "pad"]
+
+[workspace.package]
+version = "0.9.1"
+edition = "2024"
+rust-version = "1.97"
+authors = ["The PocketDesk contributors"]
+license = "GPL-3.0-or-later"
+
+[workspace.dependencies]
+windows = "0.62"
+windows-core = "0.62"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

@@ -107,3 +107,30 @@ jobs:
           name: PocketDesk-release-apk
           path: app/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
+
+  native:
+    name: Windows helpers (webcam, controller)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build
+        run: |
+          rustup toolchain install stable --profile minimal
+          cargo build --release
+      - name: Test
+        run: cargo test --release
+      # Attached to a release as PocketDesk-native-win-x64.zip; install.ps1 unpacks it into <install>\native.
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item target\release\pocketdesk_vcam.dll, target\release\pocketdesk-vcam-host.exe, target\release\pocketdesk-pad.exe, vcam\assets\OFL-Figtree.txt out\
+          Compress-Archive out\* PocketDesk-native-win-x64.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: PocketDesk-native-win-x64
+          path: native/PocketDesk-native-win-x64.zip
+          retention-days: 30

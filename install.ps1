@@ -104,6 +104,23 @@ try {
         Copy-Item (Get-ChildItem "$tmp\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName $ffDir
     }
 
+    # 3b. The phone-as-webcam and phone-as-controller helpers, when the release carries them.
+    $nativeDir = Join-Path $InstallDir "app\native"
+    $built = Join-Path $srcRoot "native\target\release"
+    if (Test-Path "$built\pocketdesk-vcam-host.exe") {
+        New-Item -ItemType Directory -Force $nativeDir | Out-Null
+        Copy-Item "$built\pocketdesk_vcam.dll", "$built\pocketdesk-vcam-host.exe", "$built\pocketdesk-pad.exe" $nativeDir -ErrorAction SilentlyContinue
+    } elseif ($Ref) { try {
+        $rel = Invoke-RestMethod "https://api.github.com/repos/$repo/releases/tags/$Ref"
+        $asset = $rel.assets | Where-Object name -eq "PocketDesk-native-win-x64.zip" | Select-Object -First 1
+        if ($asset) {
+            Step "Downloading the webcam and controller helpers"
+            Download $asset.browser_download_url "$tmp\native.zip"
+            New-Item -ItemType Directory -Force $nativeDir | Out-Null
+            Expand-Archive "$tmp\native.zip" $nativeDir -Force
+        }
+    } catch { Step "Skipping the webcam and controller helpers ($($_.Exception.Message))" } }
+
     # 4. Dependencies.
     Step "Installing dependencies"
     Push-Location $daemon
