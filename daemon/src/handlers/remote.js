@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 const pcMedia = new PcMedia();
 
 export default function remoteHandlers(ctx) {
-  const { send, desktop, desktopWatchers, video, videoWatchers, recorder, access, syncAudio } = ctx;
+  const { send, desktop, desktopWatchers, video, videoWatchers, recorder, access, syncAudio, audioListeners } = ctx;
   // Sockets that took a single snapshot stay on the viewer set for a few seconds.
   const snapshots = new Map();
   const deviceName = (ws) => devices.list().find((d) => d.id === ws._clientId)?.name || "A remote device";
@@ -182,6 +182,16 @@ export default function remoteHandlers(ctx) {
       if (press) hold(ws, "k:" + Number(msg.key), press);
       const r = await desktop.inputKey({ key: msg.key, press, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
       if (!r.ok) send(ws, { type: "desktop_input_ok", ok: false, error: r.error });
+    },
+    /** The phone as a speaker: this PC's sound alone, without the screen. */
+    async pc_audio(ws, msg) {
+      if (process.platform === "darwin") return send(ws, { type: "pc_audio", ok: false, error: "on a Mac the sound comes with the screen: open the desktop" });
+      if (msg.on) {
+        audioListeners.add(ws);
+        if (!ws._audioHooked) { ws._audioHooked = true; ws.once?.("close", () => { audioListeners.delete(ws); syncAudio(); }); }
+      } else audioListeners.delete(ws);
+      syncAudio();
+      send(ws, { type: "pc_audio", ok: true, on: audioListeners.has(ws) });
     },
     /** Handoff from the phone: a link opens in this PC's browser, other text lands on its clipboard. */
     async handoff(ws, msg) {

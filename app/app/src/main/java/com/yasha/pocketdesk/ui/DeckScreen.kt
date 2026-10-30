@@ -97,6 +97,10 @@ fun DeckScreen(ws: WsClient, onClose: () -> Unit) {
             Text("Deck", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
             TextButton(onClick = { adding = true }) { Text("＋ Button") }
         }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+            Text("Play the PC's sound on this phone", modifier = Modifier.weight(1f))
+            androidx.compose.material3.Switch(checked = PcSpeaker.on, onCheckedChange = { PcSpeaker.set(ws, it) })
+        }
         LazyVerticalGrid(GridCells.Adaptive(104.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 val now = ws.pcMedia
@@ -151,4 +155,25 @@ private fun AddTile(onDone: (DeckTile?) -> Unit) {
         confirmButton = { TextButton(enabled = label.isNotBlank() && vk != null, onClick = { onDone(DeckTile(label.trim(), vk!!, mods.toList())) }) { Text("Add") } },
         dismissButton = { TextButton(onClick = { onDone(null) }) { Text("Cancel") } },
     )
+}
+
+/** The phone as the PC's speaker: plays the PC's sound until switched off, the Deck open or not. */
+object PcSpeaker {
+    var on by mutableStateOf(false)
+        private set
+    private var player: AacPlayer? = null
+
+    fun set(ws: WsClient, want: Boolean) {
+        if (want == on) return
+        on = want
+        if (want) {
+            player = AacPlayer().also { p -> ws.audioSink = p::feed }
+            ws.sendRaw("""{"type":"pc_audio","on":true}""")
+        } else {
+            ws.sendRaw("""{"type":"pc_audio","on":false}""")
+            ws.audioSink = null
+            player?.release()
+            player = null
+        }
+    }
 }

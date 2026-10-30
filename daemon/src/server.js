@@ -567,10 +567,12 @@ export function start(config, { onTokenRotated } = {}) {
   video.on("ended", () => { if (videoWatchers.size) resync(); });
   // PC sound: Windows/Linux encode it separately; macOS's native helper hands it through DesktopVideo.
   // One AAC ADTS frame per message, kind 3, only to viewers that asked for sound and are not far behind.
+  // Phones playing the PC's sound without watching the screen (the phone as a speaker).
+  const audioListeners = new Set();
   const onAudio = (adts) => {
     const msg = Buffer.concat([Buffer.from([3]), adts]);
-    for (const w of videoWatchers) {
-      if (w.readyState !== 1 || !w._audio) continue;
+    for (const w of new Set([...videoWatchers, ...audioListeners])) {
+      if (w.readyState !== 1 || !(w._audio || audioListeners.has(w))) continue;
       if (w.sendAudio) w.sendAudio(adts);
       else if (w.bufferedAmount < 1_000_000) w.send(msg);
     }
@@ -579,7 +581,7 @@ export function start(config, { onTokenRotated } = {}) {
   audio.on("audio", onAudio);
   /** Turn PC sound on while any viewer wants it, off when none do. macOS folds it into the video restart. */
   function syncAudio() {
-    const want = [...videoWatchers].some((w) => w._audio);
+    const want = [...videoWatchers].some((w) => w._audio) || audioListeners.size > 0;
     if (process.platform === "darwin") {
       if (want !== video.audio) { video.audio = want; if (videoWatchers.size) resync(); }
       return;
@@ -690,7 +692,7 @@ export function start(config, { onTokenRotated } = {}) {
   const ctx = {
     send, broadcast, allSessions, plugins, power,
     desktop, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
-    activity, tls, syncAudio, clients: () => wss.clients,
+    activity, tls, syncAudio, audioListeners, clients: () => wss.clients,
   };
   const handlers = {
     ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx), ...phoneHandlers(ctx), ...phoneAdbHandlers(ctx), ...phoneSyncHandlers(ctx), ...pcPadHandlers(ctx), ...displayHandlers(ctx),
