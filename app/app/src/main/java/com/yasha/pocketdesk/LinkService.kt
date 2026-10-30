@@ -48,7 +48,7 @@ object Link {
                     Notifier.approvalsGone(app)
                     if (!MainActivity.foreground) client.lastError?.let { Notifier.linkLost(app, it) }
                 }
-                if (now == Status.Connected) Notifier.linkLostGone(app)
+                if (now == Status.Connected) { Notifier.linkLostGone(app); com.yasha.pocketdesk.hub.Hub.onConnected() }
                 if (now != Status.Connected && PhoneShare.sharing) PhoneShare.stop(app)
                 was = now
             }
@@ -70,6 +70,7 @@ class RhApp : android.app.Application() {
     override fun onCreate() {
         super.onCreate()
         IrohLink.Node.init(this)
+        com.yasha.pocketdesk.hub.Hub.start(this)
         Link.start(this)
     }
 }

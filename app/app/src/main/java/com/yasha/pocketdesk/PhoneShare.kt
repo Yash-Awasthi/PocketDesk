@@ -46,6 +46,7 @@ object PhoneShare {
             "phone_keyframe" -> service?.keyframe()
             "phone_input" -> ControlService.instance?.input(ev.msg)
             "phone_fs" -> PhoneStorage.handle(app, ev.msg)
+            "phone_req" -> com.yasha.pocketdesk.hub.Hub.handle(ev.msg)
             "phone_switch" -> (ev.msg["pkg"] as? JsonPrimitive)?.content?.let { ControlService.instance?.switchTo(it) }
         }
     }

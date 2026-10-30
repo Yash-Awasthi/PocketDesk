@@ -469,6 +469,8 @@ class WsClient(
     }
 
     fun rescan(): Boolean = send(Proto.detect())
+    /** A ready JSON line, for the phone hub's requests and events. */
+    fun sendRaw(line: String): Boolean = send(line)
 
     // ── SSH ──
     fun sshRefresh() {
@@ -1160,7 +1162,7 @@ class WsClient(
                     failure(str(m, "error") ?: "model rejected")
                 }
             }
-            "phone_share_request", "phone_share_stop", "phone_keyframe", "phone_input", "phone_switch", "phone_fs" ->
+            "phone_share_request", "phone_share_stop", "phone_keyframe", "phone_input", "phone_switch", "phone_fs", "phone_req" ->
                 events.tryEmit(RhEvent.Phone(type, m))
             else -> {}
         }
