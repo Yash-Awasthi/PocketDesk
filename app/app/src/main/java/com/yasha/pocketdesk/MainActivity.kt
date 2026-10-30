@@ -228,7 +228,8 @@ class MainActivity : ComponentActivity() {
             Box(Modifier.fillMaxSize().padding(pad)) {
                 // Connection state banner (surfaces Reconnecting — previously
                 // the app dropped to a bare "disconnected" with no hint).
-                when (client.status) {
+                // The PC link's state is beside the point on the phone-to-phone screen, which needs no PC.
+                if (!Peer.open) when (client.status) {
                     Status.Reconnecting -> Text(
                         "⟳ reconnecting… tap to stop",
                         color = androidx.compose.material3.MaterialTheme.colorScheme.onErrorContainer,

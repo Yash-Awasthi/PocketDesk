@@ -49,7 +49,8 @@ object Link {
                     if (!MainActivity.foreground) client.lastError?.let { Notifier.linkLost(app, it) }
                 }
                 if (now == Status.Connected) { Notifier.linkLostGone(app); com.yasha.pocketdesk.hub.Hub.onConnected() }
-                if (now != Status.Connected && PhoneShare.sharing) PhoneShare.stop(app)
+                // A share with the PC ends with its link; one with another phone does not depend on it.
+                if (now != Status.Connected && PhoneShare.sharing && Peer.hostChannel == null) PhoneShare.stop(app)
                 was = now
             }
         }

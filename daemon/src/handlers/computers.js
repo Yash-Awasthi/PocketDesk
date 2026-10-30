@@ -25,7 +25,7 @@ export function parsePairing(text) {
   if (!m) return null;
   try {
     const o = JSON.parse(Buffer.from(m[1], "base64url").toString("utf8"));
-    return o.u && o.t ? { url: o.u, token: o.t, fp: o.f || "", name: o.n || "" } : null;
+    return o.u && o.t ? { url: o.u, token: o.t, fp: o.f || "", name: o.n || "", iroh: o.i || "" } : null;
   } catch { return null; }
 }
 
@@ -34,17 +34,19 @@ export const computers = { list: () => load(), online: new Map(), link: null, li
 export default function computersHandlers(ctx) {
   const { send } = ctx;
   let nextSlot = 1;
-  const pub = (c) => ({ id: c.id, name: c.name, url: c.url, os: c.os || null, online: computers.online.has(c.id) });
+  const pub = (c) => ({ id: c.id, name: c.name, url: c.url, os: c.os || null, online: computers.online.has(c.id), anywhere: !!c.iroh });
   const linksOf = (ws) => (ws._pcLinks ||= new Map());
 
   /**
    * Opens [owner]'s link to saved PC [c]; resolves once the other daemon says welcome. A raw link
    * hands desktop messages and the bare video stream to [owner] as if this PC sent them.
    */
-  function link(c, owner, { raw = false } = {}) {
+  function link(c, owner, { raw = false } = {}, via = "lan") {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(c.url, { rejectUnauthorized: false, handshakeTimeout: 10000, maxPayload: 64 << 20 });
-      const l = { ws, id: c.id, slot: raw ? 0 : (nextSlot = (nextSlot % 250) + 1), raw, os: c.os };
+      // On the same network straight to it; from anywhere else through iroh, which checks the PC's key itself.
+      const ws = via === "iroh" ? ctx.iroh().dial(c.iroh)
+        : new WebSocket(c.url, { rejectUnauthorized: false, handshakeTimeout: 4000, maxPayload: 64 << 20 });
+      const l = { ws, id: c.id, slot: raw ? 0 : (nextSlot = (nextSlot % 250) + 1), raw, os: c.os, via };
       let welcomed = false;
       ws.on("upgrade", (res) => {
         // A wss link counts only with the certificate the PC showed when it was added.
@@ -68,7 +70,13 @@ export default function computersHandlers(ctx) {
           // A pairing token becomes this PC's own device token on the other one.
           const list = load();
           const saved = list.find((x) => x.id === c.id);
-          if (saved) { if (m.deviceToken) saved.token = m.deviceToken; saved.clientId = m.clientId; saved.os = m.os; saved.fp = c.fp; save(list); }
+          if (saved) {
+            if (m.deviceToken) saved.token = m.deviceToken;
+            Object.assign(saved, { clientId: m.clientId, os: m.os, fp: c.fp, iroh: m.iroh || saved.iroh });
+            save(list);
+          }
+          c.token = saved?.token || c.token;
+          c.clientId = m.clientId;
           l.os = c.os = m.os;
           const old = linksOf(owner).get(c.id + (raw ? ":raw" : ""));
           if (old) { old.quiet = true; old.ws.close(); }
@@ -77,6 +85,8 @@ export default function computersHandlers(ctx) {
           resolve(l);
           return;
         }
+        // The screen's OS travels with it, so each viewer shows that OS's keys.
+        if (raw && m.type === "desktop_started" && !m.os) m.os = l.os;
         if (raw && m.type === "sources_list" && !m.of) {
           // Its sources, named as seen from here.
           const items = (m.items || []).map((x) => ({ ...x, id: x.id === "local" ? `pc:${c.id}` : `pc:${c.id}/${x.id}` }));
@@ -106,10 +116,17 @@ export default function computersHandlers(ctx) {
     });
   }
 
+  /** Same network first; a PC that does not answer there is tried through iroh. */
+  async function linkAny(c, owner, opts) {
+    try { return await link(c, owner, opts, "lan"); } catch (e) {
+      if (!c.iroh || !ctx.iroh?.() || /token|password|two-factor|certificate/.test(e.message)) throw e;
+      return link(c, owner, opts, "iroh");
+    }
+  }
   computers.link = async (owner, id, opts) => {
     const c = load().find((x) => x.id === id);
     if (!c) throw new Error("no such PC");
-    return link(c, owner, opts);
+    return linkAny(c, owner, opts);
   };
   computers.linkOf = (owner, id, raw = false) => linksOf(owner).get(id + (raw ? ":raw" : "")) || null;
 
@@ -124,10 +141,10 @@ export default function computersHandlers(ctx) {
         if (!/^wss?:\/\/[^/]+/.test(p.url) || !p.token) throw new Error("paste the other PC's pairing link, or its wss:// address and token");
         const c = {
           id: crypto.randomUUID(), name: String(msg.name || p.name || new URL(p.url).hostname).slice(0, 60),
-          url: p.url, token: p.token, fp: p.fp, password: msg.password ? String(msg.password) : undefined,
+          url: p.url, token: p.token, fp: p.fp, iroh: p.iroh || undefined, password: msg.password ? String(msg.password) : undefined,
         };
         save([...load(), c]);
-        try { await link(c, ws); } catch (e) { save(load().filter((x) => x.id !== c.id)); throw e; }
+        try { await linkAny(c, ws); } catch (e) { save(load().filter((x) => x.id !== c.id)); throw e; }
         send(ws, { type: "pc_list", items: load().map(pub) });
       } catch (e) { send(ws, { type: "pc_error", message: e.message }); }
     },
@@ -138,7 +155,7 @@ export default function computersHandlers(ctx) {
       send(ws, { type: "pc_list", items: list.map(pub) });
     },
     async pc_remove(ws, msg) {
-      for (const k of [msg.id, msg.id + ":raw"]) linksOf(ws).get(k)?.ws.close();
+      for (const k of [msg.id, msg.id + ":raw"]) { const l = linksOf(ws).get(k); if (l) { l.quiet = true; l.ws.close(); } }
       save(load().filter((x) => x.id !== msg.id));
       send(ws, { type: "pc_list", items: load().map(pub) });
     },

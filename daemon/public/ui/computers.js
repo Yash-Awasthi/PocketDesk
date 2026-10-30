@@ -114,6 +114,15 @@ const VK = (() => {
   return m;
 })();
 const BUTTONS = ["left", "middle", "right"];
+const SWAP = { 0xa2: 0x5b, 0xa3: 0x5c, 0x5b: 0xa2, 0x5c: 0xa3 };
+// [label, virtual key, modifiers]; "win" is Cmd on a Mac and Super on Linux.
+const SHORTCUTS = {
+  win32: [["Start", 0x5b, []], ["Task view", 0x09, ["win"]], ["Show desktop", 0x44, ["win"]], ["Alt+Tab", 0x09, ["alt"]],
+    ["Task Manager", 0x1b, ["ctrl", "shift"]], ["Lock", 0x4c, ["win"]], ["Close window", 0x73, ["alt"]]],
+  darwin: [["Spotlight", 0x20, ["win"]], ["Mission Control", 0x26, ["ctrl"]], ["App switcher", 0x09, ["win"]], ["Close window", 0x57, ["win"]],
+    ["Quit app", 0x51, ["win"]], ["Force Quit", 0x1b, ["win", "alt"]], ["Lock screen", 0x51, ["ctrl", "win"]], ["Screenshot", 0x34, ["win", "shift"]]],
+  linux: [["Activities", 0x5b, []], ["Alt+Tab", 0x09, ["alt"]], ["Show desktop", 0x44, ["win"]], ["Close window", 0x73, ["alt"]], ["Lock", 0x4c, ["win"]]],
+};
 let z = 2000;
 
 function openWin(s) {
@@ -137,9 +146,21 @@ function openWin(s) {
   };
   const mon = h("select", { title: "Screen", style: "display:none", onchange: () => { w.monitor = Number(mon.value); start(); } });
   tools.append(mon);
+  const nav = (key) => send({ type: "desktop_nav", key });
   if (phone) {
-    tool("back", "Back (right click)", () => tap(0x1b));
-    tool("home", "Home (middle click)", () => send({ type: "desktop_mouse", click: "middle", fx: 0.5, fy: 0.5 }));
+    tool("back", "Back (right click)", () => nav("back"));
+    tool("home", "Home (middle click)", () => nav("home"));
+    tool("recents", "Recent apps", () => nav("recents"));
+    tool("notifications", "Notifications", () => nav("notifications"));
+  } else {
+    // Shortcuts spelled for the OS on the other end, filled in once it says which.
+    w.keys = h("select", { title: "Shortcuts", onchange: () => {
+      const c = SHORTCUTS[w.os]?.[Number(w.keys.value)] || SHORTCUTS.win32[Number(w.keys.value)];
+      if (c && !w.viewOnly) send({ type: "desktop_key", key: c[1], modifiers: c[2] });
+      w.keys.value = "";
+      canvas.focus();
+    } });
+    tools.append(w.keys);
   }
   tool("shot", "Screenshot (copies it)", () => canvas.toBlob(async (b) => {
     try { await navigator.clipboard.write([new ClipboardItem({ "image/png": b })]); PD.toast("Screenshot copied"); } catch { PD.toast("Could not copy", true); }
@@ -184,6 +205,11 @@ function openWin(s) {
     else if (m.type === "desktop_started") {
       if (!m.ok) { status.hidden = false; status.textContent = m.reason || "Could not open it"; return; }
       w.mode = m.mode;
+      w.os = m.os || s.os || "win32";
+      if (w.keys) w.keys.replaceChildren(h("option", { value: "", textContent: "Keys…" }),
+        (SHORTCUTS[w.os] || SHORTCUTS.win32).map((c, i) => h("option", { value: i, textContent: c[0] })));
+      // A PC keyboard on a Mac: Ctrl and Cmd trade places, so Ctrl+C copies there as here.
+      w.swap = w.os === "darwin" && !/Mac/i.test(navigator.platform);
       w.viewOnly = !!m.viewOnly;
       title.textContent = `${s.name}${m.viewOnly ? " · view only" : ""}`;
     } else if (m.type === "desktop_frame" && m.base64 && w.mode !== "h264") {
@@ -235,7 +261,8 @@ function openWin(s) {
   const tap = (vk) => send({ type: "desktop_key", key: vk });
   for (const [evt, press] of [["keydown", "down"], ["keyup", "up"]]) {
     canvas.addEventListener(evt, (e) => {
-      const vk = VK[e.code];
+      let vk = VK[e.code];
+      if (w.swap && SWAP[vk]) vk = SWAP[vk];
       if (!vk || w.viewOnly) return;
       // Ctrl+V pastes this PC's clipboard there instead (the paste event below).
       if (e.code === "KeyV" && (e.ctrlKey || e.metaKey)) return;

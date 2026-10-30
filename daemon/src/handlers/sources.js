@@ -11,7 +11,7 @@ import { computers } from "./computers.js";
 import { shareFeed } from "./phone.js";
 
 const ROUTED = ["desktop_start", "desktop_stop", "desktop_mouse", "desktop_key", "desktop_type", "desktop_ping",
-  "desktop_monitors", "desktop_quality", "video_ack", "clipboard_get", "clipboard_set"];
+  "desktop_monitors", "desktop_quality", "video_ack", "clipboard_get", "clipboard_set", "desktop_nav"];
 
 /** Wraps the desktop handlers in [handlers] so they follow each viewer's chosen source. */
 export function withSources(handlers, ctx) {
@@ -63,7 +63,7 @@ export function withSources(handlers, ctx) {
     if (!s) return local[type]?.(ws, msg);
     if (type === "desktop_stop") { stop(ws); return send(ws, { type: "desktop_stopped", ok: true, source: s.source }); }
     // Paused control on this PC, or a view-only device, keeps every source it reaches view-only too.
-    if (/^(desktop_mouse|desktop_key|desktop_type|clipboard_set)$/.test(type) && (!access.controlAllowed || ws._viewOnlyForced)) {
+    if (/^(desktop_mouse|desktop_key|desktop_type|desktop_nav|clipboard_set)$/.test(type) && (!access.controlAllowed || ws._viewOnlyForced)) {
       return send(ws, { type: "desktop_input_ok", ok: false, error: "view only" });
     }
     if (s.kind === "pc") {
@@ -74,13 +74,13 @@ export function withSources(handlers, ctx) {
       if (type === "desktop_ping") return send(ws, { type: "desktop_pong", t: msg.t, server: Date.now() });
       if (type === "desktop_monitors") return send(ws, { type: "desktop_monitors", ok: true, monitors: [{ index: 0, ...shareFeed.size(), primary: true }], current: 0 });
       if (type === "clipboard_set" && typeof msg.text === "string") return shareFeed.input(ws, "desktop_type", { text: msg.text });
-      if (/^desktop_(mouse|key|type)$/.test(type)) shareFeed.input(ws, type, msg);
+      if (/^desktop_(mouse|key|type|nav)$/.test(type)) shareFeed.input(ws, type, msg);
       return;
     }
     if (type === "desktop_ping") return send(ws, { type: "desktop_pong", t: msg.t, server: Date.now() });
     if (type === "desktop_monitors") return send(ws, { type: "desktop_monitors", ok: true, monitors: [{ index: 0, w: s.v.size?.width, h: s.v.size?.height, primary: true }], current: 0 });
     if (type === "clipboard_set" && typeof msg.text === "string") return bridge.feedInput?.(s.v, "desktop_type", { text: msg.text });
-    if (type === "desktop_mouse" || type === "desktop_key" || type === "desktop_type") bridge.feedInput?.(s.v, type, msg);
+    if (/^desktop_(mouse|key|type|nav)$/.test(type)) bridge.feedInput?.(s.v, type, msg);
   };
 
   for (const t of ROUTED) handlers[t] = routed(t);

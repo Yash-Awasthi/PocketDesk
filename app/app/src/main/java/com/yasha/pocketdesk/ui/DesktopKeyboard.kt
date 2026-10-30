@@ -163,7 +163,7 @@ fun DesktopKeyboard(ws: WsClient) {
         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             Mod.entries.forEach { m ->
                 val l = latches.getValue(m)
-                Key(modLabel(ws.hostOs, m.wire) + if (l == Latch.Locked) " ■" else "", Modifier.weight(1f), special = true,
+                Key(modLabel(ws.targetOs, m.wire) + if (l == Latch.Locked) " ■" else "", Modifier.weight(1f), special = true,
                     background = when (l) { Latch.Off -> null; Latch.Once -> ONCE_BG; Latch.Locked -> LOCKED_BG }) {
                     latches = latches + (m to when (l) { Latch.Off -> Latch.Once; Latch.Once -> Latch.Locked; Latch.Locked -> Latch.Off })
                 }

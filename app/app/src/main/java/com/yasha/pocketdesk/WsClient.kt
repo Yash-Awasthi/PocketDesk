@@ -190,6 +190,11 @@ class WsClient(
     /** Everything the PC offers to view, its linked PCs' own screens included once they answer. */
     var desktopSources by mutableStateOf<List<DesktopSource>>(emptyList())
         private set
+    /** The OS of the screen in view when it is not this PC's own ("android" for a phone). */
+    var desktopOs by mutableStateOf("")
+        private set
+    /** Which OS's keys and buttons the viewer offers: the screen's, not necessarily the PC's. */
+    val targetOs: String get() = if (desktopSource == "local") hostOs else desktopOs.ifEmpty { hostOs }
     /** Receives binary video packets (kinds 0-2); called on the socket thread. */
     @Volatile var videoSink: ((ByteArray) -> Unit)? = null
     /** Receives PC audio packets (kind 3, an ADTS frame); called on the socket thread. */
@@ -613,6 +618,7 @@ class WsClient(
     fun pickSource(id: String) {
         if (id == desktopSource) return
         desktopSource = id
+        desktopOs = desktopSources.firstOrNull { it.id == id }?.let { if (it.kind == "phone") "android" else it.os } ?: ""
         desktopMonitor = 0
         desktopMonitors = emptyList()
         if (desktopStreaming) desktopStartVideo()
@@ -644,6 +650,10 @@ class WsClient(
     /** Positive scrolls right. */
     fun desktopHWheel(delta: Int) = control(Proto.desktopMouse(null, null, null, null, hwheel = delta))
     fun desktopType(text: String) = control(Proto.desktopType(text))
+    /** A phone's own button (back, home, recents, notifications) when the screen in view is a phone. */
+    fun desktopNav(key: String) = control(Proto.desktopNav(key))
+    /** Touch and hold, on a phone in view. */
+    fun desktopLongPress(x: Int, y: Int) = control(Proto.desktopMouse(x, y, "long", null, frac = frac(x, y)))
 
     fun modelList(chatId: String) = send(Proto.modelList(chatId))
     fun chatModelSet(chatId: String, model: String?) = send(Proto.chatModelSet(chatId, model))
@@ -1094,6 +1104,7 @@ class WsClient(
                 else if (type == "fb_config_set") send(Proto.fbConfigList()) else if (type != "fb_skill_run") send(Proto.fbStatus())
             "desktop_started" -> {
                 desktopNotice = ""
+                str(m, "os")?.let { desktopOs = it }
                 if (bool(m, "ok") == true) {
                     desktopStreaming = true
                     desktopMode = str(m, "mode") ?: "jpeg"

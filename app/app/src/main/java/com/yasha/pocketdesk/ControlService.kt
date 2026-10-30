@@ -28,8 +28,53 @@ class ControlService : AccessibilityService() {
     private var switchingTo: String? = null
     private var switchUntil = 0L
 
-    override fun onServiceConnected() { instance = this }
-    override fun onDestroy() { if (instance === this) instance = null; super.onDestroy() }
+    override fun onServiceConnected() {
+        instance = this
+        if (PhoneShare.sharing) pill(Peer.viewer ?: "Your PC")
+    }
+    override fun onDestroy() { pill(null); if (instance === this) instance = null; super.onDestroy() }
+
+    private var pillView: android.widget.TextView? = null
+
+    /**
+     * A small red "Stop" over every app while the screen is shared, so whoever holds this phone can
+     * end it from anywhere; [who] null takes it away. Drag it up or down out of the way.
+     */
+    fun pill(who: String?) = main.post {
+        val wm = getSystemService(android.view.WindowManager::class.java)
+        pillView?.let { runCatching { wm.removeView(it) } }
+        pillView = null
+        if (who == null) return@post
+        val dp = resources.displayMetrics.density
+        val lp = android.view.WindowManager.LayoutParams(
+            android.view.WindowManager.LayoutParams.WRAP_CONTENT, android.view.WindowManager.LayoutParams.WRAP_CONTENT,
+            android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or android.view.WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            android.graphics.PixelFormat.TRANSLUCENT,
+        ).apply { gravity = android.view.Gravity.TOP or android.view.Gravity.CENTER_HORIZONTAL; y = (36 * dp).toInt() }
+        val v = android.widget.TextView(this).apply {
+            text = "●  $who sees this phone  ·  Stop"
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 13f
+            setPadding((14 * dp).toInt(), (7 * dp).toInt(), (14 * dp).toInt(), (7 * dp).toInt())
+            background = android.graphics.drawable.GradientDrawable().apply { cornerRadius = 20 * dp; setColor(0xE6C62828.toInt()) }
+            var downY = 0f
+            var startY = 0
+            var moved = false
+            setOnTouchListener { view, e ->
+                when (e.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> { downY = e.rawY; startY = lp.y; moved = false }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        if (kotlin.math.abs(e.rawY - downY) > 10 * dp) moved = true
+                        if (moved) { lp.y = (startY + e.rawY - downY).toInt().coerceAtLeast(0); runCatching { wm.updateViewLayout(view, lp) } }
+                    }
+                    android.view.MotionEvent.ACTION_UP -> if (!moved) { view.performClick(); PhoneShare.stop(this@ControlService) }
+                }
+                true
+            }
+        }
+        runCatching { wm.addView(v, lp); pillView = v }
+    }
     override fun onInterrupt() {}
 
     private val main = Handler(Looper.getMainLooper())
@@ -60,7 +105,7 @@ class ControlService : AccessibilityService() {
     }
 
     fun sendApps() {
-        if (!PhoneShare.sharing) return
+        if (!PhoneShare.sharing || Peer.hostChannel != null) return
         val a = active
         val others = recent.filter { it != a }
         val slots = PhoneShare.service?.panes?.show(a, others).orEmpty()

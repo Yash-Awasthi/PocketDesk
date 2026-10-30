@@ -71,6 +71,8 @@ export async function startIroh({ dir, relays, onConnection }) {
   // Polled rather than watched: the binding's watchAddr panics outside its runtime.
   return {
     id: ep.id().toString(),
+    /** Dials another PocketDesk daemon by its ticket, as this PC's own iroh identity. */
+    dial: (ticket) => new IrohClient(ep, EndpointTicket, ticket),
     ticket: () => EndpointTicket.fromAddr(ep.addr()).toString(),
     async close() { live.delete(ep); await ep.close().catch(() => {}); },
   };
@@ -96,6 +98,81 @@ function streamWriter(stream) {
   w.reset = () => { if (!w.dead) { w.dead = true; stream.reset(0n).catch(() => {}); } };
   w.finish = () => { w.chain = w.chain.then(() => (w.dead ? null : stream.finish().catch(() => {}))); };
   return w;
+}
+
+/**
+ * The dialling side, shaped like a ws client: "open", "message" (data, isBinary), "close" (code,
+ * reason) and "error". Control comes on the one bidirectional stream, video one GOP stream at a time.
+ */
+export class IrohClient extends EventEmitter {
+  constructor(ep, EndpointTicket, ticket) {
+    super();
+    this.readyState = 0;
+    this.bufferedAmount = 0;
+    this._progress = { g: 0, f: 0 };
+    (async () => {
+      const addr = EndpointTicket.fromString(ticket).endpointAddr();
+      const conn = await Promise.race([ep.connect(addr, [...Buffer.from(ALPN)]),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("iroh connect timed out")), 15000))]);
+      this.conn = conn;
+      const bi = await conn.openBi();
+      this._ctl = streamWriter(bi.send);
+      this.readyState = 1;
+      this.emit("open");
+      conn.closed().then((r) => this._end(1006, r), () => this._end(1006, ""));
+      this._videoLoop(conn).catch(() => {});
+      this._ackTimer = setInterval(() => {
+        const p = this._progress;
+        if (p.g && p !== this._acked) { this._acked = p; this.send(JSON.stringify({ type: "video_ack", g: p.g, f: p.f })); }
+      }, 250);
+      for (;;) {
+        const len = Buffer.from(await bi.recv.readExact(4)).readUInt32BE(0);
+        if (len > MAX_MESSAGE) throw new Error("message too big");
+        const m = Buffer.from(await bi.recv.readExact(len));
+        // PC sound rides on control as [3, ...adts]; JSON always starts with "{".
+        this.emit("message", m, m[0] === 3);
+      }
+    })().catch((e) => { if (this.readyState === 0) this.emit("error", e); this._end(1006, e?.message || ""); });
+  }
+
+  async _videoLoop(conn) {
+    let current = null;
+    for (;;) {
+      const st = await conn.acceptUni();
+      current?.stop(0n).catch(() => {});
+      current = st;
+      (async () => {
+        const g = Buffer.from(await st.readExact(4)).readUInt32BE(0);
+        let f = 0;
+        this._progress = { g, f };
+        for (;;) {
+          const len = Buffer.from(await st.readExact(4)).readUInt32BE(0);
+          if (len > MAX_MESSAGE || current !== st) return;
+          this.emit("message", Buffer.from(await st.readExact(len)), true);
+          this._progress = { g, f: ++f };
+        }
+      })().catch(() => {});
+    }
+  }
+
+  send(data) {
+    if (this.readyState !== 1) return;
+    this._ctl.write(frame(Buffer.isBuffer(data) ? data : Buffer.from(String(data))));
+  }
+
+  close(code = 1000, reason = "") {
+    try { this.conn?.close(BigInt(code), [...Buffer.from(String(reason))]); } catch {}
+    this._end(code, reason);
+  }
+
+  terminate() { this.close(1006); }
+
+  _end(code, reason) {
+    if (this.readyState === 3) return;
+    this.readyState = 3;
+    clearInterval(this._ackTimer);
+    this.emit("close", code, Buffer.from(String(reason || "")));
+  }
 }
 
 /** ws-compatible surface over one iroh connection: send, close, readyState, "message"/"close" events. */

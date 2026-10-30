@@ -282,6 +282,8 @@ export default function phoneAdbHandlers(ctx) {
       return v.at || { x: size.width / 2, y: size.height / 2 };
     };
     if (type === "desktop_type") return input(v, { t: "text", text: String(m.text ?? "") });
+    // A phone's own buttons, from a viewer that knows it is showing a phone.
+    if (type === "desktop_nav") return input(v, { t: "nav", key: String(m.key) });
     if (type === "desktop_key") {
       const code = VK_CODE[Number(m.key)];
       if (!code) return;
@@ -302,6 +304,7 @@ export default function phoneAdbHandlers(ctx) {
     if ((m.press === "down" || m.click) && button === "middle") return input(v, { t: "nav", key: "home" });
     if (button === "right" || button === "middle") return;
     const touch = (action) => input(v, { t: "touch", action, pointer: -2, x: p.x, y: p.y });
+    if (m.click === "long") { touch(ACTION.DOWN); setTimeout(() => touch(ACTION.UP), 650); return; }
     if (m.click) { touch(ACTION.DOWN); touch(ACTION.UP); if (m.click === "double") { touch(ACTION.DOWN); touch(ACTION.UP); } }
     else if (m.press === "down") { v.down = true; touch(ACTION.DOWN); }
     else if (m.press === "up") { v.down = false; touch(ACTION.UP); }

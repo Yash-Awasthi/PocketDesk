@@ -106,7 +106,8 @@ private fun HostPanel(close: () -> Unit) {
                 Text("Open Accessibility settings")
             }
         }
-        Text("The QR works only while this screen is open, and a new one is made each time.", style = MaterialTheme.typography.bodySmall)
+        Text("To stop at any time: the red Stop pill at the top of the screen, Stop in the notification, or Stop here. " +
+            "The QR works only while this screen is open, and a new one is made each time.", style = MaterialTheme.typography.bodySmall)
         Button(onClick = close) { Text("Stop") }
     }
 }

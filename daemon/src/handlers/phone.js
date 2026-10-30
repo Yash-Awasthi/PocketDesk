@@ -39,6 +39,8 @@ export const shareFeed = {
       if (k && m.press !== "up") go({ kind: "key", key: k });
       return;
     }
+    if (type === "desktop_nav") return ["back", "home", "recents", "notifications"].includes(m.key) && go({ kind: "key", key: m.key });
+    if (m.click === "long" && fin(m.fx) && fin(m.fy)) return go({ kind: "press", fx: m.fx, fy: m.fy });
     const button = m.button || m.click;
     if ((m.click || m.press === "down") && (button === "right" || button === "middle")) return go({ kind: "key", key: button === "right" ? "back" : "home" });
     if (!fin(m.fx) || !fin(m.fy)) return;

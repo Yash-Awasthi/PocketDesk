@@ -149,6 +149,8 @@ fun DesktopScreen(
     BackHandler(enabled = fullscreen) { onFullscreen(false) }
 
     val video = ws.desktopMode == "h264"
+    // A phone in view is mirrored as it is: touch lands where the finger is, and it gets a phone's buttons.
+    val phone = ws.targetOs == "android"
     val frame = ws.desktopFrame
     val bitmap = remember(frame, video) {
         if (video) null
@@ -387,8 +389,9 @@ fun DesktopScreen(
                             }
                         }
                     }
-                    .pointerInput(dims, touchpad) {
+                    .pointerInput(dims, touchpad, phone) {
                         val f = dims ?: return@pointerInput
+                        val touchpad = touchpad && !phone
                         awaitEachGesture {
                             val down = awaitFirstDown(requireUnconsumed = false)
                             if (down.type == PointerType.Mouse) return@awaitEachGesture
@@ -419,10 +422,10 @@ fun DesktopScreen(
                                     multi = true
                                     three = true
                                     threeTravel += ev.calculatePan()
-                                    if (!swiped) threeFingerSwipe(threeTravel, swipePx)?.let { s ->
+                                    if (!swiped && !phone) threeFingerSwipe(threeTravel, swipePx)?.let { s ->
                                         swiped = true
                                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        swipeCombo(ws.hostOs, s).let { ws.desktopKey(it.vk, it.mods) }
+                                        swipeCombo(ws.targetOs, s).let { ws.desktopKey(it.vk, it.mods) }
                                     }
                                 } else if (pressed.size == 2) {
                                     multi = true
@@ -467,7 +470,8 @@ fun DesktopScreen(
                                     moved += delta.getDistance()
                                     val vp = Viewport(f, size.width.toFloat(), size.height.toFloat(), zoom, pan)
                                     // Held still first, then moved: press the left button here and drag.
-                                    if (wasStill && moved > 8f && ch.uptimeMillis - start >= DRAG_HOLD_MS) {
+                                    // On a phone every drag is a swipe: the finger goes down where it started.
+                                    if (wasStill && moved > 8f && (phone || ch.uptimeMillis - start >= DRAG_HOLD_MS)) {
                                         cursor?.let { c ->
                                             dragging = true
                                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -499,7 +503,7 @@ fun DesktopScreen(
                             when {
                                 dragging -> ws.desktopPress(c.x.toInt(), c.y.toInt(), false)
                                 moved > 8f -> ws.desktopMove(c.x.toInt(), c.y.toInt())
-                                end - start >= 500 -> ws.desktopClick(c.x.toInt(), c.y.toInt(), "right")
+                                end - start >= 500 -> if (phone) ws.desktopLongPress(c.x.toInt(), c.y.toInt()) else ws.desktopClick(c.x.toInt(), c.y.toInt(), "right")
                                 else -> leftClick(c)
                             }
                         }
@@ -538,7 +542,7 @@ fun DesktopScreen(
                 }
             }
             // With several monitors, which one is showing and how to change it must be visible, not buried in the menu.
-            if (video && !fullscreen && ws.desktopMonitors.isNotEmpty()) {
+            if (video && !fullscreen && !phone && ws.desktopMonitors.isNotEmpty()) {
                 var picking by remember { mutableStateOf(false) }
                 Box(Modifier.align(Alignment.TopStart).padding(6.dp)) {
                     FilledTonalButton(onClick = { picking = true }, modifier = Modifier.height(32.dp),
@@ -566,7 +570,7 @@ fun DesktopScreen(
                 }
             }
             // Any screen the PC reaches: itself, its phones, other PCs and theirs.
-            if (video && !fullscreen) {
+            if (!fullscreen) {
                 var choosing by remember { mutableStateOf(false) }
                 Box(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
                     val now = ws.desktopSources.firstOrNull { it.id == ws.desktopSource }
@@ -611,8 +615,20 @@ fun DesktopScreen(
         }
 
         // The keyboard bar has its own Esc, Tab and clipboard keys, and the picture needs the room.
-        if (!fullscreen && !showKeys && shortcuts && !ws.desktopViewOnly) ShortcutBar(ws)
-        if (!fullscreen) Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (!fullscreen && !showKeys && shortcuts && !ws.desktopViewOnly && !phone) ShortcutBar(ws)
+        if (!fullscreen && phone) Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            val pad = PaddingValues(horizontal = 4.dp)
+            for ((label, key) in listOf("◁" to "back", "○" to "home", "▢" to "recents", "🔔" to "notifications")) {
+                FilledTonalButton(onClick = { ws.desktopNav(key) }, modifier = Modifier.weight(2f).fillMaxHeight(), contentPadding = pad) { Text(label) }
+            }
+            val keysButton: @Composable (Modifier) -> Unit = { m ->
+                if (showKeys) FilledTonalButton(onClick = { onShowKeys(false) }, modifier = m, contentPadding = pad) { Text("⌨") }
+                else OutlinedButton(onClick = { onShowKeys(true) }, modifier = m, contentPadding = pad) { Text("⌨") }
+            }
+            keysButton(Modifier.weight(1f).fillMaxHeight())
+            OutlinedButton(onClick = { onFullscreen(!fullscreen) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("⛶") }
+        }
+        if (!fullscreen && !phone) Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             val pad = PaddingValues(horizontal = 4.dp)
             FilledTonalButton(onClick = { cursor?.let { leftClick(it) } },
                 modifier = Modifier.weight(2f).fillMaxHeight(), contentPadding = pad) { Text("L") }
@@ -788,7 +804,7 @@ private fun AppLauncher(ws: WsClient, onDismiss: () -> Unit) {
 /** Key combinations used all the time, one tap each, spelled for the PC's OS. */
 @Composable
 private fun ShortcutBar(ws: WsClient) {
-    val shortcuts = shortcutsFor(ws.hostOs)
+    val shortcuts = shortcutsFor(ws.targetOs)
     androidx.compose.foundation.lazy.LazyRow(
         Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.spacedBy(4.dp),

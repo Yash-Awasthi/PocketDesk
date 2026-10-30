@@ -272,6 +272,7 @@ object Proto {
         if (audio) put("audio", true)
     }
     fun desktopMonitors() = obj { put("type", "desktop_monitors") }
+    fun desktopNav(key: String) = obj { put("type", "desktop_nav"); put("key", key) }
     fun sourcesList(of: String? = null) = obj { put("type", "sources_list"); if (of != null) put("of", of) }
     fun desktopPing(t: Long) = obj { put("type", "desktop_ping"); put("t", t) }
     fun clipboardGet() = obj { put("type", "clipboard_get") }

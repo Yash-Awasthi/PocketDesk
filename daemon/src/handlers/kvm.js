@@ -76,7 +76,7 @@ export default function kvmHandlers(ctx) {
       st.error = "";
       // This PC's clipboard goes along, so a paste over there is what was copied here.
       const clip = await desktop.clipboardRead?.().catch(() => null);
-      toPc({ t: "enter", side: OPPOSITE[cfg.side], along: e.along, clip: clip?.text || undefined });
+      toPc({ t: "enter", side: OPPOSITE[cfg.side], along: e.along, clip: clip?.text || undefined, from: process.platform });
       clearInterval(st.ping);
       st.ping = setInterval(() => toHelper("ping"), 1000);
       tell();
@@ -183,7 +183,9 @@ export default function kvmHandlers(ctx) {
         const side = SIDES.includes(msg.side) ? msg.side : "left";
         const edge = { left: { x: b.x + 2, y: b.y + a * (b.h - 1) }, right: { x: b.x + b.w - 3, y: b.y + a * (b.h - 1) },
           top: { x: b.x + a * (b.w - 1), y: b.y + 2 }, bottom: { x: b.x + a * (b.w - 1), y: b.y + b.h - 3 } }[side];
-        Object.assign(recv, { box: b, side, owner: ws, pos: edge, armed: false });
+        // A PC keyboard on a Mac: its Ctrl does what Cmd does there, so the two trade places.
+        const swap = process.platform === "darwin" && msg.from !== "darwin";
+        Object.assign(recv, { box: b, side, owner: ws, pos: edge, armed: false, swap });
         if (typeof msg.clip === "string" && msg.clip) desktop.clipboardSet({ text: msg.clip }).catch?.(() => {});
         if (!ws._kvmHooked) { ws._kvmHooked = true; ws.once?.("close", () => { if (recv.owner === ws) release(); }); }
         return moveTo(recv.pos);
@@ -212,7 +214,8 @@ export default function kvmHandlers(ctx) {
       }
       if (msg.t === "wheel") return desktop.inputMouse({ wheel: Number(msg.wheel) || undefined, hwheel: Number(msg.hwheel) || undefined });
       if (msg.t === "key") {
-        const vk = Number(msg.vk);
+        const SWAP = { 0x11: 0x5b, 0xa2: 0x5b, 0xa3: 0x5c, 0x5b: 0xa2, 0x5c: 0xa3 };
+        const vk = recv.swap && SWAP[Number(msg.vk)] ? SWAP[Number(msg.vk)] : Number(msg.vk);
         if (msg.down) recv.held.add(`k:${vk}`); else recv.held.delete(`k:${vk}`);
         return desktop.inputKey({ key: vk, press: msg.down ? "down" : "up" });
       }

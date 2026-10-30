@@ -62,6 +62,7 @@ class ShareService : Service() {
         getSystemService(DisplayManager::class.java).registerDisplayListener(displayChanged, main)
         PhoneShare.service = this
         PhoneShare.sharing = true
+        ControlService.instance?.pill(Peer.viewer ?: "Your PC")
         ControlService.instance?.sendApps()
         // su may wait on the owner's grant prompt, so root is asked off the main thread.
         Thread {
@@ -130,6 +131,7 @@ class ShareService : Service() {
         projection?.stop()
         projection = null
         PhoneShare.service = null
+        ControlService.instance?.pill(null)
         if (PhoneShare.sharing) { if (Peer.hostChannel != null) Peer.announceStop() else Link.client.phoneShareStop() }
         PhoneShare.sharing = false
         super.onDestroy()

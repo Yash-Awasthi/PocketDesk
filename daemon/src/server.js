@@ -696,7 +696,7 @@ export function start(config, { onTokenRotated } = {}) {
   const ctx = {
     send, broadcast, allSessions, plugins, power,
     desktop, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
-    activity, tls, syncAudio, audioListeners, clients: () => wss.clients,
+    activity, tls, syncAudio, audioListeners, clients: () => wss.clients, iroh: () => irohEp,
   };
   const handlers = withSources({
     ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx), ...phoneHandlers(ctx), ...phoneAdbHandlers(ctx), ...phoneSyncHandlers(ctx), ...pcPadHandlers(ctx), ...displayHandlers(ctx), ...computersHandlers(ctx), ...kvmHandlers(ctx),
