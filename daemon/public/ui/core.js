@@ -104,13 +104,16 @@ PD.connect = () => {
 
 PD.start = () => {
   PD.buildNav();
-  const fromLink = new URLSearchParams(location.hash.slice(1)).get("t");
-  if (fromLink) history.replaceState(null, "", location.pathname);
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const fromLink = hash.get("t");
+  // An app shortcut (installed page) opens straight on its page.
+  const goTo = hash.get("go");
+  if (fromLink || goTo) history.replaceState(null, "", location.pathname);
   let saved = null, page = null;
   try { saved = localStorage.getItem("pd_token"); page = localStorage.getItem("pd_page"); } catch {}
   const t = fromLink || saved;
   PD.$("#token").addEventListener("keydown", (e) => { if (e.key === "Enter") PD.connect(); });
-  PD.go(page || "home");
+  PD.go(goTo || page || "home");
   if (t) { PD.$("#token").value = t; PD.connect(); }
   // Theme: system by default; the toggle cycles light, dark and system.
   const apply = (m) => { if (m) document.documentElement.dataset.theme = m; else delete document.documentElement.dataset.theme; };

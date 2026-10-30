@@ -1,0 +1,16 @@
+{
+  "name": "PocketDesk",
+  "short_name": "PocketDesk",
+  "description": "Your phone on this PC",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "icons": [{ "src": "/ui/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }],
+  "shortcuts": [
+    { "name": "Phone screen", "url": "/#go=screen" },
+    { "name": "Messages", "url": "/#go=messages" },
+    { "name": "Calls", "url": "/#go=calls" },
+    { "name": "Notifications", "url": "/#go=notifications" }
+  ]
+}

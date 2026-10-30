@@ -148,7 +148,8 @@ export function start(config, { onTokenRotated } = {}) {
     if ((req.url.startsWith("/vendor/") || req.url.startsWith("/ui/")) && !req.url.includes("..") && /^[\w/.-]+$/.test(req.url)) {
       const file = path.join(publicDir, req.url);
       if (fs.existsSync(file)) {
-        const type = req.url.endsWith(".js") ? "text/javascript" : req.url.endsWith(".css") ? "text/css" : "text/plain";
+        const type = req.url.endsWith(".js") ? "text/javascript" : req.url.endsWith(".css") ? "text/css"
+          : req.url.endsWith(".svg") ? "image/svg+xml" : req.url.endsWith(".webmanifest") ? "application/manifest+json" : "text/plain";
         res.writeHead(200, { "content-type": type, "cache-control": "no-cache" });
         res.end(fs.readFileSync(file));
         return;
