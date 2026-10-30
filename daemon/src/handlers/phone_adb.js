@@ -260,6 +260,22 @@ export default function phoneAdbHandlers(ctx) {
     }
   }
 
+  const APP = "com.yasha.pocketdesk";
+  const RUNTIME = ["READ_SMS", "SEND_SMS", "RECEIVE_SMS", "READ_CALL_LOG", "CALL_PHONE", "ANSWER_PHONE_CALLS", "READ_PHONE_STATE",
+    "READ_CONTACTS", "READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO", "POST_NOTIFICATIONS", "BLUETOOTH_CONNECT"];
+  async function grantAll(serial) {
+    const a = await adb();
+    const sh = (c) => a.shell(serial, c, { timeout: 10000 });
+    if (!(await sh(`pm path ${APP}`)).out.includes("package:")) throw new Error("the PocketDesk app is not on the phone");
+    for (const p of RUNTIME) await sh(`pm grant ${APP} android.permission.${p}`);
+    await sh(`cmd notification allow_listener ${APP}/${APP}.hub.HubNotifications`);
+    await sh(`cmd notification allow_dnd ${APP}`);
+    await sh(`appops set ${APP} WRITE_SETTINGS allow`);
+    await sh(`appops set ${APP} MANAGE_EXTERNAL_STORAGE allow`);
+    // Android 13+ greys out notification access for sideloaded apps until this is allowed.
+    await sh(`appops set ${APP} ACCESS_RESTRICTED_SETTINGS allow`);
+  }
+
   const err = (ws, op, e) => send(ws, { type: "adb_error", op, message: e?.message || String(e) });
   const viewOf = (ws, id) => { const v = st.views.get(Number(id)); return v && v.owner === ws ? v : null; };
 
@@ -390,6 +406,37 @@ export default function phoneAdbHandlers(ctx) {
         add("Extra screen driver", vdd, vdd ? "installed" : "installed on first use (one administrator prompt)");
       }
       send(ws, { type: "phone_doctor", checks });
+    },
+    /** Installs the PocketDesk app on the phone from the latest release (fetched once, about 11 MB). */
+    async adb_install_app(ws) {
+      try {
+        const serial = needSerial();
+        const rel = await (await fetch("https://api.github.com/repos/Yash-Awasthi/PocketDesk/releases/latest", { headers: { "user-agent": "PocketDesk" } })).json();
+        const asset = (rel.assets || []).find((a) => /\.apk$/i.test(a.name));
+        if (!asset) throw new Error("the latest release has no app");
+        const dir = path.join(path.dirname(serverPath()), "apk");
+        fs.mkdirSync(dir, { recursive: true });
+        const apk = path.join(dir, path.basename(asset.name));
+        if (!fs.existsSync(apk) || fs.statSync(apk).size !== asset.size) {
+          send(ws, { type: "adb_progress", text: `Downloading ${asset.name}…` });
+          const res = await fetch(asset.browser_download_url, { headers: { "user-agent": "PocketDesk" } });
+          if (!res.ok) throw new Error(`download failed (HTTP ${res.status})`);
+          fs.writeFileSync(`${apk}.part`, Buffer.from(await res.arrayBuffer()));
+          fs.renameSync(`${apk}.part`, apk);
+        }
+        send(ws, { type: "adb_progress", text: "Installing on the phone…" });
+        const r = await (await adb()).install(serial, apk);
+        if (!/Success/.test(r.out)) throw new Error((r.out + r.err).trim().split("\n").pop() || "install failed");
+        await grantAll(serial);
+        send(ws, { type: "adb_progress", text: "The app is installed with its permissions; open it on the phone to connect it to this PC." });
+      } catch (e) { err(ws, "install", e); }
+    },
+    /** Every permission the phone app's features use, granted over phone control instead of one by one. */
+    async adb_grant_app(ws) {
+      try {
+        await grantAll(needSerial());
+        send(ws, { type: "adb_progress", text: "Permissions granted to the phone app." });
+      } catch (e) { err(ws, "grant", e); }
     },
     async adb_webcam_status(ws) {
       send(ws, { type: "adb_webcam", ...(await webcam.status()) });

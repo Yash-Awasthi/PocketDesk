@@ -469,6 +469,8 @@ function addClip(text, from) {
 PD.on("phone_clip", (t) => addClip(t, "phone"));
 PD.on("evt_clip", (e) => { if (e.text) { addClip(e.text, "phone"); navigator.clipboard.writeText(e.text).catch(() => {}); } });
 
+PD.on("adb_progress", (m) => { PD.toast(m.text); setTimeout(drawApp, 1500); });
+
 // ── Connect ──
 PD.page("connect", {
   title: "Connect", icon: I.connect,
@@ -520,7 +522,10 @@ async function drawApp() {
   const st = PD.hub.online ? await PD.ask("hub", "status").catch(() => null) : null;
   const perm = (id, label, on) => h("div", { className: "item row" }, h("span", { className: "grow", textContent: label }),
     on ? h("span", { className: "pill ok", textContent: "on" }) : btn("Turn on (on the phone)", () => run(() => PD.ask("hub", "grant", { what: id }), "Asked on the phone")));
-  box.replaceChildren(h("h3", { textContent: "Phone app (notifications, texts, calls, photos, quick settings)" }),
+  const viaAdb = phoneReady() ? h("div", { className: "actions" },
+    btn("Install the app on the phone", () => PD.send({ type: "adb_install_app" })),
+    btn("Grant all its permissions", () => PD.send({ type: "adb_grant_app" }))) : "";
+  box.replaceChildren(h("h3", { textContent: "Phone app (notifications, texts, calls, photos, quick settings)" }), viaAdb,
     !PD.hub.online ? needApp()
       : !st ? empty("Asking the phone…")
       : h("div", { className: "list" },
