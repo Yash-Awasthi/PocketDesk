@@ -26,7 +26,8 @@ PD.on("pc_pairing_link", async (m) => {
   try { await navigator.clipboard.writeText(m.link); PD.toast("This PC's link is copied: paste it on the other PC's Computers page"); }
   catch { prompt("This PC's link, for the other PC's Computers page", m.link); }
 });
-const refresh = () => { PD.send({ type: "pc_list" }); PD.send({ type: "sources_list" }); };
+PD.on("kvm", (m) => { C.kvm = m; PD.emit("computers_changed"); });
+const refresh = () => { PD.send({ type: "pc_list" }); PD.send({ type: "sources_list" }); PD.send({ type: "kvm_get" }); };
 PD.on("welcome", refresh);
 
 PD.page("computers", {
@@ -36,6 +37,7 @@ PD.page("computers", {
     const grid = h("div", { className: "grid" });
     const link = h("textarea", { rows: 2, placeholder: "pocketdesk://pair#…  (or wss://address:8765/ws)" });
     const token = h("input", { type: "text", placeholder: "Token, only with a wss:// address" });
+    const kvm = h("div", { className: "card col" });
     const pass = h("input", { type: "password", placeholder: "Its connection password, if it has one", autocomplete: "off" });
     const add = () => {
       const v = link.value.trim();
@@ -48,6 +50,7 @@ PD.page("computers", {
       h("div", { className: "bar" }, btn("Refresh", refresh), btn("Copy this PC's link", () => PD.send({ type: "pc_pairing_link" }))),
       h("p", { className: "dim small", textContent: "Phones on this PC, other PCs with PocketDesk (Windows, Mac or Linux) and their phones. Open one and drive it with this PC's mouse and keyboard; Ctrl+V pastes this PC's clipboard there." }),
       grid,
+      kvm,
       h("div", { className: "card col" },
         h("b", { textContent: "Add a PC" }),
         h("span", { className: "dim small", textContent: "On the other PC open PocketDesk's page, go to Computers and press \"Copy this PC's link\", then paste it here. Both PCs need to be on the same network, or reachable over a VPN." }),
@@ -67,8 +70,29 @@ PD.page("computers", {
         cards.push(card(s));
         for (const n of C.nested.get(s.id) || []) cards.push(card(n, s.name));
       }
+      drawKvm();
       grid.replaceChildren(...(cards.length ? cards : [h("p", { className: "dim", textContent: "Nothing yet: set up a phone on the Connect page, or add a PC below." })]));
     };
+    function drawKvm() {
+      const k = C.kvm;
+      if (!k) return kvm.replaceChildren(h("b", { textContent: "Shared mouse and keyboard" }));
+      const set = (o) => PD.send({ type: "kvm_set", ...o });
+      const target = h("select", { onchange: () => set({ target: target.value || null }) },
+        h("option", { value: "", textContent: "Choose a PC" }),
+        C.saved.map((p) => h("option", { value: p.id, textContent: p.name, selected: p.id === k.target })));
+      const side = h("select", { onchange: () => set({ side: side.value }) },
+        ["left", "right", "top", "bottom"].map((s) => h("option", { value: s, textContent: `Past the ${s} edge`, selected: s === k.side })));
+      const status = !k.supported ? "This side needs Windows; a Mac or Linux PC can still be the one driven."
+        : k.error ? k.error : !k.on ? "Off." : k.away ? "The pointer is on the other PC. Scroll Lock brings it back."
+          : k.linked ? "On: push the pointer past the edge to cross." : "Waiting for the other PC…";
+      kvm.replaceChildren(
+        h("b", { textContent: "Shared mouse and keyboard" }),
+        h("span", { className: "dim small", textContent: "One mouse and keyboard for two PCs, the clipboard shared between them. Push the pointer past the edge where the other PC stands; come back the same way, or press Scroll Lock." }),
+        h("div", { className: "bar" },
+          h("label", { className: "check" }, h("input", { type: "checkbox", checked: !!k.on, disabled: !k.supported, onchange: (e) => set({ on: e.target.checked, target: target.value || null }) }), h("span", { textContent: "On" })),
+          target, side),
+        h("span", { className: `small ${k.error ? "bad" : "dim"}`, textContent: status }));
+    }
     PD.on("computers_changed", draw);
     draw();
   },
