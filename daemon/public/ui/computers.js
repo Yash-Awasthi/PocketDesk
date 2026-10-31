@@ -77,20 +77,26 @@ PD.page("computers", {
       const k = C.kvm;
       if (!k) return kvm.replaceChildren(h("b", { textContent: "Shared mouse and keyboard" }));
       const set = (o) => PD.send({ type: "kvm_set", ...o });
-      const target = h("select", { onchange: () => set({ target: target.value || null }) },
-        h("option", { value: "", textContent: "Choose a PC" }),
-        C.saved.map((p) => h("option", { value: p.id, textContent: p.name, selected: p.id === k.target })));
-      const side = h("select", { onchange: () => set({ side: side.value }) },
-        ["left", "right", "top", "bottom"].map((s) => h("option", { value: s, textContent: `Past the ${s} edge`, selected: s === k.side })));
+      const links = k.links || (k.target ? [{ target: k.target, side: k.side }] : []);
+      // One PC per edge: the desk map. Each PC lists its own neighbours, so three or more make a mesh.
+      const pick = {};
+      const edge = (s) => {
+        const cur = links.find((l) => l.side === s);
+        const sel = h("select", { onchange: () => set({ links: Object.entries(pick).map(([side, el]) => ({ side, target: el.value })).filter((l) => l.target) }) },
+          h("option", { value: "", textContent: "Nothing" }),
+          C.saved.map((p) => h("option", { value: p.id, textContent: p.name + (cur?.target === p.id && !cur.linked && k.on ? " (waiting)" : ""), selected: p.id === cur?.target })));
+        pick[s] = sel;
+        return h("label", { className: `kvm-${s}` }, h("span", { className: "dim small", textContent: `${s[0].toUpperCase()}${s.slice(1)} ` }), sel);
+      };
+      const awayName = k.away ? C.saved.find((p) => p.id === k.active)?.name || "the other PC" : "";
       const status = !k.supported ? "This side needs Windows; a Mac or Linux PC can still be the one driven."
-        : k.error ? k.error : !k.on ? "Off." : k.away ? "The pointer is on the other PC. Scroll Lock brings it back."
-          : k.linked ? "On: push the pointer past the edge to cross." : "Waiting for the other PC…";
+        : k.error ? k.error : !k.on ? "Off." : k.away ? `The pointer is on ${awayName}. Scroll Lock brings it back.`
+          : k.linked ? "On: push the pointer past an edge to cross. Drag files across to drop them over there." : "Waiting for the other PCs…";
       kvm.replaceChildren(
         h("b", { textContent: "Shared mouse and keyboard" }),
-        h("span", { className: "dim small", textContent: "One mouse and keyboard for two PCs, the clipboard shared between them. Push the pointer past the edge where the other PC stands; come back the same way, or press Scroll Lock." }),
-        h("div", { className: "bar" },
-          h("label", { className: "check" }, h("input", { type: "checkbox", checked: !!k.on, disabled: !k.supported, onchange: (e) => set({ on: e.target.checked, target: target.value || null }) }), h("span", { textContent: "On" })),
-          target, side),
+        h("span", { className: "dim small", textContent: "One mouse and keyboard for your PCs, the clipboard going along. Put each PC at the edge it stands at; for three or more, set the same on each PC so the pointer travels across them all. Come back the same way, or press Scroll Lock." }),
+        h("label", { className: "check" }, h("input", { type: "checkbox", checked: !!k.on, disabled: !k.supported, onchange: (e) => set({ on: e.target.checked }) }), h("span", { textContent: "On" })),
+        h("div", { className: "kvm-map" }, edge("top"), edge("left"), h("div", { className: "kvm-me", textContent: "This PC" }), edge("right"), edge("bottom")),
         h("span", { className: `small ${k.error ? "bad" : "dim"}`, textContent: status }));
     }
     PD.on("computers_changed", draw);

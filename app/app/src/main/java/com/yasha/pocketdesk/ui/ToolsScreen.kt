@@ -42,7 +42,7 @@ import com.yasha.pocketdesk.WsClient
 import kotlinx.coroutines.delay
 
 @Composable
-fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit, openSsh: () -> Unit, openGamepad: () -> Unit, openDeck: () -> Unit, openFreebuff: () -> Unit, openAgent: (String) -> Unit, openChats: () -> Unit, lock: AppLock) {
+fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) -> Unit, openSsh: () -> Unit, openGamepad: () -> Unit, openDeck: () -> Unit, openRemote: () -> Unit, openFreebuff: () -> Unit, openAgent: (String) -> Unit, openChats: () -> Unit, lock: AppLock) {
     // One project folder for everything started from this screen: an IDE opens
     // it, a CLI tool runs in it.
     var cwd by remember { mutableStateOf("") }
@@ -90,9 +90,18 @@ fun ToolsScreen(ws: WsClient, openDesktop: () -> Unit, openTerminal: (String) ->
         item {
             // The PC from the phone, and the phone on the PC.
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = openRemote) { Text("Remote") }
                 OutlinedButton(onClick = openDeck) { Text("Deck") }
                 OutlinedButton(onClick = openGamepad) { Text("Controller") }
                 OutlinedButton(onClick = { ws.sendRaw("""{"type":"phone_show"}""") }) { Text("Show on PC") }
+            }
+        }
+        item {
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            fun capture(mode: String) = ctx.startActivity(android.content.Intent(ctx, com.yasha.pocketdesk.CaptureActivity::class.java).putExtra("mode", mode))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { capture("photo") }) { Text("Photo to PC") }
+                OutlinedButton(onClick = { capture("scan") }) { Text("Scan to PC") }
             }
         }
         item { OutlinedButton(onClick = { com.yasha.pocketdesk.Peer.open = true }) { Text("Phone to phone (no PC)") } }

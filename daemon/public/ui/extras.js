@@ -26,7 +26,9 @@ PD.syncCard = (which) => {
       h("input", { type: "checkbox", checked: !!s[key], disabled: !ok, onchange: (e) => PD.send({ type: "phone_sync_set", [key]: e.target.checked }) }),
       h("span", {}, h("b", { textContent: label }), h("span", { className: "dim", textContent: ` ${note}` })));
     card.replaceChildren(which === "clip"
-      ? row("clipSync", "Sync the clipboard", "Copy on the PC, paste on the phone, and back. Text both ways; pictures to the phone through its app. Things password managers copy stay on the phone.", s.clipSupported !== false)
+      ? h("div", { className: "col" },
+        row("clipSync", "Sync the clipboard", "Copy on the PC, paste on the phone, and back. Text both ways; pictures both ways through the phone app (from the phone while the app is open). Things password managers copy stay on the phone.", s.clipSupported !== false),
+        row("hotkeys", "Ctrl+Alt+C and Ctrl+Alt+V for files", s.hotkeysSupported === false ? "Windows only." : "Ctrl+Alt+C sends the files selected in File Explorer to the phone's Downloads. Ctrl+Alt+V pastes the files the phone shared with \"Copy to PC\" into the app in front.", s.hotkeysSupported !== false))
       : h("div", { className: "col" },
         row("phoneToasts", "Show the phone's notifications and calls as Windows notifications", "Even with this page closed. Low battery too."),
         row("otpCopy", "Copy one-time codes to this PC's clipboard", "When a text or app notification on the phone carries a sign-in code."),
@@ -96,6 +98,11 @@ function commands() {
     out.push({ label: "Play or pause the phone's music", run: () => PD.ask("media", PD.hub.state.media?.playing ? "pause" : "play") });
     out.push({ label: "Next track on the phone", run: () => PD.ask("media", "next") });
   }
+  out.push({ label: "Open the shelf", run: () => PD.shelf(true) });
+  if (PD.hub.online) {
+    out.push({ label: "Take a photo with the phone", run: () => PD.ask("capture", "photo").then(() => PD.toast("Tap the notification on the phone")) });
+    out.push({ label: "Scan a document with the phone", run: () => PD.ask("capture", "scan").then(() => PD.toast("Tap the notification on the phone")) });
+  }
   out.push({ label: "Send this PC's clipboard to the phone", run: async () => { const t = await navigator.clipboard.readText(); ready ? PD.send({ type: "adb_clipboard_set", text: t }) : PD.ask("clip", "set", { text: t }); PD.toast("On the phone's clipboard"); } });
   return out;
 }
@@ -134,6 +141,64 @@ document.addEventListener("keydown", (e) => {
   // Not while typing into the phone: its windows take every key.
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k" && !e.target.closest?.(".pwin")) { e.preventDefault(); box.hidden ? open() : close(); }
 });
+
+// ── Shelf: a slide-out drawer on every page; drop or paste onto it and it goes to the phone ──
+const shelf = h("aside", { id: "shelf", hidden: true });
+const shelfList = h("div", { className: "list" });
+const shelfDrop = h("div", { className: "drop-zone", textContent: "Drop files, pictures, text or a link here, or paste with Ctrl+V. Files go to the phone, text to its clipboard, links open on it." });
+shelf.append(h("div", { className: "row" }, h("h3", { className: "grow", textContent: "Shelf" }), btn("✕", () => toggleShelf(false))), shelfDrop, h("h4", { textContent: "Recent" }), shelfList);
+document.body.append(shelf);
+function shelfSend({ files, text }) {
+  const ready = !!PD.adb.state?.serial;
+  if (files?.length) {
+    if (ready) PD.adb.pushFiles(files);
+    else if (PD.hub.online) PD.storage.upload(files);
+    else return PD.toast("Connect the phone first", true);
+    return PD.toast(`Sending ${files.length} file${files.length > 1 ? "s" : ""} to the phone`);
+  }
+  const t = (text || "").trim();
+  if (!t) return;
+  if (/^https?:[/][/][^ ]+$/i.test(t)) return PD.openOnPhone(t);
+  ready ? PD.send({ type: "adb_clipboard_set", text: t }) : PD.ask("clip", "set", { text: t }).catch((e) => PD.toast(e.message, true));
+  PD.toast("On the phone's clipboard");
+}
+function drawShelf() {
+  const items = [
+    ...PD.clips.map((c) => ({ at: c.at, kind: "clip", title: c.from === "phone" ? "Copied on the phone" : "Sent to the phone", text: c.text })),
+    ...PD.timeline.filter((e) => ["clip", "file", "shot"].includes(e.kind)).map((e) => ({ at: e.at, kind: e.kind, title: e.title, text: e.text })),
+  ].sort((a, b) => b.at - a.at).filter((e, i, all) => all.findIndex((x) => x.text === e.text && x.title === e.title) === i).slice(0, 30);
+  shelfList.replaceChildren(...items.map((e) => h("div", { className: "item", draggable: !!e.text, ondragstart: (ev) => ev.dataTransfer.setData("text/plain", e.text || "") },
+    h("div", { className: "row" }, h("span", { className: `pill k-${e.kind}`, textContent: KIND[e.kind] || e.kind }), h("b", { className: "grow", textContent: e.title })),
+    e.text ? h("div", { className: "dim clip", textContent: e.text }) : "",
+    e.text ? h("div", { className: "actions" }, btn("Copy", () => navigator.clipboard.writeText(e.text).then(() => PD.toast("Copied"))), btn("Send to phone", () => shelfSend({ text: e.text }))) : "")));
+  if (!items.length) shelfList.append(h("div", { className: "empty", textContent: "What moves between this PC and the phone shows up here." }));
+}
+function toggleShelf(on = shelf.hidden) {
+  shelf.hidden = !on;
+  if (on) drawShelf();
+}
+PD.shelf = toggleShelf;
+PD.on("timeline_changed", () => { if (!shelf.hidden) drawShelf(); });
+PD.on("clips_changed", () => { if (!shelf.hidden) drawShelf(); });
+shelfDrop.addEventListener("dragover", (e) => { e.preventDefault(); shelfDrop.classList.add("drop"); });
+shelfDrop.addEventListener("dragleave", () => shelfDrop.classList.remove("drop"));
+shelfDrop.addEventListener("drop", (e) => {
+  e.preventDefault();
+  shelfDrop.classList.remove("drop");
+  const files = e.dataTransfer.files;
+  shelfSend(files.length ? { files } : { text: e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain") });
+});
+shelf.addEventListener("paste", (e) => {
+  const files = e.clipboardData.files;
+  shelfSend(files.length ? { files } : { text: e.clipboardData.getData("text/plain") });
+});
+shelf.tabIndex = -1;
+// A file dragged over the page's right edge slides the shelf out.
+document.addEventListener("dragover", (e) => { if (shelf.hidden && e.clientX > innerWidth - 24 && e.dataTransfer?.types?.includes("Files")) toggleShelf(true); });
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "s" && !e.target.closest?.(".pwin")) { e.preventDefault(); toggleShelf(); if (!shelf.hidden) shelf.focus(); }
+});
+document.querySelector("header .gap")?.after(h("button", { className: "ic", title: "Shelf (Ctrl+Shift+S): drop or paste things for the phone", ariaLabel: "Shelf", innerHTML: '<svg viewBox="0 0 20 20"><path d="M3 6h14M3 10h14M3 14h14"/><path d="M13 3v14"/></svg>', onclick: () => toggleShelf() }));
 
 // ── game controllers: this PC's gamepads become the phone's, through phone control ──
 const pads = new Map(); // index -> last report sent

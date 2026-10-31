@@ -52,6 +52,23 @@ export function padReport(buttons = [], axes = []) {
   return r;
 }
 
+/** Windows Firewall and network profile as they bear on phones reaching this PC (port: the daemon's). */
+async function netState(runOut, port) {
+  const ps = `$p='${Number(port) || 8765}'; $open=$false; $mdns=$false
+$active = @(Get-NetConnectionProfile -ErrorAction SilentlyContinue)
+$fwOff = @(Get-NetFirewallProfile -ErrorAction SilentlyContinue | Where-Object { $_.Enabled -eq $false }).Name
+if ($active | Where-Object { $fwOff -contains ([string]$_.NetworkCategory -replace 'DomainAuthenticated','Domain') }) { $open=$true; $mdns=$true }
+$allow = { param($r) $r.Enabled -eq 'True' -and $r.Direction -eq 'Inbound' -and $r.Action -eq 'Allow' }
+foreach ($f in @(Get-NetFirewallPortFilter -All -ErrorAction SilentlyContinue | Where-Object { ($_.Protocol -eq 'TCP' -and @($_.LocalPort) -contains $p) -or ($_.Protocol -eq 'UDP' -and @($_.LocalPort) -contains '5353') })) {
+  $r = $f | Get-NetFirewallRule; if (& $allow $r) { if ($f.Protocol -eq 'TCP') { $open=$true } else { $mdns=$true } } }
+foreach ($f in @(Get-NetFirewallApplicationFilter -All -ErrorAction SilentlyContinue | Where-Object { $_.Program -like '*\\node.exe' })) {
+  $r = $f | Get-NetFirewallRule; if (& $allow $r) { $open=$true } }
+$addr = (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -notlike '169.254.*' -and $_.IPAddress -ne '127.0.0.1' } | ForEach-Object IPAddress) -join ', '
+@{ portOpen=$open; mdnsOpen=$mdns; public=(($active | Where-Object NetworkCategory -eq 'Public' | ForEach-Object Name) -join ', '); names=(($active | ForEach-Object Name) -join ', '); addresses=$addr } | ConvertTo-Json -Compress`;
+  try { return JSON.parse(await runOut("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(ps, "utf16le").toString("base64")])); }
+  catch { return { portOpen: true, mdnsOpen: true, public: "", names: "", addresses: "" }; }
+}
+
 const CHATS = new Set(["com.whatsapp", "com.whatsapp.w4b", "com.instagram.android", "org.telegram.messenger", "org.telegram.messenger.web", "org.thoughtcrime.securesms"]);
 
 const st = { adb: null, serial: null, error: "", qr: null, apps: new Map(), clip: null, views: new Map() };
@@ -85,6 +102,15 @@ export default function phoneAdbHandlers(ctx) {
     return open(ws, { kind: "screen", serial, feed: true, codec: "h264", maxSize: Number(m.maxSize) || 1920, mbps: 8 });
   };
   bridge.closeFeed = (v) => close(v);
+  /** A file or folder on this PC into the phone's Downloads, over phone control. */
+  bridge.pushFile = async (local) => {
+    const name = path.basename(local).replace(/[\\/:*?"<>|']/g, "_");
+    const remote = `/sdcard/Download/${name}`;
+    const r = await (await adb()).push(needSerial(), local, remote);
+    if (r.code !== 0) throw new Error(r.err.trim() || r.out.trim() || "push failed");
+    await (await adb()).shell(st.serial, `am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d 'file://${remote}'`, { timeout: 8000 }).catch(() => {});
+    timeline.add("file", name, "Sent to the phone's Downloads");
+  };
   bridge.feedInput = (v, type, m) => feedInput(v, type, m);
 
   async function adb() {
@@ -325,26 +351,56 @@ export default function phoneAdbHandlers(ctx) {
     await sh(`appops set ${APP} MANAGE_EXTERNAL_STORAGE allow`);
     // Android 13+ greys out notification access for sideloaded apps until this is allowed.
     await sh(`appops set ${APP} ACCESS_RESTRICTED_SETTINGS allow`);
+    // Lets the app switch wireless debugging back on when the PC needs it (MIUI and others turn it off).
+    await sh(`pm grant ${APP} android.permission.WRITE_SECURE_SETTINGS`);
   }
 
-  // Wireless debugging moves to a new port when the phone sleeps or changes network; while a PC
-  // page is open and the phone is gone, it is looked for again so the page comes back by itself.
+  // Wireless debugging moves to a new port when the phone sleeps or changes network, and some
+  // phones switch it off. While a PC page is open or the phone app is linked, the phone is looked
+  // for again; the app is asked to switch it back on. Each reconnect also keeps Android from
+  // forgetting this PC's pairing, which it does after 7 days unused.
   let lastSerial = null;
+  let askedOn = 0;
+  const phoneApps = () => [...clients()].filter((w) => w._authed && w._android && w.readyState === 1);
   const rejoin = setInterval(async () => {
-    if (!st.adb || !viewers().length || rejoin.busy) return;
+    if (!st.adb || (!viewers().length && !phoneApps().length) || rejoin.busy) return;
     rejoin.busy = true;
     try {
       const had = st.serial;
       await devices({ reconnect: !had });
-      if (st.serial !== lastSerial) { lastSerial = st.serial; await tellAll(); }
+      if (!st.serial && lastSerial && Date.now() - askedOn > 60_000) {
+        askedOn = Date.now();
+        for (const p of phoneApps()) send(p, { type: "phone_req", svc: "adb", op: "wifi_on", rid: 0 });
+      }
+      if (st.serial !== lastSerial && st.serial) lastSerial = st.serial;
+      if (st.serial !== had) await tellAll();
     } catch {} finally { rejoin.busy = false; }
   }, 20_000);
   rejoin.unref?.();
 
+  // A phone on a USB cable reaches this daemon at its own 127.0.0.1 through adb reverse, so the
+  // phone app links with no shared network at all (a train, a guest Wi-Fi that isolates devices).
+  const reversed = new Set();
+  const usbLink = setInterval(async () => {
+    if (!ctx.usbPort || (!st.adb && !findAdb()) || usbLink.busy) return;
+    usbLink.busy = true;
+    try {
+      const a = await adb();
+      const usb = (await a.devices()).filter((d) => d.state === "device" && !d.wireless).map((d) => d.serial);
+      for (const s of usb) if (!reversed.has(s)) {
+        // The phone dials its own 127.0.0.1 on the daemon's usual port; it lands on the USB port here.
+        const r = await a.run(["-s", s, "reverse", `tcp:${ctx.port}`, `tcp:${ctx.usbPort}`], { timeout: 8000 });
+        if (r.code === 0) reversed.add(s);
+      }
+      for (const s of [...reversed]) if (!usb.includes(s)) reversed.delete(s);
+    } catch {} finally { usbLink.busy = false; }
+  }, 10_000);
+  usbLink.unref?.();
+
   const err = (ws, op, e) => send(ws, { type: "adb_error", op, message: e?.message || String(e) });
   const viewOf = (ws, id) => { const v = st.views.get(Number(id)); return v && v.owner === ws ? v : null; };
 
-  return {
+  const this_ = {
     async adb_state(ws, msg) {
       try { send(ws, await state(!!msg.reconnect)); } catch (e) { err(ws, "state", e); }
     },
@@ -469,8 +525,31 @@ export default function phoneAdbHandlers(ctx) {
         add("Controller (ViGEmBus)", pad && vigem, !pad ? "the controller helper is not installed" : vigem ? "ready" : "install the ViGEmBus driver");
         const vdd = (await runOut("powershell.exe", ["-NoProfile", "-Command", "@(Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | Where-Object { $_.HardwareID -contains 'Root\\MttVDD' }).Count"])) !== "0";
         add("Extra screen driver", vdd, vdd ? "installed" : "installed on first use (one administrator prompt)");
+        // What keeps a phone from reaching this PC on the same Wi-Fi: the firewall and a Public network.
+        const net = await netState(runOut, ctx.port);
+        checks.push({ name: "Firewall lets phones in", ok: net.portOpen, detail: net.portOpen ? `TCP ${ctx.port} is allowed in` : `Windows Firewall may block TCP ${ctx.port}: phones on the Wi-Fi cannot reach this PC`, fix: net.portOpen ? undefined : "firewall" });
+        checks.push({ name: "Network type", ok: !net.public, detail: net.public ? `"${net.public}" is a Public network, where Windows hides this PC from others` : net.names || "private", fix: net.public ? "private" : undefined });
+        checks.push({ name: "Wireless debugging discovery (mDNS)", ok: net.mdnsOpen, detail: net.mdnsOpen ? "UDP 5353 allowed in" : "UDP 5353 is blocked, so this PC may not see the phone's wireless debugging", fix: net.mdnsOpen ? undefined : "mdns" });
+        if (net.addresses) add("This PC's addresses", true, net.addresses);
       }
       send(ws, { type: "phone_doctor", checks });
+    },
+    /** One fix from Check everything, run elevated (a single administrator prompt on this PC). */
+    async phone_doctor_fix(ws, msg) {
+      if (process.platform !== "win32" || !ws._loopback) return send(ws, { type: "adb_progress", text: "Fixes run from the page on this PC itself." });
+      const port = Number(ctx.port) || 8765;
+      const cmds = {
+        firewall: `New-NetFirewallRule -DisplayName 'PocketDesk (TCP ${port})' -Direction Inbound -Protocol TCP -LocalPort ${port} -Action Allow -Profile Any`,
+        mdns: "New-NetFirewallRule -DisplayName 'PocketDesk (mDNS for wireless debugging)' -Direction Inbound -Protocol UDP -LocalPort 5353 -Action Allow -Profile Private,Domain",
+        private: "Get-NetConnectionProfile | Where-Object NetworkCategory -eq 'Public' | Set-NetConnectionProfile -NetworkCategory Private",
+      };
+      const cmd = cmds[msg.id];
+      if (!cmd) return send(ws, { type: "adb_progress", text: "Unknown fix." });
+      const enc = Buffer.from(cmd, "utf16le").toString("base64");
+      const { runOut } = await import("../native.js");
+      await runOut("powershell.exe", ["-NoProfile", "-Command", `Start-Process powershell.exe -Verb RunAs -Wait -WindowStyle Hidden -ArgumentList '-NoProfile','-EncodedCommand','${enc}'`]);
+      send(ws, { type: "adb_progress", text: "Done. Running the checks again…" });
+      await this_.phone_doctor(ws);
     },
     /** Installs the PocketDesk app on the phone from the latest release (fetched once, about 11 MB). */
     async adb_install_app(ws) {
@@ -636,4 +715,5 @@ export default function phoneAdbHandlers(ctx) {
       } catch (e) { err(ws, "action", e); }
     },
   };
+  return this_;
 }

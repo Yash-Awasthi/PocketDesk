@@ -198,7 +198,7 @@ export default function remoteHandlers(ctx) {
       if (!access.controlAllowed || ws._viewOnlyForced) return send(ws, { type: "handoff", ok: false, error: "control is paused on the PC" });
       const text = String(msg.text ?? "").trim().slice(0, 200_000);
       if (!text) return send(ws, { type: "handoff", ok: false, error: "nothing to send" });
-      if (/^https?:\/\/\S+$/i.test(text)) {
+      if (!msg.copy && /^https?:\/\/\S+$/i.test(text)) {
         const [cmd, args] = process.platform === "win32" ? ["rundll32", ["url.dll,FileProtocolHandler", text]]
           : process.platform === "darwin" ? ["open", [text]] : ["xdg-open", [text]];
         spawn(cmd, args, { detached: true, stdio: "ignore", windowsHide: true }).on("error", () => {}).unref();
@@ -225,6 +225,26 @@ export default function remoteHandlers(ctx) {
       if (!access.controlAllowed || ws._viewOnlyForced) return send(ws, { type: "deck_result", ok: false, error: "control is paused on the PC" });
       const r = await desktop.inputKey({ key: msg.key, modifiers: Array.isArray(msg.modifiers) ? msg.modifiers : [] });
       send(ws, { type: "deck_result", ok: r.ok, error: r.error });
+    },
+    /** The phone's Remote (touchpad, air mouse, presenter, voice typing) without the desktop open. */
+    async remote_input(ws, msg) {
+      if (!access.controlAllowed || ws._viewOnlyForced) return send(ws, { type: "remote_result", ok: false, error: "control is paused on the PC" });
+      const button = ["left", "right", "middle"].includes(msg.button) ? msg.button : "left";
+      let r;
+      if (msg.kind === "move") {
+        const lim = (v) => Math.max(-2000, Math.min(2000, Number(v) || 0));
+        r = await desktop.inputMove(lim(msg.dx), lim(msg.dy));
+      } else if (msg.kind === "click") {
+        r = await desktop.inputMouse({ click: msg.button === "double" ? "double" : button });
+      } else if (msg.kind === "press" && (msg.press === "down" || msg.press === "up")) {
+        hold(ws, "b:" + button, msg.press);
+        r = await desktop.inputMouse({ press: msg.press, button });
+      } else if (msg.kind === "wheel") {
+        r = await desktop.inputMouse({ wheel: wheelAmount(msg.wheel), hwheel: wheelAmount(msg.hwheel) });
+      } else if (msg.kind === "text" && msg.text) {
+        r = await desktop.inputType(String(msg.text).slice(0, 2000));
+      } else return send(ws, { type: "remote_result", ok: false, error: "unknown input" });
+      if (!r.ok) send(ws, { type: "remote_result", ok: false, error: r.error });
     },
     async desktop_type(ws, msg) {
       if (!mayControl(ws)) return send(ws, { type: "desktop_input_ok", ok: false, error: "view only" });

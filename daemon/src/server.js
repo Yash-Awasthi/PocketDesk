@@ -39,7 +39,8 @@ import remoteHandlers from "./handlers/remote.js";
 import sshHandlers from "./handlers/ssh.js";
 import systemHandlers from "./handlers/system.js";
 import phoneHandlers, { phoneBinary } from "./handlers/phone.js";
-import phoneAdbHandlers from "./handlers/phone_adb.js";
+import phoneAdbHandlers, { bridge as adbBridge } from "./handlers/phone_adb.js";
+import { PhoneDav } from "./phone_dav.js";
 import phoneSyncHandlers from "./handlers/phone_sync.js";
 import pcPadHandlers from "./handlers/pc_pad.js";
 import displayHandlers from "./handlers/display.js";
@@ -162,7 +163,7 @@ export function start(config, { onTokenRotated } = {}) {
     // Windows dual-stack sockets present IPv4 clients as ::ffff:127.0.0.1.
     const remoteAddr = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
     // Host must be loopback too: DNS rebinding delivers a web page's requests from 127.0.0.1 under its own name.
-    const loopback = (remoteAddr === "127.0.0.1" || remoteAddr === "::1" || remoteAddr === "[::1]") &&
+    const loopback = !req.socket._usb && (remoteAddr === "127.0.0.1" || remoteAddr === "::1" || remoteAddr === "[::1]") &&
       /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(req.headers.host || "");
     if (req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
@@ -301,6 +302,15 @@ export function start(config, { onTokenRotated } = {}) {
   local?.on("upgrade", onUpgrade);
   local?.on("error", (e) => console.warn(`  local page unavailable on ${localPort}: ${e.message}`));
   local?.listen(localPort, "127.0.0.1");
+  // A phone on a USB cable, through adb reverse: it arrives from 127.0.0.1 but is not this PC, so
+  // its own port marks every socket and nothing loopback-only is granted to it.
+  const usbPort = Number(process.env.RH_USB_PORT) || port + 30;
+  const usb = useTls ? https.createServer({ cert: fs.readFileSync(tls.cert), key: fs.readFileSync(tls.key) }, requestHandler) : null;
+  usb?.on("connection", (s) => { s._usb = true; });
+  usb?.on("secureConnection", (s) => { s._usb = true; });
+  usb?.on("upgrade", onUpgrade);
+  usb?.on("error", (e) => console.warn(`  USB link unavailable on ${usbPort}: ${e.message}`));
+  usb?.listen(usbPort, "127.0.0.1");
 
   wss.on("connection", (ws, req) => {
     if (stopping) return ws.close(stopping.code, stopping.reason);
@@ -310,7 +320,7 @@ export function start(config, { onTokenRotated } = {}) {
     // undefined and every client shared one rate-limit counter, locking out the whole LAN.
     const clientIp = (req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
     ws._subs = new Set();
-    ws._loopback = clientIp === "127.0.0.1" || clientIp === "::1";
+    ws._loopback = !req.socket?._usb && (clientIp === "127.0.0.1" || clientIp === "::1");
     ws._authed = false;
     ws._alive = true;
     ws.on("pong", () => { ws._alive = true; });
@@ -696,11 +706,39 @@ export function start(config, { onTokenRotated } = {}) {
   const ctx = {
     send, broadcast, allSessions, plugins, power,
     desktop, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
-    activity, tls, syncAudio, audioListeners, clients: () => wss.clients, iroh: () => irohEp,
+    activity, tls, syncAudio, audioListeners, clients: () => wss.clients, iroh: () => irohEp, port, usbPort: useTls ? usbPort : 0,
   };
   const handlers = withSources({
     ...agentsHandlers(ctx), ...filesHandlers(ctx), ...remoteHandlers(ctx), ...sshHandlers(ctx), ...systemHandlers(ctx), ...phoneHandlers(ctx), ...phoneAdbHandlers(ctx), ...phoneSyncHandlers(ctx), ...pcPadHandlers(ctx), ...displayHandlers(ctx), ...computersHandlers(ctx), ...kvmHandlers(ctx),
   }, ctx);
+  // The phone's storage as a drive in File Explorer: requests go through the same handlers the Phone files page uses.
+  const dav = new PhoneDav((msg) => new Promise((resolve) => {
+    const shim = { readyState: 1, _clientId: `dav-${msg.key || "r"}`, _authed: true, send: (s) => { clearTimeout(t); resolve(JSON.parse(s)); } };
+    const t = setTimeout(() => resolve({ error: "the phone did not answer" }), 60_000);
+    const viaAdb = adbBridge.ready();
+    handlers[viaAdb ? "adb_fs" : "phone_fs"](shim, { ...msg, rid: 1 });
+  }), Number(process.env.RH_DAV_PORT) || port + 20);
+  let davDrive = null;
+  handlers.phone_drive = async (ws, msg) => {
+    if (!ws._loopback) return send(ws, { type: "phone_drive", ok: false, error: "open this page on the PC itself" });
+    if (process.platform !== "win32") return send(ws, { type: "phone_drive", ok: false, error: "Windows only" });
+    try {
+      if (msg.on === false) {
+        if (davDrive) await dav.unmapDrive(davDrive);
+        davDrive = null;
+        dav.stop();
+        return send(ws, { type: "phone_drive", ok: true, drive: null });
+      }
+      if (!davDrive) {
+        await dav.start();
+        const r = await dav.mapDrive();
+        if (!r.ok) return send(ws, { type: "phone_drive", ok: false, error: `${r.error}. The WebClient service must be running (services.msc).`, url: dav.unc });
+        davDrive = r.drive;
+      }
+      if (msg.open !== false) spawn("explorer.exe", [`${davDrive}\\`], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+      send(ws, { type: "phone_drive", ok: true, drive: davDrive, url: dav.unc });
+    } catch (e) { send(ws, { type: "phone_drive", ok: false, error: e.message }); }
+  };
   // The link another PC adds this one with; it carries the pairing token, so only this machine's page gets it.
   handlers.pc_pairing_link = async (ws) => send(ws, ws._loopback && pairLink ? { type: "pc_pairing_link", link: pairLink } : { type: "pc_error", message: "open this page on the PC itself to copy its link" });
 

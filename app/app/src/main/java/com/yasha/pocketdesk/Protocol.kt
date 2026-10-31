@@ -303,6 +303,15 @@ object Proto {
         if (press != null) put("press", press)
     }
     fun desktopType(text: String) = obj { put("type", "desktop_type"); put("text", text) }
+    fun remoteMove(dx: Float, dy: Float) = obj { put("type", "remote_input"); put("kind", "move"); put("dx", dx); put("dy", dy) }
+    fun remoteClick(button: String) = obj { put("type", "remote_input"); put("kind", "click"); put("button", button) }
+    fun remotePress(button: String, down: Boolean) = obj { put("type", "remote_input"); put("kind", "press"); put("button", button); put("press", if (down) "down" else "up") }
+    fun remoteWheel(wheel: Int, hwheel: Int) = obj { put("type", "remote_input"); put("kind", "wheel"); put("wheel", wheel); put("hwheel", hwheel) }
+    fun remoteText(text: String) = obj { put("type", "remote_input"); put("kind", "text"); put("text", text) }
+    fun deckKey(vk: Int, mods: List<String> = emptyList()) = obj {
+        put("type", "deck_key"); put("key", vk)
+        put("modifiers", JsonArray(mods.map { JsonPrimitive(it) }))
+    }
 
     // ── Freebuff control (fb_*) ──
     fun fbStatus() = obj { put("type", "fb_status") }
@@ -347,7 +356,7 @@ object Proto {
     }
 
     fun chatCancel(id: String) = obj { put("type", "chatcancel"); put("id", id) }
-    fun fs(path: String?, hidden: Boolean = false) = obj { put("type", "fs"); put("path", path ?: ""); if (hidden) put("hidden", true) }
+    fun fs(path: String?, hidden: Boolean = false, rid: Long? = null) = obj { put("type", "fs"); put("path", path ?: ""); if (hidden) put("hidden", true); rid?.let { put("rid", it) } }
     fun fsOp(op: String, path: String, to: String? = null) = obj {
         put("type", "fs_op"); put("op", op); put("path", path); to?.let { put("to", it) }
     }

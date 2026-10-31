@@ -205,7 +205,13 @@ PD.page("camera", {
       h("h3", { textContent: "The phone's camera on this PC" }),
       h("p", { className: "dim", textContent: "Shows the camera in a window you can pop out over a video call, screenshot or record. Light and zoom are in its bar. Android 12 or later." }),
       h("div", { className: "actions" }, facing, size, btn("Open camera", () => (phoneReady() ? PD.adb.open("camera", { facing: facing.value, size: size.value }) : PD.go("connect")), "primary"))),
-      h("div", { className: "card", id: "webcamCard" }));
+      h("div", { className: "card", id: "webcamCard" }),
+      h("div", { className: "card" },
+        h("h3", { textContent: "Photo or scan to this PC's clipboard" }),
+        h("p", { className: "dim", textContent: "The phone opens its camera (or the document scanner, which straightens and cleans pages); what you take is on this PC's clipboard to paste with Ctrl+V. A scan of several pages also lands in Downloads as a PDF. From the phone itself: Tools › Photo to PC, or the Quick Settings tile." }),
+        h("div", { className: "actions" },
+          btn("Take a photo", () => run(() => PD.ask("capture", "photo"), "Tap the notification on the phone"), "primary"),
+          btn("Scan a document", () => run(() => PD.ask("capture", "scan"), "Tap the notification on the phone")))));
     const draw = (st) => {
       const box = $("#webcamCard");
       const on = st?.state === "on" || st?.state === "starting";
@@ -380,7 +386,8 @@ function notifRow(n) {
       h("div", { className: "row" }, h("b", { className: "grow", textContent: n.title || n.appName }), h("span", { className: "dim small", textContent: `${n.appName} · ${rel(n.when)}` })),
       h("div", { className: "ntext", textContent: n.text || "" }),
       n.image ? h("img", { className: "nimg", src: img(n.image, "image/jpeg"), alt: "" }) : "",
-      n.progress != null ? h("progress", { max: n.max || 100, value: n.progress }) : "",
+      n.progress != null ? h("progress", { max: n.max || 100, value: n.progress }) : n.busy ? h("progress") : "",
+      n.chrono ? h("div", { className: "big chrono", _at: n.chrono, _down: !!n.countdown, textContent: clock(n.chrono, n.countdown) }) : "",
       h("div", { className: "actions" },
         (n.code ? [btn(`Copy ${n.code}`, () => navigator.clipboard.writeText(n.code).then(() => PD.toast("Code copied")))] : []),
         (n.actions || []).map((a) => btn(a.title, () => { if (a.reply) { reply.hidden = false; reply.dataset.action = a.id; reply.focus(); } else run(() => PD.ask("notif", "action", { key: n.key, action: a.id })); })),
@@ -389,6 +396,13 @@ function notifRow(n) {
         phoneReady() && btn("Open", () => PD.adb.open("app", { pkg: n.app, label: n.appName }))),
       reply));
 }
+/** A phone timer (count down to at) or stopwatch (count up from at) as h:mm:ss. */
+function clock(at, down) {
+  const s = Math.max(0, Math.floor((down ? at - Date.now() : Date.now() - at) / 1000));
+  const p = (v) => String(v).padStart(2, "0");
+  return `${s >= 3600 ? `${Math.floor(s / 3600)}:` : ""}${p(Math.floor(s / 60) % 60)}:${p(s % 60)}`;
+}
+setInterval(() => { for (const el of document.querySelectorAll(".chrono")) el.textContent = clock(el._at, el._down); }, 1000);
 PD.page("notifications", {
   title: "Notifications", icon: I.notifications,
   render(sec) {
@@ -471,7 +485,13 @@ PD.page("files", {
     drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drop"); });
     drop.addEventListener("dragleave", () => drop.classList.remove("drop"));
     drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("drop"); phoneReady() ? PD.adb.pushFiles(e.dataTransfer.files) : PD.storage.upload(e.dataTransfer.files); });
-    sec.append(drop, h("div", { id: "storageBox" }));
+    const driveNote = h("span", { className: "dim small" });
+    const drive = h("div", { className: "card" }, h("h3", { textContent: "The phone in File Explorer" }),
+      h("p", { className: "dim", textContent: "Maps the phone's storage as a drive on this PC, so any program can open, save, copy and drag files on it. Through phone control or the phone app, whichever is connected. Files over 50 MB need Windows' WebClient size limit raised." }),
+      h("div", { className: "actions" }, btn("Open in File Explorer", () => { driveNote.textContent = "Mapping…"; PD.send({ type: "phone_drive", on: true }); }, "primary"),
+        btn("Remove the drive", () => PD.send({ type: "phone_drive", on: false })), driveNote));
+    PD.on("phone_drive", (m) => { driveNote.textContent = m.ok ? (m.drive ? `Mapped as ${m.drive}` : "Removed") : m.error; driveNote.className = m.ok ? "dim small" : "bad small"; });
+    sec.append(drop, drive, h("div", { id: "storageBox" }));
     PD.storage?.render($("#storageBox"));
   },
   show() { PD.storage?.show(); },
@@ -522,10 +542,11 @@ PD.page("connect", {
   title: "Connect", icon: I.connect,
   render(sec) {
     const doc = h("div", { className: "list" });
-    sec.append(h("div", { className: "card" }, h("div", { className: "row" }, h("h3", { className: "grow", textContent: "Check everything" }), btn("Run checks", () => { doc.replaceChildren(empty("Checking…")); PD.send({ type: "phone_doctor" }); })), doc),
+    sec.append(h("div", { className: "card" }, h("div", { className: "row" }, h("h3", { className: "grow", textContent: "Connection doctor: check everything" }), btn("Run checks", () => { doc.replaceChildren(empty("Checking…")); PD.send({ type: "phone_doctor" }); })), doc),
       h("div", { className: "card", id: "adbCard" }), h("div", { className: "card", id: "appCard" }));
     PD.on("phone_doctor", (m) => doc.replaceChildren(...m.checks.map((c) => h("div", { className: "item row" },
-      h("span", { className: c.ok ? "pill ok" : "pill", textContent: c.ok ? "ok" : "to do" }), h("b", { textContent: c.name }), h("span", { className: "dim grow", textContent: c.detail })))));
+      h("span", { className: c.ok ? "pill ok" : "pill", textContent: c.ok ? "ok" : "to do" }), h("b", { textContent: c.name }), h("span", { className: "dim grow", textContent: c.detail }),
+      c.fix ? btn("Fix (asks for administrator rights)", () => { doc.replaceChildren(empty("Fixing…")); PD.send({ type: "phone_doctor_fix", id: c.fix }); }) : ""))));
     PD.on("adb_changed", drawAdb);
     PD.on("hub_changed", drawApp);
     PD.on("adb_qr", (m) => {

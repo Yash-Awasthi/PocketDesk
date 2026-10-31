@@ -42,16 +42,26 @@ object Link {
             var was = Status.Disconnected
             client.statusFlow.collect { now ->
                 LinkService.sync(app, now)
+                LinkWidget.refresh(app)
+                if ((now == Status.Connected) != (was == Status.Connected)) PcFilesProvider.rootsChanged(app)
                 // close() clears lastError, so an error here means the link ended without the user asking.
                 if (now == Status.Disconnected && was != Status.Disconnected) {
                     // Allow and Deny cannot reach the PC now; the list comes back on reconnect.
                     Notifier.approvalsGone(app)
+                    com.yasha.pocketdesk.hub.WirelessDebugging.linkEnded(app)
                     if (!MainActivity.foreground) client.lastError?.let { Notifier.linkLost(app, it) }
                 }
                 if (now == Status.Connected) { Notifier.linkLostGone(app); com.yasha.pocketdesk.hub.Hub.onConnected() }
                 // A share with the PC ends with its link; one with another phone does not depend on it.
                 if (now != Status.Connected && PhoneShare.sharing && Peer.hostChannel == null) PhoneShare.stop(app)
                 was = now
+            }
+        }
+        // A USB cable to the PC (adb reverse): checked every few seconds, it carries the link with no network at all.
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            while (true) {
+                if (client.status != Status.Disconnected) runCatching { client.usbProbe() }
+                kotlinx.coroutines.delay(5_000)
             }
         }
         scope.launch {

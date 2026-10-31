@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="clip"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/sc_clip">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.yasha.pocketdesk"
+            android:targetClass="com.yasha.pocketdesk.ClipSendActivity" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="photo"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/sc_photo">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.yasha.pocketdesk"
+            android:targetClass="com.yasha.pocketdesk.CaptureActivity">
+            <extra android:name="mode" android:value="photo" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="scan"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/sc_scan">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.yasha.pocketdesk"
+            android:targetClass="com.yasha.pocketdesk.CaptureActivity">
+            <extra android:name="mode" android:value="scan" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="remote"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/sc_remote">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.yasha.pocketdesk"
+            android:targetClass="com.yasha.pocketdesk.MainActivity">
+            <extra android:name="open" android:value="remote" />
+        </intent>
+    </shortcut>
+</shortcuts>

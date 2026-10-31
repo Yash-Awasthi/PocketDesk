@@ -146,7 +146,9 @@ while ($true) {
       $vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
       $pos = [uint32]0; $cx = 0; $cy = 0
       # x/y are relative to the virtual screen's top-left, the same origin as a captured frame.
-      if ($null -ne $cmd.x) {
+      if ($null -ne $cmd.dx) {
+        $cx = [int]$cmd.dx; $cy = [int]$cmd.dy; $pos = [RHI]::MOVE
+      } elseif ($null -ne $cmd.x) {
         $cx = [int][Math]::Round(([double]$cmd.x / [Math]::Max(1,$vs.Width - 1)) * 65535)
         $cy = [int][Math]::Round(([double]$cmd.y / [Math]::Max(1,$vs.Height - 1)) * 65535)
         if ($cx -lt 0) {$cx=0}; if ($cx -gt 65535) {$cx=65535}
@@ -1394,6 +1396,14 @@ export class DesktopController extends EventEmitter {
       y += this.origin.y;
     }
     return this._inject({ op: "mouse", x, y, click, press, button, wheel, hwheel }, 8000);
+  }
+
+  /** Moves the pointer by dx/dy pixels, as a touchpad does; Windows applies its own pointer speed. */
+  async inputMove(dx, dy) {
+    if (IS_WIN) return this._inject({ op: "mouse", dx: Math.round(dx), dy: Math.round(dy) }, 8000);
+    const p = await this.pointer();
+    if (!p) return { ok: false, error: "no_pointer" };
+    return this.inputMouse({ x: Math.round(p.x + dx), y: Math.round(p.y + dy) });
   }
 
   /** What a still frame shows, in input coordinates; null until the monitors are known. */

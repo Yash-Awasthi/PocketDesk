@@ -4,7 +4,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -288,7 +290,25 @@ class WsClient(
     private var lanFailedOn: String? = null
     private var retryJob: kotlinx.coroutines.Job? = null
 
-    private fun route(): String? = lanUrl?.let { ConnectRoute.pick(it, fallbackUrl, network, lanFailedOn) }
+    private fun route(): String? = lanUrl?.let { lan -> usbUrl()?.takeIf { usbUp } ?: ConnectRoute.pick(lan, fallbackUrl, network, lanFailedOn) }
+
+    /** The PC over a USB cable: adb reverse makes it answer on this phone's own 127.0.0.1, same port and certificate. */
+    private fun usbUrl(): String? = lanUrl?.takeIf { it.startsWith("wss://") }?.let { runCatching { java.net.URI(it) }.getOrNull() }
+        ?.let { u -> "wss://127.0.0.1:${if (u.port > 0) u.port else 8765}/ws" }
+
+    @Volatile private var usbUp = false
+
+    /** Probed now and then by Link: a cable that comes up while the link is down is tried at once. */
+    fun usbProbe() {
+        val url = usbUrl() ?: return
+        val port = java.net.URI(url).port
+        val up = runCatching { java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", port), 300) }; true }.getOrDefault(false)
+        if (up == usbUp) return
+        usbUp = up
+        if (up && (status == Status.Reconnecting || status == Status.Connecting) && !userClosed) reconnectScope.launch(kotlinx.coroutines.Dispatchers.Main) {
+            retryJob?.cancel(); reconnectNow()
+        }
+    }
 
     fun connect(url: String, token: String, pinnedFingerprint: String?, fallback: String? = null) {
         // Entries saved before wss was required: the daemon refuses plaintext from the LAN.
@@ -325,7 +345,7 @@ class WsClient(
         retryJob?.cancel()
         socket.getAndSet(null)?.cancel()
         irohLink.getAndSet(null)?.close()
-        failTransfers("network changed")
+        pauseTransfers()
         policy.reset()
         reconnectNow()
     }
@@ -341,7 +361,7 @@ class WsClient(
                 onPath = { p -> if (irohLink.get() === link) route = "iroh $p" },
                 onClosed = { code, reason ->
                     if (irohLink.compareAndSet(link, null)) {
-                        failTransfers("connection lost")
+                        pauseTransfers()
                         // Same rule as the socket path: a 4xxx refusal must not be retried.
                         if (code != null) {
                             lastError = reason.ifEmpty { "refused by server ($code)" }
@@ -407,6 +427,19 @@ class WsClient(
         }
     }
 
+    // A dropped link pauses transfers; the reconnect picks each up at what the other side already has.
+    @Volatile private var paused = false
+    private fun pauseTransfers() { paused = true }
+
+    private fun resumeTransfers() {
+        if (!paused) return
+        paused = false
+        for (t in transfers.values.toList()) when (t) {
+            is Transfer.Download -> readFileChunk(t.path, t.received)
+            is Transfer.Upload -> if (!t.resume(this)) transfers.remove(t.path)
+        }
+    }
+
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             if (webSocket !== socket.get()) return
@@ -429,13 +462,13 @@ class WsClient(
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (!socket.compareAndSet(webSocket, null)) return
             lastError = friendly(t)
-            failTransfers("connection lost")
+            pauseTransfers()
             scheduleReconnect()
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             if (!socket.compareAndSet(webSocket, null)) return
-            failTransfers("connection lost")
+            pauseTransfers()
             // 4xxx are the daemon's auth refusals (bad token, revoked, timeout,
             // rate limit): retrying spends the IP's 5-attempt budget and locks it out.
             if (code >= 4000) {
@@ -680,6 +713,22 @@ class WsClient(
     fun sendInput(id: String, dataB64: String): Boolean = send(Proto.input(id, dataB64))
     fun kill(id: String): Boolean = send(Proto.kill(id))
     fun browse(path: String?, hidden: Boolean = false): Boolean = send(Proto.fs(path, hidden))
+
+    /** Listings asked for with an id (the phone's Files app), kept apart from the Files screen's. */
+    val fsReplies = MutableSharedFlow<Pair<Long, JsonObject>>(extraBufferCapacity = 16)
+    private val nextFsRid = java.util.concurrent.atomic.AtomicLong(1)
+
+    /** One PC folder's listing, waited for; null when the PC is not linked or does not answer. */
+    suspend fun listFolder(path: String?): FsListing? {
+        val rid = nextFsRid.getAndIncrement()
+        return kotlinx.coroutines.withTimeoutOrNull(15_000) {
+            kotlinx.coroutines.coroutineScope {
+                val reply = async(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { fsReplies.first { it.first == rid }.second }
+                if (!send(Proto.fs(path, rid = rid))) { reply.cancel(); return@coroutineScope null }
+                reply.await().let { m -> if (m["error"] != null) throw java.io.FileNotFoundException(str(m, "error")) else Proto.parseFs(m) }
+            }
+        }
+    }
     fun fileOp(op: String, path: String, to: String? = null): Boolean = send(Proto.fsOp(op, path, to))
     fun searchFiles(path: String, query: String): Boolean = send(Proto.fsSearch(path, query))
     fun approve(id: String, all: Boolean = false): Boolean = send(Proto.approve(id, all))
@@ -723,7 +772,7 @@ class WsClient(
             onDone("could not open selected file")
             return
         }
-        val up = Transfer.Upload(remotePath, stream, sizeHint, onProgress, onDone)
+        val up = Transfer.Upload(remotePath, stream, openSource, sizeHint, onProgress, onDone)
         transfers[remotePath] = up
         up.sendNext(this)
     }
@@ -739,9 +788,12 @@ class WsClient(
         }
         val data = str(m, "data") ?: ""
         val bytes = java.util.Base64.getDecoder().decode(data)
+        // A chunk asked for before the link dropped can still arrive after the resume asked again.
+        if ((num(m, "offset") ?: 0L) != t.received) return
         if (bytes.isNotEmpty()) t.sink(bytes)
         val done = bool(m, "eof") ?: false
         val at = (num(m, "offset") ?: 0L) + bytes.size
+        t.received = at
         t.onProgress(at, num(m, "size"))
         if (done) {
             transfers.remove(path)
@@ -770,11 +822,14 @@ class WsClient(
             val sink: (ByteArray) -> Unit,
             val onProgress: (Long, Long?) -> Unit,
             val onDone: (String?) -> Unit,
-        ) : Transfer()
+        ) : Transfer() {
+            var received: Long = 0
+        }
 
         class Upload(
             val path: String,
-            val stream: java.io.InputStream,
+            var stream: java.io.InputStream,
+            private val reopen: () -> java.io.InputStream?,
             val sizeHint: Long?,
             val onProgress: (Long) -> Unit,
             val onDone: (String?) -> Unit,
@@ -815,8 +870,22 @@ class WsClient(
                 close()
             }
 
+            private var onRemote: Long = 0
+
             fun acked(totalOnRemote: Long?) {
-                if (totalOnRemote != null) onProgress(totalOnRemote)
+                if (totalOnRemote != null) { onRemote = totalOnRemote; onProgress(totalOnRemote) }
+            }
+
+            /** Opens the source again past what the PC confirmed and goes on appending from there. */
+            fun resume(ws: WsClient): Boolean {
+                close()
+                val s = runCatching { reopen() }.getOrNull() ?: run { onDone("could not reopen the file to resume"); return false }
+                var skip = onRemote
+                while (skip > 0) { val k = s.skip(skip); if (k <= 0) break; skip -= k }
+                stream = s
+                offset = onRemote
+                createdEmpty = onRemote > 0
+                return sendNext(ws)
             }
 
             fun close() {
@@ -859,6 +928,7 @@ class WsClient(
                 sessions = Proto.parseSessions(m)
                 chats = Proto.parseChats(m)
                 status = Status.Connected
+                resumeTransfers()
                 policy.reset()
                 reattachAll()
                 desktopResume?.invoke()
@@ -985,8 +1055,12 @@ class WsClient(
                 }
             }
             "fs" -> {
-                fsError = str(m, "error")
-                Proto.parseFs(m)?.let { dirListing = it }
+                val rid = num(m, "rid")
+                if (rid != null) fsReplies.tryEmit(rid to m)
+                else {
+                    fsError = str(m, "error")
+                    Proto.parseFs(m)?.let { dirListing = it }
+                }
             }
             "fs_found" -> fsFound = Proto.parseFsFound(m)
             "fs_thumb" -> {
@@ -1214,7 +1288,7 @@ class WsClient(
                 else { onExtended = null; _desktopError.value = str(m, "error") ?: "The PC could not add a screen" }
             "pc_media" -> pcMedia = str(m, "title")?.takeIf { it.isNotBlank() }?.let { Triple(it, str(m, "artist").orEmpty(), bool(m, "playing") == true) }
             "pc_gamepad_status" -> gamepadStatus.value = if (bool(m, "ok") == true) "The PC sees an Xbox controller" else (str(m, "error") ?: "The PC's controller is not ready")
-            "phone_share_request", "phone_share_stop", "phone_keyframe", "phone_input", "phone_switch", "phone_fs", "phone_req", "pc_notif", "pc_clip" ->
+            "phone_share_request", "phone_share_stop", "phone_keyframe", "phone_input", "phone_switch", "phone_fs", "phone_req", "pc_notif", "pc_clip", "pc_files" ->
                 events.tryEmit(RhEvent.Phone(type, m))
             else -> {}
         }
@@ -1268,16 +1342,19 @@ class WsClient(
         // A LAN url that failed here is skipped on this network from now on.
         // When the fallback fails too, the PC is down rather than off this LAN: retries alternate again,
         // or a PC that comes back would stay on the relay while the phone sits on its Wi-Fi.
-        if (activeUrl != null && activeUrl == lanUrl) lanFailedOn = network.id ?: ""
+        if (activeUrl != null && activeUrl == usbUrl()) usbUp = false
+        else if (activeUrl != null && activeUrl == lanUrl) lanFailedOn = network.id ?: ""
         else if (activeUrl != null && activeUrl == fallbackUrl) lanFailedOn = null
         if (userClosed || route() == null || lastToken == null) {
             status = Status.Disconnected
+            failTransfers("disconnected")
             return
         }
         // Switching from a failed LAN url to iroh is not a real failure: no backoff for it.
         val delay = if (activeUrl == lanUrl && route() != lanUrl) 0L else policy.nextDelayMs() ?: run {
             lastError = "gave up after ${policy.attemptsSoFar} reconnect attempts"
             status = Status.Disconnected
+            failTransfers("connection lost")
             return
         }
         status = Status.Reconnecting

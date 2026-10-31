@@ -66,6 +66,7 @@ sealed interface Screen : NavKey {
     @Serializable data object Ssh : Screen
     @Serializable data object Gamepad : Screen
     @Serializable data object Deck : Screen
+    @Serializable data object Remote : Screen
     @Serializable data class Terminal(val sessionId: String) : Screen
     @Serializable data class Agent(val id: String) : Screen
 }
@@ -106,7 +107,11 @@ class MainActivity : ComponentActivity() {
         takePairing(intent)
     }
 
+    /** A screen asked for from a widget or shortcut, opened once the PC is linked. */
+    private var pendingOpen by mutableStateOf<String?>(null)
+
     private fun takePairing(intent: android.content.Intent?) {
+        intent?.getStringExtra("open")?.let { pendingOpen = it }
         val link = intent?.dataString ?: return
         Pairing.parse(link).takeIf { it.isNotEmpty() }?.let { Link.pendingPair = it }
     }
@@ -175,6 +180,9 @@ class MainActivity : ComponentActivity() {
         }
 
         val connected = client.status == Status.Connected
+        LaunchedEffect(pendingOpen, connected) {
+            if (connected && pendingOpen == "remote") { pendingOpen = null; open(Screen.Remote) }
+        }
 
         Scaffold(
             // Fullscreen desktop reaches every edge, cutout included.
@@ -266,6 +274,7 @@ class MainActivity : ComponentActivity() {
                                 openSsh = { open(Screen.Ssh) },
                                 openGamepad = { open(Screen.Gamepad) },
                                 openDeck = { open(Screen.Deck) },
+                                openRemote = { open(Screen.Remote) },
                                 openFreebuff = { open(Screen.Freebuff) },
                                 openAgent = { open(Screen.Agent(it)) },
                                 openChats = { showTab(Screen.Chats) },
@@ -288,6 +297,7 @@ class MainActivity : ComponentActivity() {
                         }
                         entry<Screen.Ssh> { SshScreen(client, onClose = { back() }) }
                         entry<Screen.Deck> { com.yasha.pocketdesk.ui.DeckScreen(client, onClose = { back() }) }
+                        entry<Screen.Remote> { com.yasha.pocketdesk.ui.RemoteScreen(client, onClose = { back() }) }
                         entry<Screen.Gamepad> { com.yasha.pocketdesk.ui.GamepadScreen(client, onClose = { back() }) }
                         entry<Screen.Agent> { AgentScreen(client, it.id, onClose = { back() }, openChats = { showTab(Screen.Chats) }) }
                         entry<Screen.Terminal> { TerminalScreen(client, it.sessionId, onClose = { back() }) }

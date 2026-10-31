@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="control_service_description">Lets your paired PC tap, swipe and type on this phone, only while you share the screen with it. Each share asks first and shows a notification until it stops.</string>
+    <string name="widget_desc">Whether your PC is linked, with the clipboard, a photo, a scan and the remote one tap away.</string>
+    <string name="sc_clip">Clipboard to PC</string>
+    <string name="sc_photo">Photo to PC</string>
+    <string name="sc_scan">Scan to PC</string>
+    <string name="sc_remote">Remote</string>
 </resources>

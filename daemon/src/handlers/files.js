@@ -8,7 +8,8 @@ export default function filesHandlers(ctx) {
   const { send } = ctx;
   return {
     async fs(ws, msg) {
-      send(ws, listDir(msg.path, msg.hidden === true));
+      // rid marks a listing asked for by the phone's Files app, apart from the screen it is browsing.
+      send(ws, msg.rid != null ? { ...listDir(msg.path, msg.hidden === true), rid: msg.rid } : listDir(msg.path, msg.hidden === true));
     },
     async fread(ws, msg) {
       send(ws, readFileChunk(msg.path, msg.offset));

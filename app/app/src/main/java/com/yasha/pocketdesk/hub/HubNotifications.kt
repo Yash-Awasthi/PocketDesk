@@ -102,6 +102,12 @@ class HubNotifications : NotificationListenerService() {
             putNullable("icon", icon(sbn.packageName))
             picture(n)?.let { put("image", it) }
             if (max > 0) { put("progress", extras.getInt(Notification.EXTRA_PROGRESS, 0)); put("max", max) }
+            else if (extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false)) put("busy", true)
+            // A timer or stopwatch: the PC counts from the same moment the phone does.
+            if (extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER, false)) {
+                put("chrono", n.`when`); put("countdown", extras.getBoolean(Notification.EXTRA_CHRONOMETER_COUNT_DOWN, false))
+            }
+            if (live) put("live", true)
             otp(body.orEmpty())?.let { put("code", it) }
             // A chat (WhatsApp, Telegram, Signal, RCS…): its recent messages, for the PC's Messages page.
             // The texting app's own chats are already in Messages from the SMS store; only other chat apps add one.

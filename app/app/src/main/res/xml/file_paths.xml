@@ -4,4 +4,6 @@
     <cache-path name="open" path="open/" />
     <!-- Pictures sent as MMS, handed to Android's MMS service. -->
     <cache-path name="mms" path="mms/" />
+    <!-- Photos taken for the PC's clipboard. -->
+    <cache-path name="shot" path="shot/" />
 </paths>

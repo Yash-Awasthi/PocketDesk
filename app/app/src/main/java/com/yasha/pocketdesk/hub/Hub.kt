@@ -84,6 +84,13 @@ object Hub {
         "photos" -> Photos.answer(app, m)
         "find" -> Find.answer(app, m)
         "clip" -> Clip.answer(app, m)
+        "adb" -> obj { put("on", WirelessDebugging.on(app)) }
+        "capture" -> {
+            val scan = m.str("op") == "scan"
+            Grant.open(app, android.content.Intent(app, com.yasha.pocketdesk.CaptureActivity::class.java).putExtra("mode", if (scan) "scan" else "photo"),
+                if (scan) "Your PC wants a document scan" else "Your PC wants a photo", "Tap to open the camera; it lands on the PC's clipboard")
+            obj {}
+        }
         "link" -> {
             val url = m.str("url")?.takeIf { Regex("""^https?://\S+$""").matches(it) } ?: error("http(s) link required")
             // Android lets a background app open nothing itself; the link waits as a notification.
@@ -123,6 +130,33 @@ object Hub {
     }
 
     private fun unknown(m: JsonObject): JsonObject = error("unknown request: ${m.str("svc")}.${m.str("op")}")
+}
+
+/**
+ * Wireless debugging, switched on when the PC asks and back off when the PC link ends, if this app
+ * turned it on. Needs WRITE_SECURE_SETTINGS, which the PC grants once over phone control.
+ */
+object WirelessDebugging {
+    @Volatile private var ours = false
+
+    private fun allowed(ctx: Context) = ctx.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") == PackageManager.PERMISSION_GRANTED
+
+    fun on(ctx: Context): Boolean {
+        if (!allowed(ctx)) error("the PC has not granted this yet: use \"Grant all its permissions\" on its Connect page once")
+        val cr = ctx.contentResolver
+        if (Settings.Global.getInt(cr, "adb_wifi_enabled", 0) == 1) return true
+        // Wireless debugging runs only while USB debugging is on too.
+        Settings.Global.putInt(cr, Settings.Global.ADB_ENABLED, 1)
+        Settings.Global.putInt(cr, "adb_wifi_enabled", 1)
+        ours = true
+        return true
+    }
+
+    fun linkEnded(ctx: Context) {
+        if (!ours || !allowed(ctx)) return
+        ours = false
+        runCatching { Settings.Global.putInt(ctx.contentResolver, "adb_wifi_enabled", 0) }
+    }
 }
 
 fun obj(build: JsonObjectBuilder.() -> Unit): JsonObject = buildJsonObject(build)

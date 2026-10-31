@@ -5,8 +5,8 @@
 // Design after TwinDesk's windows-helper/src/Capture.cs (GPL-3.0). Built by the daemon with the
 // C# compiler that ships with Windows, so C# 5 only.
 //
-// stdin, one per line:  side <left|right|top|bottom> | off | home <along 0-1> | ping
-// stdout, JSON lines:   {"ev":"cross","along":f} {"ev":"m","dx":i,"dy":i} {"ev":"b","b":"left","d":1}
+// stdin, one per line:  side <left|right|top|bottom>[,<another>...] | off | home <along 0-1> | ping
+// stdout, JSON lines:   {"ev":"cross","side":s,"along":f,"drag":0|1} {"ev":"m","dx":i,"dy":i} {"ev":"b","b":"left","d":1}
 //                       {"ev":"w","v":i,"h":i} {"ev":"k","vk":i,"d":1} {"ev":"home"}
 using System;
 using System.Collections.Concurrent;
@@ -24,6 +24,8 @@ static class PocketDeskKvm
     [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
     [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandle(string name);
+    [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, IntPtr extra);
+    [DllImport("user32.dll")] static extern void mouse_event(uint flags, int dx, int dy, uint data, IntPtr extra);
 
     [StructLayout(LayoutKind.Sequential)] struct MouseLL { public int x, y; public uint data, flags, time; public IntPtr extra; }
     [StructLayout(LayoutKind.Sequential)] struct KeyLL { public uint vk, scan, flags, time; public IntPtr extra; }
@@ -36,7 +38,8 @@ static class PocketDeskKvm
     static IntPtr mouseHook, keyHook;
     static readonly BlockingCollection<string> output = new BlockingCollection<string>();
     static SynchronizationContext ui;
-    static volatile string side; // null: off
+    static volatile string sides; // comma-separated edges with a PC past them; null: off
+    static volatile string crossed = "right"; // the edge the pointer left through
     static volatile bool away;
     static Point park;
     static int pushes;
@@ -82,8 +85,8 @@ static class PocketDeskKvm
             lastPing = DateTime.UtcNow;
             switch (parts[0])
             {
-                case "side": side = parts.Length > 1 ? parts[1] : null; break;
-                case "off": side = null; ui.Post(delegate { if (away) Home(0.5, false); }, null); break;
+                case "side": sides = parts.Length > 1 ? parts[1] : null; break;
+                case "off": sides = null; ui.Post(delegate { if (away) Home(0.5, false); }, null); break;
                 case "home":
                     double along;
                     if (!double.TryParse(parts.Length > 1 ? parts[1] : "0.5", System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out along)) along = 0.5;
@@ -104,7 +107,7 @@ static class PocketDeskKvm
         Rectangle v = SystemInformation.VirtualScreen;
         along = Math.Max(0, Math.Min(1, along));
         int x = v.Left + (int)(along * (v.Width - 1)), y = v.Top + (int)(along * (v.Height - 1));
-        switch (side)
+        switch (crossed)
         {
             case "left": SetCursorPos(v.Left + 40, y); break;
             case "top": SetCursorPos(x, v.Top + 40); break;
@@ -114,15 +117,23 @@ static class PocketDeskKvm
         if (self) Emit("{\"ev\":\"home\"}");
     }
 
-    static void Cross(double along)
+    static void Cross(string edge, double along, bool drag)
     {
+        crossed = edge;
+        if (drag)
+        {
+            // A file drag here ends here: Escape cancels it, then the held button is let go (injected, so not ours).
+            keybd_event(0x1B, 0, 0, IntPtr.Zero);
+            keybd_event(0x1B, 0, 2, IntPtr.Zero);
+            mouse_event(0x0004, 0, 0, 0, IntPtr.Zero);
+        }
         away = true;
         lastPing = DateTime.UtcNow;
         lastCross = DateTime.UtcNow;
         Rectangle p = Screen.PrimaryScreen.Bounds;
         park = new Point(p.Left + p.Width / 2, p.Top + p.Height / 2);
         SetCursorPos(park.X, park.Y);
-        Emit("{\"ev\":\"cross\",\"along\":" + along.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "}");
+        Emit("{\"ev\":\"cross\",\"side\":\"" + edge + "\",\"drag\":" + (drag ? 1 : 0) + ",\"along\":" + along.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) + "}");
     }
 
     static IntPtr MouseHook(int code, IntPtr w, IntPtr l)
@@ -147,13 +158,16 @@ static class PocketDeskKvm
             }
             return (IntPtr)1;
         }
-        string s = side;
-        // A push: the pointer already on the edge, still moving outward, no button held (not a drag).
-        if (s != null && msg == 0x200 && (DateTime.UtcNow - lastCross).TotalMilliseconds > 400
-            && GetAsyncKeyState(0x01) >= 0 && GetAsyncKeyState(0x02) >= 0)
+        string all = sides;
+        // A push: the pointer already on an edge with a PC past it, still moving outward. The left
+        // button may be held (dragging files over); the right one never.
+        if (all != null && msg == 0x200 && (DateTime.UtcNow - lastCross).TotalMilliseconds > 400 && GetAsyncKeyState(0x02) >= 0)
         {
             Rectangle v = SystemInformation.VirtualScreen;
-            bool edge = s == "right" ? m.x >= v.Right - 1 : s == "left" ? m.x <= v.Left : s == "top" ? m.y <= v.Top : m.y >= v.Bottom - 1;
+            string s = null;
+            foreach (var e in all.Split(','))
+                if (e == "right" ? m.x >= v.Right - 1 : e == "left" ? m.x <= v.Left : e == "top" ? m.y <= v.Top : e == "bottom" && m.y >= v.Bottom - 1) { s = e; break; }
+            bool edge = s != null;
             if (!edge) pushes = 0;
             else
             {
@@ -164,7 +178,9 @@ static class PocketDeskKvm
                 {
                     pushes = 0;
                     double along = s == "left" || s == "right" ? (m.y - v.Top) / (double)Math.Max(1, v.Height - 1) : (m.x - v.Left) / (double)Math.Max(1, v.Width - 1);
-                    ui.Post(delegate { Cross(along); }, null);
+                    bool drag = GetAsyncKeyState(0x01) < 0;
+                    string at = s;
+                    ui.Post(delegate { Cross(at, along, drag); }, null);
                 }
             }
         }

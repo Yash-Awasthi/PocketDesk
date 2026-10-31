@@ -190,6 +190,28 @@ object Media {
 
     private fun current() = watching.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING } ?: watching.firstOrNull()
 
+    /** Seconds into what one of [pkgs] plays now, so a shared video link resumes there; null without one. */
+    fun secondsIn(pkgs: Set<String>): Long? {
+        val st = watching.firstOrNull { it.packageName in pkgs }?.playbackState ?: return null
+        var ms = st.position
+        if (st.state == PlaybackState.STATE_PLAYING && st.lastPositionUpdateTime > 0) {
+            ms += ((android.os.SystemClock.elapsedRealtime() - st.lastPositionUpdateTime) * st.playbackSpeed).toLong()
+        }
+        return (ms / 1000).takeIf { it > 0 }
+    }
+
+    private val YOUTUBE = setOf("com.google.android.youtube", "com.google.android.apps.youtube.music", "app.revanced.android.youtube", "app.rvx.android.youtube")
+
+    /** A YouTube link with no start time gets the phone's position in that video, else comes back as it was. */
+    fun withPosition(url: String): String {
+        val u = runCatching { android.net.Uri.parse(url) }.getOrNull() ?: return url
+        val host = u.host?.removePrefix("www.")?.removePrefix("m.") ?: return url
+        if (host != "youtu.be" && host != "youtube.com" && host != "music.youtube.com") return url
+        if (u.getQueryParameter("t") != null || u.getQueryParameter("start") != null) return url
+        val s = secondsIn(YOUTUBE) ?: return url
+        return u.buildUpon().appendQueryParameter("t", "${s}s").build().toString()
+    }
+
     fun push() {
         val c = current()
         val md = c?.metadata
@@ -351,10 +373,62 @@ object ClipSync {
         val clip = ctx.getSystemService(ClipboardManager::class.java).primaryClip ?: return
         // Password managers mark what they copy as sensitive; that never leaves the phone.
         if (clip.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE") == true) return
+        val uri = clip.getItemAt(0)?.uri
+        if (uri != null && (0 until clip.description.mimeTypeCount).any { clip.description.getMimeType(it).startsWith("image/") }) {
+            if (uri.toString() == last) return
+            last = uri.toString()
+            Thread { picture(ctx, uri)?.let { sendPicture(it) } }.start()
+            return
+        }
         val text = clip.getItemAt(0)?.coerceToText(ctx)?.toString()?.takeIf { it.isNotEmpty() } ?: return
         if (text == last) return
         last = text
         com.yasha.pocketdesk.Link.client.sendRaw(obj { put("type", "phone_clip"); put("text", text.take(200_000)) }.toString())
+    }
+
+    /** A copied picture as PNG, its long side at most 2560 px so it stays under the PC's clipboard limit. */
+    fun picture(ctx: Context, uri: android.net.Uri): String? = runCatching {
+        val src = android.graphics.ImageDecoder.createSource(ctx.contentResolver, uri)
+        val bmp = android.graphics.ImageDecoder.decodeBitmap(src) { d, info, _ ->
+            val k = minOf(1f, 2560f / maxOf(info.size.width, info.size.height))
+            if (k < 1f) d.setTargetSize((info.size.width * k).toInt().coerceAtLeast(1), (info.size.height * k).toInt().coerceAtLeast(1))
+            d.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+        }
+        HubNotifications.b64(bmp, Bitmap.CompressFormat.PNG, 100)
+    }.getOrNull()
+
+    fun sendPicture(png: String, paste: Boolean = false) {
+        com.yasha.pocketdesk.Link.client.sendRaw(obj { put("type", "phone_clip"); put("png", png); if (paste) put("paste", true) }.toString())
+    }
+}
+
+/** Files the PC sent with Ctrl+Alt+C: saved to Downloads, with a notification when they are in. */
+object PcFiles {
+    private const val CHANNEL = "pc_files"
+
+    fun save(ctx: Context, m: JsonObject) {
+        val items = (m["files"] as? kotlinx.serialization.json.JsonArray).orEmpty().mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val p = o.str("path") ?: return@mapNotNull null
+            p to (o.str("name") ?: p.substringAfterLast('\\').substringAfterLast('/'))
+        }
+        if (items.isEmpty()) return
+        main.post {
+            com.yasha.pocketdesk.ui.saveAllToDownloads(ctx, com.yasha.pocketdesk.Link.client, items, { status ->
+                if (status.startsWith("Saved") || status.contains("failed")) notify(ctx, status)
+            })
+        }
+    }
+
+    private fun notify(ctx: Context, text: String) {
+        if (!com.yasha.pocketdesk.Notifier.canNotify(ctx)) return
+        val mgr = ctx.getSystemService(NotificationManager::class.java)
+        if (mgr.getNotificationChannel(CHANNEL) == null) mgr.createNotificationChannel(android.app.NotificationChannel(CHANNEL, "Files from your PC", NotificationManager.IMPORTANCE_DEFAULT))
+        val open = android.app.PendingIntent.getActivity(ctx, 0, Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK), android.app.PendingIntent.FLAG_IMMUTABLE)
+        mgr.notify(41, androidx.core.app.NotificationCompat.Builder(ctx, CHANNEL)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("From your PC").setContentText(text)
+            .setContentIntent(open).setAutoCancel(true).build())
     }
 }
 
