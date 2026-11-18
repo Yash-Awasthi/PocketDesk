@@ -290,6 +290,16 @@ class WsClient(
     private var lanFailedOn: String? = null
     private var retryJob: kotlinx.coroutines.Job? = null
 
+    /** Keepalive over iroh (the ws path has OkHttp's own pingInterval). Idle NAT/relay state
+     *  is detected as dead and the link is redialled, so a phone miles away does not stay
+     *  half-connected forever. */
+    private val KEEPALIVE_INTERVAL_MS = 20_000L
+    private val KEEPALIVE_TIMEOUT_MS = 10_000L
+    @Volatile private var _pongAt = System.currentTimeMillis()
+    @Volatile private var _pingAt = 0L
+    @Volatile private var _awaitingPong = false
+    private var keepalive: kotlinx.coroutines.Job? = null
+
     private fun route(): String? = lanUrl?.let { lan -> usbUrl()?.takeIf { usbUp } ?: ConnectRoute.pick(lan, fallbackUrl, network, lanFailedOn) }
 
     /** The PC over a USB cable: adb reverse makes it answer on this phone's own 127.0.0.1, same port and certificate. */
@@ -345,6 +355,7 @@ class WsClient(
         retryJob?.cancel()
         socket.getAndSet(null)?.cancel()
         irohLink.getAndSet(null)?.close()
+        keepalive?.cancel(); keepalive = null
         pauseTransfers()
         policy.reset()
         reconnectNow()
@@ -360,6 +371,7 @@ class WsClient(
                 onVideo = { pkt -> if (irohLink.get() === link) onVideoPacket(pkt) },
                 onPath = { p -> if (irohLink.get() === link) route = "iroh $p" },
                 onClosed = { code, reason ->
+                    keepalive?.cancel(); keepalive = null
                     if (irohLink.compareAndSet(link, null)) {
                         pauseTransfers()
                         // Same rule as the socket path: a 4xxx refusal must not be retried.
@@ -377,6 +389,7 @@ class WsClient(
             irohLink.set(link)
             route = "iroh"
             link.start { hello?.let { link.send(it) } }
+            startKeepalive()
             return
         }
         route = url.substringAfter("://").substringBefore('/')
@@ -405,7 +418,38 @@ class WsClient(
         }
     }
 
+    /** Tear down the link without marking it user-closed, so reconnect redials it. */
+    private fun dropLink(reason: String) {
+        keepalive?.cancel(); keepalive = null
+        pauseTransfers()
+        socket.getAndSet(null)?.close(1006, reason)
+        irohLink.getAndSet(null)?.close()
+        lastError = reason
+        scheduleReconnect()
+    }
+
+    /** Send a desktop_ping every [KEEPALIVE_INTERVAL_MS] while idle, and close the link if a
+     *  pong does not come back within [KEEPALIVE_TIMEOUT_MS]. Only started once the link is up. */
+    private fun startKeepalive() {
+        keepalive?.cancel()
+        keepalive = reconnectScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(KEEPALIVE_INTERVAL_MS)
+                val now = System.currentTimeMillis()
+                if (_awaitingPong && now - _pingAt > KEEPALIVE_TIMEOUT_MS) {
+                    keepalive = null
+                    dropLink("keepalive timeout")
+                    return@launch
+                }
+                _awaitingPong = true
+                _pingAt = now
+                send(Proto.desktopPing(now))
+            }
+        }
+    }
+
     fun close() {
+        keepalive?.cancel(); keepalive = null
         userClosed = true
         linkGen++
         retryJob?.cancel()
@@ -457,12 +501,14 @@ class WsClient(
             } else {
                 hello?.let { webSocket.send(it) }
             }
+            startKeepalive()
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (!socket.compareAndSet(webSocket, null)) return
             lastError = friendly(t)
             pauseTransfers()
+            keepalive?.cancel(); keepalive = null
             scheduleReconnect()
         }
 
@@ -1192,12 +1238,18 @@ class WsClient(
                     _desktopError.value = str(m, "reason") ?: "desktop unavailable"
                 }
             }
+            "desktop_ping" -> {
+                val t = num(m, "t") ?: return
+                send(Proto.desktopPong(t, System.currentTimeMillis()))
+            }
             "desktop_pong" -> {
                 val t = num(m, "t") ?: return
                 val server = num(m, "server") ?: return
                 val now = System.currentTimeMillis()
                 val rtt = now - t
                 desktopRtt = rtt
+                _pongAt = now
+                _awaitingPong = false
                 // The fastest round trip bounds the offset error best; refresh it now and then for drift.
                 if (rtt <= bestRtt || now - bestRttAt > 30_000) {
                     bestRtt = rtt

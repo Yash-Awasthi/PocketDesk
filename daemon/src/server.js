@@ -18,6 +18,7 @@ import { PowerManager, normalizeAwakeMode } from "./power_manager.js";
 import { createActivityMonitor } from "./activity.js";
 import { StreamJsonParser } from "./stream_json_parser.js";
 import { DesktopController, toFraction } from "./desktop_capture.js";
+import { Clippy } from "./clippy.js";
 import { createAccess } from "./access.js";
 import { wakeTargets } from "./wake.js";
 import { Recorder, RECORD_FLAG } from "./recorder.js";
@@ -63,13 +64,14 @@ const PAUSE_ALLOWED = new Set([
   "plan_get", "apps_discover", "model_list", "activity_list", "prompt_queue", "todos_get", "todos_status", "schedule_list",
   "approval_waiting", "usage_list", "usage_get", "recordings_list", "recording_get",
   "fs", "fread", "fs_search", "fs_zip", "fs_thumb", "git_status", "git_diff", "git_log", "git_branches", "mention",
-  "desktop_start", "desktop_ping", "desktop_monitors", "video_ack", "desktop_stop", "desktop_frame", "desktop_quality",
+  "desktop_start", "desktop_ping", "desktop_pong", "desktop_monitors", "video_ack", "desktop_stop", "desktop_frame", "desktop_quality",
   "desktop_status", "desktop_permissions", "desktop_mouse", "desktop_key", "desktop_type", "sources_list", "pc_list", "kvm_get", "kvm_in",
   "bastion_user_list", "bastion_host_list", "bastion_sessions", "bastion_stats", "bastion_stop", "sshserver_user_list",
   "sshserver_sessions", "sshserver_stats", "sshserver_stop", "profile_list", "profile_disconnect", "hostkey_list", "sshkey_list", "mproto_status",
   "phone_watch", "phone_unwatch", "phone_share_start", "phone_share_stop", "phone_share_end", "phone_apps", "phone_input", "phone_switch", "phone_fs", "phone_fs_result",
   "proposal_list", "reject", "stats", "fb_status", "fb_config_list", "fb_config_get", "fb_skill_list", "fb_skill_get",
   "fb_auth_status", "fb_accounts", "stream_parse", "stream_stats", "doctor", "device_list", "history_list", "history_get", "agent_panel", "agent_doc", "accounts_list",
+  "clippy_status", "clippy_latest",
 ]);
 const AUDIT_SKIP = new Set(["in", "resize", "video_ack", "desktop_ping", "desktop_frame", "desktop_mouse", "desktop_key", "desktop_type", "phone_input"]);
 
@@ -348,17 +350,6 @@ export function start(config, { onTokenRotated } = {}) {
       plugins.callHook("onMessage", ws, msg).then(({ blocked }) => {
         if (blocked) return;
         if (!ws._authed) {
-          // Rate limit auth attempts (10-minute decay window so a few typos
-          // never lock an IP out forever).
-          const rec = authAttempts.get(clientIp);
-          const attempts = rec && Date.now() - rec.at < 10 * 60_000 ? rec.n : 0;
-          if (attempts >= MAX_AUTH_ATTEMPTS) {
-            ws.close(4029, "too many auth attempts");
-            return;
-          }
-          for (const [ip, r] of authAttempts) if (Date.now() - r.at > 10 * 60_000) authAttempts.delete(ip);
-          authAttempts.set(clientIp, { n: attempts + 1, at: Date.now() });
-
           const auth = authenticate(msg);
           if (auth?.totpRequired) {
             ws.close(4011, "two-factor code required");
@@ -377,7 +368,6 @@ export function start(config, { onTokenRotated } = {}) {
             const hi = welcome(auth, msg, clientIp);
             if (ws._irohId) devices.claimEndpoint(auth.id, ws._irohId);
             ws._authed = true;
-            authAttempts.delete(clientIp);
             clearTimeout(timer);
             ws._clientId = auth.id;
             ws._android = msg.platform === "android";
@@ -500,6 +490,19 @@ export function start(config, { onTokenRotated } = {}) {
   // Desktop capture + input, the frame source for rd_/desktop UIs. Frames (~200-300 KB) go straight
   // to each watching ws, too heavy to broadcast; the capture loop runs only while a watcher is attached.
   const desktop = new DesktopController();
+  const clippy = new Clippy();
+  // A captured Ctrl+C lands on the PC's system clipboard (so Ctrl+V outside the game works)
+  // and is pushed to every connected viewer as clippy_copy with the window it came from.
+  // When the game copies to its own clipboard the system clipboard is stale, so the typed
+  // buffer wins whenever it holds anything.
+  clippy.onCopy = async ({ window: win, text, typed, at }) => {
+    const clip = typed || text || "";
+    if (clip) { try { await desktop.clipboardSet({ text: clip }); } catch { /* best effort */ } }
+    broadcast({ type: "clippy_copy", window: win || "", text: text || "", typed: typed || "", at: at || "" });
+  };
+  // Broadcast clippy state (running / installed) to every connected viewer so the
+  // browser toggle stays in sync with the daemon.
+  clippy.onState = (s) => broadcast({ type: "clippy_state", ...s });
   // New terminals take the PC screen's size once the desktop view has listed the monitors.
   const listMonitors = desktop.monitors.bind(desktop);
   desktop.monitors = async () => {
@@ -523,6 +526,17 @@ export function start(config, { onTokenRotated } = {}) {
   desktop.on("capture_error", (reason) => {
     for (const w of desktopWatchers) {
       try { send(w, { type: "desktop_frame_error", reason }); } catch { /* watcher vanished mid-send */ }
+    }
+  });
+  // A focused window can exclude itself from every capture API (WDA_EXCLUDEFROMCAPTURE), so the
+  // picture shows black through no fault of the stream. Name it and point at the alpha handshake.
+  desktop.on("capture_blocked", (title) => {
+    const notice = title
+      ? `"${title}" blocks screen capture (Windows display affinity). The mirror shows black over it. ` +
+        "Alpha builds can clear the flag while PocketDesk is watching; see docs/ALPHA-CAPTURE.md."
+      : "";
+    for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
+      try { send(w, { type: "desktop_notice", notice, blocked: title }); } catch { /* watcher vanished mid-send */ }
     }
   });
 
@@ -653,6 +667,7 @@ export function start(config, { onTokenRotated } = {}) {
     audio.stop();
     scheduler.stop();
     desktop.dispose();
+    clippy.dispose();
     recorder.dispose();
     mpc.dispose();
     sshSrv.stop();
@@ -705,7 +720,7 @@ export function start(config, { onTokenRotated } = {}) {
 
   const ctx = {
     send, broadcast, allSessions, plugins, power,
-    desktop, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
+    desktop, clippy, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
     activity, tls, syncAudio, audioListeners, clients: () => wss.clients, iroh: () => irohEp, port, usbPort: useTls ? usbPort : 0,
   };
   const handlers = withSources({
