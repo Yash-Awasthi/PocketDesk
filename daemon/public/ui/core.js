@@ -103,15 +103,30 @@ PD.connect = () => {
     }
     const m = JSON.parse(ev.data);
     if (m.type === "welcome") {
+      PD.os = m.os;
       if (m.deviceToken) PD.$("#token").value = m.deviceToken;
       try { localStorage.setItem("pd_token", PD.$("#token").value); } catch {}
       setUp(true);
+      // PD.start() shows the first page before the socket opens, so its show() asked for data nobody
+      // heard. Ask again now that the welcome arrived; otherwise Home stays empty until a page switch.
+      pages.get(PD.current)?.show?.(PD.$(`#page-${PD.current}`));
+      PD.emit("page_refresh", PD.current);
     }
     PD.emit(m.type, m);
   };
 };
 
 PD.start = () => {
+  // This PC's own page carries its token and pairing codes (server.js adds them only to loopback
+  // responses), so opening PocketDesk on the PC is already signed in; phones on the LAN get the
+  // plain page. Read before buildNav, which renders the pages that use them.
+  const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.content || "";
+  PD.localToken = meta("pd-token");
+  PD.pairPayload = meta("pd-qr");
+  PD.hubUrl = meta("pd-hub");
+  PD.fingerprint = meta("pd-fp");
+  // One frontend: pairing, security and this install are a page of the hub, on the PC only.
+  if (PD.localToken) PD.registerThisPc?.();
   PD.buildNav();
   const hash = new URLSearchParams(location.hash.slice(1));
   const fromLink = hash.get("t");
@@ -120,7 +135,7 @@ PD.start = () => {
   if (fromLink || goTo) history.replaceState(null, "", location.pathname);
   let saved = null, page = null;
   try { saved = localStorage.getItem("pd_token"); page = localStorage.getItem("pd_page"); } catch {}
-  const t = fromLink || saved;
+  const t = fromLink || PD.localToken || saved;
   PD.$("#token").addEventListener("keydown", (e) => { if (e.key === "Enter") PD.connect(); });
   PD.go(goTo || page || "home");
   if (t) { PD.$("#token").value = t; PD.connect(); }

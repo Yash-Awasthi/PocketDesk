@@ -106,26 +106,41 @@ export function start(config, { onTokenRotated } = {}) {
   const { port, token: _token, tls, iroh: irohCfg } = config;
   let token = _token;
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
-  const page = fs.readFileSync(path.join(publicDir, "index.html"));
-  const pairTemplate = fs.readFileSync(path.join(publicDir, "pair.html"), "utf8");
+  const page = fs.readFileSync(path.join(publicDir, "index.html"), "utf8");
 
   function lanAddress() {
     const all = Object.values(os.networkInterfaces()).flat()
       .filter((ni) => ni?.family === "IPv4" && !ni.internal).map((ni) => ni.address);
-    // Home networks use private ranges; 100.64/10 is VPN or carrier NAT (Tailscale lives there).
-    return all.find((a) => /^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a))
+    // The address the QR and the hub link carry must be the one a phone on the same Wi-Fi can dial,
+    // so the usual home ranges win in order. A VPN or Tailscale adapter also answers to a private
+    // range (172.16/12 or 100.64/10) and would otherwise be picked first, making the QR unreachable.
+    const pick = (re) => all.find((a) => re.test(a));
+    return pick(/^192\.168\./) ?? pick(/^10\./) ?? pick(/^172\.(1[6-9]|2\d|3[01])\./)
       ?? all.find((a) => !a.startsWith("169.254.")) ?? "localhost";
   }
 
-  let pairPage = "";
   let pairLink = "";
+  let pairHub = "";
   let pairFp = "";
   let irohTicket = "";
   let irohEp = null;
-  // True while iroh is still starting: a QR shown now would carry no way to reach the PC from outside.
-  let irohStarting = false;
-  // Rebuilt on token rotation, so the QR never shows a dead token.
-  function buildPairPage(useTls, fingerprint = pairFp) {
+  /**
+   * The hub page as this machine's own browser gets it: signed in, with the pairing QR, the security
+   * switches and the device list on its This PC page. There is no separate settings document any
+   * more; only loopback requests get these metas, a phone on the LAN gets the plain page.
+   */
+  const pageForPc = () => {
+    // The address and relay change with the network, so the QR is rebuilt from the current ticket.
+    const t = irohEp?.ticket();
+    if (t && t !== irohTicket) { irohTicket = t; buildPair(useTls); }
+    return page.replace("</head>",
+      `<meta name="pd-token" content="${token}">\n` +
+      `<meta name="pd-qr" content="${pairLink}">\n` +
+      `<meta name="pd-hub" content="${pairHub}">\n` +
+      `<meta name="pd-fp" content="${pairFp}">\n</head>`);
+  };
+  // Rebuilt on token rotation and when iroh answers, so the QR never shows a dead token or address.
+  function buildPair(useTls, fingerprint = pairFp) {
     pairFp = fingerprint;
     const url = `${useTls ? "wss" : "ws"}://${lanAddress()}:${port}/ws`;
     const payload = Buffer.from(
@@ -133,11 +148,8 @@ export function start(config, { onTokenRotated } = {}) {
       "utf8",
     ).toString("base64url");
     pairLink = `pocketdesk://pair#${payload}`;
-    pairPage = pairTemplate
-      .replaceAll("__RH_PAYLOAD__", pairLink)
-      .replaceAll("__RH_URL__", url)
-      .replaceAll("__RH_TOKEN__", token)
-      .replaceAll("__RH_FP__", fingerprint || "n/a");
+    // The same hub in a plain browser (a phone without the app, or a tablet): the page reads #t=.
+    pairHub = `${useTls ? "https" : "http"}://${lanAddress()}:${port}/#t=${token}`;
   }
 
   const requestHandler = (req, res) => {
@@ -248,20 +260,18 @@ export function start(config, { onTokenRotated } = {}) {
       res.writeHead(403).end();
       return;
     }
+    // /pair was its own settings document; it is now the hub's This PC page, so every launcher and
+    // bookmark that still opens it lands there signed in.
     if (req.url.startsWith("/pair?") && loopback && keyOk) {
-      // The ticket carries current addresses and relay, which change with the network.
-      const t = irohEp?.ticket();
-      if (t && t !== irohTicket) { irohTicket = t; buildPairPage(useTls); }
-      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-      res.end(irohStarting ? pairPage.replace("</head>", '<meta http-equiv="refresh" content="2"></head>') : pairPage);
+      res.writeHead(302, { location: `/#go=thispc&t=${token}`, "cache-control": "no-store" }).end();
       return;
     }
     if (req.url.startsWith("/pair")) {
       res.writeHead(403).end();
       return;
     }
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-    res.end(page);
+    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+    res.end(loopback ? pageForPc() : page);
   };
 
   const useTls = Boolean(tls?.enabled && fs.existsSync(tls.cert) && fs.existsSync(tls.key));
@@ -452,7 +462,7 @@ export function start(config, { onTokenRotated } = {}) {
     token = crypto.randomBytes(24).toString("hex");
     pluginCtx.config.token = token;
     onTokenRotated?.(token);
-    buildPairPage(useTls);
+    buildPair(useTls);
     return token;
   }
 
@@ -570,16 +580,103 @@ export function start(config, { onTokenRotated } = {}) {
   const audio = new DesktopAudio();
   const videoWatchers = new Set();
   let resyncTimer = null;
+  let faults = 0;             // consecutive restarts that produced no working encoder
+  let lastPacketAt = Date.now();
   // Ctrl+Alt+Del, a UAC prompt or the lock screen switch to the secure desktop, which stops ddagrab
   // until the switch ends; keep retrying while anyone watches instead of leaving the picture frozen.
+  // After repeated failures on one output the grab falls back to the whole desktop through GDI, which
+  // is software and independent of the GPU that owns the display, so no screen layout is a dead end.
   const resync = (delay = 250) => {
     if (resyncTimer) return;
     resyncTimer = setTimeout(async () => {
       resyncTimer = null;
-      if (videoWatchers.size && !(await video.restart()) && videoWatchers.size) resync(1000);
+      if (!videoWatchers.size) { faults = 0; return; }
+      lastPacketAt = Date.now();  // a restart in progress is not a stall
+      if (await video.restart()) { faults = 0; return; }
+      faults++;
+      if (faults === 2 && video.monitor && !video.monitor.all) {
+        const all = (desktop.monitorList || []).find((m) => m.all);
+        if (all) {
+          video.monitor = all;
+          console.log("[pocketdesk] that screen cannot be grabbed here; falling back to all screens");
+          for (const w of videoWatchers) { w._needKey = true; }
+          for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
+            try { send(w, { type: "desktop_notice", notice: "That screen could not be captured; switched to all screens.", blocked: "" }); } catch { /* watcher vanished */ }
+          }
+        }
+      }
+      if (faults === 8) {
+        for (const w of videoWatchers) {
+          try { send(w, { type: "desktop_frame_error", reason: video.lastError || "screen capture stopped working on the PC" }); } catch { /* watcher vanished */ }
+        }
+      }
+      resync(faults > 2 ? 2000 : 600);
     }, delay);
   };
+  // A true exclusive-fullscreen app takes the display away from DWM: Desktop Duplication answers
+  // DXGI_ERROR_ACCESS_LOST and GDI comes back black for as long as it holds the screen (Windows' own
+  // docs). No user-mode API can read those pixels at any privilege level, so do not pretend: name it,
+  // keep every other screen live, and return to the chosen one the moment the app lets go.
+  let exclusive = null;     // { title } while such an app is in front
+  let exclusiveTimer = null;
+  let stallBusy = false;
+  let chosenMonitor = null; // the screen the viewers picked, restored after the fallback
+  const leaveExclusive = async () => {
+    if (!exclusive) return;
+    const f = await desktop.fullscreenNow().catch(() => ({ d3d: false }));
+    if (f.d3d) return;
+    exclusive = null;
+    clearInterval(exclusiveTimer);
+    exclusiveTimer = null;
+    console.log("[pocketdesk] exclusive fullscreen ended; back to the chosen screen");
+    if (chosenMonitor) { video.monitor = chosenMonitor; chosenMonitor = null; }
+    for (const w of videoWatchers) { w._needKey = true; }
+    if (videoWatchers.size) resync(0);
+  };
+  const enterExclusive = (title) => {
+    if (exclusive) return;
+    exclusive = { title: title || "" };
+    console.log(`[pocketdesk] exclusive fullscreen${title ? ` (${title})` : ""}: the display is not composited, so capture falls back to the rest of the desktop`);
+    for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
+      try {
+        send(w, {
+          type: "desktop_notice",
+          blocked: title || "",
+          notice: `${title || "That app"} is in true exclusive fullscreen: Windows gives it the display outside the compositor, ` +
+            "so every screen-capture API (Desktop Duplication, GDI, Graphics Capture) reads black, at any privilege level. " +
+            "PocketDesk keeps the other screens live and returns to this one when the app leaves fullscreen. " +
+            "To mirror the app itself, run it borderless, or restore Windows fullscreen optimizations for it with " +
+            "scripts/fullscreen-capture.ps1 -Exe <game.exe>; see docs/EXCLUSIVE-FULLSCREEN.md.",
+        });
+      } catch { /* watcher vanished mid-send */ }
+    }
+    if (video.monitor && !video.monitor.all) chosenMonitor = video.monitor;
+    const all = (desktop.monitorList || []).find((m) => m.all);
+    if (chosenMonitor && all) {
+      video.monitor = all;
+      for (const w of videoWatchers) { w._needKey = true; }
+    }
+    if (!exclusiveTimer) {
+      exclusiveTimer = setInterval(() => { leaveExclusive().catch(() => {}); }, 2000);
+      exclusiveTimer.unref?.();
+    }
+  };
+  // An ffmpeg that is alive but silent (a fullscreen app changing composition, a GPU reset, a display
+  // that vanished mid-stream) would leave every viewer on a frozen picture with no error at all.
+  const stallTimer = setInterval(async () => {
+    if (!videoWatchers.size || !video.running || resyncTimer || stallBusy) return;
+    if (Date.now() - lastPacketAt < 6000) return;
+    lastPacketAt = Date.now();
+    stallBusy = true;
+    const f = await desktop.fullscreenNow().catch(() => ({ d3d: false, title: "" }));
+    stallBusy = false;
+    if (f.d3d) { enterExclusive(f.title); resync(400); return; }
+    console.log("[pocketdesk] no frames for 6s while watching; restarting the encoder");
+    resync(0);
+  }, 2000);
+  stallTimer.unref?.();
   video.on("packet", ({ kind, data }) => {
+    lastPacketAt = Date.now();
     const msg = Buffer.concat([Buffer.from([kind]), data]);
     for (const w of videoWatchers) {
       if (w.readyState !== 1) continue;
@@ -593,6 +690,40 @@ export function start(config, { onTokenRotated } = {}) {
     }
   });
   video.on("ended", () => { if (videoWatchers.size) resync(); });
+  // A display plugged in, unplugged or rearranged changes the list behind the viewer's back: the phone
+  // keeps its stale picker (and the encoder its old output), so a second screen only appeared after
+  // leaving the connection. While anyone watches, poll the list and push a refresh when it changes;
+  // a restarted encoder also gives every viewer a fresh keyframe of the new picture.
+  let monitorSig = "";
+  let monitorTimer = null;
+  const monitorRefresh = () => {
+    if (monitorTimer) return;
+    monitorTimer = setInterval(async () => {
+      if (!videoWatchers.size && !desktopWatchers.size) {
+        clearInterval(monitorTimer);
+        monitorTimer = null;
+        monitorSig = "";
+        return;
+      }
+      const r = await desktop.monitors().catch(() => null);
+      if (!r?.ok) return;
+      const sig = r.monitors.map((m) => `${m.output ?? ""}:${m.adapter ?? ""}:${m.x ?? m.left ?? 0},${m.y ?? m.top ?? 0},${m.w}x${m.h}${m.all ? ":all" : ""}`).join("|");
+      if (!monitorSig) { monitorSig = sig; return; }
+      if (sig === monitorSig) return;
+      monitorSig = sig;
+      // Stay on the same picture when it still exists (the whole desktop, or that screen), else let the
+      // primary start again on its own.
+      if (video.monitor) {
+        const list = desktop.monitorList || [];
+        video.monitor = video.monitor.all ? (list.find((m) => m.all) || null) : (list[video.monitor.index] || null);
+      }
+      for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
+        try { send(w, { type: "desktop_monitors", ...r, current: video.monitor?.index ?? 0 }); } catch { /* gone */ }
+      }
+      if (videoWatchers.size) await video.restart().catch(() => null);
+    }, 5000);
+    monitorTimer.unref?.();
+  };
   // PC sound: Windows/Linux encode it separately; macOS's native helper hands it through DesktopVideo.
   // One AAC ADTS frame per message, kind 3, only to viewers that asked for sound and are not far behind.
   // Phones playing the PC's sound without watching the screen (the phone as a speaker).
@@ -720,7 +851,7 @@ export function start(config, { onTokenRotated } = {}) {
 
   const ctx = {
     send, broadcast, allSessions, plugins, power,
-    desktop, clippy, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser,
+    desktop, clippy, desktopWatchers, video, videoWatchers, recorder, access, bastion, sshSrv, mpc, streamParser, monitorRefresh,
     activity, tls, syncAudio, audioListeners, clients: () => wss.clients, iroh: () => irohEp, port, usbPort: useTls ? usbPort : 0,
   };
   const handlers = withSources({
@@ -758,13 +889,16 @@ export function start(config, { onTokenRotated } = {}) {
   handlers.pc_pairing_link = async (ws) => send(ws, ws._loopback && pairLink ? { type: "pc_pairing_link", link: pairLink } : { type: "pc_error", message: "open this page on the PC itself to copy its link" });
 
 
-  server.listen(port, async () => {
+  // Roadmap 2.1: without TLS the hello (the pairing token) would cross the LAN in cleartext, so a
+  // plaintext daemon answers this machine only. It used to bind every interface and rely on the
+  // firewall; the loopback bind is the guarantee. iroh carries its own encryption and is untouched.
+  server.listen(port, useTls ? undefined : "127.0.0.1", async () => {
     const scheme = useTls ? "wss" : "ws";
     let fp = "";
     if (useTls) {
       fp = new crypto.X509Certificate(fs.readFileSync(tls.cert)).fingerprint256;
     }
-    buildPairPage(useTls, fp);
+    buildPair(useTls, fp);
     console.log("");
     console.log("  PocketDesk daemon");
     console.log(`  local     http${useTls ? "s" : ""}://localhost:${port}`);
@@ -778,15 +912,14 @@ export function start(config, { onTokenRotated } = {}) {
     } else {
       console.warn("  tls       OFF: only connections from this machine are accepted (phones need wss)");
     }
-    const pairUrl = `http${useTls ? "s" : ""}://localhost:${port}/pair`;
+    const hubUrl = `http${useTls ? "s" : ""}://localhost:${port}/`;
     console.log(process.stdout.isTTY
-      ? `  pairing   ${pairUrl}?k=${token}  (open on THIS PC, scan the QR from the app)`
-      : `  pairing   the PocketDesk app entry, or ${pairUrl}?k=<token from config.json>`);
+      ? `  hub       ${hubUrl}#go=thispc&t=${token}  (open on THIS PC: QR, security, devices)`
+      : `  hub       ${hubUrl}  (This PC page on the PC itself; token in config.json)`);
     console.log(`  config    ${configPath}`);
     console.log("");
     // iroh sockets join wss.clients so broadcast and revoke reach them like /ws sockets.
     if (irohCfg?.enabled) {
-      irohStarting = true;
       startIroh({
         dir: configDir,
         relays: irohCfg.relays,
@@ -802,13 +935,12 @@ export function start(config, { onTokenRotated } = {}) {
           wss.emit("connection", sock, { socket: { remoteAddress: `iroh:${remoteId}` } });
         },
       }).then((ep) => {
-        irohStarting = false;
         if (!ep) return console.log("  iroh      unavailable (optional @number0/iroh not installed)");
         irohEp = ep;
         irohTicket = ep.ticket();
-        buildPairPage(useTls);
+        buildPair(useTls);
         console.log(`  iroh      ${ep.id}`);
-      }).catch((e) => { irohStarting = false; console.log(`  iroh      failed to start: ${e?.message || e}`); });
+      }).catch((e) => console.log(`  iroh      failed to start: ${e?.message || e}`));
     }
     sessionStore.init();
     cliServer.start(() => token, { broadcast, allSessions, pairLink: () => pairLink });

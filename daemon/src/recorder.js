@@ -18,9 +18,15 @@ const safe = (s) => String(s || "").replace(/[^\w.-]+/g, "_").slice(0, 40);
 /** ffmpeg arguments for the audit copy of the screen: 10 fps, pointer drawn, playable even if cut off. */
 export function screenArgs(file, monitor) {
   const adapter = monitor?.adapter || 0;
+  // The audit copy has to show what the viewer saw: the whole extended desktop when that is the chosen
+  // view (ddagrab can only take one output, so the desktop comes from GDI), one output otherwise.
+  const input = monitor?.all
+    ? ["-f", "gdigrab", "-draw_mouse", "1", "-framerate", "10", "-i", "desktop",
+      "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p"]
+    : [...(adapter ? ["-init_hw_device", `d3d11va=rec:${adapter}`, "-filter_hw_device", "rec"] : []),
+      "-filter_complex", `ddagrab=output_idx=${monitor?.output || 0}:framerate=10,hwdownload,format=bgra,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p`];
   return ["-hide_banner", "-loglevel", "error",
-    ...(adapter ? ["-init_hw_device", `d3d11va=rec:${adapter}`, "-filter_hw_device", "rec"] : []),
-    "-filter_complex", `ddagrab=output_idx=${monitor?.output || 0}:framerate=10,hwdownload,format=bgra,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p`,
+    ...input,
     "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", "-g", "100",
     // Fragmented MP4 stays playable up to the last fragment if the daemon dies mid-recording.
     "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "-y", file];

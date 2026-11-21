@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>PocketDesk Phone</title>
+<title>PocketDesk</title>
 <link rel="stylesheet" href="/ui/app.css" />
 <link rel="manifest" href="/ui/manifest.webmanifest" />
 <link rel="icon" href="/ui/icon.svg" type="image/svg+xml" />
@@ -13,7 +13,7 @@
 <div id="login">
   <div class="login-card">
     <div class="brand">PocketDesk</div>
-    <div class="dim">Your phone on this PC</div>
+    <div class="dim">Your phone and this PC, in one place</div>
     <input id="token" placeholder="Token from %USERPROFILE%\.pocketdesk\config.json" />
     <button class="primary" onclick="PD.connect()">Connect</button>
     <div id="loginStatus" class="dim">disconnected</div>
@@ -46,6 +46,7 @@
 <script src="/ui/hub.js"></script>
 <script src="/ui/share.js"></script>
 <script src="/ui/pages.js"></script>
+<script src="/ui/thispc.js"></script>
 <script src="/ui/computers.js"></script>
 <script src="/ui/extras.js"></script>
 </body>

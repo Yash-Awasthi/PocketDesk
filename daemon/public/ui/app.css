@@ -68,6 +68,8 @@ header h1 { margin: 0; font-size: 18px; }
 .item { text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 9px 6px; }
 button.item:hover, .item.on { background: var(--panel2); }
 .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A capture is shown whole, scrolled rather than shortened. */
+.clippy-text { white-space: pre-wrap; overflow: auto; max-height: 45vh; font: 12px/1.45 ui-monospace, Consolas, monospace; background: var(--panel2); border-radius: 8px; padding: 8px; }
 .unread { color: var(--text); font-weight: 600; }
 button.ic { padding: 5px; display: inline-flex; background: transparent; border-color: transparent; }
 button.ic:hover { background: var(--panel2); }
@@ -117,7 +119,13 @@ button.ic:hover { background: var(--panel2); }
 .files tr.dir td.name { cursor: pointer; color: var(--accent); }
 .drop-zone { border-style: dashed; color: var(--dim); }
 .drop-zone.drop, .pwin.drop { outline: 3px dashed var(--accent); outline-offset: -6px; }
-.qr { width: 220px; margin-top: 10px; background: #fff; border-radius: 8px; }
+.tabs { display: flex; gap: 6px; margin: 2px 0 10px; }
+.tab { background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 5px 14px; }
+.tab.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+/* A pairing code has to be big enough to scan from a phone held away from the screen, and black on
+   white whatever the theme: the page-wide svg rule makes icons 18px, which left the QR unreadable. */
+.qr { width: min(320px, 100%); margin-top: 10px; background: #fff; border-radius: 10px; padding: 8px; box-sizing: border-box; }
+.qr svg { width: 100%; height: auto; display: block; fill: #000; stroke: none; shape-rendering: crispEdges; }
 .qr:empty { display: none; }
 .sharepanes { display: flex; gap: 8px; height: 60vh; margin-top: 10px; }
 .sharepanes:empty { display: none; }

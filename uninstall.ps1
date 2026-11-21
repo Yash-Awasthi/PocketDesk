@@ -56,6 +56,7 @@ Stop-PocketDesk
 Start-Sleep -Milliseconds 500
 Stop-PocketDesk
 
+Remove-NetFirewallRule -DisplayName "PocketDesk (daemon)" -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -ErrorAction SilentlyContinue
 foreach ($dir in @([Environment]::GetFolderPath("Programs"), [Environment]::GetFolderPath("Desktop"))) {
     Remove-Item (Join-Path $dir "PocketDesk.lnk") -ErrorAction SilentlyContinue

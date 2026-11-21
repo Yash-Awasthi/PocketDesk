@@ -16,8 +16,10 @@ PD.on("pc_list", (m) => { C.saved = m.items || []; PD.emit("computers_changed");
 PD.on("sources_list", (m) => {
   if (m.of) C.nested.set(m.of, (m.items || []).filter((x) => x.id !== m.of));
   else {
-    C.sources = (m.items || []).filter((x) => x.id !== "local");
-    for (const s of C.sources) if (s.kind === "pc") PD.send({ type: "sources_list", of: s.id });
+    // This PC belongs in the list: its own screen is what a phone opens to drive the desktop.
+    C.sources = (m.items || []).slice();
+    if (!C.sources.some((x) => x.id === "local")) C.sources.unshift({ id: "local", name: "This PC", os: PD.os || "win32", kind: "pc" });
+    for (const s of C.sources) if (s.id.startsWith("pc:") && s.kind === "pc") PD.send({ type: "sources_list", of: s.id });
   }
   PD.emit("computers_changed");
 });
@@ -48,7 +50,7 @@ PD.page("computers", {
     };
     sec.append(
       h("div", { className: "bar" }, btn("Refresh", refresh), btn("Copy this PC's link", () => PD.send({ type: "pc_pairing_link" }))),
-      h("p", { className: "dim small", textContent: "Phones on this PC, other PCs with PocketDesk (Windows, Mac or Linux) and their phones. Open one and drive it with this PC's mouse and keyboard; Ctrl+V pastes this PC's clipboard there." }),
+      h("p", { className: "dim small", textContent: "This PC's own screen, phones on this PC, other PCs with PocketDesk (Windows, Mac or Linux) and their phones. Open one and drive it with this PC's mouse and keyboard; Ctrl+V pastes this PC's clipboard there." }),
       grid,
       kvm,
       h("div", { className: "card col" },
@@ -60,7 +62,7 @@ PD.page("computers", {
         h("div", { className: "row" },
           h("b", { className: "grow", textContent: s.name }),
           h("span", { className: "pill", textContent: s.kind === "phone" ? (s.via === "app" ? "Phone · app" : "Phone") : OS[s.os] || "PC" })),
-        h("span", { className: "dim small", textContent: nestedIn ? `through ${nestedIn}` : s.id.startsWith("pc:") ? (s.online ? "linked" : "saved") : s.id === "share" ? "asks on the phone first" : "on this PC" }),
+        h("span", { className: "dim small", textContent: nestedIn ? `through ${nestedIn}` : s.id === "local" ? "this PC's own screen" : s.id.startsWith("pc:") ? (s.online ? "linked" : "saved") : s.id === "share" ? "asks on the phone first" : "on this PC" }),
         h("div", { className: "bar" },
           btn("Open", () => openWin(s), "primary"),
           s.id.startsWith("pc:") && !nestedIn ? btn("Rename", () => { const n = prompt("Name", s.name); if (n) PD.send({ type: "pc_rename", id: s.id.slice(3), name: n }); }) : "",
@@ -377,4 +379,7 @@ function audio(w, f) {
   if (w.adec.state !== "configured") return;
   try { w.adec.decode(new EncodedAudioChunk({ type: "key", timestamp: (w.aTs = (w.aTs || 0) + 1024), data: f.subarray(7) })); } catch {}
 }
+
+/** Any source in a window of its own, this PC included: Home, the palette and Computers all call this. */
+PD.openComputer = (s) => openWin(s || { id: "local", name: "This PC", kind: "pc", os: PD.os || "win32" });
 })();
