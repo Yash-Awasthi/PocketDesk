@@ -357,8 +357,14 @@ On Windows the installer starts the daemon hidden at logon; see
   black over it, and only that window's own process may change the flag. PocketDesk names the window
   when it can; the alpha handshake in [docs/ALPHA-CAPTURE.md](docs/ALPHA-CAPTURE.md) lets your own
   app stay protected and clear the flag only while PocketDesk is watching.
-- **Exclusive fullscreen** games are not composited by DWM and come back black from every capture
-  path: run them borderless windowed. HDR content can look washed out through an SDR capture.
+- **True exclusive fullscreen** hands the display to the game outside the compositor, so Desktop
+  Duplication returns `DXGI_ERROR_ACCESS_LOST` and GDI/Graphics Capture read black — for any capture
+  tool, at any privilege level. PocketDesk detects it (no frozen mirror: the other screens stay live,
+  the window is named, and the stream snaps back the moment the game lets go) and can make the title
+  capturable again by restoring Windows fullscreen optimizations for it:
+  `scripts/fullscreen-capture.ps1 -Exe <game.exe> -EnableOptimizations`. Borderless fullscreen works
+  as-is. Full detail and the research: [docs/EXCLUSIVE-FULLSCREEN.md](docs/EXCLUSIVE-FULLSCREEN.md).
+  HDR content can look washed out through an SDR capture.
 
 ### How access works
 

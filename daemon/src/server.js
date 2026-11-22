@@ -613,12 +613,64 @@ export function start(config, { onTokenRotated } = {}) {
       resync(faults > 2 ? 2000 : 600);
     }, delay);
   };
+  // A true exclusive-fullscreen app takes the display away from DWM: Desktop Duplication answers
+  // DXGI_ERROR_ACCESS_LOST and GDI comes back black for as long as it holds the screen (Windows' own
+  // docs). No user-mode API can read those pixels at any privilege level, so do not pretend: name it,
+  // keep every other screen live, and return to the chosen one the moment the app lets go.
+  let exclusive = null;     // { title } while such an app is in front
+  let exclusiveTimer = null;
+  let stallBusy = false;
+  let chosenMonitor = null; // the screen the viewers picked, restored after the fallback
+  const leaveExclusive = async () => {
+    if (!exclusive) return;
+    const f = await desktop.fullscreenNow().catch(() => ({ d3d: false }));
+    if (f.d3d) return;
+    exclusive = null;
+    clearInterval(exclusiveTimer);
+    exclusiveTimer = null;
+    console.log("[pocketdesk] exclusive fullscreen ended; back to the chosen screen");
+    if (chosenMonitor) { video.monitor = chosenMonitor; chosenMonitor = null; }
+    for (const w of videoWatchers) { w._needKey = true; }
+    if (videoWatchers.size) resync(0);
+  };
+  const enterExclusive = (title) => {
+    if (exclusive) return;
+    exclusive = { title: title || "" };
+    console.log(`[pocketdesk] exclusive fullscreen${title ? ` (${title})` : ""}: the display is not composited, so capture falls back to the rest of the desktop`);
+    for (const w of new Set([...videoWatchers, ...desktopWatchers])) {
+      try {
+        send(w, {
+          type: "desktop_notice",
+          blocked: title || "",
+          notice: `${title || "That app"} is in true exclusive fullscreen: Windows gives it the display outside the compositor, ` +
+            "so every screen-capture API (Desktop Duplication, GDI, Graphics Capture) reads black, at any privilege level. " +
+            "PocketDesk keeps the other screens live and returns to this one when the app leaves fullscreen. " +
+            "To mirror the app itself, run it borderless, or restore Windows fullscreen optimizations for it with " +
+            "scripts/fullscreen-capture.ps1 -Exe <game.exe>; see docs/EXCLUSIVE-FULLSCREEN.md.",
+        });
+      } catch { /* watcher vanished mid-send */ }
+    }
+    if (video.monitor && !video.monitor.all) chosenMonitor = video.monitor;
+    const all = (desktop.monitorList || []).find((m) => m.all);
+    if (chosenMonitor && all) {
+      video.monitor = all;
+      for (const w of videoWatchers) { w._needKey = true; }
+    }
+    if (!exclusiveTimer) {
+      exclusiveTimer = setInterval(() => { leaveExclusive().catch(() => {}); }, 2000);
+      exclusiveTimer.unref?.();
+    }
+  };
   // An ffmpeg that is alive but silent (a fullscreen app changing composition, a GPU reset, a display
   // that vanished mid-stream) would leave every viewer on a frozen picture with no error at all.
-  const stallTimer = setInterval(() => {
-    if (!videoWatchers.size || !video.running || resyncTimer) return;
+  const stallTimer = setInterval(async () => {
+    if (!videoWatchers.size || !video.running || resyncTimer || stallBusy) return;
     if (Date.now() - lastPacketAt < 6000) return;
     lastPacketAt = Date.now();
+    stallBusy = true;
+    const f = await desktop.fullscreenNow().catch(() => ({ d3d: false, title: "" }));
+    stallBusy = false;
+    if (f.d3d) { enterExclusive(f.title); resync(400); return; }
     console.log("[pocketdesk] no frames for 6s while watching; restarting the encoder");
     resync(0);
   }, 2000);

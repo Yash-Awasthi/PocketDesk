@@ -279,6 +279,33 @@ public static class RHD {
     GetWindowText(h, sb, sb.Capacity);
     return sb.ToString();
   }
+  [StructLayout(LayoutKind.Sequential)] public struct WRECT { public int L, T, R, B; }
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out WRECT r);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+  [DllImport("shell32.dll")] static extern int SHQueryUserNotificationState(out int state);
+  /**
+   * [state, d3d, pid, w, h, title] for the focused window. state is SHQueryUserNotificationState:
+   * 2 a fullscreen app is in front, 3 a D3D app has taken the display (true exclusive fullscreen,
+   * outside DWM, so Desktop Duplication and GDI come back empty until it lets go).
+   */
+  public static string[] Fullscreen() {
+    int s = -1;
+    int hr = SHQueryUserNotificationState(out s);
+    IntPtr h = GetForegroundWindow();
+    var sb = new StringBuilder(256);
+    if (h != IntPtr.Zero) GetWindowText(h, sb, sb.Capacity);
+    var r = new WRECT();
+    uint pid = 0;
+    if (h != IntPtr.Zero) { GetWindowRect(h, out r); GetWindowThreadProcessId(h, out pid); }
+    return new string[] {
+      (hr == 0 ? s : -1).ToString(),
+      (s == 3 ? "true" : "false"),
+      pid.ToString(),
+      (r.R - r.L).ToString(),
+      (r.B - r.T).ToString(),
+      sb.ToString(),
+    };
+  }
   /** Outputs in the adapter/output order ffmpeg's ddagrab uses, as JSON objects. */
   public static string Monitors() {
     var g = typeof(IFactory).GUID; IFactory f;
@@ -312,6 +339,14 @@ while ($true) {
   }
   if ($op -eq 'protected') {
     try { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$true; blocked=[RHD]::BlockedWindow()} | ConvertTo-Json -Compress)) }
+    catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
+    continue
+  }
+  if ($op -eq 'fullscreen') {
+    try {
+      $f = [RHD]::Fullscreen()
+      [Console]::Out.WriteLine((@{id=$cmd.id; ok=$true; state=[int]$f[0]; d3d=($f[1] -eq 'true'); pid=[int]$f[2]; w=[int]$f[3]; h=[int]$f[4]; title=$f[5]} | ConvertTo-Json -Compress))
+    }
     catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
     continue
   }
@@ -1542,6 +1577,22 @@ export class DesktopController extends EventEmitter {
       return { ok: !!r?.ok, blocked: r?.blocked || "" };
     } catch (e) {
       return { ok: false, error: e.message, blocked: "" };
+    }
+  }
+
+  /**
+   * The focused window's fullscreen state: { d3d } is true while a D3D app owns the display outside
+   * DWM (true exclusive fullscreen), which every user-mode capture API returns black for.
+   */
+  async fullscreenNow() {
+    if (!IS_WIN) return { ok: true, d3d: false, state: 0, title: "" };
+    try {
+      await this.helperCapture.ensure();
+      const r = await this.helperCapture.cmd({ op: "fullscreen" }, 3000);
+      const f = r?.fullscreen || r || {};
+      return { ok: !!r?.ok, d3d: r?.d3d === true, state: r?.state ?? 0, title: r?.title || "", pid: r?.pid || 0, w: r?.w || 0, h: r?.h || 0 };
+    } catch (e) {
+      return { ok: false, d3d: false, state: 0, title: "", error: e.message };
     }
   }
 
