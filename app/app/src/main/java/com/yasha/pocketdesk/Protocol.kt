@@ -275,6 +275,7 @@ object Proto {
     fun desktopNav(key: String) = obj { put("type", "desktop_nav"); put("key", key) }
     fun sourcesList(of: String? = null) = obj { put("type", "sources_list"); if (of != null) put("of", of) }
     fun desktopPing(t: Long) = obj { put("type", "desktop_ping"); put("t", t) }
+    fun desktopPong(t: Long, server: Long) = obj { put("type", "desktop_pong"); put("t", t); put("server", server) }
     fun clipboardGet() = obj { put("type", "clipboard_get") }
     fun clipboardSet(text: String?, png: String? = null, files: List<String>? = null, paste: Boolean = false) = obj {
         put("type", "clipboard_set")

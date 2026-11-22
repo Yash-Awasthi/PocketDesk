@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 const pcMedia = new PcMedia();
 
 export default function remoteHandlers(ctx) {
-  const { send, desktop, desktopWatchers, video, videoWatchers, recorder, access, syncAudio, audioListeners } = ctx;
+  const { send, desktop, clippy, desktopWatchers, video, videoWatchers, recorder, access, syncAudio, audioListeners } = ctx;
   // Sockets that took a single snapshot stay on the viewer set for a few seconds.
   const snapshots = new Map();
   const deviceName = (ws) => devices.list().find((d) => d.id === ws._clientId)?.name || "A remote device";
@@ -80,7 +80,12 @@ export default function remoteHandlers(ctx) {
         video.setPreset(msg.preset);
         // One encoder serves everyone, so only codecs every current viewer decodes are on the table.
         video.setCodecs(sharedCodecs());
-        if (msg.monitor != null) video.monitor = await monitorAt(Number(msg.monitor) || 0);
+        // follow: mirror whichever monitor holds the foreground window (game on a second screen).
+        if (msg.follow) {
+          if (!desktop.monitorList) await desktop.monitors();
+          const fm = await desktop.foregroundMonitor();
+          if (fm) video.monitor = fm;
+        } else if (msg.monitor != null) video.monitor = await monitorAt(Number(msg.monitor) || 0);
         const encoder = video.running ? await video.restart() : await video.start();
         if (encoder) {
           if (!ws._videoCloseHooked) {
@@ -119,6 +124,10 @@ export default function remoteHandlers(ctx) {
     // Viewers align their clock with the daemon's to turn frame stamps into delays.
     async desktop_ping(ws, msg) {
       send(ws, { type: "desktop_pong", t: msg.t, server: Date.now() });
+    },
+    // Phone replies to keepalive pings; recorded so the link is known alive.
+    async desktop_pong(ws, msg) {
+      // Nothing to act on: the pong confirms the iroh/ws path is round-tripping.
     },
     async desktop_monitors(ws, msg) {
       const r = await desktop.monitors();
@@ -276,6 +285,54 @@ export default function remoteHandlers(ctx) {
     },
     async desktop_status(ws, msg) {
       send(ws, { type: "desktop_status", ...desktop.getStatus() });
+    },
+    // clippy: keystroke recorder that captures Ctrl+C (foreground window + system clipboard)
+    // into clippy_capture.json; PocketDesk pushes that text to the system clipboard so
+    // Ctrl+V outside a game pastes what Ctrl+C copied inside it.
+    async clippy_start(ws, msg) {
+      if (!access.controlAllowed || ws._viewOnlyForced)
+        return send(ws, { type: "clippy_start_ok", ok: false, error: "control is paused on the PC" });
+      send(ws, { type: "clippy_start_ok", ...(await clippy.start()) });
+    },
+    async clippy_stop(ws, msg) {
+      if (!access.controlAllowed || ws._viewOnlyForced)
+        return send(ws, { type: "clippy_stop_ok", ok: false, error: "control is paused on the PC" });
+      send(ws, { type: "clippy_stop_ok", ...(await clippy.stop()) });
+    },
+    async clippy_status(ws, msg) {
+      send(ws, { type: "clippy_status", ...(await clippy.status()) });
+    },
+    /** Choose where clippy stores capture + history. Empty dir resets to the exe folder. */
+    async clippy_setdir(ws, msg) {
+      if (!access.controlAllowed || ws._viewOnlyForced)
+        return send(ws, { type: "clippy_setdir_ok", ok: false, error: "control is paused on the PC" });
+      send(ws, { type: "clippy_setdir_ok", ...(await clippy.setDir(msg.dir)) });
+    },
+    /** One-time elevated install of the Clippy scheduled task (UAC prompt). After this,
+     *  clippy_start runs it with full administrator privileges. */
+    async clippy_install(ws, msg) {
+      if (!access.controlAllowed || ws._viewOnlyForced)
+        return send(ws, { type: "clippy_install_ok", ok: false, error: "control is paused on the PC" });
+      send(ws, { type: "clippy_install_ok", ...(await clippy.install()) });
+    },
+    /** Latest Ctrl+C capture, on demand. */
+    async clippy_latest(ws, msg) {
+      send(ws, { type: "clippy_latest", ...(await clippy.latest()) });
+    },
+    /** Push the most recent clippy capture onto the PC's system clipboard,
+     *  and optionally press Ctrl+V so the active window pastes it at once. */
+    async clippy_paste(ws, msg) {
+      if (!access.controlAllowed || ws._viewOnlyForced)
+        return send(ws, { type: "clippy_paste_ok", ok: false, error: "control is paused on the PC" });
+      const c = await clippy.latest();
+      if (!c.ok) return send(ws, { type: "clippy_paste_ok", ok: false, error: c.error });
+      const body = c.text || c.typed;
+      if (!body) return send(ws, { type: "clippy_paste_ok", ok: false, error: "capture is empty" });
+      const r = await desktop.clipboardSet({ text: body });
+      if (r.ok && msg.paste) {
+        await desktop.inputKey({ key: 86, modifiers: [process.platform === "darwin" ? "win" : "ctrl"] });
+      }
+      send(ws, { type: "clippy_paste_ok", ok: r.ok, error: r.error, window: c.window, text: c.text, typed: c.typed, at: c.at });
     },
     // macOS grants: { request:true } shows the system prompts on the PC, so only a controller may ask.
     async desktop_permissions(ws, msg) {

@@ -16,6 +16,7 @@ const I = {
   photos: '<svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="1.5"/><path d="m3.5 14 4-4 3 3 2-2 4 4"/><circle cx="13" cy="7.5" r="1.3"/></svg>',
   files: '<svg viewBox="0 0 20 20"><path d="M3 5.5V15a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V7.5a1 1 0 0 0-1-1H9.5L8 4.5H4a1 1 0 0 0-1 1z"/></svg>',
   clipboard: '<svg viewBox="0 0 20 20"><rect x="5" y="4" width="10" height="13" rx="1.5"/><path d="M8 4V3h4v1"/><path d="M7.5 8.5h5 M7.5 11.5h5 M7.5 14.5h3"/></svg>',
+  clippy: '<svg viewBox="0 0 20 20"><path d="M3 4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm14-2h-6l-2-2H5a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1m-1 14H6v-6h10zm0-8H6V5h10z"/></svg>',
   connect: '<svg viewBox="0 0 20 20"><path d="M8 12l4-4 M6.5 9.5 5 11a2.8 2.8 0 0 0 4 4l1.5-1.5 M13.5 10.5 15 9a2.8 2.8 0 0 0-4-4L9.5 6.5"/></svg>',
 };
 const btn = (label, onclick, cls = "") => h("button", { className: cls, textContent: label, onclick });
@@ -39,14 +40,15 @@ PD.page("home", {
     sec.append(
       h("div", { className: "grid2" },
         h("div", { className: "card", id: "homePhone" }),
-        h("div", { className: "card", id: "homeMedia" })),
+        h("div", { className: "card", id: "homeMedia" }),
+        h("div", { className: "card", id: "homeClippy" })),
       h("div", { className: "card", id: "homeToggles" }),
       h("div", { className: "card", id: "homeNotifs" }));
-    const draw = () => { drawPhoneCard(); drawMedia(); drawToggles(); drawHomeNotifs(); };
+    const draw = () => { drawPhoneCard(); drawMedia(); drawToggles(); drawClippy(); drawHomeNotifs(); };
     PD.on("adb_changed", draw);
     PD.on("hub_changed", draw);
   },
-  show() { PD.send({ type: "adb_state" }); PD.send({ type: "phone_hub" }); },
+  show() { PD.send({ type: "adb_state" }); PD.send({ type: "phone_hub" }); PD.send({ type: "clippy_status" }); PD.send({ type: "clippy_latest" }); },
 });
 function drawPhoneCard() {
   const box = $("#homePhone");
@@ -105,6 +107,59 @@ function drawToggles() {
       slider("Volume", t.volume, (v) => run(() => PD.ask("toggles", "set", { id: "volume", level: v }))),
       slider("Brightness", t.brightness, (v) => run(() => PD.ask("toggles", "set", { id: "brightness", level: v })))) : "");
 }
+
+// ── Clippy toggle ──
+PD.clippy = { on: false, installed: false, last: null, dir: "" };
+function drawClippy() {
+  const b = $("#homeClippy");
+  if (!b) return;
+  const st = PD.clippy;
+  if (!st.dirInput) {
+    st.dirInput = h("input", { placeholder: "D:\\clippy-data (blank = beside the app)", value: st.dir || "" });
+  }
+  const on = st.on, inst = st.installed, last = st.last;
+  const lastText = last ? (last.text || last.typed || "") : "";
+  const preview = lastText
+    ? h("div", { className: "card", style: "padding:8px;margin-top:8px" },
+        h("div", { className: "dim small", textContent: `${last.window ? `From: ${last.window}` : "Last Ctrl+C"}${!last.text && last.typed ? " · typed buffer" : ""}` }),
+        h("div", { className: "clip", textContent: lastText.slice(0, 300) }))
+    : "";
+  b.replaceChildren(
+    h("h3", { textContent: "Clippy — Ctrl+C capture" }),
+    h("p", { className: "dim", textContent: "Captures the system clipboard on Ctrl+C from any window (games included) so Ctrl+V outside the game pastes it. Runs as an elevated scheduled task." }),
+    h("div", { className: "actions" },
+      !inst ? btn("Install clippy (asks for administrator rights once)", () => { PD.send({ type: "clippy_install" }); }, "primary")
+        : on ? btn("Stop clippy", () => { PD.send({ type: "clippy_stop" }); }, "danger")
+        : btn("Start clippy (elevated)", () => { PD.send({ type: "clippy_start" }); }, "primary"),
+      inst && btn("Paste last copy (elevated)", () => { PD.send({ type: "clippy_paste", paste: true }); })),
+    on ? h("div", { className: "dim", textContent: "Running — Ctrl+C inside any window is captured to the PC clipboard." })
+      : inst ? h("div", { className: "dim", textContent: "Installed. Click Start to begin capturing." })
+      : h("div", { className: "dim", textContent: "Not installed yet." }),
+    h("div", { className: "form", style: "margin-top:8px" },
+      h("label", {}, "Where clippy stores its data"),
+      st.dirInput,
+      btn("Save path", () => { PD.send({ type: "clippy_setdir", dir: st.dirInput.value.trim() }); }),
+      h("span", { className: "dim small", textContent: st.dir ? `Now: ${st.dir}` : "" })),
+    preview);
+}
+PD.on("clippy_state", (m) => {
+  PD.clippy.on = !!m.running; PD.clippy.installed = !!m.installed;
+  if (typeof m.dir === "string") { PD.clippy.dir = m.dir; if (PD.clippy.dirInput && !PD.clippy.dirInput.value) PD.clippy.dirInput.value = m.dir; }
+  drawClippy();
+});
+PD.on("clippy_status", (m) => {
+  if (typeof m.dir === "string") { PD.clippy.dir = m.dir; if (PD.clippy.dirInput && !PD.clippy.dirInput.value) PD.clippy.dirInput.value = m.dir; }
+  if (Array.isArray(m.history) && m.history.length) { const l = m.history[m.history.length - 1]; PD.clippy.last = { window: l.window, text: l.text, typed: l.typed, at: l.at }; }
+  drawClippy();
+});
+PD.on("clippy_setdir_ok", (m) => {
+  if (m.ok) { PD.clippy.dir = m.dir || ""; if (PD.clippy.dirInput) PD.clippy.dirInput.value = m.dir || ""; PD.toast("Clippy data path saved"); }
+  else PD.toast(m.error || "Could not set path", true);
+  drawClippy();
+});
+PD.on("clippy_copy", (m) => { PD.clippy.last = { window: m.window, text: m.text, typed: m.typed, at: m.at }; drawClippy(); });
+PD.on("clippy_latest", (m) => { if (m.ok) { PD.clippy.last = { window: m.window, text: m.text, typed: m.typed, at: m.at }; drawClippy(); } });
+
 function drawHomeNotifs() {
   const box = $("#homeNotifs"), list = PD.notifs.list.slice(0, 5);
   box.replaceChildren(h("h3", {}, "Notifications ", h("a", { href: "#", textContent: "all", onclick: (e) => { e.preventDefault(); PD.go("notifications"); } })),

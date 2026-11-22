@@ -36,6 +36,29 @@ const IS_WIN = process.platform === "win32";
 const IS_MAC = process.platform === "darwin";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Whether this process can see elevated windows (UIPI). A non-elevated daemon captures only
+// unelevated windows and injects input only into them. Cached: elevation does not change at runtime.
+let _elevated = null;
+function isElevated() {
+  if (_elevated !== null) return _elevated;
+  if (!IS_WIN) { _elevated = true; return _elevated; }
+  try { execFileSync("net", ["session"], { stdio: "ignore", windowsHide: true, timeout: 3000 }); _elevated = true; }
+  catch { _elevated = false; }
+  return _elevated;
+}
+
+// Foreground window rectangle, in virtual-screen coordinates; null off Windows or on failure.
+const FG_RECT_SCRIPT = "Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public struct R{public int L,T,Rt,B;}public static class FG{[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();[DllImport(\"user32.dll\")]public static extern bool GetWindowRect(IntPtr h,out R r);}';$h=[FG]::GetForegroundWindow();$r=New-Object R;[FG]::GetWindowRect($h,[ref]$r)|Out-Null;'{0} {1} {2} {3}' -f $r.L,$r.T,$r.Rt,$r.B";
+function foregroundRect() {
+  if (!IS_WIN) return null;
+  try {
+    const out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", FG_RECT_SCRIPT],
+      { encoding: "utf8", windowsHide: true, timeout: 4000 });
+    const m = out.trim().match(/^(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)$/);
+    return m ? { left: +m[1], top: +m[2], right: +m[3], bottom: +m[4] } : null;
+  } catch { return null; }
+}
+
 /** JSON-safe, ASCII-only wire line (PS 5.1 stdin is happiest with ASCII). */
 function wireLine(obj) {
   return JSON.stringify(obj).replace(/[\u0080-\uFFFF]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")) + "\n";
@@ -1310,10 +1333,21 @@ export class DesktopController extends EventEmitter {
       // captureOnce is a no-op while the stream loop has one in flight, so
       // wait for that frame rather than reporting a failure that never was.
       if (this.capturing) await this._nextFrame(15000);
+      else if (IS_WIN && await this._tryDXGI()) { /* frame set from DXGI */ }
       else await this.captureOnce();
       if (!this.lastFrame) return { ok: false, reason: inputError(this._lastCaptureError) || "capture_failed" };
     }
     return { ok: true, ...this.lastFrame };
+  }
+
+  /** Snapshot via DXGI Desktop Duplication (captures exclusive fullscreen games that
+   *  GDI CopyFromScreen misses). Returns true when it produced a frame. */
+  async _tryDXGI() {
+    const t0 = Date.now();
+    const dxgi = await this.captureFrameDXGI(this.quality);
+    if (dxgi?.ok && dxgi.b64) { this._setFrame(dxgi.b64, dxgi.width, dxgi.height, t0); return true; }
+    this._lastCaptureError = dxgi?.error || "dxgi_failed";
+    return false;
   }
 
   _nextFrame(timeoutMs) {
@@ -1348,11 +1382,7 @@ export class DesktopController extends EventEmitter {
       // temp-file save/rename pattern is what its heuristics flag.
       const r = await this.helperCapture.cmd({ op: "capture", s: this.scale }, 12000);
       if (r?.ok && r.b64) {
-        this.stats.lastCaptureMs = Date.now() - t0;
-        this.lastFrame = { base64: r.b64, width: r.w, height: r.h, ts: Date.now(), seq: ++this.frameSeq };
-        this.stats.framesSent++;
-        this._lastCaptureError = null;
-        this.emit("frame", this.lastFrame);
+        this._setFrame(r.b64, r.w, r.h, t0);
       } else {
         this.stats.capturesFailed++;
         const error = r?.error || "capture_failed";
@@ -1369,6 +1399,91 @@ export class DesktopController extends EventEmitter {
     } finally {
       this.capturing = false;
     }
+  }
+
+  /** Set lastFrame from a captured result, updating stats and emitting "frame". */
+  _setFrame(b64, width, height, t0) {
+    this.stats.lastCaptureMs = Date.now() - t0;
+    this.lastFrame = { base64: b64, width, height, ts: Date.now(), seq: ++this.frameSeq };
+    this.stats.framesSent++;
+    this._lastCaptureError = null;
+    this.emit("frame", this.lastFrame);
+  }
+
+  /** Resolve ffmpeg binary: FFMPEG_PATH env, then known winget install paths, then PATH. */
+  static _ffmpegPath() {
+    if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
+    const base = "C:\\Users\\Yash\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe";
+    try {
+      const pkgs = fs.readdirSync(base, { withFileTypes: true }).filter((d) => d.isDirectory());
+      for (const d of pkgs.sort().reverse()) {
+        const p = path.join(base, d.name, "bin", "ffmpeg.exe");
+        try { if (fs.existsSync(p)) return p; } catch { /* skip */ }
+      }
+    } catch { /* base dir missing */ }
+    return "ffmpeg";
+  }
+
+  /** Capture a single frame via ffmpeg + DXGI Desktop Duplication (ddagrab).
+   *  Captures exclusive fullscreen game surfaces that GDI CopyFromScreen cannot see.
+   *  Returns { ok, b64, width, height } or { ok: false, error }. */
+  async captureFrameDXGI(quality = 60) {
+    const ffmpeg = DesktopController._ffmpegPath();
+    // MJPEG quality: -qscale:v 1..31, lower = better. Map our 0-100 quality to that range.
+    const qscale = Math.round(31 - (Math.min(95, Math.max(10, quality)) / 100) * 30);
+
+    return new Promise((resolve) => {
+      let stdout = Buffer.alloc(0);
+      let stderr = "";
+      let resolved = false;
+      const child = spawn(ffmpeg, [
+        "-hide_banner", "-loglevel", "error",
+        "-f", "ddagrab",
+        "-framerate", "1",
+        "-i", "desktop",
+        "-frames:v", "1",
+        "-f", "image2pipe",
+        "-vcodec", "mjpeg",
+        "-qscale:v", String(qscale),
+        "-"
+      ], { windowsHide: true });
+
+      const finish = (ok, error, b64, width, height) => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timer);
+        try { child.kill("SIGKILL"); } catch { }
+        resolve({ ok, error, b64, width, height });
+      };
+
+      const timer = setTimeout(() => finish(false, "ffmpeg_timeout"), 10000);
+
+      child.stdout.on("data", (d) => { stdout = Buffer.concat([stdout, d]); });
+      child.stderr.on("data", (d) => { stderr += d.toString(); });
+
+      child.on("close", (code) => {
+        if (resolved) return;
+        if (code === 0 && stdout.length > 0) {
+          try {
+            const b64 = stdout.toString("base64");
+            // Parse JPEG SOF0 marker for dimensions: FF C0 .. length .. precision H W
+            let w = 0, h = 0;
+            for (let i = 2; i < stdout.length - 5; i++) {
+              if (stdout[i] === 0xFF && stdout[i + 1] === 0xC0) {
+                h = stdout.readUInt16BE(i + 5);
+                w = stdout.readUInt16BE(i + 7);
+                break;
+              }
+            }
+            finish(true, null, b64, w || 0, h || 0);
+          } catch { finish(true, null, stdout.toString("base64"), 0, 0); }
+        } else {
+          finish(false, stderr.trim() || `ffmpeg exited ${code}`);
+        }
+      });
+
+      child.on("error", (e) => { finish(false, e.message); });
+    });
   }
 
   /** x/y: from the top-left monitor's corner, in pixels (points on macOS) (omit to act at the cursor); click: left|right|middle|double; press: down|up of button. */
@@ -1452,6 +1567,18 @@ export class DesktopController extends EventEmitter {
     this.origin = IS_MAC ? { x: ox, y: oy } : { x: 0, y: 0 };
     this.monitorList = monitors;
     return { ok: true, monitors };
+  }
+
+  /** The monitor holding the foreground window, so a game on a second screen can be mirrored
+   *  without the viewer picking it. Null when unknown (off Windows, no monitors listed, no rect). */
+  async foregroundMonitor() {
+    if (!IS_WIN) return null;
+    if (!this.monitorList) return null;
+    const rect = foregroundRect();
+    if (!rect) return null;
+    const cx = (rect.left + rect.right) / 2 - this.origin.x;
+    const cy = (rect.top + rect.bottom) / 2 - this.origin.y;
+    return this.monitorList.find((m) => cx >= m.x && cx < m.x + m.w && cy >= m.y && cy < m.y + m.h) || null;
   }
 
   /** The pointer now, in the same space as input, or null. */
@@ -1548,6 +1675,7 @@ export class DesktopController extends EventEmitter {
   getStatus() {
     return {
       supported: this.usable,
+      elevated: IS_WIN ? isElevated() : null,
       streaming: !!this.captureTimer,
       clients: this.clients.size,
       quality: this.quality,

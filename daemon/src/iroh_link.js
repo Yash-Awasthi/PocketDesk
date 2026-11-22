@@ -85,6 +85,39 @@ function frame(payload) {
   return b;
 }
 
+/** Ping/pong keepalive over iroh: idle NAT/relay state is detected as dead and redialled.
+ *  `io` must expose send(data), close(code, reason) and an "message" event. */
+function keepalive(io) {
+  const INTERVAL = 20_000; // send a ping every 20 s while the link is otherwise idle
+  const TIMEOUT = 10_000;  // close if a ping goes unanswered for 10 s
+  let lastPong = Date.now();
+  let awaiting = false;
+  let pingAt = 0;
+  const timer = setInterval(() => {
+    const now = Date.now();
+    if (awaiting && now - pingAt > TIMEOUT) {
+      io.close(1006, "keepalive timeout");
+      return;
+    }
+    if (now - lastPong > INTERVAL) {
+      awaiting = true;
+      pingAt = now;
+      io.send(JSON.stringify({ type: "desktop_ping", t: now }));
+    }
+  }, INTERVAL);
+  timer.unref?.();
+  io._pingTimer = timer;
+  io.on("message", (m) => {
+    try {
+      const j = JSON.parse(m);
+      if (j.type === "desktop_pong" && typeof j.t === "number" && pingAt > 0 && j.t === pingAt) {
+        lastPong = Date.now();
+        awaiting = false;
+      }
+    } catch {}
+  });
+}
+
 /** Serialized writes to one send stream; `queued` counts bytes not yet accepted by it. */
 function streamWriter(stream) {
   const w = { queued: 0, dead: false, chain: Promise.resolve() };
@@ -119,6 +152,7 @@ export class IrohClient extends EventEmitter {
       this._ctl = streamWriter(bi.send);
       this.readyState = 1;
       this.emit("open");
+      keepalive(this);
       conn.closed().then((r) => this._end(1006, r), () => this._end(1006, ""));
       this._videoLoop(conn).catch(() => {});
       this._ackTimer = setInterval(() => {
@@ -171,6 +205,7 @@ export class IrohClient extends EventEmitter {
     if (this.readyState === 3) return;
     this.readyState = 3;
     clearInterval(this._ackTimer);
+    clearInterval(this._pingTimer);
     this.emit("close", code, Buffer.from(String(reason || "")));
   }
 }
@@ -181,6 +216,7 @@ export class IrohSocket extends EventEmitter {
     super();
     this.conn = conn;
     this.readyState = 1;
+    keepalive(this);
     this._ctl = streamWriter(bi.send);
     // Replies and terminal output must not queue behind video; GOP streams count up from 1.
     bi.send.setPriority(2 ** 31 - 1).catch(() => {});
@@ -312,6 +348,7 @@ export class IrohSocket extends EventEmitter {
   _closed(code) {
     if (this.readyState === 3) return;
     this.readyState = 3;
+    clearInterval(this._pingTimer);
     this._gop?.reset();
     this.emit("close", code);
   }
