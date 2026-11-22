@@ -889,7 +889,10 @@ export function start(config, { onTokenRotated } = {}) {
   handlers.pc_pairing_link = async (ws) => send(ws, ws._loopback && pairLink ? { type: "pc_pairing_link", link: pairLink } : { type: "pc_error", message: "open this page on the PC itself to copy its link" });
 
 
-  server.listen(port, async () => {
+  // Roadmap 2.1: without TLS the hello (the pairing token) would cross the LAN in cleartext, so a
+  // plaintext daemon answers this machine only. It used to bind every interface and rely on the
+  // firewall; the loopback bind is the guarantee. iroh carries its own encryption and is untouched.
+  server.listen(port, useTls ? undefined : "127.0.0.1", async () => {
     const scheme = useTls ? "wss" : "ws";
     let fp = "";
     if (useTls) {

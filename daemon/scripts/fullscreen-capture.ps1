@@ -22,6 +22,11 @@
 .PARAMETER DisableOptimizations
   Put the flag back.
 
+.PARAMETER ToWindowed
+  Send Alt+Enter to the exclusive app in front, the standard fullscreen toggle most games honour.
+  When it works the title drops to a windowed/borderless mode that PocketDesk captures at once;
+  when it does not, the app stays exclusive and nothing else changes.
+
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File fullscreen-capture.ps1
   powershell -ExecutionPolicy Bypass -File fullscreen-capture.ps1 -Exe "C:\Games\Riddle\game.exe" -EnableOptimizations
@@ -29,7 +34,8 @@
 param(
   [string]$Exe,
   [switch]$EnableOptimizations,
-  [switch]$DisableOptimizations
+  [switch]$DisableOptimizations,
+  [switch]$ToWindowed
 )
 
 $ErrorActionPreference = 'Stop'
@@ -44,6 +50,14 @@ public static class PdFullscreen {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("shell32.dll")] public static extern int SHQueryUserNotificationState(out int state);
+  [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+  /** Alt+Enter: the fullscreen toggle most games listen for. */
+  public static void ToggleFullscreen() {
+    keybd_event(0x12, 0, 0, UIntPtr.Zero);  // Alt down
+    keybd_event(0x0D, 0, 0, UIntPtr.Zero);  // Enter down
+    keybd_event(0x0D, 0, 2, UIntPtr.Zero);  // Enter up
+    keybd_event(0x12, 0, 2, UIntPtr.Zero);  // Alt up
+  }
 }
 '@
 
@@ -74,6 +88,24 @@ Write-Host "  foreground window            : '$($sb.ToString())'"
 Write-Host "  process                      : $proc (pid $pid_)"
 Write-Host "  window size                  : $($rect.R - $rect.L) x $($rect.B - $rect.T)"
 Write-Host ''
+
+if ($ToWindowed) {
+  if ($state -ne 3) {
+    Write-Host "No D3D exclusive-fullscreen app in front (state $state), nothing to knock out of it." -ForegroundColor Yellow
+    exit 1
+  }
+  Write-Host 'Sending Alt+Enter to the exclusive app, the standard fullscreen toggle...'
+  [PdFullscreen]::ToggleFullscreen()
+  Start-Sleep -Milliseconds 1800
+  $after = -1
+  [void][PdFullscreen]::SHQueryUserNotificationState([ref]$after)
+  if ($after -eq 3) {
+    Write-Host 'Still exclusive: this title ignores Alt+Enter. Restart it with -EnableOptimizations set, or pick borderless in its own settings.' -ForegroundColor Yellow
+    exit 1
+  }
+  Write-Host 'Left exclusive fullscreen: PocketDesk captures it now (the mirror resumes within a second).' -ForegroundColor Green
+  exit 0
+}
 
 $layers = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers'
 $all = @{}

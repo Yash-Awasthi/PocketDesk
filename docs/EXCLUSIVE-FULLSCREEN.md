@@ -57,6 +57,16 @@ RAT heuristics AMSI flags). Every other route is the OS saying no.
 
    The other one-line fix is the game’s own setting: **borderless / windowed fullscreen**.
 
+4. **Knocks a title out of exclusive in place**, for games that honour the standard toggle:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File daemon\scripts\fullscreen-capture.ps1 -ToWindowed
+   ```
+
+   It sends Alt+Enter to the exclusive app, re-reads `SHQueryUserNotificationState` and reports
+   whether the display came back to the compositor. When it did, the mirror picks the game up within
+   a second (the 400 ms retry). When the title ignores the key, nothing else changes.
+
 ## How to check what you have
 
 With the game open, on the PC:

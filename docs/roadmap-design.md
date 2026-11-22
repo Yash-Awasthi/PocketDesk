@@ -200,3 +200,22 @@ window flash during a chat turn, a git action or a desktop stream.
 - Still needs real hardware: a phone run (foreground service, biometric lock, QR pairing), a
   Windows check that no helper flashes a window, and a Mac check of H.264 capture and
   Retina input mapping.
+
+### Re-check on this Windows machine (2026-11-22)
+
+Re-run against the installed build and a checkout, because 2.1's claim did not survive it:
+
+- **2.1 wss only — gap found and fixed.** A plaintext daemon (`RH_HOME` + `RH_PORT` + `RH_TOKEN`,
+  which forces TLS off) was listening on `0.0.0.0:8899` *and* `[::]:8899`, not on loopback. The
+  existing test passed only because Windows Firewall refused the LAN connection for that Node
+  binary; the bind itself was wrong. `server.listen` now binds `127.0.0.1` whenever TLS is off
+  (`server.js`, "roadmap 2.1"), so the guarantee no longer depends on a firewall rule. Verified
+  after the change: `netstat` shows `127.0.0.1:8899` only, `/health` answers on loopback, and the
+  LAN address is refused.
+- **2.2 settings on the PC — verified.** `GET /access/devices?k=<token>` → 200, the same route with
+  no key → 403, `POST /access/totp` with no key → 403.
+- **2.3 Task Manager only — verified except the window-flash check.** The Start Menu has
+  `PocketDesk.lnk` and the Desktop has no PocketDesk shortcut; `wake.js`, `power_manager.js`,
+  `gitpanel.js`, `chat.js`, `freebuff_control.js` and `desktop_video.js` all pass `windowsHide`. The
+  console daemon name could not be checked here: `-Console` is not installed on this machine.
+- Still open from before: the on-device phone run and the Mac capture check.
