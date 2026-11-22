@@ -1,3 +1,0 @@
-PocketDesk: open tasks
-
-1. Check Linux (Arch: TTY, X11, wlroots Wayland) and macOS on real machines.

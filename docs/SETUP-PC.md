@@ -46,7 +46,12 @@ certificate. Choose **Advanced**, then **Continue to localhost**.
 
 ## Pair a phone
 
-- **At home:** scan the QR from the pairing page (the **PocketDesk** Start Menu shortcut).
+The **PocketDesk** Start Menu shortcut opens **This PC** on the loopback hub: the pairing QRs, the
+security switches, paired devices and the uninstall button, all on one page. The old
+`/pair?k=<token>` link still works — it redirects there.
+
+- **At home:** scan the QR from that page (first tab, **PocketDesk app**). The second tab carries a
+  QR and certificate steps for using a phone browser instead.
 - **Later, from anywhere:** the same saved PC works on any network. The app uses your Wi-Fi when the
   phone is on the PC's network and connects over iroh (direct or through a relay) otherwise.
 - **Another phone:** open the pairing page again and scan it with that phone.
@@ -219,6 +224,9 @@ Edit `%USERPROFILE%\.pocketdesk\config.json`, then end **PocketDesk.exe** in Tas
 | The settings page does not open | Click the **PocketDesk** Start Menu shortcut again; if **PocketDesk.exe** is still missing from Task Manager, read `daemon.log` for the error. |
 | Antivirus flags the desktop helper | The daemon sends mouse and keyboard input on your behalf; allow it in your antivirus. |
 | The daemon does not start and the PocketDesk task reports `0x800711C7` | Smart App Control blocked the compiled launcher. Run the install command again: it detects Smart App Control and switches the task to `run-daemon.ps1`. |
+| A black box, or a see-through hole, on the mirror | A window that excludes itself from capture (Windows display affinity) is in front; the daemon names it when it can. For your own app, use the handshake in [ALPHA-CAPTURE.md](ALPHA-CAPTURE.md). Exclusive-fullscreen games are black from every capture path — run them borderless. HDR displays can look washed out. |
+| The mirror freezes | The daemon restarts an encoder that stops producing frames for 6 s (`no frames for 6s` in `daemon.log`), and falls back to the whole desktop if one screen cannot be grabbed. |
+| A second monitor did not appear in the viewer | It does now without reconnecting: the list is polled every 5 s while someone watches. If it still is not listed, check the display is enabled in Windows. |
 | The phone stays on `iroh relayed` while on the PC's Wi-Fi | On Android 17 and later, allow PocketDesk access to devices on your local network (Settings > Apps > PocketDesk > Permissions). |
 
 ## Running from a checkout (development)

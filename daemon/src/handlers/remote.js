@@ -7,7 +7,7 @@ import { spawn } from "node:child_process";
 const pcMedia = new PcMedia();
 
 export default function remoteHandlers(ctx) {
-  const { send, desktop, clippy, desktopWatchers, video, videoWatchers, recorder, access, syncAudio, audioListeners } = ctx;
+  const { send, desktop, clippy, desktopWatchers, video, videoWatchers, recorder, access, syncAudio, audioListeners, monitorRefresh } = ctx;
   // Sockets that took a single snapshot stay on the viewer set for a few seconds.
   const snapshots = new Map();
   const deviceName = (ws) => devices.list().find((d) => d.id === ws._clientId)?.name || "A remote device";
@@ -24,6 +24,8 @@ export default function remoteHandlers(ctx) {
     const on = videoWatchers.size + desktopWatchers.size > 0;
     desktop.watchCursor(on);
     desktop.watchClipboard(on);
+    desktop.watchProtected(on);
+    desktop.setCaptureAllowed(on);
     if (on && desktop.cursor) desktop.emit("cursor", desktop.cursor);
     const viewers = new Set([...videoWatchers, ...desktopWatchers, ...snapshots.keys()]);
     for (const w of viewers) if (!logged.has(w)) recorder.log("viewer_joined", { device: deviceName(w), viewOnly: !!w._viewOnly, snapshot: snapshots.has(w) && !videoWatchers.has(w) && !desktopWatchers.has(w) });
@@ -73,6 +75,8 @@ export default function remoteHandlers(ctx) {
       // Codecs the phone can decode, best first (av1, hevc, h264); older clients send none and get H.264.
       ws._codecs = Array.isArray(msg.codecs) ? msg.codecs.filter((c) => ["av1", "hevc", "h264"].includes(c)) : [];
       ws._audio = !!msg.audio;
+      // A screen plugged in or unplugged while this viewer watches must reach it without a reconnect.
+      monitorRefresh?.();
       // Binary frames need a real socket; relay shims fall back to JPEG.
       if (msg.video && typeof ws.bufferedAmount === "number") {
         videoWatchers.add(ws);
@@ -86,6 +90,11 @@ export default function remoteHandlers(ctx) {
           const fm = await desktop.foregroundMonitor();
           if (fm) video.monitor = fm;
         } else if (msg.monitor != null) video.monitor = await monitorAt(Number(msg.monitor) || 0);
+        else if (!video.monitor) {
+          // Nobody picked a screen: show the desktop as it is, both screens of an extended setup whole.
+          const list = desktop.monitorList || (await desktop.monitors()).monitors || [];
+          video.monitor = list.find((m) => m.all) || null;
+        }
         const encoder = video.running ? await video.restart() : await video.start();
         if (encoder) {
           if (!ws._videoCloseHooked) {
@@ -104,7 +113,10 @@ export default function remoteHandlers(ctx) {
         }
         videoWatchers.delete(ws);
       }
-      const r = await desktop.startFrameStream(ws._clientId || "anon", msg.quality);
+      // Still frames are ~250 KB each at full size, and this is the path a slow link or a host
+      // without H.264 falls back to, so it starts at half size; the viewer can raise it later.
+      const stillQuality = Math.min(Number(msg.quality) || 35, 45);
+      const r = await desktop.startFrameStream(ws._clientId || "anon", stillQuality);
       // Pointing by fraction needs to know what the still frames show.
       if (r.ok && !desktop.monitorList) await desktop.monitors();
       // A repeat start from the same socket must not stack another close listener.
@@ -118,7 +130,8 @@ export default function remoteHandlers(ctx) {
         });
       }
       syncCursor();
-      // No h264 here (relay, or a non-Windows host): the client renders the pushed JPEG frames.
+      // No H.264 here (relay, or a host without an encoder): the client renders the pushed JPEG
+      // frames. When not even the first one arrived, say why instead of showing a black window.
       send(ws, { type: "desktop_started", mode: "jpeg", ...r, viewOnly: ws._viewOnly, recording: recorder.recordingScreen });
     },
     // Viewers align their clock with the daemon's to turn frame stamps into delays.
@@ -326,7 +339,7 @@ export default function remoteHandlers(ctx) {
         return send(ws, { type: "clippy_paste_ok", ok: false, error: "control is paused on the PC" });
       const c = await clippy.latest();
       if (!c.ok) return send(ws, { type: "clippy_paste_ok", ok: false, error: c.error });
-      const body = c.text || c.typed;
+      const body = c.typed || c.text;
       if (!body) return send(ws, { type: "clippy_paste_ok", ok: false, error: "capture is empty" });
       const r = await desktop.clipboardSet({ text: body });
       if (r.ok && msg.paste) {

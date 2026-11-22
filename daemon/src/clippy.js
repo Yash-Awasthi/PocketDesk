@@ -2,10 +2,10 @@
  * clippy bridge — PocketDesk side of the clippy keystroke recorder.
  *
  * clippy.exe (built from ../clippy/clippy.cs) runs as an elevated scheduled task
- * with a low-level keyboard hook. On Ctrl+C it writes clippy_capture.json
- * (overwritten each time — no file pileup) holding the foreground window title
- * plus the system clipboard text at that instant, and appends to
- * clippy_history.json (last 20 entries).
+ * with a low-level keyboard hook. On Ctrl+C it overwrites clippy_capture.json with the
+ * latest snapshot (foreground window title, system clipboard text and the typed buffer
+ * since the previous Ctrl+C) and appends one line to clippy_history.json, which is a
+ * session log: nothing is ever removed from it. The UI shows the last 20 entries.
  *
  * Everything happens in the daemon. The browser toggle sends clippy_start /
  * clippy_stop; the daemon installs clippy as a HighestAvailable scheduled task
@@ -27,33 +27,62 @@ const TASK = "Clippy";
 const DIR_CONFIG_FILE = path.join(CLIPPY_DIR, "clippy_dir.txt");
 const CAPTURE_NAME = "clippy_capture.json";
 const HISTORY_NAME = "clippy_history.json";
+// An install under Program Files cannot write beside the exe; both sides fall back here.
+const FALLBACK_DIR = path.join(process.env.LOCALAPPDATA || path.dirname(CLIPPY_DIR), "PocketDesk", "clippy");
+
+function writable(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, ".clippy_write_test");
+    fs.writeFileSync(probe, "ok");
+    fs.unlinkSync(probe);
+    return true;
+  } catch { return false; }
+}
+
+let cachedDir = null;
 
 /**
- * Where clippy stores its data: the path in clippy_dir.txt beside the exe when it is
- * set and usable, otherwise the exe's own folder. clippy.exe reads the same file.
+ * Where clippy stores its data: the path in clippy_dir.txt beside the exe when it is set and usable,
+ * otherwise one folder per user, then the exe's own folder, then that per-user folder whatever
+ * happens. clippy.cs applies the same rules, so a checkout and an installed copy share one place
+ * and nothing is written into a program folder or a git worktree by default.
  */
 function dataDir() {
+  if (cachedDir) return cachedDir;
   try {
     const p = fs.readFileSync(DIR_CONFIG_FILE, "utf8").trim();
-    if (p && path.isAbsolute(p)) {
-      try { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); } catch { /* created by clippy */ }
-      if (fs.existsSync(p)) return p;
-    }
+    if (p && path.isAbsolute(p) && writable(p)) return (cachedDir = p);
   } catch { /* no override set */ }
-  return CLIPPY_DIR;
+  try { fs.mkdirSync(FALLBACK_DIR, { recursive: true }); } catch { /* reported on write */ }
+  if (writable(FALLBACK_DIR)) return (cachedDir = FALLBACK_DIR);
+  if (writable(CLIPPY_DIR)) return (cachedDir = CLIPPY_DIR);
+  return (cachedDir = FALLBACK_DIR);
 }
 
 function readJson(file) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
 }
 
-/** History is newline-delimited JSON (one capture per line). */
-function readHistory(file) {
+/**
+ * History is newline-delimited JSON (one capture per line) and append-only, so only its tail is
+ * read: a long session log must not be loaded whole on every status request.
+ */
+function readHistory(file, limit = 20) {
   try {
-    return fs.readFileSync(file, "utf8")
-      .split("\n").map((s) => s.trim()).filter(Boolean)
+    const size = fs.statSync(file).size;
+    const from = Math.max(0, size - 256 * 1024);
+    const fd = fs.openSync(file, "r");
+    let text;
+    try {
+      const buf = Buffer.alloc(size - from);
+      fs.readSync(fd, buf, 0, buf.length, from);
+      text = buf.toString("utf8");
+    } finally { fs.closeSync(fd); }
+    // A read that starts mid-line leaves an incomplete first entry; parsing drops it.
+    return text.split("\n").map((s) => s.trim()).filter(Boolean)
       .map((s) => { try { return JSON.parse(s); } catch { return null; } })
-      .filter(Boolean).slice(-20);
+      .filter(Boolean).slice(-limit);
   } catch { return []; }
 }
 
@@ -64,7 +93,8 @@ export class Clippy {
     this.onCopy = null;   // ( { window, text, at } ) => void
     this.onState = null;  // ( { running, installed } ) => void
     this._timer = null;
-    this._lastCapture = null; // mtime of clippy_capture.json
+    this._lastCapture = null; // "mtime:size" of the last clippy_capture.json seen
+    this._startedAt = 0;      // a task takes a moment to spawn its process; do not un-set running yet
   }
 
   /** Tell every listener (server broadcasts it as clippy_state) about state changes. */
@@ -82,39 +112,55 @@ export class Clippy {
   async setDir(dir) {
     const raw = String(dir ?? "").trim();
     if (raw && !path.isAbsolute(raw)) return { ok: false, error: "path must be absolute (e.g. D:\\clippy-data)" };
-    if (raw) {
-      try {
-        fs.mkdirSync(raw, { recursive: true });
-        const probe = path.join(raw, ".clippy_write_test");
-        fs.writeFileSync(probe, "ok");
-        fs.unlinkSync(probe);
-      } catch (e) { return { ok: false, error: `cannot write to ${raw}: ${e.message}` }; }
-    }
+    if (raw && !writable(raw)) return { ok: false, error: `cannot write to ${raw}` };
     try {
       if (raw) fs.writeFileSync(DIR_CONFIG_FILE, raw + "\n");
       else { try { fs.unlinkSync(DIR_CONFIG_FILE); } catch { /* already absent */ } }
-    } catch (e) { return { ok: false, error: e.message }; }
+    } catch (e) {
+      // A read-only install cannot persist the choice; the task still starts with --dir.
+      if (!raw) return { ok: false, error: e.message };
+    }
+    cachedDir = raw || null;
     this._lastCapture = null; // re-read the capture from the new location
     this._emit();
     return { ok: true, dir: dataDir() };
   }
 
   /** Is the Clippy scheduled task registered? */
-  _taskExists() {
+  _taskXml() {
     try {
-      const out = execFileSync("schtasks.exe", ["/Query", "/TN", TASK], { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-      return out.includes(TASK);
-    } catch { return false; }
+      return execFileSync("schtasks.exe", ["/Query", "/TN", TASK, "/XML"], { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+    } catch { return ""; }
+  }
+
+  _taskExists() {
+    return this._taskXml().includes("<Task ");
+  }
+
+  /**
+   * Is clippy.exe actually running? The in-memory flag only knows about this daemon run, while the
+   * task outlives it, so the process table is the source of truth (tasklist output is not localized).
+   */
+  _processRunning() {
+    try {
+      const out = execFileSync("tasklist.exe", ["/FI", "IMAGENAME eq clippy.exe", "/FO", "CSV", "/NH"],
+        { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+      return /"clippy\.exe"/i.test(out);
+    } catch { return null; }
   }
 
   /** Install clippy as a HighestAvailable scheduled task (elevated: UAC prompt once). */
   async install() {
-    if (this._taskExists()) { this.installed = true; this._emit(); return { ok: true, already: true }; }
+    const dir = dataDir();
+    const xml = this._taskXml();
+    if (xml.includes("<Task ") && xml.includes(dir.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))) {
+      this.installed = true; this._emit(); return { ok: true, already: true };
+    }
     if (!fs.existsSync(CLIPPY_EXE)) return { ok: false, error: `clippy.exe not found at ${CLIPPY_EXE}` };
     try {
       execFileSync("powershell.exe", [
         "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-        "-Command", `Start-Process -FilePath '${CLIPPY_EXE}' -ArgumentList '--install' -Verb runas -Wait`
+        "-Command", `Start-Process -FilePath '${CLIPPY_EXE.replace(/'/g, "''")}' -ArgumentList '--install','--dir','${dir.replace(/'/g, "''")}' -Verb runas -Wait`
       ], { encoding: "utf8", windowsHide: true });
     } catch (e) { return { ok: false, error: e.message }; }
     this.installed = true;
@@ -122,17 +168,17 @@ export class Clippy {
     return { ok: true };
   }
 
-  /** Start clippy through its elevated scheduled task. Installs first if needed. */
+  /** Start clippy through its elevated scheduled task. Installs (or refreshes) it first if needed. */
   async start() {
     if (this.running) return { ok: true, already: true };
     if (!fs.existsSync(CLIPPY_EXE)) return { ok: false, error: `clippy.exe not found at ${CLIPPY_EXE}` };
-    if (!this.installed && !this._taskExists()) {
-      const inst = await this.install();
-      if (!inst.ok) return inst;
-    }
+    const inst = await this.install();
+    if (!inst.ok) return inst;
     try {
       execFileSync("schtasks.exe", ["/Run", "/TN", TASK], { encoding: "utf8", windowsHide: true });
       this.running = true;
+      this._startedAt = Date.now();
+      this._lastCapture = null; // a run starts a fresh capture file
       this._startWatch();
       this._emit();
       return { ok: true };
@@ -146,6 +192,7 @@ export class Clippy {
   async stop() {
     this._stopWatch();
     try { execFileSync("schtasks.exe", ["/End", "/TN", TASK], { encoding: "utf8", windowsHide: true }); } catch { /* already gone */ }
+    this._startedAt = 0;
     this.running = false;
     this._emit();
     return { ok: true };
@@ -166,8 +213,10 @@ export class Clippy {
       const capFile = path.join(dataDir(), CAPTURE_NAME);
       if (!fs.existsSync(capFile)) return;
       const st = fs.statSync(capFile);
-      if (this._lastCapture && st.mtimeMs <= this._lastCapture) return;
-      this._lastCapture = st.mtimeMs;
+      // Size as well as mtime: two captures inside one filesystem timestamp tick still differ.
+      const stamp = `${st.mtimeMs}:${st.size}`;
+      if (stamp === this._lastCapture) return;
+      this._lastCapture = stamp;
       const cap = readJson(capFile);
       if (cap && (cap.text || cap.typed) && this.onCopy) {
         try { this.onCopy({ window: cap.window || "", text: cap.text || "", typed: cap.typed || "", at: cap.at || "" }); } catch { /* callback must not kill the watcher */ }
@@ -178,6 +227,12 @@ export class Clippy {
   /** Current state: running flag, installed flag, data dir, recent history, exe path. */
   async status() {
     this.installed = this._taskExists();
+    const live = this._processRunning();
+    // Just-started clippy.exe may not be in the process table yet; let the flag stand for a moment.
+    if (live !== null && Date.now() - this._startedAt > 5000 && live !== this.running) {
+      this.running = live;
+      if (live) this._startWatch(); else this._stopWatch();
+    }
     const dir = dataDir();
     const history = readHistory(path.join(dir, HISTORY_NAME));
     this._emit();
@@ -189,5 +244,15 @@ export class Clippy {
     const cap = readJson(path.join(dataDir(), CAPTURE_NAME));
     if (!cap || (!cap.text && !cap.typed)) return { ok: false, error: "no clippy capture yet" };
     return { ok: true, window: cap.window || "", text: cap.text || "", typed: cap.typed || "", at: cap.at || "" };
+  }
+
+  /**
+   * Daemon shutdown: stop watching, but leave the recorder alone. It is an on-demand scheduled task
+   * at the interactive session, so "running" survives a daemon restart instead of silently turning
+   * off every time PocketDesk restarts; stopping it is the Stop switch (or clippy --stop).
+   */
+  dispose() {
+    this._stopWatch();
+    this.running = false;
   }
 }

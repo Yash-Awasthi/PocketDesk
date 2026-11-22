@@ -22,8 +22,15 @@ export const PRESETS = {
 };
 const scaleTo = (p) => (p.scale === 1 ? "" : `scale=trunc(iw*${p.scale}/2)*2:-2,`);
 // The pointer is left out of the picture; viewers draw it from desktop_cursor so it moves without video delay.
-const grab = (p, output) => `ddagrab=output_idx=${output}:framerate=${p.fps}:dup_frames=0:draw_mouse=0,hwdownload,format=bgra,`
+// dup_frames=1 matters: with ddagrab's 0 a screen that is not changing yields no frames at all, so a viewer
+// who joins on an idle PC gets the sequence header and then black until something on screen moves.
+const grab = (p, output) => `ddagrab=output_idx=${output}:framerate=${p.fps}:dup_frames=1:draw_mouse=0,hwdownload,format=bgra,`
   + scaleTo(p) + "format=nv12";
+// The extended desktop as one picture. ddagrab takes a single output, so two screens side by side need
+// GDI's whole-desktop grab; it is a software capture, so it runs at a lower rate and is scaled down to
+// stay smooth at 4480x1440 and above.
+const grabAll = (p) => ["-f", "gdigrab", "-draw_mouse", "0", "-framerate", String(Math.min(p.fps, 20)),
+  "-i", "desktop", "-vf", "scale=trunc(iw*0.66/2)*2:-2,format=nv12"];
 // avfoundation hands over full-resolution (Retina) pixels; the pointer is left out as on Windows.
 const grabMac = (p, output) => ["-f", "avfoundation", "-capture_cursor", "0", "-framerate", String(p.fps),
   "-pixel_format", "nv12", "-i", `Capture screen ${output}:none`, "-vf", scaleTo(p) + "format=nv12"];
@@ -65,12 +72,13 @@ const LADDER = ["low", "saver", "balanced", "quality"];
 /** Packet kinds, first byte of every binary message. */
 export const KIND = { config: 0, key: 1, delta: 2, audio: 3 };
 
-/** ffmpeg arguments for one encoder; a monitor on another GPU needs its own D3D11 device. */
+/* * ffmpeg arguments for one encoder; a monitor on another GPU needs its own D3D11 device. */
 export function ffmpegArgs(enc, presetName, monitor, platform = process.platform) {
   const p = PRESETS[presetName];
   let input;
   if (platform === "darwin") input = grabMac(p, monitor?.output || 0);
   else if (platform === "linux") input = grabX11(p, monitor, enc.endsWith("_vaapi"));
+  else if (monitor?.all) input = grabAll(p);
   else {
     const adapter = monitor?.adapter || 0;
     input = [...(adapter ? ["-init_hw_device", `d3d11va=rh:${adapter}`, "-filter_hw_device", "rh"] : []),

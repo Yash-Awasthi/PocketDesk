@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig, saveConfig } from "./config.js";
 import { start, closeClients } from "./server.js";
 import { killAll, liveIds, stopReaper } from "./sessions.js";
@@ -5,6 +8,27 @@ import * as chat from "./chat.js";
 
 // ps, Activity Monitor and system monitors list the daemon by this name instead of "node".
 process.title = process.env.RH_CONSOLE ? "PocketDeskConsole" : "PocketDesk";
+
+/**
+ * The installer ships ffmpeg beside the daemon (<root>\ffmpeg), but the video stream, the recorder,
+ * the webcam and PC audio all read the binary from PATH. Point them at the bundled copy when nobody
+ * chose one, so a PC without ffmpeg installed still gets the H.264 stream instead of slow JPEG
+ * frames. FFMPEG_PATH from the environment (or a service manager) always wins.
+ */
+function useBundledFfmpeg() {
+  if (process.env.FFMPEG_PATH) return;
+  const exe = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const daemonDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+  const candidates = [
+    path.join(path.dirname(daemonDir), "ffmpeg", exe), // <install root>\ffmpeg, normal and protected copy
+    path.join(daemonDir, "ffmpeg", exe),
+    path.join(process.env.LOCALAPPDATA || "", "PocketDesk", "ffmpeg", exe),
+  ];
+  for (const p of candidates) {
+    try { if (fs.existsSync(p)) { process.env.FFMPEG_PATH = p; return; } } catch { /* try the next */ }
+  }
+}
+useBundledFfmpeg();
 
 // Surviving a stray rejection keeps the unsupervised user daemon alive; uncaughtException is left
 // to crash on purpose so an agent's child processes die with it (see crash-kills-agents test).

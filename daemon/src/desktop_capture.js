@@ -247,6 +247,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
 using System;
+using System.Text;
 using System.Runtime.InteropServices;
 using System.Collections.Generic;
 public static class RHD {
@@ -261,6 +262,23 @@ public static class RHD {
   [ComImport, Guid("7b7166ec-21c7-44ae-b21a-c9ae321ae369"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
   public interface IFactory { void P0(); void P1(); void P2(); void P3(); [PreserveSig] int EnumAdapters(uint i, out IAdapter a); }
   [DllImport("dxgi.dll")] static extern int CreateDXGIFactory(ref Guid riid, out IFactory f);
+  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern bool GetWindowDisplayAffinity(IntPtr hwnd, out uint affinity);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int count);
+  /**
+   * Title of the focused window when Windows excludes it from capture (a game shielding its
+   * screen), or "". WDA_MONITOR = 1, WDA_EXCLUDEFROMCAPTURE = 0x11: both reach CopyFromScreen
+   * and Desktop Duplication as black, and only the window's own process may clear the flag.
+   */
+  public static string BlockedWindow() {
+    IntPtr h = GetForegroundWindow();
+    if (h == IntPtr.Zero) return "";
+    uint a;
+    if (!GetWindowDisplayAffinity(h, out a) || (a != 1 && a != 0x11)) return "";
+    var sb = new StringBuilder(256);
+    GetWindowText(h, sb, sb.Capacity);
+    return sb.ToString();
+  }
   /** Outputs in the adapter/output order ffmpeg's ddagrab uses, as JSON objects. */
   public static string Monitors() {
     var g = typeof(IFactory).GUID; IFactory f;
@@ -292,6 +310,11 @@ while ($true) {
     catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
     continue
   }
+  if ($op -eq 'protected') {
+    try { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$true; blocked=[RHD]::BlockedWindow()} | ConvertTo-Json -Compress)) }
+    catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
+    continue
+  }
   if ($op -eq 'capture') {
     try {
       ${followInput("RHD")}$vs = [System.Windows.Forms.SystemInformation]::VirtualScreen
@@ -316,7 +339,7 @@ while ($true) {
       $bmp.Dispose()
       $b64 = [Convert]::ToBase64String($ms.ToArray())
       $ms.Dispose()
-      [Console]::Out.WriteLine((@{id=$cmd.id; ok=$true; w=$w; h=$h; b64=$b64} | ConvertTo-Json -Compress))
+      [Console]::Out.WriteLine((@{id=$cmd.id; ok=$true; w=$w; h=$h; blocked=[RHD]::BlockedWindow(); b64=$b64} | ConvertTo-Json -Compress))
     } catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
     continue
   }
@@ -398,6 +421,8 @@ export class PsHelper {
     this.seq = 0;
     this.starting = null;
     this.file = null;
+    this.stderrTail = ""; // the last thing the helper said on stderr (a compile error, usually)
+    this.failed = "";     // why it never answered, once one ping loop has failed
   }
 
   /** Write the script to a private .ps1 once (AV-deterministic, no quoting issues). */
@@ -430,6 +455,8 @@ export class PsHelper {
       // A helper that cannot start (no swiftc, a failed compile) leaves cmd() answering helper_not_running.
       try { this.proc = this._launch(); } catch { this.proc = null; return; }
       this.buf = "";
+      this.stderrTail = "";
+      this.failed = "";
       this.proc.stdout.setEncoding("utf8");
       this.proc.stdout.on("data", (d) => {
         this.buf += d;
@@ -450,7 +477,9 @@ export class PsHelper {
           }
         }
       });
-      this.proc.stderr.on("data", () => { /* diagnostics only */ });
+      // Never swallowed: when Add-Type fails, this is the only explanation the user gets.
+      this.proc.stderr.setEncoding("utf8");
+      this.proc.stderr.on("data", (d) => { this.stderrTail = (this.stderrTail + d).slice(-4000); });
       this.proc.on("close", () => {
         this.proc = null;
         for (const w of this.waiters.values()) {
@@ -466,6 +495,10 @@ export class PsHelper {
         const r = await this.cmd({ op: "ping" }, 4000).catch(() => null);
         if (r?.ok) return;
       }
+      // It never answered: remember why, and do not leave a half-dead process behind.
+      this.failed = (this.stderrTail.trim().split(/\r?\n/).filter(Boolean).slice(-3).join(" ") || "the helper did not start").slice(0, 400);
+      if (this.proc) try { this.proc.kill(); } catch { /* already gone */ }
+      this.proc = null;
     })();
     try {
       await this.starting;
@@ -475,7 +508,10 @@ export class PsHelper {
   }
 
   cmd(obj, timeoutMs = 15000) {
-    if (!this.proc || this.proc.exitCode !== null) return Promise.resolve({ ok: false, error: "helper_not_running" });
+    if (!this.proc || this.proc.exitCode !== null) {
+      const detail = this.failed || this.stderrTail.trim().slice(-400);
+      return Promise.resolve({ ok: false, error: "helper_not_running", ...(detail ? { detail } : {}) });
+    }
     const id = ++this.seq;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
@@ -1271,7 +1307,12 @@ const MAC_HELP = {
   accessibility_permission: "The Mac blocks remote input until you allow PocketDesk (it may be listed as node) under System Settings > Privacy & Security > Accessibility.",
   screen_permission: "The Mac shows no screen until you allow PocketDesk (it may be listed as node) under System Settings > Privacy & Security > Screen Recording. The picture starts by itself once allowed.",
 };
-const inputError = (e) => (e === "elevated_window" || e === "input_blocked" ? ELEVATED : MAC_HELP[e] || e);
+// A helper that never started (a script that fails to compile, PowerShell blocked) used to answer a
+// bare "helper_not_running"; carry what it printed on stderr so the reason reaches the viewer.
+const inputError = (e, detail) => {
+  const base = e === "elevated_window" || e === "input_blocked" ? ELEVATED : MAC_HELP[e] || e;
+  return detail ? `${base}: ${detail}` : base;
+};
 
 export class DesktopController extends EventEmitter {
   static get supported() {
@@ -1297,6 +1338,9 @@ export class DesktopController extends EventEmitter {
     this.linux = IS_LINUX ? (IS_WAYLAND ? new WaylandDesktop() : new LinuxDesktop()) : null;
     this.origin = { x: 0, y: 0 };
     this.monitorList = null;
+    this.blocked = "";       // focused window that excludes itself from capture
+    this.captureAllowed = false;
+    this.protectedTimer = null;
   }
 
   /** True when this host can do real desktop control now (a Linux box needs xdotool). */
@@ -1308,6 +1352,24 @@ export class DesktopController extends EventEmitter {
     if (quality) this.quality = Math.min(95, Math.max(10, Number(quality) || 60));
     this.clients.add(clientId);
     this._ensureLoop();
+    // Honest start: a viewer must not be told the stream is live before a frame exists, or a helper
+    // that cannot capture leaves a black window with no reason. The first frame or failure decides.
+    if (!this.lastFrame) {
+      const first = await new Promise((resolve) => {
+        const done = (r) => { clearTimeout(timer); this.off("frame", onFrame); resolve(r); };
+        const onFrame = () => done({ ok: true });
+        const timer = setTimeout(() => done({
+          ok: false,
+          reason: inputError(this._lastCaptureError || "capture_timeout", this._lastCaptureDetail),
+        }), 6000);
+        this.once("frame", onFrame);
+      });
+      if (!first.ok) {
+        this.clients.delete(clientId);
+        if (!this.clients.size) this._stopLoop();
+        return first;
+      }
+    }
     return { ok: true, clients: this.clients.size, quality: this.quality };
   }
 
@@ -1361,9 +1423,11 @@ export class DesktopController extends EventEmitter {
   _ensureLoop() {
     if (this.captureTimer || (!IS_WIN && !IS_MAC)) return;
     this.captureOnce();
+    // The still-frame fallback used to sit at ~3 fps. A warm PowerShell capture costs ~80-150 ms,
+    // so 150 ms keeps the picture usable without letting a slow capture queue up (capturing guard).
     this.captureTimer = setInterval(() => {
       if (!this.capturing) this.captureOnce();
-    }, 300);
+    }, 150);
   }
 
   _stopLoop() {
@@ -1382,12 +1446,13 @@ export class DesktopController extends EventEmitter {
       // temp-file save/rename pattern is what its heuristics flag.
       const r = await this.helperCapture.cmd({ op: "capture", s: this.scale }, 12000);
       if (r?.ok && r.b64) {
-        this._setFrame(r.b64, r.w, r.h, t0);
+        this._setFrame(r.b64, r.w, r.h, t0, r.blocked || "");
       } else {
         this.stats.capturesFailed++;
         const error = r?.error || "capture_failed";
-        if (error !== this._lastCaptureError) this.emit("capture_error", inputError(error));
+        if (error !== this._lastCaptureError) this.emit("capture_error", inputError(error, r?.detail));
         this._lastCaptureError = error;
+        this._lastCaptureDetail = r?.detail || "";
         if (error === "screen_permission") {
           // Show the system prompt once; macOS applies a new grant only to a fresh process, so restart now and then.
           if (!this._permRequested) { this._permRequested = true; this.requestPermissions().catch(() => {}); }
@@ -1402,25 +1467,103 @@ export class DesktopController extends EventEmitter {
   }
 
   /** Set lastFrame from a captured result, updating stats and emitting "frame". */
-  _setFrame(b64, width, height, t0) {
+  _setFrame(b64, width, height, t0, blocked) {
     this.stats.lastCaptureMs = Date.now() - t0;
     this.lastFrame = { base64: b64, width, height, ts: Date.now(), seq: ++this.frameSeq };
     this.stats.framesSent++;
     this._lastCaptureError = null;
+    this._lastCaptureDetail = "";
+    if (blocked !== undefined) this._noteBlocked(blocked);
     this.emit("frame", this.lastFrame);
   }
 
-  /** Resolve ffmpeg binary: FFMPEG_PATH env, then known winget install paths, then PATH. */
+  /** Remember which focused window blocks capture, and tell watchers when it changes. */
+  _noteBlocked(title) {
+    const t = String(title || "");
+    if (t === this.blocked) return;
+    this.blocked = t;
+    this.emit("capture_blocked", t);
+  }
+
+  /**
+   * While a desktop viewer is attached, drop a marker file an alpha build of a
+   * capture-restricted app can look for. The window's own process is the only one
+   * allowed to clear WDA_EXCLUDEFROMCAPTURE, so this is the documented handshake:
+   * present = PocketDesk is mirroring, clear the flag; gone = restore it.
+   */
+  setCaptureAllowed(on) {
+    if (!IS_WIN) return;
+    // The elevated task does not always inherit LOCALAPPDATA, and the marker has to land in the user's
+    // own profile: that is the path the alpha app polls. USERPROFILE is always there.
+    const base = process.env.LOCALAPPDATA
+      || (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "AppData", "Local") : "");
+    if (!base) {
+      if (!this._markerWarned) {
+        this._markerWarned = true;
+        console.warn("[pocketdesk] no LOCALAPPDATA or USERPROFILE: the alpha capture marker cannot be written");
+      }
+      return;
+    }
+    const dir = path.join(base, "PocketDesk");
+    const flag = path.join(dir, "allow-capture");
+    try {
+      if (on) {
+        fs.mkdirSync(dir, { recursive: true });
+        if (!fs.existsSync(flag)) fs.writeFileSync(flag, JSON.stringify({ app: "PocketDesk", at: new Date().toISOString() }) + "\n");
+      } else {
+        try { fs.unlinkSync(flag); } catch { /* already gone */ }
+      }
+    } catch { /* best effort; the app simply keeps its protection */ }
+    this.captureAllowed = !!on;
+  }
+
+  /** Poll the focused window's display affinity while anyone watches (video mode included). */
+  watchProtected(on) {
+    if (!on || !IS_WIN) { clearInterval(this.protectedTimer); this.protectedTimer = null; return; }
+    if (this.protectedTimer) return;
+    const check = async () => {
+      try {
+        await this.helperCapture.ensure();
+        const r = await this.helperCapture.cmd({ op: "protected" }, 3000);
+        if (r?.ok) this._noteBlocked(r.blocked || "");
+      } catch { /* helper restarting */ }
+    };
+    check();
+    this.protectedTimer = setInterval(check, 2000);
+  }
+
+  /** The focused window right now if it excludes itself from capture. */
+  async protectedNow() {
+    if (!IS_WIN) return { ok: true, blocked: "" };
+    try {
+      await this.helperCapture.ensure();
+      const r = await this.helperCapture.cmd({ op: "protected" }, 3000);
+      if (r?.ok) this._noteBlocked(r.blocked || "");
+      return { ok: !!r?.ok, blocked: r?.blocked || "" };
+    } catch (e) {
+      return { ok: false, error: e.message, blocked: "" };
+    }
+  }
+
+  /**
+   * Resolve ffmpeg: FFMPEG_PATH (set at startup from the copy the installer bundles), then any
+   * ffmpeg package this user installed with WinGet, then PATH. Nothing is tied to one user name or
+   * one package id, so the same code works on another PC.
+   */
   static _ffmpegPath() {
     if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
-    const base = "C:\\Users\\Yash\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe";
+    const base = path.join(process.env.LOCALAPPDATA || "", "Microsoft", "WinGet", "Packages");
     try {
-      const pkgs = fs.readdirSync(base, { withFileTypes: true }).filter((d) => d.isDirectory());
-      for (const d of pkgs.sort().reverse()) {
-        const p = path.join(base, d.name, "bin", "ffmpeg.exe");
-        try { if (fs.existsSync(p)) return p; } catch { /* skip */ }
+      // <Packages>\<package id>\<version>\bin\ffmpeg.exe
+      for (const pkg of fs.readdirSync(base, { withFileTypes: true })) {
+        if (!pkg.isDirectory() || !/ffmpeg/i.test(pkg.name)) continue;
+        const dir = path.join(base, pkg.name);
+        for (const ver of fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory())) {
+          const p = path.join(dir, ver.name, "bin", "ffmpeg.exe");
+          try { if (fs.existsSync(p)) return p; } catch { /* skip */ }
+        }
       }
-    } catch { /* base dir missing */ }
+    } catch { /* no winget packages */ }
     return "ffmpeg";
   }
 
@@ -1563,6 +1706,15 @@ export class DesktopController extends EventEmitter {
       index, adapter: m.adapter, output: m.output, name: m.name,
       x: m.left - ox, y: m.top - oy, w: m.w, h: m.h, primary: m.primary ?? (m.left === 0 && m.top === 0),
     }));
+    // An extended desktop is several outputs side by side, and ddagrab only ever grabs one of them.
+    // The whole desktop is listed first, as one picture, so a viewer sees both screens as they are and
+    // picks a single screen only when it wants one. A one-screen PC gets no extra entry (same picture).
+    if (monitors.length > 1) {
+      const w = Math.max(...monitors.map((m) => m.x + m.w));
+      const h = Math.max(...monitors.map((m) => m.y + m.h));
+      monitors.unshift({ index: 0, adapter: 0, output: 0, all: true, name: "All screens", x: 0, y: 0, w, h, primary: false });
+      monitors.forEach((m, i) => { m.index = i; });
+    }
     // The Swift helper takes and reports global points, which start at the main display, not the top-left one.
     this.origin = IS_MAC ? { x: ox, y: oy } : { x: 0, y: 0 };
     this.monitorList = monitors;
@@ -1578,7 +1730,8 @@ export class DesktopController extends EventEmitter {
     if (!rect) return null;
     const cx = (rect.left + rect.right) / 2 - this.origin.x;
     const cy = (rect.top + rect.bottom) / 2 - this.origin.y;
-    return this.monitorList.find((m) => cx >= m.x && cx < m.x + m.w && cy >= m.y && cy < m.y + m.h) || null;
+    // The all-screens entry covers every point, so it would always match first; a real screen is wanted.
+    return this.monitorList.find((m) => !m.all && cx >= m.x && cx < m.x + m.w && cy >= m.y && cy < m.y + m.h) || null;
   }
 
   /** The pointer now, in the same space as input, or null. */
@@ -1676,6 +1829,8 @@ export class DesktopController extends EventEmitter {
     return {
       supported: this.usable,
       elevated: IS_WIN ? isElevated() : null,
+      blocked: this.blocked,
+      captureAllowed: this.captureAllowed,
       streaming: !!this.captureTimer,
       clients: this.clients.size,
       quality: this.quality,
@@ -1688,6 +1843,8 @@ export class DesktopController extends EventEmitter {
   dispose() {
     this.watchCursor(false);
     this.watchClipboard(false);
+    this.watchProtected(false);
+    this.setCaptureAllowed(false);
     this._stopLoop();
     this.clients.clear();
     this.helperInput.kill();

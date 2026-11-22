@@ -57,6 +57,19 @@ if ($Protect) {
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
                     -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
     Register-ScheduledTask -TaskName "PocketDesk" -Action $action -Trigger $trigger -Principal $prin -Settings $settings -Force | Out-Null
+
+    # Phones and browsers on the LAN connect to this PC on its TLS port. Windows firewall rules are
+    # per program path and per network profile, and the daemon now runs from this protected copy as
+    # PocketDesk.exe: an allow rule that exists only for node.exe, or only for the Public profile,
+    # silently drops every LAN connection (Wi-Fi is usually classified Private), which shows up on
+    # the phone as "site can't be reached". One rule, any port, any profile, exactly this binary.
+    $daemonExe = Join-Path $Protect "PocketDesk.exe"
+    if (Test-Path $daemonExe) {
+        Remove-NetFirewallRule -DisplayName "PocketDesk (daemon)" -ErrorAction SilentlyContinue
+        New-NetFirewallRule -DisplayName "PocketDesk (daemon)" -Direction Inbound -Program $daemonExe `
+            -Action Allow -Profile Any -Enabled True `
+            -Description "Inbound to the PocketDesk daemon: phones and browser viewers on the LAN." | Out-Null
+    }
     return
 }
 

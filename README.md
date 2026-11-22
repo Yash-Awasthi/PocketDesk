@@ -43,7 +43,7 @@ PocketDesk is a self-hosted bridge between your Windows/Linux/Mac PC and your An
 | 📱 **Multi-PC** | Connect to multiple PCs, each with pinned certificates |
 | 🔔 **Background Notify** | Get notified when sessions end while the app is in background |
 | 📈 **Activity Monitor** | Per-session working/asking/quiet states |
-| 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware video up to 60 fps, negotiated to the best codec both ends support — AV1 or HEVC where the phone can decode them (about 30–50% less data than H.264), H.264 otherwise (NVENC, Quick Sync, AMD AMF, Apple VideoToolbox or VA-API; the browser decodes H.264 with WebCodecs), the PC's sound streamed alongside as AAC, any monitor, the PC pointer drawn on the viewer as a small dot centred on the click point; touch gestures (two-finger scroll in both directions, two-finger tap for right click, three-finger tap for middle click, three-finger swipes to switch desktops or Spaces and show every window, hold then move to drag, pinch to zoom), a screen switcher on the picture when the PC has several monitors, pointer placement that is exact on Retina and mixed-DPI setups plus a manual corner calibration in the menu, a one-tap shortcut bar that follows the PC's OS (Ctrl shortcuts, Win and Task Manager on Windows; Cmd shortcuts, Spotlight, Mission Control and Force Quit on a Mac), media and volume keys, an app drawer of every installed program, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows, macOS and Linux/X11). |
+| 🖨️ **Desktop Control** | Watch and drive the PC screen from the **browser and the Android app**: hardware video up to 60 fps, negotiated to the best codec both ends support — AV1 or HEVC where the phone can decode them (about 30–50% less data than H.264), H.264 otherwise (NVENC, Quick Sync, AMD AMF, Apple VideoToolbox or VA-API; the browser decodes H.264 with WebCodecs), the PC's sound streamed alongside as AAC, any monitor, the PC pointer drawn on the viewer as a small dot centred on the click point; touch gestures (two-finger scroll in both directions, two-finger tap for right click, three-finger tap for middle click, three-finger swipes to switch desktops or Spaces and show every window, hold then move to drag, pinch to zoom), a screen switcher on the picture when the PC has several monitors, pointer placement that is exact on Retina and mixed-DPI setups plus a manual corner calibration in the menu, **All screens** as the default capture of the whole extended desktop with every monitor listed by name and resolution (a display plugged in or unplugged while you watch appears without reconnecting, an encoder that dies is restarted, a screen that cannot be grabbed falls back to the whole desktop, and a window that hides itself from capture is named — see [docs/ALPHA-CAPTURE.md](docs/ALPHA-CAPTURE.md)), a one-tap shortcut bar that follows the PC's OS (Ctrl shortcuts, Win and Task Manager on Windows; Cmd shortcuts, Spotlight, Mission Control and Force Quit on a Mac), media and volume keys, an app drawer of every installed program, held keys and buttons, a keyboard or mouse attached to the phone, and the frame delay shown live (`desktop_*`; Windows, macOS and Linux/X11). |
 | 📲 **Phone on the PC** | The PC drives the phone through Android's wireless debugging or a USB cable, with no root: its screen in a window with real touch, mouse, keyboard and its sound (H.264 or H.265, up to 120 fps), **any phone app in a window of its own** on a virtual display that follows the window's size, the phone's cameras, screenshots and recordings, its clipboard both ways, files dropped onto it, typing on the phone without a window, Wi-Fi, Bluetooth and Do not disturb. Pair from the browser page with a QR code or a pairing code; adb and scrcpy-server are fetched on first use (`adb_*`) |
 | 🔀 **Any device, any device** | The PC is the hub: from the browser's **Computers** page or the app's Desktop screen (the device button on the picture), view and drive this PC, a phone on it (over adb, or through the PocketDesk app with its owner's yes), another PC running PocketDesk on Windows, macOS or Linux, or a phone on that PC. So a phone drives another phone, a phone drives a Mac through a Windows PC, a Mac page drives a Windows PC, and so on. Other PCs are added with their pairing link and their certificate is pinned; on the same network they link directly, from anywhere else through iroh. The viewer follows the screen it shows: Mac shortcuts for a Mac, Windows ones for Windows, and for a phone the phone mirrored as it is with direct touch and Back, Home, Recents and Notifications (`sources_list`, `desktop_start` `source`, `desktop_nav`, `pc_*`) |
 | 📱 **Phone to phone** | No PC needed: one phone shows a QR (Phone to phone › Show my QR), the other scans it and sees and drives that phone, directly on the same Wi-Fi and through iroh from any other network. The QR holds a fresh secret key and the whole link is sealed with it (AES-GCM), so only the phone that scanned it gets in. The shown phone's owner says yes to Android's screen-capture prompt, and a red Stop pill stays on top of every app while it is shared; tapping needs PocketDesk control on in Accessibility |
@@ -183,11 +183,12 @@ auth token (also persisted to `~/.pocketdesk/config.json` —
 ### Step 3 — Pair
 
 1. **QR pairing (easiest)** — on the PC, open the pairing link from the banner
-   (`https://localhost:8765/pair?k=<token>`; the **PocketDesk** Start Menu shortcut opens it) and
-   scan the QR **with the PocketDesk app** (tap **Scan QR** on the PC list). The app
-   receives the URL, token and (with TLS) the cert fingerprint automatically.
-   > Note: the QR page is loopback-only by design — open it on the PC itself,
-   not on the phone.
+   (`https://localhost:8765/pair?k=<token>`; the **PocketDesk** Start Menu shortcut opens it, and the
+   link redirects to **This PC** on the hub) and scan the QR **with the PocketDesk app** (tap **Scan QR**
+   on the PC list). The app receives the URL, token and (with TLS) the cert fingerprint automatically.
+   The page has two tabs — the app, and a phone browser with its certificate steps — plus the security
+   switches, paired devices and uninstall. The page is loopback-only by design: open it on the PC, not
+   on the phone.
 2. **Manual entry** — in the app tap **＋**, then enter
    `wss://<pc-ip>:8765/ws` (find the PC's IP with `ipconfig` / `ip a`) and the
    token from the banner or `config.json`.
@@ -340,6 +341,24 @@ then set `tls.enabled: true` in the config.
 
 On Windows the installer starts the daemon hidden at logon; see
 [docs/SETUP-PC.md](docs/SETUP-PC.md).
+
+### Screen mirroring
+
+- **All screens** is the default capture: the whole extended desktop (every monitor, in its real
+  layout) as one picture, so a second screen is never a surprise. Pick one monitor by name and
+  resolution in the viewer's screen switcher to get that screen alone on the native DXGI path.
+- **Screens change while you watch:** the monitor list is polled every 5 s, pushed to the viewer and
+  the encoder restarted, so plugging in or unplugging a display needs no reconnect.
+- **It keeps itself alive:** an encoder that exits is restarted while anyone watches, one that is
+  alive but silent for 6 s is restarted, and if a screen cannot be grabbed after two attempts the
+  grab falls back to the whole desktop through GDI, which does not depend on the GPU.
+- **Protected windows:** a window that sets Windows display affinity (`WDA_EXCLUDEFROMCAPTURE` or
+  `WDA_MONITOR`) is invisible to *every* capture API — the mirror shows the desktop behind it or
+  black over it, and only that window's own process may change the flag. PocketDesk names the window
+  when it can; the alpha handshake in [docs/ALPHA-CAPTURE.md](docs/ALPHA-CAPTURE.md) lets your own
+  app stay protected and clear the flag only while PocketDesk is watching.
+- **Exclusive fullscreen** games are not composited by DWM and come back black from every capture
+  path: run them borderless windowed. HDR content can look washed out through an SDR capture.
 
 ### How access works
 
@@ -668,9 +687,8 @@ PocketDesk/
 - [ ] Provider presets (DeepSeek, Kimi, GLM, OpenRouter)
 - [ ] Cross-platform app (iOS / Desktop)
 
-One-by-one status of **every feature from the inspiration corpus** (241 reference repos):
-see [docs/FEATURE-MATRIX.md](docs/FEATURE-MATRIX.md); the **per-repo ledger** is
-[docs/ABSORPTION-LEDGER.md](docs/ABSORPTION-LEDGER.md).
+One-by-one status of every feature, with what was absorbed and what was dropped:
+see [docs/FEATURE-MATRIX.md](docs/FEATURE-MATRIX.md).
 
 ---
 

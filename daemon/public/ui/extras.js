@@ -98,6 +98,11 @@ function commands() {
     out.push({ label: "Play or pause the phone's music", run: () => PD.ask("media", PD.hub.state.media?.playing ? "pause" : "play") });
     out.push({ label: "Next track on the phone", run: () => PD.ask("media", "next") });
   }
+  // The same three things the Home launcher offers, so Ctrl+K reaches them from any page.
+  out.push({ label: "Open this PC's screen", hint: "desktop", run: () => PD.openComputer({ id: "local", name: "This PC", kind: "pc", os: PD.os || "win32" }) });
+  if (PD.localToken) out.push({ label: "Pair a phone (QR code)", run: () => PD.go("thispc") });
+  out.push({ label: PD.clippy.on ? "Stop clippy" : "Start clippy", run: () => PD.send({ type: PD.clippy.on ? "clippy_stop" : "clippy_start" }) });
+  out.push({ label: "Open clippy captures", run: () => PD.go("clippy") });
   out.push({ label: "Open the shelf", run: () => PD.shelf(true) });
   if (PD.hub.online) {
     out.push({ label: "Take a photo with the phone", run: () => PD.ask("capture", "photo").then(() => PD.toast("Tap the notification on the phone")) });

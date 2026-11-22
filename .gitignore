@@ -12,6 +12,13 @@ keystore.properties
 .pocketdesk-*/
 .pocketdesk/
 
+# clippy's capture and session log are written next to whichever copy runs it
+clippy_capture.json
+clippy_history.json
+clippy_dir.txt
+pocketdesk.log
+pocketdesk.err
+
 # Local-only files
 .freebuff/
 notes.md

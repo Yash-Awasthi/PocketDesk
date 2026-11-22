@@ -20,7 +20,7 @@ mobile "with all features enabled" → plan is `launch` adapter for GUI apps + V
 
 - `daemon/src/` — index.js, config.js, server.js, registry.js, sessions.js, chat.js
 - `daemon/scripts/` — gen-cert.js, install-service.ps1, uninstall-service.ps1, tray/PocketDeskTray.cs
-- `daemon/public/` — index.html (the phone on the PC: Phone screen and Phone storage tabs only), pair.html (QR pairing page), vendor/qrcode.min.js (qrcode-generator@1.4.4, works as browser global `qrcode`)
+- `daemon/public/` — index.html (the hub: every page of the phone and of the PC), `ui/thispc.js` (pairing QR, security switches, devices, uninstall; routed at `#go=thispc`), vendor/qrcode.min.js (qrcode-generator@1.4.4, works as browser global `qrcode`)
 - `daemon/manifests/*.json` — claude, opencode, codex, gemini, aider, qwen (+chat sections)
 - `daemon/test/smoke.mjs` + `test/smoke-chat.mjs` — run via `npm.cmd test` (npm.ps1 blocked by execution policy; use npm.cmd)
 - `app/` — Android project. Gradle wrapper 9.8.1, AGP 9.5.0-alpha09 (built-in Kotlin), Kotlin 2.5.0-Beta1,
@@ -38,8 +38,9 @@ chatmsg{id,text} follow-ups use manifest resumeArgs fresh process per turn,
 chatcancel/kill cancel. Events pushed only to subscribed sockets:
 chatuser/chatdelta/chartool/chattoolresult/chatstate/chatreplay.
 Formats parsed daemon-side: `claude-stream-json`, `codex-json`, plain `text`.
-Pairing: GET /pair is loopback-only, serves pair.html with __RH_PAYLOAD__/__RH_URL__/
-__RH_TOKEN__/__RH_FP__ replaced; payload = `pocketdesk://pair#<base64url({u,t,f})>`;
+Pairing: GET /pair?k=<token> is loopback-only and 302s to the hub's This PC page
+(`/#go=thispc&t=<token>`); the loopback page response carries `<meta name="pd-token">`,
+`pd-qr` (payload = `pocketdesk://pair#<base64url({u,t,f,i,n})>`), `pd-hub` and `pd-fp`;
 /vendor/* static files served from public/vendor.
 
 Manifest chat section: `"chat": { "args": [...], "format": "...", "resumeArgs": [...] }`;
@@ -48,6 +49,30 @@ prompt always via stdin. claude: `-p --output-format stream-json --verbose` +
 text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
 
 ## State at save (IMPORTANT — current)
+
+**2026-11-22 pass — one front end, all-screens mirroring, alpha capture (current):**
+
+- **Single front end.** `daemon/public/pair.html` is gone; `/pair?k=<token>` 302s to
+  `/#go=thispc&t=<token>`, and `ui/thispc.js` is the one page for pairing (two QR tabs: the app and a
+  phone browser), the security switches, paired devices and uninstall. Banner, hub and docs point at
+  it; nothing links to the old page.
+- **All screens** is the default capture (`gdigrab -i desktop`, 0.66 scale, <=20 fps): the whole
+  extended desktop as one picture, listed first by `monitors()` and chosen when a viewer sends no
+  monitor. Per-monitor ddagrab stays for single-screen viewing; `foregroundMonitor()` skips the
+  synthetic entry and `recorder.js` records the same view.
+- **Live monitor list.** While anyone watches, the list is polled every 5 s and pushed as
+  `desktop_monitors`; a change restarts the encoder, so a hot-plugged display appears without a
+  reconnect.
+- **Never stuck.** `server.js` restarts an encoder that exits, restarts one that is alive but silent
+  for 6 s, and after two failures on one output falls back to the all-screens GDI grab (software,
+  GPU-independent); 8 consecutive failures surface `desktop_frame_error`.
+- **Alpha capture handshake.** `setCaptureAllowed()` writes `%LOCALAPPDATA%\PocketDesk\allow-capture`
+  while a viewer is attached and removes it when the last one leaves (falls back to
+  `%USERPROFILE%\AppData\Local`); `capture_blocked` -> `desktop_notice` names the window that hides
+  itself. Contract, C#/C++ snippets and the exclusive-fullscreen/HDR caveats live in
+  `docs/ALPHA-CAPTURE.md`. Verified on this machine: marker appears while streaming, gone after stop.
+- **Bloat gone:** `plan.txt`, `betterstack.md`, `docs/ABSORPTION-LEDGER.md` and
+  `docs/INSPIRATION-SOURCES.md` are removed; `docs/FEATURE-MATRIX.md` remains the feature record.
 
 **2026-10-14 pass B — codecs, PC sound, native macOS capture, Linux X11 (0.8.0, newest):**
 
@@ -153,7 +178,7 @@ text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
      agent_orchestrator, session_multiplexer, tmux_session_manager, qr_session_sharing,
      session_monitor), their server cases and wiring, and ten test files. Each had a
      green test and no caller — no browser screen, no phone screen, nothing inside the
-     daemon. `docs/FEATURE-MATRIX.md` and `docs/ABSORPTION-LEDGER.md` record the removal.
+     daemon. `docs/FEATURE-MATRIX.md` records the removal.
    - **Tunnel bind race fixed.** `tunnel_create` answered before the listener was bound,
      so a client could connect to a port that did not exist yet. `createTunnel` now
      resolves on `listening` and rejects on a bind error, and the handler awaits it.

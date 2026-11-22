@@ -37,7 +37,21 @@ const phoneReady = () => !!PD.adb.state?.serial;
 PD.page("home", {
   title: "Home", icon: I.home,
   render(sec) {
+    // One launcher: the three things people come here to start, with no second entry point.
+    const openPc = () => (PD.openComputer
+      ? PD.openComputer({ id: "local", name: "This PC", kind: "pc", os: PD.os || "win32" })
+      : PD.go("computers"));
     sec.append(
+      h("div", { className: "card" },
+        h("h3", { textContent: "Start here" }),
+        h("p", { className: "dim small", textContent: "This PC's screen (drive it from the phone or from this window), pairing a phone, and clippy." }),
+        h("div", { className: "actions" },
+          btn("This PC's screen", openPc, "primary"),
+          PD.localToken ? btn("Pair a phone (QR)", () => PD.go("thispc")) : "",
+          btn("Clippy", () => PD.go("clippy"))),
+        h("p", { className: "dim small", textContent: PD.localToken
+          ? "The phone app: Desktop tab for this PC's screen, or Scan QR on its Connect tab."
+          : "Open this page on the PC itself to see the pairing QR." })),
       h("div", { className: "grid2" },
         h("div", { className: "card", id: "homePhone" }),
         h("div", { className: "card", id: "homeMedia" }),
@@ -108,57 +122,117 @@ function drawToggles() {
       slider("Brightness", t.brightness, (v) => run(() => PD.ask("toggles", "set", { id: "brightness", level: v })))) : "");
 }
 
-// ── Clippy toggle ──
-PD.clippy = { on: false, installed: false, last: null, dir: "" };
-function drawClippy() {
-  const b = $("#homeClippy");
-  if (!b) return;
-  const st = PD.clippy;
-  if (!st.dirInput) {
-    st.dirInput = h("input", { placeholder: "D:\\clippy-data (blank = beside the app)", value: st.dir || "" });
-  }
-  const on = st.on, inst = st.installed, last = st.last;
-  const lastText = last ? (last.text || last.typed || "") : "";
-  const preview = lastText
-    ? h("div", { className: "card", style: "padding:8px;margin-top:8px" },
-        h("div", { className: "dim small", textContent: `${last.window ? `From: ${last.window}` : "Last Ctrl+C"}${!last.text && last.typed ? " · typed buffer" : ""}` }),
-        h("div", { className: "clip", textContent: lastText.slice(0, 300) }))
-    : "";
-  b.replaceChildren(
-    h("h3", { textContent: "Clippy — Ctrl+C capture" }),
-    h("p", { className: "dim", textContent: "Captures the system clipboard on Ctrl+C from any window (games included) so Ctrl+V outside the game pastes it. Runs as an elevated scheduled task." }),
-    h("div", { className: "actions" },
-      !inst ? btn("Install clippy (asks for administrator rights once)", () => { PD.send({ type: "clippy_install" }); }, "primary")
-        : on ? btn("Stop clippy", () => { PD.send({ type: "clippy_stop" }); }, "danger")
-        : btn("Start clippy (elevated)", () => { PD.send({ type: "clippy_start" }); }, "primary"),
-      inst && btn("Paste last copy (elevated)", () => { PD.send({ type: "clippy_paste", paste: true }); })),
-    on ? h("div", { className: "dim", textContent: "Running — Ctrl+C inside any window is captured to the PC clipboard." })
-      : inst ? h("div", { className: "dim", textContent: "Installed. Click Start to begin capturing." })
-      : h("div", { className: "dim", textContent: "Not installed yet." }),
-    h("div", { className: "form", style: "margin-top:8px" },
-      h("label", {}, "Where clippy stores its data"),
-      st.dirInput,
-      btn("Save path", () => { PD.send({ type: "clippy_setdir", dir: st.dirInput.value.trim() }); }),
-      h("span", { className: "dim small", textContent: st.dir ? `Now: ${st.dir}` : "" })),
-    preview);
+// ── Clippy: Ctrl+C capture on the PC ──
+// Home shows the state and the start/stop switch; the Clippy page carries the settings and the
+// session log, so nothing about clippy is hidden behind a click nobody finds.
+PD.clippy = { on: false, installed: false, last: null, dir: "", history: [], dirDraft: null };
+
+function clippyState(st) {
+  return !st.installed ? "Not installed yet."
+    : st.on ? "Running — Ctrl+C in any window is captured."
+    : "Installed and stopped.";
 }
+function clippyButtons(compact) {
+  const st = PD.clippy;
+  const send = (type, extra) => { PD.send({ type, ...extra }); };
+  return h("div", { className: "actions" },
+    !st.installed ? btn("Install clippy (asks for administrator rights once)", () => send("clippy_install"), "primary")
+      : st.on ? btn("Stop clippy", () => send("clippy_stop"), "danger")
+      : btn("Start clippy (elevated)", () => send("clippy_start"), "primary"),
+    st.installed && btn("Paste last copy", () => send("clippy_paste", { paste: true })),
+    compact && btn("Open Clippy", () => PD.go("clippy")));
+}
+// A capture is shown and copied whole, however long: scrolling keeps it intact where an ellipsis
+// would quietly lose the end of it.
+function copyCaptured(text) {
+  navigator.clipboard.writeText(text).then(() => PD.toast(`Copied ${text.length} characters`), () => PD.toast("Could not copy", true));
+}
+function clippyLast() {
+  const last = PD.clippy.last;
+  const text = last ? last.text || last.typed || "" : "";
+  if (!text) return "";
+  return h("div", { className: "card", style: "padding:8px;margin-top:8px" },
+    h("div", { className: "bar" },
+      h("span", { className: "dim small grow", textContent: `${last.window ? `From: ${last.window}` : "Last Ctrl+C"}${!last.text && last.typed ? " · typed buffer" : ""} · ${text.length.toLocaleString()} characters` }),
+      btn("Copy", () => copyCaptured(text))),
+    h("div", { className: "clippy-text", textContent: text }));
+}
+function clippyHistory() {
+  const list = PD.clippy.history;
+  if (!list.length) return empty("No Ctrl+C captured yet.");
+  return h("div", { className: "list" }, list.slice().reverse().map((e) => {
+    const text = e.typed || e.text || "";
+    return h("div", { className: "item" },
+      h("div", { className: "bar" },
+        h("b", { className: "grow", textContent: e.window || "(no window title)" }),
+        h("span", { className: "dim small", textContent: `${e.at ? new Date(e.at).toLocaleTimeString() : ""} · ${text.length.toLocaleString()} chars` }),
+        btn("Copy", () => copyCaptured(text))),
+      h("div", { className: "clippy-text", textContent: text }));
+  }));
+}
+function drawClippy() {
+  const st = PD.clippy;
+  const home = $("#homeClippy");
+  if (home) home.replaceChildren(
+    h("h3", { textContent: "Clippy — Ctrl+C capture" }),
+    h("div", { className: "dim", textContent: clippyState(st) }),
+    clippyButtons(true),
+    clippyLast());
+  const page = $("#clippyPage");
+  if (!page) return;
+  const dirInput = h("input", { placeholder: "blank = %LOCALAPPDATA%\\PocketDesk\\clippy", value: st.dirDraft ?? st.dir ?? "" });
+  dirInput.addEventListener("input", () => { st.dirDraft = dirInput.value; });
+  page.replaceChildren(
+    h("div", { className: "card" },
+      h("h3", { textContent: st.on ? "Clippy is running" : "Clippy is stopped" }),
+      h("p", { className: "dim", textContent: "A low-level keyboard hook, run as an elevated scheduled task, records what is typed. Ctrl+C in any window — a game with its own clipboard included — writes a snapshot, and that text goes onto this PC's clipboard so Ctrl+V pastes it anywhere. Paste itself is never recorded." }),
+      h("div", { className: "dim", textContent: clippyState(st) }),
+      clippyButtons(false),
+      h("div", { className: "form" },
+        h("label", {}, "Where clippy stores its data"), dirInput,
+        btn("Save path", () => { PD.send({ type: "clippy_setdir", dir: dirInput.value.trim() }); }),
+        h("span", { className: "dim small", textContent: st.dir ? `Now: ${st.dir}` : "" }))),
+    clippyLast(),
+    h("div", { className: "card" },
+      h("div", { className: "bar" }, h("h3", { className: "grow", textContent: "This session's captures" }),
+        btn("Refresh", () => PD.send({ type: "clippy_status" }))),
+      h("p", { className: "dim small", textContent: "Written to clippy_capture.json (the latest snapshot) and appended to clippy_history.json (every capture, never removed). The newest 20 are shown." }),
+      clippyHistory()));
+}
+
+PD.page("clippy", {
+  title: "Clippy", icon: I.clippy,
+  render(sec) { sec.append(h("div", { id: "clippyPage" })); drawClippy(); },
+  show() { PD.send({ type: "clippy_status" }); PD.send({ type: "clippy_latest" }); },
+});
+
 PD.on("clippy_state", (m) => {
   PD.clippy.on = !!m.running; PD.clippy.installed = !!m.installed;
-  if (typeof m.dir === "string") { PD.clippy.dir = m.dir; if (PD.clippy.dirInput && !PD.clippy.dirInput.value) PD.clippy.dirInput.value = m.dir; }
+  if (typeof m.dir === "string") PD.clippy.dir = m.dir;
   drawClippy();
 });
 PD.on("clippy_status", (m) => {
-  if (typeof m.dir === "string") { PD.clippy.dir = m.dir; if (PD.clippy.dirInput && !PD.clippy.dirInput.value) PD.clippy.dirInput.value = m.dir; }
-  if (Array.isArray(m.history) && m.history.length) { const l = m.history[m.history.length - 1]; PD.clippy.last = { window: l.window, text: l.text, typed: l.typed, at: l.at }; }
+  PD.clippy.on = !!m.running; PD.clippy.installed = !!m.installed;
+  if (typeof m.dir === "string") PD.clippy.dir = m.dir;
+  if (Array.isArray(m.history)) {
+    PD.clippy.history = m.history;
+    const l = m.history[m.history.length - 1];
+    if (l) PD.clippy.last = { window: l.window, text: l.text, typed: l.typed, at: l.at };
+  }
   drawClippy();
 });
 PD.on("clippy_setdir_ok", (m) => {
-  if (m.ok) { PD.clippy.dir = m.dir || ""; if (PD.clippy.dirInput) PD.clippy.dirInput.value = m.dir || ""; PD.toast("Clippy data path saved"); }
+  if (m.ok) { PD.clippy.dir = m.dir || ""; PD.clippy.dirDraft = null; PD.toast("Clippy data path saved"); }
   else PD.toast(m.error || "Could not set path", true);
   drawClippy();
 });
 PD.on("clippy_copy", (m) => { PD.clippy.last = { window: m.window, text: m.text, typed: m.typed, at: m.at }; drawClippy(); });
 PD.on("clippy_latest", (m) => { if (m.ok) { PD.clippy.last = { window: m.window, text: m.text, typed: m.typed, at: m.at }; drawClippy(); } });
+// The controls used to fail silently; say what happened.
+PD.on("clippy_start_ok", (m) => { PD.toast(m.ok ? "Clippy started" : m.error || "Could not start clippy", !m.ok); PD.send({ type: "clippy_status" }); });
+PD.on("clippy_stop_ok", (m) => { PD.toast(m.ok ? "Clippy stopped" : m.error || "Could not stop clippy", !m.ok); PD.send({ type: "clippy_status" }); });
+PD.on("clippy_install_ok", (m) => { PD.toast(m.ok ? "Clippy installed" : m.error || "Could not install clippy", !m.ok); PD.send({ type: "clippy_status" }); });
+PD.on("clippy_paste_ok", (m) => { PD.toast(m.ok ? "Pasted the last capture" : m.error || "Nothing to paste", !m.ok); });
 
 function drawHomeNotifs() {
   const box = $("#homeNotifs"), list = PD.notifs.list.slice(0, 5);
