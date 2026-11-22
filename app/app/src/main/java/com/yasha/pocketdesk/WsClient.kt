@@ -293,8 +293,8 @@ class WsClient(
     /** Keepalive over iroh (the ws path has OkHttp's own pingInterval). Idle NAT/relay state
      *  is detected as dead and the link is redialled, so a phone miles away does not stay
      *  half-connected forever. */
-    private const val KEEPALIVE_INTERVAL_MS = 20_000L
-    private const val KEEPALIVE_TIMEOUT_MS = 10_000L
+    private val KEEPALIVE_INTERVAL_MS = 20_000L
+    private val KEEPALIVE_TIMEOUT_MS = 10_000L
     @Volatile private var _pongAt = System.currentTimeMillis()
     @Volatile private var _pingAt = 0L
     @Volatile private var _awaitingPong = false
@@ -433,7 +433,7 @@ class WsClient(
     private fun startKeepalive() {
         keepalive?.cancel()
         keepalive = reconnectScope.launch {
-            while (isActive) {
+            while (true) {
                 kotlinx.coroutines.delay(KEEPALIVE_INTERVAL_MS)
                 val now = System.currentTimeMillis()
                 if (_awaitingPong && now - _pingAt > KEEPALIVE_TIMEOUT_MS) {
