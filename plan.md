@@ -96,7 +96,9 @@ stopped.
 - [x] Remove `RestartCount` from the default task; a stop is a stop, and the next start is a user action. `[C]`
   verified-here: `cd daemon && node --test test/installer.unit.test.mjs` → 25 checks ALL PASS, including "a stop stays stopped: the default task does not restart itself"; `powershell -Command '[Parser]::ParseFile(...)'` → PARSE OK
   deviation: the `-Protected` task keeps `-RestartCount 3` (that path is the explicit "uncloseable" opt-in, and its removal is Appendix A question 2 — an owner decision, not an agent's).
-- [ ] `pocketdesk stop` terminates the PowerShell, ffmpeg and helper children, and asserts nothing re-arms capture or input. `[C]`
+- [x] `pocketdesk stop` terminates the PowerShell, ffmpeg and helper children, and asserts nothing re-arms capture or input. `[C]`
+  verified-here: `cd daemon && node --test test/stop-cli.test.mjs` → 11 PASS / ALL PASS (daemon, terminal child and a helper-shaped process from `<RH_HOME>\helpers` all gone; both ports closed; still closed 3 s later). Before: `node /tmp/old-cli.js stop` → `pocketdesk: unknown command: stop`, exit 1
+  needs-verify: the ffmpeg child and the real PowerShell capture/input helpers need a live desktop session on Windows hardware; the sweep matches any process whose command line names `<RH_HOME>\helpers`, which is where `desktop_capture.js:474` writes them.
 - [ ] Test in `daemon/test`: a simulated lockdown client enumerates processes, reads the scheduled task, kills every PocketDesk process, then asserts nothing is left and nothing returns. The same test against the current build must fail — that is the regression oracle. `[C]`
 - [ ] `pocketdesk --status` prints elevated (yes/no), auto-start, restart policy, ports and data folder, one line each. `[C]`
 
@@ -545,3 +547,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.1.4 [x] INTEGRITY.md linked from README and CONTRIBUTING | proof: `grep -n INTEGRITY.md README.md CONTRIBUTING.md` -> README:697, CONTRIBUTING:184,193 | next: m1.2.1
 - 2026-11-24 m1.2.1 [x] default install unelevated (per-user task, RunLevel Limited); -Protected is opt-in with a warning; launcher gates UAC on the protected marker | proof: `node --test test/installer.unit.test.mjs` -> 24 PASS; PS parse OK; csc OK | next: m1.2.2
 - 2026-11-24 m1.2.2 [x] RestartCount removed from the default task (protected path keeps it, owner decision pending) | proof: `node --test test/installer.unit.test.mjs` -> 25 PASS incl. no-restart check; PS PARSE OK | next: m1.2.3
+- 2026-11-24 m1.2.3 [x] `pocketdesk stop`: graceful /shutdown, Windows tree+helper sweep, 3 s re-arm watch | proof: `node --test test/stop-cli.test.mjs` -> 11 PASS; old CLI -> "unknown command: stop" | next: m1.2.4

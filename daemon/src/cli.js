@@ -1,17 +1,20 @@
 // pocketdesk list | new [--cwd DIR] [tool] | attach ID | send ID KEYS... | read ID | resize ID COLS ROWS | kill ID
-//            pair | record on|off
+//            pair | record on|off | stop
 // Talks to the daemon on 127.0.0.1; the terminals are the same ones the phone and the browser watch.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import net from "node:net";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
 
 const port = Number(process.env.RH_CLI_PORT) || 4679;
 const home = process.env.RH_HOME || path.join(os.homedir(), ".pocketdesk");
-const token = process.env.RH_TOKEN || (() => {
-  try { return JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8")).token; } catch { return ""; }
+const config = (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8")); } catch { return {}; }
 })();
+const token = process.env.RH_TOKEN || config.token || "";
+const daemonPort = Number(process.env.RH_PORT) || Number(config.port) || 8765;
 
 async function call(method, route, body) {
   const r = await fetch(`http://127.0.0.1:${port}${route}`, {
@@ -48,6 +51,65 @@ async function pageUrl() {
   const got = await fetch(`http://127.0.0.1:${local}/prove?n=${nonce}`, { signal: AbortSignal.timeout(3000) }).then((r) => r.text()).catch(() => "");
   const k = encodeURIComponent(token);
   return got === want ? `http://localhost:${local}/pair?k=${k}` : `${cfg.tls?.enabled ? "https" : "http"}://localhost:${main}/pair?k=${k}`;
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** True while something is listening on the loopback port (a refused connection means nothing is). */
+function listening(p) {
+  return new Promise((resolve) => {
+    const s = net.connect({ host: "127.0.0.1", port: p });
+    const done = (v) => { s.destroy(); resolve(v); };
+    s.setTimeout(500);
+    s.once("connect", () => done(true));
+    s.once("timeout", () => done(false));
+    s.once("error", () => done(false));
+  });
+}
+
+/** Runs one PowerShell line; resolves whatever happens (a missing Windows tool is not a stop failure). */
+function powershell(script) {
+  return new Promise((resolve) => {
+    const p = spawn("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { stdio: "ignore", windowsHide: true });
+    p.on("exit", () => resolve());
+    p.on("error", () => resolve());
+  });
+}
+
+/**
+ * Stops the daemon and proves it stayed stopped. The graceful exit kills terminals and chat sessions;
+ * the capture helpers, ffmpeg and the webcam/ADB children are swept here, because they are separate
+ * processes that a stop must not leave behind. Then the ports are watched for a few seconds: a task
+ * that brings PocketDesk back would make "stopped" a lie, so it is reported as a failure.
+ */
+async function stop() {
+  const ports = [...new Set([daemonPort, daemonPort + 10, port])];
+  const was = await listening(daemonPort);
+  if (was) await call("POST", "/shutdown").catch(() => {});
+  for (let i = 0; i < 60 && (await listening(daemonPort)); i++) await sleep(250);
+
+  if (process.platform === "win32") {
+    // End the autostart task first, then take the whole process tree: helpers and ffmpeg are its children.
+    const holders = ports.map((p) => `Get-NetTCPConnection -State Listen -LocalPort ${p} -ErrorAction SilentlyContinue`).join(";");
+    await powershell(
+      `schtasks /End /TN PocketDesk 2>$null | Out-Null;` +
+      `${holders} | ForEach-Object { taskkill /T /F /PID $_.OwningProcess 2>$null | Out-Null };` +
+      // The PowerShell capture/input helpers run from the data folder, not from the daemon's process tree.
+      `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf('${path.join(home, "helpers")}', [StringComparison]::OrdinalIgnoreCase) -ge 0 } |` +
+      ` ForEach-Object { taskkill /T /F /PID $_.ProcessId 2>$null | Out-Null }`);
+    for (let i = 0; i < 40 && (await Promise.all(ports.map(listening))).some(Boolean); i++) await sleep(250);
+  }
+
+  const live = async () => (await Promise.all(ports.map(listening))).map((v, i) => (v ? ports[i] : 0)).filter(Boolean);
+  const still = await live();
+  if (still.length) fail(`still listening on ${still.join(", ")} — PocketDesk did not stop`);
+  // A stop that something re-arms within seconds is not a stop.
+  await sleep(3000);
+  const again = await live();
+  if (again.length) fail(`PocketDesk came back on ${again.join(", ")} — the scheduled task 'PocketDesk' restarted it (schtasks /End /TN PocketDesk)`);
+  console.log(was
+    ? "stopped: daemon and helpers gone, nothing listening, nothing restarted"
+    : "PocketDesk was not running; nothing is listening");
 }
 
 const [cmd, id, ...rest] = process.argv.slice(2);
@@ -115,6 +177,8 @@ if (cmd === "list") {
     const url = await pageUrl();
     spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
   }
+} else if (cmd === "stop") {
+  await stop();
 } else if (cmd === "record") {
   const flag = path.join(home, "record-sessions");
   if (id === "on") fs.writeFileSync(flag, "");
