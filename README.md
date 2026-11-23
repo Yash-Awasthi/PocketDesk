@@ -274,6 +274,7 @@ pocketdesk attach s1                  # use it in this window; Ctrl+] leaves it 
 pocketdesk resize s1 120 40
 pocketdesk kill s1
 pocketdesk stop                       # stops the daemon and its helpers, and checks nothing restarts
+pocketdesk --status                   # elevated? autostart? restart policy? ports and data folder
 ```
 
 ### 📱 Your phone on the PC

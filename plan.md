@@ -102,7 +102,8 @@ stopped.
 - [x] Test in `daemon/test`: a simulated lockdown client enumerates processes, reads the scheduled task, kills every PocketDesk process, then asserts nothing is left and nothing returns. The same test against the current build must fail — that is the regression oracle. `[C]`
   verified-here: `cd daemon && node --test test/lockdown-client.test.mjs` → 9 PASS / ALL PASS. Oracle: the same two task assertions against `git show 25969a6:daemon/scripts/install-service.ps1` → `Limited: false | Highest: true | RestartCount: true`, i.e. the pre-fix installer fails them
   needs-verify: the live half registers no real scheduled task (that would modify the machine), so "nothing returns" is proven for processes and ports, not for Task Scheduler itself; that needs one install + kill on the owner's hardware.
-- [ ] `pocketdesk --status` prints elevated (yes/no), auto-start, restart policy, ports and data folder, one line each. `[C]`
+- [x] `pocketdesk --status` prints elevated (yes/no), auto-start, restart policy, ports and data folder, one line each. `[C]`
+  verified-here: `cd daemon && node --test test/status-cli.test.mjs` → 10 PASS / ALL PASS; on this machine `RH_HOME=$TEMP/pd-status-test RH_PORT=8865 node src/cli.js --status` → `elevated: yes — ordinary programs cannot stop the daemon` / `auto-start: yes — scheduled task 'PocketDesk' (HighestAvailable)` / `restart policy: 3 restarts, 1 min apart`, read from the live task XML, not hard-coded
 
 ### M1.3 Visibility
 
@@ -551,3 +552,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.2.2 [x] RestartCount removed from the default task (protected path keeps it, owner decision pending) | proof: `node --test test/installer.unit.test.mjs` -> 25 PASS incl. no-restart check; PS PARSE OK | next: m1.2.3
 - 2026-11-24 m1.2.3 [x] `pocketdesk stop`: graceful /shutdown, Windows tree+helper sweep, 3 s re-arm watch | proof: `node --test test/stop-cli.test.mjs` -> 11 PASS; old CLI -> "unknown command: stop" | next: m1.2.4
 - 2026-11-24 m1.2.4 [x] lockdown-client oracle test: enumerate (name, helper command line, port owners), kill, assert nothing left/returns | proof: `node --test test/lockdown-client.test.mjs` -> 9 PASS; pre-fix installer fails the task assertions (Highest+RestartCount) | next: m1.2.5
+- 2026-11-24 m1.2.5 [x] `pocketdesk --status`: elevated/autostart/restart/ports/data/running, each measured | proof: `node --test test/status-cli.test.mjs` -> 10 PASS; live run reads this machine task XML (HighestAvailable, 3 restarts) | next: M1.3

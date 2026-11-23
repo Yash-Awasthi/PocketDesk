@@ -177,6 +177,9 @@ if (cmd === "list") {
     const url = await pageUrl();
     spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
   }
+} else if (cmd === "--status" || cmd === "status") {
+  const { statusLines } = await import("./status.js");
+  for (const line of await statusLines()) console.log(line);
 } else if (cmd === "stop") {
   await stop();
 } else if (cmd === "record") {
