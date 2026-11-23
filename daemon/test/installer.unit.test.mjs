@@ -36,6 +36,17 @@ check("the console install takes ownership of ProgramData\\PocketDesk", install.
 // The pairing URL carries the master token, so it only goes to a listener proven to be this install.
 check("the launcher checks the daemon's certificate before opening pairing", launcherCs.includes("if (tls && !IsOurDaemon(port)) return;"));
 check("install.ps1 opens pairing through the launcher", !/Start-Process "\$\{scheme\}:\/\/localhost/.test(fs.readFileSync(path.join(REPO, "install.ps1"), "utf8")));
+
+// What an uninstall must take with it, and the one thing it must ask about first.
+const uninstall = fs.readFileSync(path.join(REPO, "uninstall.ps1"), "utf8");
+check("uninstall removes the autostart task", /Unregister-ScheduledTask -TaskName \$task/.test(uninstall));
+check("uninstall removes the Start Menu shortcut", /GetFolderPath\("Programs"\)/.test(uninstall) && /PocketDesk\.lnk/.test(uninstall));
+check("uninstall removes the firewall rule", /Remove-NetFirewallRule -DisplayName "PocketDesk \(daemon\)"/.test(uninstall));
+check("uninstall removes the machine policy file", /policy\.json/.test(uninstall));
+check("uninstall asks before deleting settings and paired phones", /Read-Host/.test(uninstall) && /\$KeepData/.test(uninstall) && /\$removeData = \$answer/.test(uninstall));
+check("the data folder is deleted only in the confirmed branch",
+  uninstall.slice(0, uninstall.indexOf("if ($removeData)")).indexOf('Join-Path $env:USERPROFILE ".pocketdesk"') < 0
+  && uninstall.slice(uninstall.indexOf("if ($removeData)")).includes('Join-Path $env:USERPROFILE ".pocketdesk"'));
 check("the console install checks who holds port 8766", install.includes('(Get-Process -Id $listener.OwningProcess).Path -ne'));
 const trayCs = fs.readFileSync(path.join(REPO, "daemon", "scripts", "PocketDeskTray.cs"), "utf8");
 check("the launcher keeps no main window", !/new Form\(|ShowDialog\(/.test(launcherCs) && launcherCs.includes("CreateNoWindow = true"));

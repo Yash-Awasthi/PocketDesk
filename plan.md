@@ -114,7 +114,9 @@ stopped.
 - [x] Write start, stop and policy events to the Windows Event Log under source `PocketDesk`, so an external client can read them without guessing. `[C]`
   verified-here: `cd daemon && node --test test/eventlog.unit.test.mjs` → 10 PASS / ALL PASS, including a real write followed by `wevtutil qe Application "*[System[Provider[@Name='PocketDesk']]]"` reading the same message back
   partial: ids 1002/1003 (policy, policy refusal) are wired in `eventlog.js` but nothing emits them yet — M6.1 owns the call site.
-- [ ] Uninstall removes task, Start Menu entry, firewall rule, `ProgramData` policy and data folder only on confirmation; assert with a test on the installer scripts. `[C]`
+- [x] Uninstall removes task, Start Menu entry, firewall rule, `ProgramData` policy and data folder only on confirmation; assert with a test on the installer scripts. `[C]`
+  verified-here: `cd daemon && node --test test/installer.unit.test.mjs` → 34 checks ALL PASS, including "uninstall removes the machine policy file", "uninstall asks before deleting settings and paired phones", "the data folder is deleted only in the confirmed branch"; `powershell -Command '[Parser]::ParseFile("uninstall.ps1")'` → PARSE OK
+  needs-verify: nobody has run this uninstaller against a real install since the change; the prompt path is parsed and statically checked, not clicked.
 
 ### M1.4 Stop the release path shipping alphas
 
@@ -560,3 +562,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.2.5 [x] `pocketdesk --status`: elevated/autostart/restart/ports/data/running, each measured | proof: `node --test test/status-cli.test.mjs` -> 10 PASS; live run reads this machine task XML (HighestAvailable, 3 restarts) | next: M1.3
 - 2026-11-24 m1.3.1 [x] tray icon (Open/Stop/Uninstall) + one-time logon notice, compiled into the launcher | proof: installer.unit.test.mjs 28 PASS; csc with WinForms -> CSC OK | next: m1.3.2
 - 2026-11-24 m1.3.2 [x] Event Log source PocketDesk: start 1000 / stop 1001 (policy 1002/1003 reserved), best-effort with a one-time warning | proof: `node --test test/eventlog.unit.test.mjs` -> 10 PASS incl. real eventcreate + wevtutil read-back | next: m1.3.3
+- 2026-11-24 m1.3.3 [x] uninstall removes task/shortcut/firewall/policy always, data only after -RemoveData or a y answer (-KeepData opts out) | proof: `node --test test/installer.unit.test.mjs` -> 34 PASS; uninstall.ps1 PARSE OK | next: m1.4.1

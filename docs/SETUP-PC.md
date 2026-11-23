@@ -163,8 +163,10 @@ powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PocketDesk\uninstall
 ```
 
 Or run `uninstall.ps1` from a checkout. It stops every PocketDesk process (the daemon, which runs as `PocketDesk.exe`, and all its helpers),
-then removes the autostart, the shortcuts and the program files.
-Your settings and paired phones stay in `%USERPROFILE%\.pocketdesk`; add `-RemoveData` to delete them too.
+then removes the autostart task, the Start Menu shortcut, the firewall rule, the machine policy file and
+the program files. Your settings and paired phones stay in `%USERPROFILE%\.pocketdesk`; it asks once
+whether to delete those too (the default is keep). `-RemoveData` answers yes up front and `-KeepData`
+answers no.
 
 If you installed console access, the uninstall asks for administrator rights once so it can also remove
 the system task. The console pairing token in `%ProgramData%\PocketDesk` is kept unless you pass
