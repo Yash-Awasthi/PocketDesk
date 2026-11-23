@@ -12,14 +12,22 @@ check("no shortcut is created on the desktop", !/CreateShortcut\([^)]*Desktop/.t
 check("a Start Menu shortcut is created", /CreateShortcut\(\(Join-Path \(\[Environment\]::GetFolderPath\("Programs"\)\)/.test(install));
 check("an older desktop shortcut is removed", /Remove-Item \(Join-Path \(\[Environment\]::GetFolderPath\("Desktop"\)\) "PocketDesk.lnk"\)/.test(install));
 check("the SYSTEM daemon gets its own exe name", install.includes("PocketDeskConsoleDaemon.exe") && consoleCs.includes("PocketDeskConsoleDaemon.exe"));
-check("starting the daemon asks UAC, and No leaves it stopped", launcherCs.includes('Verb = "runas"') && launcherCs.includes("--elevated")
-  && /catch \(Win32Exception\) \{ return false; \}/.test(launcherCs) && launcherCs.includes("if (!DaemonRunning(port) && !StartElevated()) return;"));
+// Closing the daemon is the point: the default install is an ordinary unelevated per-user task, and
+// elevation is an explicit -Protected flag that states what it costs.
+const DEFAULT = install.slice(install.indexOf("# Default install:"));
+check("the installer offers -Protected as an explicit flag", install.includes("$Protected"));
+check("the default install registers an unelevated per-user task", DEFAULT.includes("-RunLevel Limited"));
+check("the default install never asks for elevation", !/-Verb RunAs/.test(DEFAULT) && !/-RunLevel Highest/.test(DEFAULT));
+check("the protected install warns that it cannot be stopped by ordinary programs", /cannot be stopped by ordinary programs/i.test(install));
+check("the launcher reads the protected marker, so only -Protected installs elevate", launcherCs.includes("IsProtectedInstall")
+  && launcherCs.includes('Path.Combine(ExeDir, "PocketDesk.ini")') && /if \(!IsProtectedInstall\) \{ StartDaemonDetached\(\); return true; \}/.test(launcherCs)
+  && /Verb = "runas"/.test(launcherCs) && /catch \(Win32Exception\) \{ return false; \}/.test(launcherCs));
 check("installers ask a running daemon to stop before killing it", ["install.ps1", "uninstall.ps1", path.join("daemon", "scripts", "install-service.ps1")]
   .every((f) => fs.readFileSync(path.join(REPO, f), "utf8").includes("127.0.0.1:4679/shutdown")));
 check("the SYSTEM daemon leaves CLI port 4679 to the user daemon", /RH_CLI_PORT=(?!4679)\d+/.test(consoleCs));
-// The daemon runs elevated, so nothing it executes may come from a folder or variable the user's programs can change.
-check("the elevated launcher runs from an admin-only Program Files copy", /\$protected = Join-Path \$env:ProgramFiles/.test(install)
-  && install.includes('$exe = Join-Path $protected "PocketDeskLauncher.exe"')
+// Only a -Protected install lives in Program Files and runs elevated; the default one runs from the
+// user's own folder and needs no admin rights at all.
+check("the protected launcher runs from an admin-only Program Files copy", /\$protected = Join-Path \$env:ProgramFiles/.test(install)
   && install.includes('New-ScheduledTaskAction -Execute $exe -Argument "--supervise"'));
 check("the launcher never takes node or ffmpeg from PATH", !/: "node"/.test(launcherCs) && launcherCs.includes('Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe")'));
 check("the launcher drops NODE_* variables before starting node", launcherCs.includes('StartsWith("NODE_"'));

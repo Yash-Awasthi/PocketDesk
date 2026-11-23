@@ -10,8 +10,12 @@ param(
     [string]$InstallDir = (Join-Path $env:USERPROFILE ".pocketdesk"),
     [switch]$NoStart,
     # Registers the SYSTEM console endpoint (secure desktop: lock screen, UAC, before login)
-    # instead of the tray. Must run elevated. See docs/console-endpoint-plan.md.
+    # instead of the tray. Must run elevated. See plan.md, Appendix D.
     [switch]$Console,
+    # Advanced, opt-in: copy PocketDesk into Program Files and run it elevated. An elevated daemon
+    # cannot be stopped by ordinary programs, so the default install never asks for elevation.
+    # See docs/INTEGRITY.md (P1b).
+    [switch]$Protected,
     # Internal, elevated: copies the staged install into this admin-only folder, which the elevated daemon runs from.
     [string]$Protect = ""
 )
@@ -195,17 +199,45 @@ Copy-Item $nodeExe (Join-Path $InstallDir "PocketDesk.exe") -Force
 & $csc /nologo /target:winexe /out:$staged /r:System.dll $src
 if ($LASTEXITCODE -ne 0) { throw "compile failed" }
 
-# The daemon runs as administrator, and this folder is writable by every program the user runs,
-# so the launcher, node, daemon and ffmpeg are copied (one UAC prompt) to a per-user admin-only folder.
-$protected = Join-Path $env:ProgramFiles ("PocketDesk\" + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
-$protectArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Protect', "`"$protected`"",
-                 '-InstallDir', "`"$InstallDir`"", '-DaemonDir', "`"$DaemonDir`"")
-Write-Host "  copying PocketDesk to $protected (elevation required)"
-try { $p = Start-Process powershell -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList $protectArgs } catch { throw "elevation declined: PocketDesk needs it to install" }
-if ($p.ExitCode -ne 0 -or -not (Test-Path (Join-Path $protected "PocketDesk.ini"))) { throw "copying PocketDesk to $protected failed" }
-$exe = Join-Path $protected "PocketDeskLauncher.exe"
-# Staged copies are not run; left here they would only invite elevating something any program can replace.
-foreach ($f in "PocketDeskLauncher.exe", "PocketDesk.exe", "PocketDesk.ini") { Remove-Item (Join-Path $InstallDir $f) -Force -ErrorAction SilentlyContinue }
+# -Protected (advanced, opt-in): the daemon runs as administrator, and this folder is writable by
+# every program the user runs, so the launcher, node, daemon and ffmpeg are copied (one UAC prompt)
+# to a per-user admin-only folder. The price is the point of the default install: an elevated daemon
+# cannot be closed by ordinary programs.
+if ($Protected) {
+    Write-Host ""
+    Write-Warning "-Protected runs PocketDesk elevated, from $env:ProgramFiles\PocketDesk."
+    Write-Warning "An elevated daemon cannot be stopped by ordinary programs: only Task Manager (as"
+    Write-Warning "administrator) or 'schtasks /End /TN PocketDesk' (as administrator). Everything else"
+    Write-Warning "works the same. Skip -Protected unless you must control elevated windows."
+    $protected = Join-Path $env:ProgramFiles ("PocketDesk\" + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+    $protectArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-Protect', "`"$protected`"",
+                     '-InstallDir', "`"$InstallDir`"", '-DaemonDir', "`"$DaemonDir`"")
+    Write-Host "  copying PocketDesk to $protected (elevation required)"
+    try { $p = Start-Process powershell -Verb RunAs -Wait -PassThru -WindowStyle Hidden -ArgumentList $protectArgs } catch { throw "elevation declined: -Protected needs it" }
+    if ($p.ExitCode -ne 0 -or -not (Test-Path (Join-Path $protected "PocketDesk.ini"))) { throw "copying PocketDesk to $protected failed" }
+    # Staged copies are not run; left here they would only invite elevating something any program can replace.
+    foreach ($f in "PocketDeskLauncher.exe", "PocketDesk.exe", "PocketDesk.ini") { Remove-Item (Join-Path $InstallDir $f) -Force -ErrorAction SilentlyContinue }
+    if (-not $NoStart) { Start-ScheduledTask -TaskName "PocketDesk" }
+    Write-Host "  protected daemon installed; it starts at logon (Scheduled Task 'PocketDesk', elevated)."
+    Write-Host "  stop it: schtasks /End /TN PocketDesk, or Task Manager as administrator."
+    return
+}
+
+# Default install: an ordinary per-user task, running the launcher as you from a folder you own.
+# No elevation, no admin-only folder, no firewall rule — Windows asks once on first listen and the
+# answer is yours to change.
+$exe = $staged
+$me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+$action = if ($sac) {
+    $run = Join-Path $InstallDir "daemon\scripts\run-daemon.ps1"
+    New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot "System32\conhost.exe") `
+        -Argument "--headless powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$run`""
+} else { New-ScheduledTaskAction -Execute $exe -Argument "--supervise" }
+$trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
+$prin = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+                -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+Register-ScheduledTask -TaskName "PocketDesk" -Action $action -Trigger $trigger -Principal $prin -Settings $settings -Force | Out-Null
 
 # Start Menu only: a click starts the daemon if needed and opens the pairing and settings page.
 # No desktop icon, so outside Task Manager the daemon leaves nothing on screen.
@@ -213,8 +245,8 @@ $shell = New-Object -ComObject WScript.Shell
 $lnk = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath("Programs")) "PocketDesk.lnk"))
 if ($sac) {
     $lnk.TargetPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
-    $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $protected 'daemon\scripts\open-pairing.ps1')`""
-    $lnk.IconLocation = Join-Path $protected "PocketDesk.exe"
+    $lnk.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $InstallDir 'daemon\scripts\open-pairing.ps1')`""
+    $lnk.IconLocation = Join-Path $InstallDir "PocketDesk.exe"
 } else { $lnk.TargetPath = $exe }
 $lnk.WorkingDirectory = $InstallDir
 $lnk.Description = "Open PocketDesk pairing and settings"
@@ -222,10 +254,10 @@ $lnk.Save()
 # Earlier installs also put one on the desktop.
 Remove-Item (Join-Path ([Environment]::GetFolderPath("Desktop")) "PocketDesk.lnk") -ErrorAction SilentlyContinue
 
-# Autostart is the Scheduled Task registered during the elevated copy above; clear the old Run-key
-# autostart so the daemon never starts twice.
+# Autostart is the Scheduled Task registered above; clear the old Run-key autostart so the daemon
+# never starts twice.
 Remove-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run" -Name "PocketDesk" -ErrorAction SilentlyContinue
 
 if (-not $NoStart) { Start-ScheduledTask -TaskName "PocketDesk" }
-Write-Host "  hidden daemon installed; it starts at logon (Scheduled Task 'PocketDesk', auto-restarts on crash)."
-Write-Host "  stop it: schtasks /End /TN PocketDesk (End alone; the task restarts it otherwise). settings: $env:USERPROFILE\.pocketdesk\config.json"
+Write-Host "  daemon installed in $InstallDir; it starts at logon (Scheduled Task 'PocketDesk')."
+Write-Host "  stop it: schtasks /End /TN PocketDesk, or Task Manager > PocketDesk.exe. settings: $env:USERPROFILE\.pocketdesk\config.json"

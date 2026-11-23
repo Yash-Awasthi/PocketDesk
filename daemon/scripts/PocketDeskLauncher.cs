@@ -16,8 +16,10 @@ using System.Text;
 //                                       already running, then open the pairing page in the browser.
 //   PocketDeskLauncher.exe --daemon   — the logon autostart: start the daemon hidden, then exit.
 //   PocketDeskLauncher.exe --elevated — internal: the copy that UAC elevated, which only starts the daemon.
-// The daemon runs as administrator, so input reaches elevated windows such as Task Manager. Starting
-// it shows the UAC prompt; No leaves it stopped. The pairing page always opens unelevated.
+// A normal install runs the daemon as you, from your own folder, so it can always be closed. Only an
+// explicit -Protected install (marker written into the Program Files copy) elevates, and there UAC
+// decides: No leaves it stopped. An elevated daemon reaches elevated windows such as Task Manager,
+// and in exchange ordinary programs cannot stop it. The pairing page always opens unelevated.
 // The daemon is spawned detached, so it keeps running after this process exits and is stopped only
 // from Task Manager (end "PocketDesk.exe") or by the uninstaller. No tray icon, no window, no on-screen indicator.
 namespace PocketDeskLauncher
@@ -59,7 +61,7 @@ namespace PocketDeskLauncher
                 Environment.Exit(p.ExitCode);
             }
 
-            if (!DaemonRunning(port) && !StartElevated()) return;
+            if (!DaemonRunning(port) && !StartDaemon()) return;
 
             if (!autostart) OpenPairingPage(port);
         }
@@ -95,6 +97,16 @@ namespace PocketDeskLauncher
                     return got == BitConverter.ToString(h.ComputeHash(Encoding.UTF8.GetBytes(nonce))).Replace("-", "").ToLowerInvariant();
             }
             catch { return false; }
+        }
+
+        /** True for the opt-in -Protected install, whose every binary sits in an admin-only folder. */
+        static bool IsProtectedInstall { get { return File.Exists(Path.Combine(ExeDir, "PocketDesk.ini")); } }
+
+        /** Starts the daemon: as you for a normal install, through UAC for a -Protected one. */
+        static bool StartDaemon()
+        {
+            if (!IsProtectedInstall) { StartDaemonDetached(); return true; }
+            return StartElevated();
         }
 
         static bool IsElevated()
@@ -184,8 +196,10 @@ namespace PocketDeskLauncher
             var nodeVars = new System.Collections.Generic.List<string>();
             foreach (string k in psi.EnvironmentVariables.Keys) if (k.StartsWith("NODE_", StringComparison.OrdinalIgnoreCase)) nodeVars.Add(k);
             foreach (var k in nodeVars) psi.EnvironmentVariables.Remove(k);
-            // Set even when missing, so the daemon falls back to JPEG instead of an ffmpeg found on PATH.
-            psi.EnvironmentVariables["FFMPEG_PATH"] = Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe");
+            // Set only for a -Protected install, which snapshots ffmpeg beside the daemon. A normal
+            // install may rely on ffmpeg from PATH, where the daemon looks when this is unset.
+            var ff = Path.Combine(ExeDir, "ffmpeg", "ffmpeg.exe");
+            if (File.Exists(ff)) psi.EnvironmentVariables["FFMPEG_PATH"] = ff;
             return psi;
         }
 
