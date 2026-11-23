@@ -126,7 +126,9 @@ pre-releases change R8 and native ABI behaviour between builds of one commit.
 **Done when:** release builds use stable versions and a second build of the same
 commit is byte-identical.
 
-- [ ] Pin AGP, Kotlin and Compose to the newest **stable** line that supports `compileSdk 37.2`; record the blocker in a comment if one remains. `[C]`
+- [x] Pin AGP, Kotlin and Compose to the newest **stable** line that supports `compileSdk 37.2`; record the blocker in a comment if one remains. `[C]`
+  verified-here: `cd app && JAVA_HOME=/c/work/jdk21 ./gradlew :app:dependencyInsight --configuration debugCompileClasspath --dependency androidx.compose:compose-bom` → `compose-bom:2026.11.01`, `org.gradle.status = release`; the same for `navigation3-runtime:1.2.2`; `./gradlew -q :app:compileDebugKotlin` → EXIT=0 with AGP 9.5.2, Kotlin 2.4.21, activity 1.13.0, lifecycle 2.11.1, navigation3 1.2.2, kotlinx-serialization 1.13.0
+  also: pre-release versions this subtask removed — `agp 9.5.0-alpha09`, `kotlin 2.5.0-Beta1`, `compose-bom-alpha 2026.10.00`, `activity 1.14.0-alpha03`, `lifecycle 2.12.0-alpha04`, `navigation3 1.3.0-alpha02`, `serialization 1.12.0-RC`
 - [ ] Pin `node-pty` to a stable release, or vendor the beta with an ADR stating the risk and the exit condition. `[C]`
 - [ ] Add a check that fails the build when `libs.versions.toml` or `package.json` gains a pre-release version without a `# prerelease:` note. `[P]`
 - [ ] Reproducible APK: build the same commit twice with the same keystore, compare `sha256sum`, document any non-deterministic input. `[C]`
@@ -563,3 +565,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.3.1 [x] tray icon (Open/Stop/Uninstall) + one-time logon notice, compiled into the launcher | proof: installer.unit.test.mjs 28 PASS; csc with WinForms -> CSC OK | next: m1.3.2
 - 2026-11-24 m1.3.2 [x] Event Log source PocketDesk: start 1000 / stop 1001 (policy 1002/1003 reserved), best-effort with a one-time warning | proof: `node --test test/eventlog.unit.test.mjs` -> 10 PASS incl. real eventcreate + wevtutil read-back | next: m1.3.3
 - 2026-11-24 m1.3.3 [x] uninstall removes task/shortcut/firewall/policy always, data only after -RemoveData or a y answer (-KeepData opts out) | proof: `node --test test/installer.unit.test.mjs` -> 34 PASS; uninstall.ps1 PARSE OK | next: m1.4.1
+- 2026-11-24 m1.4.1 [x] Android toolchain pinned to stable: AGP 9.5.2, Kotlin 2.4.21, Compose BOM 2026.11.01, activity 1.13.0, lifecycle 2.11.1, nav3 1.2.2, serialization 1.13.0 | proof: dependencyInsight shows org.gradle.status=release; `./gradlew -q :app:compileDebugKotlin` EXIT=0 (JDK 21, SDK 37.2) | next: m1.4.2
