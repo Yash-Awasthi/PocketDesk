@@ -98,17 +98,20 @@ silently approve UAC on your behalf. Remove it any time (see Uninstall).
 
 ## Daily use
 
-PocketDesk has no window and no tray icon. It runs as administrator, so the phone can also control
-admin windows such as Task Manager. At each sign-in Windows shows its usual **Yes / No** prompt for
-PocketDesk: **Yes** starts it in the background as **PocketDesk.exe**, **No** leaves it stopped until you
-open the **PocketDesk** Start Menu shortcut (which asks again). Task Manager is the only place it
-shows: under Processes, and under Startup apps, where it can be turned off. End **PocketDesk.exe**
-there to stop it until the next sign-in.
+At each sign-in PocketDesk starts with your account and puts a **tray icon** near the clock: it is the
+one place it shows itself. Right-click it for **Open PocketDesk**, **Stop PocketDesk** and **Uninstall
+PocketDesk**; the first logon after installing also shows a one-time "PocketDesk is running" notice.
+The daemon itself has no window and is listed in Task Manager as **PocketDesk.exe**. A stop from the
+tray or the Task Manager is final — nothing restarts it until the next sign-in or the Start Menu
+shortcut.
 
-Because it runs as administrator, anything a paired phone does (terminals, agents, files, and apps
-it opens) runs with administrator rights too. Set a connection password and turn on two-factor
-pairing. On a standard (non-administrator) account the prompt asks for an administrator's
-password, and PocketDesk then runs as that administrator, with that account's settings.
+By default it runs with your own rights, from `%LOCALAPPDATA%\PocketDesk`, so it can reach anything
+you can and nothing more. If you installed with `-Protected`, it runs as administrator instead, from
+`Program Files\PocketDesk`, which reaches admin windows such as Task Manager at the price of being
+stoppable only by an administrator (`pocketdesk --status` says which install you have).
+
+Run `pocketdesk --status` to see whether it is running, whether it is elevated, whether it starts
+automatically, its restart policy, its ports and its data folder — one line each, all measured.
 
 The **PocketDesk** shortcut in the Start Menu starts the daemon if it is not running and opens the
 pairing and settings page in the browser. That page only opens on the PC itself, and it holds every

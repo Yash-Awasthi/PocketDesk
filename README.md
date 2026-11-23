@@ -107,9 +107,12 @@ so the installer detects it and runs the daemon from signed programs only (`conh
 the bundled Node.js, through `run-daemon.ps1`); the Start Menu shortcut then opens pairing through
 `open-pairing.ps1`. Nothing to do on your side.
 
-It downloads the daemon with its own Node.js and ffmpeg, starts it hidden at logon (it shows only
-in Task Manager, as PocketDesk.exe), adds a **PocketDesk** shortcut to the Start Menu, and opens the
-pairing QR. Scan it with the app and you are done. Clicking the shortcut later starts PocketDesk,
+It downloads the daemon with its own Node.js and ffmpeg, starts it at logon with a **tray icon**
+near the clock (right-click it to open, stop or uninstall; the daemon process is `PocketDesk.exe` in
+Task Manager), adds a **PocketDesk** shortcut to the Start Menu, and opens the pairing QR. It runs
+with your own rights by default; add `-Protected` to the installer only if you need admin windows
+to be controllable from the phone, because that build can only be stopped by an administrator.
+Scan the QR with the app and you are done. Clicking the shortcut later starts PocketDesk,
 or shows the pairing QR again if it is already running.
 To remove it: **Settings > Apps > Installed apps > PocketDesk > Uninstall**.
 Full guide, updating and uninstalling: [docs/SETUP-PC.md](docs/SETUP-PC.md).

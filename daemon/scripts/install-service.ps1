@@ -196,7 +196,9 @@ $nodeExe = if (Test-Path $bundledNode) { $bundledNode } else { (Get-Command node
 Copy-Item $nodeExe (Join-Path $InstallDir "PocketDesk.exe") -Force
 
 # Always rebuilt: a release zip gives the source its commit time, often older than the previous exe.
-& $csc /nologo /target:winexe /out:$staged /r:System.dll $src
+# The tray needs WinForms; the launcher stays one exe, so there is nothing separate to start or hide.
+& $csc /nologo /target:winexe /out:$staged /r:System.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll `
+    $src (Join-Path $PSScriptRoot "PocketDeskTray.cs")
 if ($LASTEXITCODE -ne 0) { throw "compile failed" }
 
 # -Protected (advanced, opt-in): the daemon runs as administrator, and this folder is writable by

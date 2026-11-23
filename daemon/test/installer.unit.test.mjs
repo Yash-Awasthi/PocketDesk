@@ -37,7 +37,12 @@ check("the console install takes ownership of ProgramData\\PocketDesk", install.
 check("the launcher checks the daemon's certificate before opening pairing", launcherCs.includes("if (tls && !IsOurDaemon(port)) return;"));
 check("install.ps1 opens pairing through the launcher", !/Start-Process "\$\{scheme\}:\/\/localhost/.test(fs.readFileSync(path.join(REPO, "install.ps1"), "utf8")));
 check("the console install checks who holds port 8766", install.includes('(Get-Process -Id $listener.OwningProcess).Path -ne'));
-check("the launcher has no tray icon or window", !/NotifyIcon|Application\.Run|new Form/.test(launcherCs) && launcherCs.includes("CreateNoWindow = true"));
+const trayCs = fs.readFileSync(path.join(REPO, "daemon", "scripts", "PocketDeskTray.cs"), "utf8");
+check("the launcher keeps no main window", !/new Form\(|ShowDialog\(/.test(launcherCs) && launcherCs.includes("CreateNoWindow = true"));
+check("the tray offers open, stop and uninstall", ["Open PocketDesk", "Stop PocketDesk", "Uninstall PocketDesk"].every((s) => trayCs.includes(s)));
+check("the tray disappears with the daemon, so it cannot claim a dead daemon", trayCs.includes("HasExited") && trayCs.includes("icon.Visible = false"));
+check("the first logon after install shows the notice once", trayCs.includes("tray-notified") && trayCs.includes("ShowBalloonTip"));
+check("the installer compiles the tray into the launcher", install.includes("PocketDeskTray.cs") && install.includes("/r:System.Windows.Forms.dll"));
 
 // macOS and Linux follow the same rule: a hidden service, an app entry that opens the settings page.
 const sh = fs.readFileSync(path.join(REPO, "install.sh"), "utf8");

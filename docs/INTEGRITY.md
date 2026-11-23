@@ -13,11 +13,12 @@ native clients the one check they rely on ("close all other applications") can
 be defeated by how PocketDesk installs itself.** Not because of one feature, but
 because three properties stack:
 
-1. **Invisible persistence.** The daemon is installed as a *hidden* process: no
-   tray, no window, an elevated Scheduled Task at logon, a protected copy under
-   `Program Files`, auto-restart on crash (`daemon/scripts/install-service.ps1`,
-   `install.ps1:142`). It does not appear in a screen recording or a screenshot,
-   and it never asks the candidate for anything after install.
+1. **Invisible persistence — shipped fixed, kept here as the diagnosis.** As audited, the daemon was
+   installed as a *hidden* process: no tray, no window, an elevated Scheduled Task at logon, a
+   protected copy under `Program Files`, auto-restart on crash. The W0 work changed the default:
+   an unelevated per-user task with no restart policy, a tray icon with Stop / Open / Uninstall, and
+   a one-time logon notice (`daemon/scripts/PocketDeskTray.cs`); elevation is the explicit
+   `-Protected` option and says so in `pocketdesk --status`.
 2. **Remote input that the page cannot distinguish from typing.** Input goes in
    through `SendInput` (Windows), `CGEvent` (macOS) and `uinput` (Linux) from
    `daemon/src/desktop_capture.js`. An elevated daemon can drive elevated

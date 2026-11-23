@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.ComponentModel;
+using System.Drawing;
 using System.IO;
 using System.Net;
 using System.Net.Security;
@@ -10,29 +11,33 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.Text;
+using System.Windows.Forms;
 
-// Windowless launcher for the hidden daemon. Three uses:
+// Windowless launcher for the daemon. Four uses:
 //   PocketDeskLauncher.exe            — a person opening the app: start the daemon if it is not
 //                                       already running, then open the pairing page in the browser.
-//   PocketDeskLauncher.exe --daemon   — the logon autostart: start the daemon hidden, then exit.
+//   PocketDeskLauncher.exe --daemon   — start the daemon hidden, then exit (no tray).
+//   PocketDeskLauncher.exe --supervise — the logon autostart: run the daemon with a tray icon beside
+//                                       it, so PocketDesk is visible and can be stopped from there.
 //   PocketDeskLauncher.exe --elevated — internal: the copy that UAC elevated, which only starts the daemon.
 // A normal install runs the daemon as you, from your own folder, so it can always be closed. Only an
 // explicit -Protected install (marker written into the Program Files copy) elevates, and there UAC
 // decides: No leaves it stopped. An elevated daemon reaches elevated windows such as Task Manager,
 // and in exchange ordinary programs cannot stop it. The pairing page always opens unelevated.
-// The daemon is spawned detached, so it keeps running after this process exits and is stopped only
-// from Task Manager (end "PocketDesk.exe") or by the uninstaller. No tray icon, no window, no on-screen indicator.
+// The daemon is spawned detached and is stopped from the tray icon, from Task Manager (end
+// "PocketDesk.exe") or by the uninstaller. No main window. Nothing hides itself from the machine.
 namespace PocketDeskLauncher
 {
     internal static class Program
     {
-        static readonly string DataDir = Path.Combine(
+        internal static readonly string DataDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".pocketdesk");
 
-        static string CertFile = "";
+        internal static string CertFile = "";
 
-        static string ExeDir { get { return AppDomain.CurrentDomain.BaseDirectory; } }
+        internal static string ExeDir { get { return AppDomain.CurrentDomain.BaseDirectory; } }
 
+        [STAThread]
         static void Main(string[] args)
         {
             bool autostart = Array.IndexOf(args, "--daemon") >= 0;
@@ -46,19 +51,12 @@ namespace PocketDeskLauncher
                 return;
             }
 
-            // The scheduled task runs this already-elevated and monitors it: run the daemon in the
-            // foreground and exit with its code, so the task's RestartCount restarts it on a crash.
+            // The scheduled task runs this already-elevated: run the daemon in the foreground with a
+            // tray icon beside it, and exit with the daemon's code when it ends.
             if (Array.IndexOf(args, "--supervise") >= 0)
             {
-                if (DaemonRunning(port)) return;
-                var psi = BuildDaemonPsi();
-                if (psi == null) Environment.Exit(1);
-                var p = Process.Start(psi);
-                // First run only (no device has paired yet): open the pairing page so a new user sees
-                // the QR without hunting for the Start-menu shortcut. Silent once any phone is paired.
-                if (!File.Exists(Path.Combine(DataDir, "devices.json"))) OpenPairingPage(port);
-                p.WaitForExit();
-                Environment.Exit(p.ExitCode);
+                Supervise(port);
+                return;
             }
 
             if (!DaemonRunning(port) && !StartDaemon()) return;
@@ -66,8 +64,62 @@ namespace PocketDeskLauncher
             if (!autostart) OpenPairingPage(port);
         }
 
+        /** The autostart: the daemon plus a tray icon, so "it is running" is something you can see. */
+        static void Supervise(string port)
+        {
+            if (DaemonRunning(port)) return;
+            var psi = BuildDaemonPsi();
+            if (psi == null) Environment.Exit(1);
+            var daemon = Process.Start(psi);
+            // First run only (no device has paired yet): open the pairing page so a new user sees
+            // the QR without hunting for the Start-menu shortcut. Silent once any phone is paired.
+            if (!File.Exists(Path.Combine(DataDir, "devices.json"))) OpenPairingPage(port);
+            Application.EnableVisualStyles();
+            Application.Run(new Tray(port, daemon));
+        }
+
+        /** Asks the daemon to shut down over its loopback CLI port; true once the port is free. */
+        internal static bool RequestStop(string port)
+        {
+            string token = "", p = port; bool tls = false;
+            LoadConfig(ref p, ref token, ref tls);
+            try
+            {
+                var req = (HttpWebRequest)WebRequest.Create("http://127.0.0.1:4679/shutdown");
+                req.Method = "POST";
+                req.Headers["Authorization"] = "Bearer " + token;
+                req.Timeout = 3000;
+                using (req.GetResponse()) { }
+            }
+            catch { }
+            for (int i = 0; i < 60 && DaemonRunning(port); i++) System.Threading.Thread.Sleep(250);
+            return !DaemonRunning(port);
+        }
+
+        /** Runs the installed uninstaller: one visible entry point, no separate script to find. */
+        internal static void RunUninstaller()
+        {
+            string script = Path.Combine(ExeDir, "..", "uninstall.ps1");
+            if (!File.Exists(script)) script = Path.Combine(ExeDir, "uninstall.ps1");
+            if (!File.Exists(script))
+            {
+                MessageBox.Show("uninstall.ps1 was not found next to PocketDesk. Remove PocketDesk from Settings > Apps instead.",
+                    "PocketDesk", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            try
+            {
+                Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell\\v1.0\\powershell.exe"))
+                {
+                    Arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + script + "\"",
+                    UseShellExecute = true,
+                });
+            }
+            catch (Exception e) { MessageBox.Show("Could not start the uninstaller: " + e.Message, "PocketDesk"); }
+        }
+
         /** Waits for the daemon to bind, then opens its pairing page in the default browser. */
-        static void OpenPairingPage(string port)
+        internal static void OpenPairingPage(string port)
         {
             for (int i = 0; i < 40 && !DaemonRunning(port); i++) System.Threading.Thread.Sleep(100);
             string token = "", p = port; bool tls = false;

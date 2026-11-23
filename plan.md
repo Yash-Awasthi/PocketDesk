@@ -107,7 +107,10 @@ stopped.
 
 ### M1.3 Visibility
 
-- [ ] Tray icon with Stop / Open settings / Uninstall, and a one-time "PocketDesk is running" notice at logon. `[C]`
+- [x] Tray icon with Stop / Open settings / Uninstall, and a one-time "PocketDesk is running" notice at logon. `[C]`
+  verified-here: `cd daemon && node --test test/installer.unit.test.mjs` → 28 checks ALL PASS (tray offers open/stop/uninstall, disappears with the daemon, shows the notice once, compiled into the launcher); `csc -target:winexe -r:System.Windows.Forms.dll -r:System.Drawing.dll PocketDeskLauncher.cs PocketDeskTray.cs` → CSC OK
+  deviation: under Smart App Control the autostart path is `conhost` + `run-daemon.ps1` (a signed-binary workaround), so no tray is running there. needs-verify: one SAC machine.
+  needs-verify: nobody has clicked the tray on Windows hardware yet; the menu items, balloon and Stop are compiled and statically checked, not exercised.
 - [ ] Write start, stop and policy events to the Windows Event Log under source `PocketDesk`, so an external client can read them without guessing. `[C]`
 - [ ] Uninstall removes task, Start Menu entry, firewall rule, `ProgramData` policy and data folder only on confirmation; assert with a test on the installer scripts. `[C]`
 
@@ -553,3 +556,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.2.3 [x] `pocketdesk stop`: graceful /shutdown, Windows tree+helper sweep, 3 s re-arm watch | proof: `node --test test/stop-cli.test.mjs` -> 11 PASS; old CLI -> "unknown command: stop" | next: m1.2.4
 - 2026-11-24 m1.2.4 [x] lockdown-client oracle test: enumerate (name, helper command line, port owners), kill, assert nothing left/returns | proof: `node --test test/lockdown-client.test.mjs` -> 9 PASS; pre-fix installer fails the task assertions (Highest+RestartCount) | next: m1.2.5
 - 2026-11-24 m1.2.5 [x] `pocketdesk --status`: elevated/autostart/restart/ports/data/running, each measured | proof: `node --test test/status-cli.test.mjs` -> 10 PASS; live run reads this machine task XML (HighestAvailable, 3 restarts) | next: M1.3
+- 2026-11-24 m1.3.1 [x] tray icon (Open/Stop/Uninstall) + one-time logon notice, compiled into the launcher | proof: installer.unit.test.mjs 28 PASS; csc with WinForms -> CSC OK | next: m1.3.2
