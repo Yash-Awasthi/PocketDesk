@@ -99,7 +99,9 @@ stopped.
 - [x] `pocketdesk stop` terminates the PowerShell, ffmpeg and helper children, and asserts nothing re-arms capture or input. `[C]`
   verified-here: `cd daemon && node --test test/stop-cli.test.mjs` → 11 PASS / ALL PASS (daemon, terminal child and a helper-shaped process from `<RH_HOME>\helpers` all gone; both ports closed; still closed 3 s later). Before: `node /tmp/old-cli.js stop` → `pocketdesk: unknown command: stop`, exit 1
   needs-verify: the ffmpeg child and the real PowerShell capture/input helpers need a live desktop session on Windows hardware; the sweep matches any process whose command line names `<RH_HOME>\helpers`, which is where `desktop_capture.js:474` writes them.
-- [ ] Test in `daemon/test`: a simulated lockdown client enumerates processes, reads the scheduled task, kills every PocketDesk process, then asserts nothing is left and nothing returns. The same test against the current build must fail — that is the regression oracle. `[C]`
+- [x] Test in `daemon/test`: a simulated lockdown client enumerates processes, reads the scheduled task, kills every PocketDesk process, then asserts nothing is left and nothing returns. The same test against the current build must fail — that is the regression oracle. `[C]`
+  verified-here: `cd daemon && node --test test/lockdown-client.test.mjs` → 9 PASS / ALL PASS. Oracle: the same two task assertions against `git show 25969a6:daemon/scripts/install-service.ps1` → `Limited: false | Highest: true | RestartCount: true`, i.e. the pre-fix installer fails them
+  needs-verify: the live half registers no real scheduled task (that would modify the machine), so "nothing returns" is proven for processes and ports, not for Task Scheduler itself; that needs one install + kill on the owner's hardware.
 - [ ] `pocketdesk --status` prints elevated (yes/no), auto-start, restart policy, ports and data folder, one line each. `[C]`
 
 ### M1.3 Visibility
@@ -548,3 +550,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.2.1 [x] default install unelevated (per-user task, RunLevel Limited); -Protected is opt-in with a warning; launcher gates UAC on the protected marker | proof: `node --test test/installer.unit.test.mjs` -> 24 PASS; PS parse OK; csc OK | next: m1.2.2
 - 2026-11-24 m1.2.2 [x] RestartCount removed from the default task (protected path keeps it, owner decision pending) | proof: `node --test test/installer.unit.test.mjs` -> 25 PASS incl. no-restart check; PS PARSE OK | next: m1.2.3
 - 2026-11-24 m1.2.3 [x] `pocketdesk stop`: graceful /shutdown, Windows tree+helper sweep, 3 s re-arm watch | proof: `node --test test/stop-cli.test.mjs` -> 11 PASS; old CLI -> "unknown command: stop" | next: m1.2.4
+- 2026-11-24 m1.2.4 [x] lockdown-client oracle test: enumerate (name, helper command line, port owners), kill, assert nothing left/returns | proof: `node --test test/lockdown-client.test.mjs` -> 9 PASS; pre-fix installer fails the task assertions (Highest+RestartCount) | next: m1.2.5
