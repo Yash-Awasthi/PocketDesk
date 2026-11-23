@@ -74,7 +74,8 @@ the front page.
 
 - [x] New README section "Responsible use": not for proctored assessments, not for another person's machine or session, and the two-line reason. `[C]`
   verified-here: `grep -A8 '^### Responsible use' README.md` → section at line 688 names proctored assessment/interview/exam and driving another person's session, with the reason
-- [ ] Remove every "invisible to antivirus / anti-cheat" and AMSI claim from `README.md`, `CONTEXT.md`, `EXCLUSIVE-FULLSCREEN.md` and the `desktop_capture.js` header comment. `[C]`
+- [x] Remove every "invisible to antivirus / anti-cheat" and AMSI claim from `README.md`, `CONTEXT.md`, `EXCLUSIVE-FULLSCREEN.md` and the `desktop_capture.js` header comment. `[C]`
+  verified-here: `grep -rniE "amsi|anti-?cheat|invisible to" --include='*.js' --include='*.mjs' --include='*.md' . | grep -v node_modules | grep -v plan.md | grep -v INTEGRITY.md` → 2 hits, both legitimate: `EXCLUSIVE-FULLSCREEN.md:23` lists anti-cheat bans as a *cost of someone else's* DLL-hooking approach, `README.md:356` says DRM content is invisible to capture APIs. Zero claims about PocketDesk; `CONTEXT.md` had none; `node --check src/desktop_capture.js` → OK
 - [ ] Add the `CONTRIBUTING.md` rule (no anti-detection, no anti-forensics, no driver, no enumeration hiding) and a grep-able list of banned patterns. `[C]`
 - [ ] Link `docs/INTEGRITY.md` from README and CONTRIBUTING; keep it as the standing statement. `[C]`
 
@@ -532,3 +533,4 @@ endpoint's architecture, and the manual checks that never ran.
 ## Journal
 
 - 2026-11-24 m1.1.1 [x] README "Responsible use", INTEGRITY.md committed | proof: `grep -A8 "### Responsible use" README.md` -> two prohibitions + reason at :688 | next: m1.1.2
+- 2026-11-24 m1.1.2 [x] AMSI/invisibility claims removed from desktop_capture.js header + capture comment, EXCLUSIVE-FULLSCREEN.md, FEATURE-MATRIX.md | proof: `grep -rniE "amsi|anti-?cheat|invisible to" …` -> 2 hits, both about other tools/DRM, none about PocketDesk; `node --check src/desktop_capture.js` -> OK | next: m1.1.3
