@@ -235,8 +235,10 @@ $action = if ($sac) {
 } else { New-ScheduledTaskAction -Execute $exe -Argument "--supervise" }
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
 $prin = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
+# No RestartCount: a stop is a stop. Ending the task (Task Manager, `schtasks /End`) leaves the
+# daemon down until you start it again — the next logon, or the Start-menu entry.
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-                -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
+                -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskName "PocketDesk" -Action $action -Trigger $trigger -Principal $prin -Settings $settings -Force | Out-Null
 
 # Start Menu only: a click starts the daemon if needed and opens the pairing and settings page.

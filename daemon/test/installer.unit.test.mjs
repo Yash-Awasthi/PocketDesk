@@ -18,6 +18,7 @@ const DEFAULT = install.slice(install.indexOf("# Default install:"));
 check("the installer offers -Protected as an explicit flag", install.includes("$Protected"));
 check("the default install registers an unelevated per-user task", DEFAULT.includes("-RunLevel Limited"));
 check("the default install never asks for elevation", !/-Verb RunAs/.test(DEFAULT) && !/-RunLevel Highest/.test(DEFAULT));
+check("a stop stays stopped: the default task does not restart itself", !/-RestartCount/.test(DEFAULT) && !/RestartInterval/.test(DEFAULT));
 check("the protected install warns that it cannot be stopped by ordinary programs", /cannot be stopped by ordinary programs/i.test(install));
 check("the launcher reads the protected marker, so only -Protected installs elevate", launcherCs.includes("IsProtectedInstall")
   && launcherCs.includes('Path.Combine(ExeDir, "PocketDesk.ini")') && /if \(!IsProtectedInstall\) \{ StartDaemonDetached\(\); return true; \}/.test(launcherCs)

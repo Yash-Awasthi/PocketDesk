@@ -93,7 +93,9 @@ stopped.
   verified-here: `cd daemon && node --test test/installer.unit.test.mjs` → 24 checks ALL PASS (default task `-RunLevel Limited`, no `-Verb RunAs` in the default region); `powershell -NoProfile -Command '[Parser]::ParseFile(...)'` → PARSE OK on `install.ps1`, `install-service.ps1`, `uninstall.ps1`; `csc -target:winexe daemon\scripts\PocketDeskLauncher.cs` → CSC OK
   deviation: data stays in `%USERPROFILE%\.pocketdesk` — already per-user and user-writable; moving it would orphan every paired phone and token with no migration path (§11 rollback = restart). The security property the item asks for (no elevation, folder the user owns) holds.
   deviation: the default install no longer adds the `PocketDesk (daemon)` firewall rule (`New-NetFirewallRule` needs admin); Windows asks once on first listen and the answer is the user's. `-Protected` keeps the rule.
-- [ ] Remove `RestartCount` from the default task; a stop is a stop, and the next start is a user action. `[C]`
+- [x] Remove `RestartCount` from the default task; a stop is a stop, and the next start is a user action. `[C]`
+  verified-here: `cd daemon && node --test test/installer.unit.test.mjs` → 25 checks ALL PASS, including "a stop stays stopped: the default task does not restart itself"; `powershell -Command '[Parser]::ParseFile(...)'` → PARSE OK
+  deviation: the `-Protected` task keeps `-RestartCount 3` (that path is the explicit "uncloseable" opt-in, and its removal is Appendix A question 2 — an owner decision, not an agent's).
 - [ ] `pocketdesk stop` terminates the PowerShell, ffmpeg and helper children, and asserts nothing re-arms capture or input. `[C]`
 - [ ] Test in `daemon/test`: a simulated lockdown client enumerates processes, reads the scheduled task, kills every PocketDesk process, then asserts nothing is left and nothing returns. The same test against the current build must fail — that is the regression oracle. `[C]`
 - [ ] `pocketdesk --status` prints elevated (yes/no), auto-start, restart policy, ports and data folder, one line each. `[C]`
@@ -542,3 +544,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.1.3 [x] CONTRIBUTING "No detection evasion, ever" + banned-pattern grep; new daemon/test/no-evasion.test.mjs enforces it | proof: `node --test test/no-evasion.test.mjs` -> 8 PASS/ALL PASS; documented grep -> no output (exit 1) | next: m1.1.4
 - 2026-11-24 m1.1.4 [x] INTEGRITY.md linked from README and CONTRIBUTING | proof: `grep -n INTEGRITY.md README.md CONTRIBUTING.md` -> README:697, CONTRIBUTING:184,193 | next: m1.2.1
 - 2026-11-24 m1.2.1 [x] default install unelevated (per-user task, RunLevel Limited); -Protected is opt-in with a warning; launcher gates UAC on the protected marker | proof: `node --test test/installer.unit.test.mjs` -> 24 PASS; PS parse OK; csc OK | next: m1.2.2
+- 2026-11-24 m1.2.2 [x] RestartCount removed from the default task (protected path keeps it, owner decision pending) | proof: `node --test test/installer.unit.test.mjs` -> 25 PASS incl. no-restart check; PS PARSE OK | next: m1.2.3
