@@ -128,6 +128,23 @@ setting:
 
 The daemon's output goes to `%USERPROFILE%\.pocketdesk\daemon.log`.
 
+### Windows Event Log
+
+Start, stop and (when machine policy is added) policy refusals are written to the Windows
+**Application** log under the source **PocketDesk**, so a lab, an employer or an integrity client can
+read them without knowing where PocketDesk keeps files:
+
+| Event ID | Meaning |
+|---|---|
+| 1000 | daemon started (port, pid, and whether it is the console endpoint) |
+| 1001 | daemon stopped, with the reason and how many terminals were closed |
+| 1002 | a policy changed |
+| 1003 | a remote sense was refused by policy |
+
+Read them with `wevtutil qe Application "/q:*[System[Provider[@Name='PocketDesk']]]" /f:text`, or
+Event Viewer under Windows Logs > Application. If the machine refuses the write, the daemon says so
+once in `daemon.log` and keeps running.
+
 ## Update
 
 Run the setup file or the install command again. It replaces the program and keeps your settings, keys
