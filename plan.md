@@ -78,7 +78,8 @@ the front page.
   verified-here: `grep -rniE "amsi|anti-?cheat|invisible to" --include='*.js' --include='*.mjs' --include='*.md' . | grep -v node_modules | grep -v plan.md | grep -v INTEGRITY.md` → 2 hits, both legitimate: `EXCLUSIVE-FULLSCREEN.md:23` lists anti-cheat bans as a *cost of someone else's* DLL-hooking approach, `README.md:356` says DRM content is invisible to capture APIs. Zero claims about PocketDesk; `CONTEXT.md` had none; `node --check src/desktop_capture.js` → OK
 - [x] Add the `CONTRIBUTING.md` rule (no anti-detection, no anti-forensics, no driver, no enumeration hiding) and a grep-able list of banned patterns. `[C]`
   verified-here: `cd daemon && node --test test/no-evasion.test.mjs` → 8 PASS / ALL PASS; the copy-paste gate in `CONTRIBUTING.md` ("No detection evasion, ever") → no output, `grep` exit 1 (clean) over 252 scanned files
-- [ ] Link `docs/INTEGRITY.md` from README and CONTRIBUTING; keep it as the standing statement. `[C]`
+- [x] Link `docs/INTEGRITY.md` from README and CONTRIBUTING; keep it as the standing statement. `[C]`
+  verified-here: `grep -n 'INTEGRITY.md' README.md CONTRIBUTING.md` → `README.md:697` (end of Responsible use) and `CONTRIBUTING.md:184,193`; the file is committed in `7c830b4`, so both links resolve
 
 ### M1.2 Be closeable
 
@@ -536,3 +537,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.1.1 [x] README "Responsible use", INTEGRITY.md committed | proof: `grep -A8 "### Responsible use" README.md` -> two prohibitions + reason at :688 | next: m1.1.2
 - 2026-11-24 m1.1.2 [x] AMSI/invisibility claims removed from desktop_capture.js header + capture comment, EXCLUSIVE-FULLSCREEN.md, FEATURE-MATRIX.md | proof: `grep -rniE "amsi|anti-?cheat|invisible to" …` -> 2 hits, both about other tools/DRM, none about PocketDesk; `node --check src/desktop_capture.js` -> OK | next: m1.1.3
 - 2026-11-24 m1.1.3 [x] CONTRIBUTING "No detection evasion, ever" + banned-pattern grep; new daemon/test/no-evasion.test.mjs enforces it | proof: `node --test test/no-evasion.test.mjs` -> 8 PASS/ALL PASS; documented grep -> no output (exit 1) | next: m1.1.4
+- 2026-11-24 m1.1.4 [x] INTEGRITY.md linked from README and CONTRIBUTING | proof: `grep -n INTEGRITY.md README.md CONTRIBUTING.md` -> README:697, CONTRIBUTING:184,193 | next: m1.2.1
