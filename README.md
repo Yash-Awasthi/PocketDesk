@@ -685,6 +685,17 @@ PocketDesk/
 - **At the PC**: a red frame and a viewer bar show when someone is connected; with *Ask before someone views this PC* on, the Allow button ignores keys for the first 1.5 s so typing cannot approve by accident.
 - **No open ports**: Reach the PC over LAN or iroh. **Do not** port-forward to the internet — the protocol has full shell control of your PC.
 
+### Responsible use
+
+PocketDesk is a remote-control tool: it can stream a screen, inject input and lend a
+camera. Use it only on machines you own or are responsible for, and only for your own
+work. **Do not use it during a proctored assessment, interview, or exam**, and do not
+use it to drive another person's session — that is cheating, and it breaks the platform's
+terms even where the platform cannot see it. PocketDesk deliberately stays visible to
+the machine it runs on, so the owner can block or stop it; the audit of what the tool
+could be misused for, and the guardrails that follow from it, are in
+[docs/INTEGRITY.md](docs/INTEGRITY.md).
+
 ---
 
 ## 🗺️ Roadmap
