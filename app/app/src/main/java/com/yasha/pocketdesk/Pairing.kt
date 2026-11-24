@@ -13,6 +13,13 @@ import kotlinx.serialization.json.contentOrNull
 object Pairing {
     const val SCHEME = "pocketdesk"
 
+    /**
+     * What the scanner says when [parse] returns nothing — a plain `ws://` link with no iroh
+     * ticket, or a QR from another app. The wording is asserted in
+     * `PairRejectInstrumentedTest`, so changing it here without changing the test fails.
+     */
+    const val REJECTED = "Not a PocketDesk pairing QR"
+
     fun parse(link: String): List<ServerEntry> {
         val payload = link.trim().takeIf { it.startsWith("$SCHEME://pair#") }?.substringAfter('#') ?: return emptyList()
         val json = runCatching {

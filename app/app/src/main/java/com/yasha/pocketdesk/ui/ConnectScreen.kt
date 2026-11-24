@@ -96,7 +96,7 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
         com.google.mlkit.vision.codescanner.GmsBarcodeScanning.getClient(ctx, opts).startScan()
             .addOnSuccessListener { code ->
                 val paired = Pairing.parse(code.rawValue ?: "")
-                if (paired.isEmpty()) android.widget.Toast.makeText(ctx, "Not a PocketDesk pairing QR", android.widget.Toast.LENGTH_LONG).show()
+                if (paired.isEmpty()) android.widget.Toast.makeText(ctx, com.yasha.pocketdesk.Pairing.REJECTED, android.widget.Toast.LENGTH_LONG).show()
                 else Link.pendingPair = paired
             }
             .addOnFailureListener { e ->
