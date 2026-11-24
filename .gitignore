@@ -23,3 +23,6 @@ pocketdesk.err
 .freebuff/
 notes.md
 desktop.ini
+
+# c8 output
+daemon/coverage/
