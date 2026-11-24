@@ -1,227 +1,104 @@
-# PocketDesk — Session Context
+# PocketDesk — context for a fresh session
 
-Date: 2026-09-22 (state section refreshed; original notes 2026-08-24). Repo:
-`C:\Users\yasha\PROJECTS\PROJECTS\PocketDesk`.
+Refreshed 2026-11-24 from the tree itself. Every path, count and version below was
+read out of the repository on that date; if one of them disagrees with the code,
+the code is right and this file needs the fix.
 
-## What the project is
+## What it is
 
-Android app + Node daemon to drive AI coding agents (and now IDEs/tools) installed on a
-Windows PC from a phone. Daemon spawns CLIs in real PTYs (node-pty/ConPTY), serves a WS
-API (ws:// or wss:// with self-signed TLS), phone is Kotlin+Compose with xterm.js terminal,
-chat UI (in progress), file transfer, multi-PC server list, QR pairing (in progress).
+A Node daemon on a Windows PC plus an Android app (and a browser UI) that drive AI
+coding agents and desktop tools on that PC from a phone. The daemon runs CLIs in
+real PTYs (`node-pty`/ConPTY) and serves a WebSocket API on the LAN or over iroh;
+the phone is Kotlin + Compose with an xterm.js terminal, chat, file transfer, a
+multi-PC list and QR pairing.
 
-User's north star: **AnyDesk-style**. PC side = install once, hands-free forever.
-Phone side = just prompts, attach files, configure stuff. Latest ask adds:
-access ALL IDEs, invoke them from cmd, install them from mobile, and use any IDE from
-mobile "with all features enabled" → plan is `launch` adapter for GUI apps + VS Code
-`code tunnel` adapter so full VS Code opens in the phone browser.
+Product intent, ethics and the rules we will not break: [docs/INTEGRITY.md](docs/INTEGRITY.md).
+What each feature actually does today: [docs/FEATURE-MATRIX.md](docs/FEATURE-MATRIX.md).
 
-## Layout
+## Layout (counts as of the refresh)
 
-- `daemon/src/` — index.js, config.js, server.js, registry.js, sessions.js, chat.js
-- `daemon/scripts/` — gen-cert.js, install-service.ps1, uninstall-service.ps1, tray/PocketDeskTray.cs
-- `daemon/public/` — index.html (the hub: every page of the phone and of the PC), `ui/thispc.js` (pairing QR, security switches, devices, uninstall; routed at `#go=thispc`), vendor/qrcode.min.js (qrcode-generator@1.4.4, works as browser global `qrcode`)
-- `daemon/manifests/*.json` — claude, opencode, codex, gemini, aider, qwen (+chat sections)
-- `daemon/test/smoke.mjs` + `test/smoke-chat.mjs` — run via `npm.cmd test` (npm.ps1 blocked by execution policy; use npm.cmd)
-- `app/` — Android project. Gradle wrapper 9.8.1, AGP 9.5.0-alpha09 (built-in Kotlin), Kotlin 2.5.0-Beta1,
-  compileSdk 37.2, targetSdk 37, JDK 25 to build; versions live in `app/gradle/libs.versions.toml`.
-  Keystore: `app/pocketdesk.keystore`, creds in `app/keystore.properties` (both gitignored).
-- APKs land in `app/app/build/outputs/apk/{debug,release}/`.
+| Path | What lives there |
+|---|---|
+| `daemon/src/` | 65 modules at the top level (plus `handlers/`, `plugins/`, `phone_adb/`). Entry point `index.js`; `daemon.js` boots the process; `server.js` is the WS/HTTP surface; `sessions.js` owns PTYs; `cli.js` is the `pocketdesk` command |
+| `daemon/src/handlers/` | 13 message modules: agents, computers, display, files, kvm, pc_pad, phone, phone_adb, phone_sync, remote, sources, ssh, system |
+| `daemon/src/plugins/` | 3 plugins (auth, logger, metrics), loaded by `plugins.js` |
+| `daemon/manifests/` | 17 CLI/GUI manifests: claude, codex, gemini, opencode, opencode-desktop, qwen, aider, cline, copilot, cursor, windsurf, zed, zcode, antigravity, freebuff-desktop, vscode, shell |
+| `daemon/public/` | `index.html` (the hub), `ui/` (core, hub, pages, phone, computers, extras, share, thispc), `vendor/` |
+| `daemon/scripts/` | installers (`install-service.ps1`, `uninstall-service.ps1`), launcher and tray sources (`PocketDeskLauncher.cs`, `PocketDeskTray.cs`, `PocketDeskKvm.cs`), `gen-cert.js`, bench scripts, `console/`, `linux/`, `mac/`, `unix/` |
+| `daemon/test/` | 57 `*.test.mjs` files plus `helpers.mjs` and `setup.mjs` |
+| `app/` | Android project (see versions below) |
+| `docs/` | `INTEGRITY.md`, `FEATURE-MATRIX.md`, `SETUP-PC.md`, `REPRODUCIBLE-BUILD.md`, `EXCLUSIVE-FULLSCREEN.md`, `ALPHA-CAPTURE.md`, `RELAY.md`, `CONNECTIVITY-NOTES.md`, `TRANSPORT-BENCH.md` |
+| `plan.md` | The work plan and the journal; the source of truth for what is being built |
 
-## Protocol summary
+## Running it
 
-hello{token} auth (4003 on bad). Terminal sessions: create/attach/detach/in/resize/kill,
-replay scrollback. FS: fs{path} → items[{name,dir,size}], fread/fwrite chunked 256KB base64
-(stop-and-wait). Chat (new): chatsession{harness,cwd,prompt} → created{id kind:"chat"},
-server attaches socket FIRST then sends prompt (ordering matters — was a bug),
-chatmsg{id,text} follow-ups use manifest resumeArgs fresh process per turn,
-chatcancel/kill cancel. Events pushed only to subscribed sockets:
-chatuser/chatdelta/chartool/chattoolresult/chatstate/chatreplay.
-Formats parsed daemon-side: `claude-stream-json`, `codex-json`, plain `text`.
-Pairing: GET /pair?k=<token> is loopback-only and 302s to the hub's This PC page
-(`/#go=thispc&t=<token>`); the loopback page response carries `<meta name="pd-token">`,
-`pd-qr` (payload = `pocketdesk://pair#<base64url({u,t,f,i,n})>`), `pd-hub` and `pd-fp`;
-/vendor/* static files served from public/vendor.
+```bash
+cd daemon
+npm install
+npm test                 # node --test --test-global-setup=test/setup.mjs "test/*.test.mjs"
+npm start                # the daemon, on port 8765 unless config.json says otherwise
+node src/cli.js status   # what is installed, elevated or not, auto-start policy, ports
+node src/cli.js stop     # ask it to exit, then clear stray helpers
+node src/doctor.js       # environment probes (pty, ffmpeg, ports, task, console endpoint)
+```
 
-Manifest chat section: `"chat": { "args": [...], "format": "...", "resumeArgs": [...] }`;
-prompt always via stdin. claude: `-p --output-format stream-json --verbose` +
-`--continue` resume; codex: `exec --json -` + `exec resume --last`; opencode/gemini/qwen:
-text mode stdin, opencode has `--continue`. aider intentionally terminal-only.
+Two environment-driven modes matter:
 
-## State at save (IMPORTANT — current)
+- `RH_PORT` + `RH_TOKEN` + `RH_HOME` + `POCKETDESK_DATA` make a throwaway instance
+  with no TLS and no iroh — this is what every test uses (`test/helpers.mjs`).
+- A normal run reads `%USERPROFILE%\.pocketdesk\config.json`.
 
-**2026-11-22 pass — one front end, all-screens mirroring, alpha capture (current):**
+Ports in use: 8765 (daemon, configurable), the loopback page the phone opens for pairing is
+the daemon port + 10 (8775 by default),
+8766 (optional SYSTEM console endpoint),
+4679 or `RH_CLI_PORT` (loopback CLI server for `pocketdesk pair|record|list`).
 
-- **Single front end.** `daemon/public/pair.html` is gone; `/pair?k=<token>` 302s to
-  `/#go=thispc&t=<token>`, and `ui/thispc.js` is the one page for pairing (two QR tabs: the app and a
-  phone browser), the security switches, paired devices and uninstall. Banner, hub and docs point at
-  it; nothing links to the old page.
-- **All screens** is the default capture (`gdigrab -i desktop`, 0.66 scale, <=20 fps): the whole
-  extended desktop as one picture, listed first by `monitors()` and chosen when a viewer sends no
-  monitor. Per-monitor ddagrab stays for single-screen viewing; `foregroundMonitor()` skips the
-  synthetic entry and `recorder.js` records the same view.
-- **Live monitor list.** While anyone watches, the list is polled every 5 s and pushed as
-  `desktop_monitors`; a change restarts the encoder, so a hot-plugged display appears without a
-  reconnect.
-- **Never stuck.** `server.js` restarts an encoder that exits, restarts one that is alive but silent
-  for 6 s, and after two failures on one output falls back to the all-screens GDI grab (software,
-  GPU-independent); 8 consecutive failures surface `desktop_frame_error`.
-- **Alpha capture handshake.** `setCaptureAllowed()` writes `%LOCALAPPDATA%\PocketDesk\allow-capture`
-  while a viewer is attached and removes it when the last one leaves (falls back to
-  `%USERPROFILE%\AppData\Local`); `capture_blocked` -> `desktop_notice` names the window that hides
-  itself. Contract, C#/C++ snippets and the exclusive-fullscreen/HDR caveats live in
-  `docs/ALPHA-CAPTURE.md`. Verified on this machine: marker appears while streaming, gone after stop.
-- **Bloat gone:** `plan.txt`, `betterstack.md`, `docs/ABSORPTION-LEDGER.md` and
-  `docs/INSPIRATION-SOURCES.md` are removed; `docs/FEATURE-MATRIX.md` remains the feature record.
+Install and uninstall on a real PC: [docs/SETUP-PC.md](docs/SETUP-PC.md). The
+installer is `install.ps1`, the uninstaller `uninstall.ps1`; both are covered by
+`daemon/test/installer.unit.test.mjs`.
 
-**2026-10-14 pass B — codecs, PC sound, native macOS capture, Linux X11 (0.8.0, newest):**
+## Android build
 
-- Codec negotiation: `desktop_start` carries `codecs` (phone/browser decodables, best first) and `audio`.
-  `DesktopVideo.setCodecs` + `candidates()` pick AV1 → HEVC → H.264 across NVENC/QSV/AMF/VA-API/
-  VideoToolbox/x264; the shared codec is the intersection of all current viewers. `desktop_started`
-  reports `codec`. Enhanced FLV (hvc1/av01) parsing + AV1 sequence-header insertion in `desktop_video.js`.
-- Per-codec latency stamp: H.264 SEI, HEVC prefix-SEI, AV1 padding OBU (`stampFrame`); phone + browser
-  read all three.
-- PC sound: kind-3 packets, AAC-LC ADTS. Windows WASAPI loopback helper + ffmpeg (`desktop_audio.js`),
-  Linux pulse monitor source (pactl), macOS from the native helper. iroh carries audio on the control
-  stream (`sendAudio`); the phone splits kind 3 to `AacPlayer`, the browser to WebCodecs AudioDecoder.
-- macOS capture is now ScreenCaptureKit + VideoToolbox in the Swift helper (`stream` mode, records
-  `[kind u8][len u32][data]`); stills use SCScreenshotManager. No ffmpeg needed on a Mac. CGDisplayCreateImage is gone.
-- Linux X11 (`linux_desktop.js`): monitors via xrandr, input via xdotool, cursor via xdotool, video via
-  ffmpeg x11grab. Wayland unsupported (no X grab). `DesktopController.usable` gates it on xdotool.
-- Phone decodes HEVC/AV1 when a hardware decoder exists (`decodableCodecs`), rebuilds the decoder on a
-  codec switch. `install.sh` installs ffmpeg/xdotool/xrandr/xclip per package manager.
-- UNPROVEN: macOS ScreenCaptureKit/VideoToolbox stream and Linux X11 have NOT run on hardware; CI
-  compiles the Mac helper but has no display to capture. Windows AV1/HEVC/H.264 NVENC + WASAPI loopback
-  ARE verified on real hardware (RTX 4060) via `desktop.test.mjs` with FFMPEG_PATH.
+Versions are pinned in `app/gradle/libs.versions.toml` and may not carry an
+un-noted pre-release (enforced by `daemon/test/prerelease-pins.test.mjs`):
 
-**2026-10-14 pass A — desktop control on macOS, OS-aware input, pointer mapping (0.7.0):**
+- AGP 9.5.2, Kotlin 2.4.21, Compose BOM 2026.11.01 (Compose 1.13, Material3 1.5.0)
+- `compileSdk 37.2`, `targetSdk 37`, `minSdk 30`, `versionName 0.11.0`, `versionCode 26`
+- Gradle wrapper 9.8.1, JDK 17 or newer to build (21 was used), NDK ABI: `arm64-v8a` (release) + `x86_64` (debug)
+- Signing needs `app/keystore.properties`, which is gitignored; without it the
+  release APK is unsigned but still builds.
 
-- `welcome` carries `os` (`process.platform`); the app picks shortcut bar, modifier names and
-  three-finger swipe shortcuts from it (`ui/HostKeys.kt`).
-- Pointer placement is by fraction of the picture: `desktop_mouse` carries `fx`/`fy` and
-  `desktop_cursor` sends them back, mapped onto the watched monitor's rect (video) or `jpegRect`
-  (still frames). x/y stays for older clients. On macOS the input space is CG global points, so
-  no pixel ratio is involved; `CGDisplayPixelsWide` returns points on HiDPI modes, which is what
-  made the Mac pointer land at twice the distance before.
-- Manual corner calibration lives on the phone only (`Calibration` in `ui/TouchGestures.kt`), keyed
-  by server url and monitor; a tap while calibrating marks a corner and is never sent as a click.
-- Swift helper: drag events while a button is held, click counts for double clicks, held
-  modifiers applied to every event, full key map with the fn flag on arrows/F-keys (needed for
-  Ctrl+arrow Space switching), media keys, horizontal scroll, Accessibility check with a clear
-  error. A changed source now forces a rebuild (the old binary used to win on mtime).
-- Held keys and buttons are released on `desktop_stop` and when control is paused.
-- UNPROVEN: none of the macOS changes have run on a real Mac; CI's macOS job compiles the helper
-  (`desktop.test.mjs` fails on `helper_not_running`). Linux still has no desktop capture or input.
+```bash
+cd app
+JAVA_HOME=/path/to/jdk21 ./gradlew :app:assembleDebug     # compile + package
+JAVA_HOME=/path/to/jdk21 ./gradlew :app:compileDebugKotlin # fastest check that the app still compiles
+```
 
-**2026-09-26 pass — console (secure-desktop) endpoint:**
+Outputs land in `app/app/build/outputs/apk/{debug,release}/`. Release builds are
+reproducible by content, not by file hash: [docs/REPRODUCIBLE-BUILD.md](docs/REPRODUCIBLE-BUILD.md).
 
-- A second daemon instance runs as SYSTEM in the active console session so it can reach the
-  secure desktop (UAC prompts, lock screen, before login), which the user daemon cannot. It is
-  the full daemon reused unchanged, on its own port 8766, with its own config/token/TLS/iroh
-  key under `%ProgramData%\PocketDesk\console` (ACL: Administrators + SYSTEM only).
-- Launcher `daemon/scripts/console/PocketDeskConsole.cs` (compiled by csc.exe, System.dll
-  only) is started by the `PocketDeskConsole` SYSTEM scheduled task at boot. It polls
-  `WTSGetActiveConsoleSessionId`, moves a duplicated SYSTEM token into that session
-  (`SetTokenInformation(TokenSessionId)`), and `CreateProcessAsUser`-launches node on
-  `winsta0\default`, relaunching across session/logon changes and on child exit.
-- LPE fix (security review): the SYSTEM task must not execute code from a user-writable path.
-  The install copies the launcher, Node, and the daemon tree into `%ProgramData%\PocketDesk\bin`,
-  ACL-locked to Administrators + SYSTEM before the copy, and the task runs the exe from there. The
-  launcher refuses to spawn unless its own dir, its node, and the ini-supplied daemon dir all
-  resolve under `%ProgramData%\PocketDesk` and the node/`src\index.js` exist (no bare-`node`
-  PATH fallback). Teardown removes `bin` always; the token dir stays unless `-Purge`/`-RemoveData`.
-- Env that drives it: `RH_CONSOLE=1`, `RH_HOME`, `RH_PORT=8766`, `RH_LABEL="PC (console)"`.
-  `config.js` under `RH_CONSOLE` icacls-locks the dir to Admins+SYSTEM and refuses to start
-  without TLS. The capture/input helpers gain `SetThreadDesktop(OpenInputDesktop())` before
-  each op ONLY under `RH_CONSOLE`, so they follow the secure desktop; the user daemon's helper
-  scripts stay byte-identical (a test enforces this). The pair payload gained an `n` (name)
-  field, folded into the phone entry name (`Pairing.kt`).
-- Install: `install-service.ps1 -Console` (elevated) compiles the launcher, ACLs the dir,
-  registers the task, opens `https://localhost:8766/pair`. `install.ps1 -Console` opts in with
-  one UAC relaunch. `uninstall-service.ps1`/`uninstall.ps1` tear down the task + port 8766 and
-  keep the token unless `-Purge`/`-RemoveData`. `doctor` reports `console_endpoint`.
-- Ports now: 8765 user daemon, 8766 console daemon. Security trade-off on the record: the
-  console endpoint is the full daemon as SYSTEM, so anything run through it (agents, SSH,
-  files) runs as SYSTEM; it is gated only by its own admin-only token and separate pairing.
-- UNPROVEN: the secure-desktop injection, before-login reach, and UAC-approval path have only
-  been unit-checked and reasoned through, never run on hardware. `npm.cmd test` = all pass;
-  Android `PairingTest` passes; all PS scripts parse. Manual steps pending in
-  `docs/console-plan/60-verification.md` (delete that folder once the hardware run is done).
+## Protocol in one paragraph
 
-0. 2026-09-23 pass:
-   - `server.js` split: message handlers live in `src/handlers/{agents,files,remote,ssh,system}.js`
-     (a lookup table guarded by `Object.hasOwn`), relay bridging in `relay_bridge.js`, file
-     browse/read/write in `fs_ops.js`. server.js keeps HTTP, WS auth, broadcast and wiring.
-   - Fixed: share-token sockets received every broadcast; a revoked relay device stayed
-     subscribed to sessions; desktop input used a stale scale after `desktop_quality`.
-   - Android is 11+ only (minSdk 30). Fixed relay transport (no hello, main-thread writes,
-     unbounded retries, relay URL could not be saved), cert-accept loop, retry on 4xxx auth
-     refusals, stale-socket callbacks, no ping, hung transfers on disconnect, POSIX paths,
-     empty uploads, lock bypass on rotation, desktop stream left running, drag = click spam.
-   - Relay auth: the phone publishes only a token-free `rhchallenge`; the daemon answers direct
-     with a nonce, and the hello carries HMAC(sha256hex(token), "nonce:connId") instead of the
-     token. All `rhreq` traffic is direct, so channel members see neither token nor requests.
-   - Pairing: the app handles `pocketdesk://pair#…` (camera QR scan or pasted into the add
-     dialog) behind a confirm dialog, saving a pinned LAN entry plus a relay entry when the
-     payload names one. The pair page is rebuilt on token rotation.
-   - `RhApp` starts `Link`, which drives `LinkService` and exit notifications from a process
-     scope; reconnects go Connected -> Reconnecting without a Disconnected flash.
-   - GitGuardian flags fake passwords in `daemon/test/bastion.test.mjs` from older commits;
-     mark them as test credentials in its dashboard.
-   - `test/protocol-contract.test.mjs` checks every type the app sends has a handler and every
-     type it handles is emitted. CI runs daemon tests on Windows and Ubuntu, plus Android lint,
-     unit tests and a debug build.
-1. 2026-09-22 pass:
-   - **Six unused clusters deleted.** `sync_*`, `fleet_*`, `agent_*`, `mux_*`/`tmux_*`,
-     `qr_*` and `monitor_*` are gone: seven modules (file_sync_engine, fleet_view,
-     agent_orchestrator, session_multiplexer, tmux_session_manager, qr_session_sharing,
-     session_monitor), their server cases and wiring, and ten test files. Each had a
-     green test and no caller — no browser screen, no phone screen, nothing inside the
-     daemon. `docs/FEATURE-MATRIX.md` records the removal.
-   - **Tunnel bind race fixed.** `tunnel_create` answered before the listener was bound,
-     so a client could connect to a port that did not exist yet. `createTunnel` now
-     resolves on `listening` and rejects on a bind error, and the handler awaits it.
-     Deleting the startup work above made the race reproducible on every run.
-   - **SSH front end.** Browser client has an SSH tab (profiles with per-connect
-     credentials, key generation with the public half shown, known host keys, host-key
-     new/changed banner, bastion and sshserver start/stop bound to loopback by default).
-     `profile_create` now carries `keyId`, without which key auth was unreachable from
-     the wire. `test/ssh-ui.test.mjs` covers exactly the messages the panel sends.
-   - **Android catch-up.** New `ui/SshScreen.kt` mirrors the browser SSH tab, reached
-     from the Tools screen; the Tools screen gained the Git and Doctor sections it was
-     missing. `assembleDebug`, `testDebugUnitTest` and `bundleRelease` are all clean;
-     the release AAB is signed (certificate valid to 2054).
-   - **Hardware probe.** `daemon/scripts/hw-probe.mjs` drives the real transports
-     against a machine you own: SSH connect + key auth, one remote command, an SFTP
-     upload/download byte-compared, and an RFB handshake reporting the announced
-     geometry. Still unrun against real hardware — that needs a host only the user has.
-   - `npm.cmd test` = **24 files, all pass**.
-2. The inspiration-corpus absorption pass (tracked in `docs/FEATURE-MATRIX.md`) is the
-   workstream this grew out of; the ledger stays as the provenance record.
-3. Open gaps, honestly: no on-device Android run has ever happened (compile-verified
-   only); the WhatsApp pairing QR has never been scanned by a phone; the RFB client has
-   never met a real VNC server; SSH and SFTP have never left loopback. `hw-probe.mjs`
-   closes the last three the moment someone runs it against real hosts.
-4. Remaining 🗺️ surfaces: full WebRTC screen transport (frames are JPEG over the
-   protocol at ~3 fps), mosh-style UDP roam, E2EE shares, Android foreground service
-   and biometric lock.
+`hello{token}` authenticates (close code 4003 on a bad token). Terminal sessions
+use create/attach/detach/in/resize/kill with scrollback replay. Files use
+`fs{path}` plus chunked `fread`/`fwrite` (256 KB base64). Chat uses
+`chatsession{harness,cwd,prompt}` and `chatmsg`, with the socket subscribed before
+the prompt is sent; events are `chatuser`, `chatdelta`, `chartool`,
+`chattoolresult`, `chatstate`, `chatreplay`. Stream formats parsed daemon-side:
+`claude-stream-json`, `codex-json`, plain `text`. Pairing: `GET /pair?k=<token>` is
+loopback-only and redirects to `/#go=thispc&t=<token>`, whose page carries
+`<meta name="pd-token">` and a `pocketdesk://pair#…` QR payload.
 
-## Environment facts
+Message names, per handler, are the authority: `daemon/src/handlers/*.js` and
+`daemon/test/protocol-contract.test.mjs`. If this paragraph and a handler disagree,
+the handler wins.
 
-- ANDROID_HOME set, SDK platforms 36/37, JDK 25 needed for the app build, node v24 or newer.
-- No gradle on PATH; wrapper generated from local dist (9.3.1).
-- TLS certs are generated in pure Node (no openssl needed); csc.exe available
-  (.NET Framework 4) — used to compile tray app.
-- adb not on PATH: `$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe`.
-- Build cmd: `cd app; .\gradlew.bat assembleDebug` (~3 min first time).
-- Real config lives in `%USERPROFILE%\.pocketdesk\config.json` (TLS enabled, cert at
-  ~/.pocketdesk/tls/, fp b6bedeeb...aa14). Smoke tests use env RH_PORT/RH_TOKEN and no
-  longer pollute it (config.js only persists when file absent AND no env overrides).
+## Rules that already have a test
 
-## Conventions
-
-- Caveman style ONLY in chat + commit subjects; everything persisted to disk is normal prose.
-- No comments unless non-obvious constraint; no dead code (user explicitly wants lean APK,
-  R8 on; xterm + qrcode vendored locally, no CDN).
-- Never commit without being asked; never add AI attribution.
+- No detection evasion anywhere: `daemon/test/no-evasion.test.mjs` plus a grep gate
+  in [CONTRIBUTING.md](CONTRIBUTING.md).
+- No un-noted pre-release dependency: `daemon/test/prerelease-pins.test.mjs`.
+- The daemon can always be stopped: `daemon/test/stop-cli.test.mjs`,
+  `daemon/test/lockdown-client.test.mjs`.
+- Every script and installer still parses: the `*.unit.test.mjs` files parse the
+  PowerShell and compile the C# with `csc`.

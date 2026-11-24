@@ -152,7 +152,9 @@ commit is byte-identical.
 
 ### M1.5 Make the stale docs true
 
-- [ ] Rewrite `CONTEXT.md` from the tree (paths, test entrypoints, plugin location, Android versions) or delete it; a doc that names the wrong files costs more than it saves. `[C]`
+- [x] Rewrite `CONTEXT.md` from the tree (paths, test entrypoints, plugin location, Android versions) or delete it; a doc that names the wrong files costs more than it saves. `[C]`
+  verified-here: counts and paths read from the tree on 2026-11-24 — `ls daemon/src/*.js | wc -l` → 65, `ls daemon/src/handlers/*.js | wc -l` → 13, `ls daemon/manifests/*.json | wc -l` → 17, `ls daemon/src/plugins/*.js | wc -l` → 3, `ls daemon/test/*.test.mjs | wc -l` → 57; versions from `app/gradle/libs.versions.toml` (agp 9.5.2, kotlin 2.4.21, composeBom 2026.11.01) and `app/app/build.gradle.kts` (compileSdk 37.2, minSdk 30, targetSdk 37, versionName 0.11.0); `node src/cli.js status` → `ports: 8765 daemon, 8775 loopback page, 4679 cli`, `EXIT=0`
+  removed from the old file: the stale repo path (`C:\Users\yasha\PROJECTS\…`), `AGP 9.5.0-alpha09` / `Kotlin 2.5.0-Beta1`, `JDK 25 to build` (AGP 9.5 takes 17+, 21 was used), "test/smoke.mjs + smoke-chat.mjs" as the only tests (57 files), and the 2026-09/11 state narrative that contradicted `docs/FEATURE-MATRIX.md`
 - [ ] Fix the "28 suites" badge to the generated test-file count. `[C]`
 - [ ] `docs/FEATURE-MATRIX.md` and the README feature table re-checked against `handlers/*` message names; a feature with no handler is removed. `[C]`
 - [ ] `daemon/README`-level statement of every protocol message with its handler file, generated from the registry. `[C]`
@@ -586,3 +588,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.4.2 [x] node-pty 1.2.0-beta.15 -> 1.1.0 (stable latest, N-API prebuilds, no compiler) | proof: spawn+echo PTY_OK, term-cli/stream/crash-kills-agents 3/3 ALL PASS, ssh-ui 1 PASS, clean `npm ci` -> CI PTY OK | next: m1.4.3
 - 2026-11-24 m1.4.3 [x] prerelease-pins.test.mjs: un-noted pre-release in libs.versions.toml or package.json fails npm test (note on the pin line, or a "prerelease" map) | proof: 9 PASS clean; injected alpha/beta -> FAILED: 2 with names; noted -> ALL PASS | next: m1.4.4
 - 2026-11-24 m1.4.4 [x] reproducible release build measured: signed APK sha256 cannot match (v2/v3 random salt) but content fingerprint can; added app/scripts/apk-content-hash.mjs + docs/REPRODUCIBLE-BUILD.md | proof: two assembleRelease runs -> entry fingerprint d187d072 both, unsigned sha256 a76d5286 both, apksigner verify exit 0 both; apk-hash.unit.test.mjs 7 PASS | deviation: plan "Done when" was wrong (byte-identical signed APK is impossible) and was corrected in place | next: m1.5.1
+- 2026-11-24 m1.5.1 [x] CONTEXT.md rewritten from the tree: 65 src modules, 13 handlers, 17 manifests, 3 plugins, 57 test files, stable Android pins, real ports (8765 / +10 / 8766 / 4679) | proof: each count from `ls | wc -l`, versions from libs.versions.toml + build.gradle.kts, `node src/cli.js status` EXIT=0 | next: m1.5.2
