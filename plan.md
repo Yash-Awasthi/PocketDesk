@@ -177,7 +177,12 @@ commit is byte-identical.
 
 ### M1.6 Android has never run a test on a device in CI
 
-- [ ] Emulator CI job (`reactivecircus/android-emulator-runner`, API 26 and 37): `connectedDebugAndroidTest`; start with the pairing and TLS tests. `[C]`
+- [x] Emulator CI job (`reactivecircus/android-emulator-runner`, API 26 and 37): `connectedDebugAndroidTest`; start with the pairing and TLS tests. `[C]`
+  corrected: the plan said API 26, but `minSdk` is 30 — an API 26 emulator cannot install the app. The matrix is `[30, 37]`: the oldest phone it installs on and the API it targets.
+  verified-here: `cd app && JAVA_HOME=/c/work/jdk21 ./gradlew :app:assembleDebugAndroidTest` → BUILD SUCCESSFUL; then on the local emulator (`adb devices` → `emulator-5556`, AVD `ping_ci34`, API 34): `./gradlew :app:connectedDebugAndroidTest` → BUILD SUCCESSFUL in 4m 13s, and `app/app/build/outputs/androidTest-results/connected/debug/TEST-*.xml` → `tests="11" failures="0"` — 7 pairing + 4 TLS cases, e.g. `thePairedFingerprintIsAccepted`, `aDifferentFingerprintIsRefused`, `theDaemonsOwnLinkShapeIsUnderstood`
+  added: `app/app/src/androidTest/.../PairingInstrumentedTest.kt` (7 cases, Android's own base64/JSON) and `TlsInstrumentedTest.kt` (4 cases, a real handshake against a `HeldCertificate` server: pinned accepts, wrong pin refuses, collecting trust manager reports the leaf fingerprint), `testInstrumentationRunner`, and `androidx.test:{junit 1.3.0,runner 1.7.0,core}` + `okhttp-tls` under `androidTestImplementation`
+  also: `daemon/test/android-ci.unit.test.mjs` (15 checks) ties the workflow to the build file — the matrix must contain `minSdk` and `targetSdk` read from `build.gradle.kts`, so bumping either without touching CI fails.
+  needs-verify: the GitHub job itself has not run (no Actions here). Its YAML parses with `npx js-yaml` and the same Gradle task passed locally on API 34; API 30 and 37 runner images are unproven.
 - [ ] Robolectric (or Roborazzi) tests for the five main screens so layout can be checked without hardware. `[C]`
 - [ ] Instrumented test for `LinkService` foreground start, background survival and stop. `[C]`
 - [ ] Instrumented test for `AppLock` re-lock after 30 s background. `[C]`
@@ -610,3 +615,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.5.5 [x] pair payload label + console parity folded into suites: `n` only with RH_LABEL; capture geometry/encoder args byte-identical with and without RH_CONSOLE | proof: auth.test.mjs ALL PASS (label checks), console-parity.test.mjs 5 PASS; removing the label or perturbing ffmpegArgs under RH_CONSOLE fails by name; badge 61 -> 62 | next: m1.5.6
 - 2026-11-24 m1.5.6 [x] CONTEXT.md gains the env-var table (RH_HOME/RH_CONSOLE/RH_LABEL/...), the console-endpoint paragraph and the full port list; SETUP-PC console section re-checked against the installer | proof: install-service.ps1 lines 99/150/153/155/161 match the doc; server.js:59 audit log, :866 WebDAV port+20 | next: m1.6.1
 - 2026-11-24 note: full suite 113 tests / 108 pass / 5 fail (absorb, graceful-shutdown, sessions-leakguard, smoke, smoke-chat) — startup-timing flakes, now tracked as an M2.1 subtask with the measured 5-7 s cold-start figure
+- 2026-11-24 m1.6.1 [x] emulator CI job (API 30 + 37, minSdk/targetSdk derived) running connectedDebugAndroidTest, plus 11 instrumented pairing+TLS tests | proof: local `connectedDebugAndroidTest` on ping_ci34 (API 34) -> tests=11 failures=0 BUILD SUCCESSFUL; ci.yml parses via js-yaml; android-ci.unit.test.mjs 15 PASS | deviation: plan said API 26 but minSdk is 30, matrix is [30,37] | next: m1.6.2
