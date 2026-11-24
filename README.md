@@ -9,7 +9,7 @@
 [![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-orange.svg)](#protocol-v1)
 [![Android](https://img.shields.io/badge/Android-Kotlin-purple.svg)](https://developer.android.com)
 [![Plugins](https://img.shields.io/badge/Plugins-4-blueviolet.svg)](#plugin-system)
-[![Tests](https://img.shields.io/badge/Tests-28%20suites-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-58%20files-brightgreen.svg)](#testing)
 
 **No cloud. No accounts. Your machine, your data, your agents.**
 
@@ -610,7 +610,9 @@ node test/smoke.test.mjs        # session smoke tests
 node test/features.test.mjs     # absorbed-features suite (backfill, stats, git, activity, accounts)
 ```
 
-The suite never leaves loopback. To exercise the SSH, SFTP and VNC transports
+The suite never leaves loopback. The test-count badge above is checked against the
+number of `daemon/test/*.test.mjs` files by `test/readme-truth.unit.test.mjs`, so it
+cannot go stale. To exercise the SSH, SFTP and VNC transports
 against a machine you actually own:
 
 ```bash
