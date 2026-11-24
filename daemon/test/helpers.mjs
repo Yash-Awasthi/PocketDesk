@@ -32,22 +32,32 @@ export function failureNames() {
  * `/health` is only served by a listening server, so it is the readiness signal.
  */
 export async function waitForHealth(port, timeoutMs = 60_000) {
+  const res = await waitForUrl(`http://127.0.0.1:${port}/health`, (r) => r.ok, timeoutMs);
+  const body = await res.json();
+  if (body.status !== "healthy") throw new Error(`health on ${port} said ${JSON.stringify(body)}`);
+  return body;
+}
+
+/**
+ * Resolve with the first response that satisfies [ok], polling every 100 ms until [timeoutMs].
+ *
+ * Used where `/health` is not the readiness signal: a daemon with TLS on its main port serves
+ * plain HTTP only on the loopback page port, so `local-page` waits on that page instead.
+ */
+export async function waitForUrl(url, ok = (r) => r.ok, timeoutMs = 60_000) {
   const deadline = Date.now() + timeoutMs;
   let last;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`);
-      if (res.ok) {
-        const body = await res.json();
-        if (body.status === "healthy") return body;
-        last = new Error(`health said ${JSON.stringify(body)}`);
-      } else last = new Error(`health returned ${res.status}`);
+      const res = await fetch(url);
+      if (ok(res)) return res;
+      last = new Error(`${url} returned ${res.status}`);
     } catch (e) {
       last = e;
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error(`daemon on ${port} never became healthy: ${last?.message}`);
+  throw new Error(`no answer from ${url}: ${last?.message}`);
 }
 
 /**
@@ -92,6 +102,13 @@ export function startDaemon(port, cliPort, opts = {}) {
     d.stdout.on("data", (x) => {
       process.stdout.write("[daemon] " + x);
       if (String(x).includes("registry scanned")) resolve();
+    });
+    // A daemon left behind by an earlier run holds the port, and the failure then looks like
+    // "never became healthy" while the *stale* daemon answers the health check. Say what it is.
+    d.stderr.on("data", (x) => {
+      if (String(x).includes("EADDRINUSE")) {
+        reject(new Error(`port ${port} is already in use — a previous test run left a daemon behind (kill it, then re-run)`));
+      }
     });
     d.on("exit", (code) => reject(new Error(`daemon exited early (code ${code})`)));
   });

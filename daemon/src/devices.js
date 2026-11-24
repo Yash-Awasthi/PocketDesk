@@ -14,7 +14,7 @@ import crypto from "node:crypto";
 import { writeFileAtomic } from "./atomic_write.js";
 
 const DATA_DIR = process.env.POCKETDESK_DATA || ".pocketdesk";
-const STORE = path.join(os.homedir(), DATA_DIR, "devices.json");
+const STORE = path.resolve(os.homedir(), DATA_DIR, "devices.json");
 
 const devices = new Map(); // clientId -> { id, name, platform, firstSeen, lastSeen, lastIp, revoked }
 let dirty = 0;

@@ -4,7 +4,7 @@ import os from "node:os";
 import { writeFileAtomic } from "./atomic_write.js";
 
 const DATA_DIR = process.env.POCKETDESK_DATA || ".pocketdesk";
-const STORE_FILE = path.join(os.homedir(), DATA_DIR, "sessions.json");
+const STORE_FILE = path.resolve(os.homedir(), DATA_DIR, "sessions.json");
 
 let store = { sessions: [], version: 1 };
 

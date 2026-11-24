@@ -16,7 +16,7 @@ import crypto from "node:crypto";
 import { writeFileAtomic } from "./atomic_write.js";
 
 const DATA_DIR = process.env.POCKETDESK_DATA || ".pocketdesk";
-const STORE = path.join(os.homedir(), DATA_DIR, "schedules.json");
+const STORE = path.resolve(os.homedir(), DATA_DIR, "schedules.json");
 
 const MAX_RUNS = 200;
 const MIN_INTERVAL_MS = 5_000;

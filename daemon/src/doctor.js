@@ -48,7 +48,7 @@ export async function diagnose({ tls, manifests } = {}) {
   });
 
   // Data dir writable
-  const dataDir = path.join(os.homedir(), DATA_DIR);
+  const dataDir = path.resolve(os.homedir(), DATA_DIR);
   try {
     fs.mkdirSync(dataDir, { recursive: true });
     const probe = path.join(dataDir, ".doctor-probe");

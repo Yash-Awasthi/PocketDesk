@@ -19,7 +19,7 @@ export default {
 
   init(ctx) {
     // Under the profile like every other data file; cwd-relative landed logs inside the install dir.
-    this._dir = path.join(os.homedir(), ctx.config?.dataDir || ".pocketdesk", "logs");
+    this._dir = path.resolve(os.homedir(), ctx.config?.dataDir || ".pocketdesk", "logs");
     fs.mkdirSync(this._dir, { recursive: true, mode: 0o700 });
   },
 
