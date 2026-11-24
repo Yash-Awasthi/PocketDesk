@@ -48,8 +48,25 @@ Two environment-driven modes matter:
   with no TLS and no iroh — this is what every test uses (`test/helpers.mjs`).
 - A normal run reads `%USERPROFILE%\.pocketdesk\config.json`.
 
+The environment variables that change the shape of an install instead:
+
+| Variable | Effect |
+|---|---|
+| `RH_HOME` | Moves every piece of daemon state (config, TLS, SSH keys) out of `%USERPROFILE%\.pocketdesk`; the tests and the SYSTEM console endpoint both use it |
+| `RH_CONSOLE` | Runs this process as the console endpoint: task name `PocketDeskConsole`, port 8766, its own audit log, and access to the secure desktop |
+| `RH_LABEL` | A machine name carried in the pairing QR (`n` in the payload) so the phone shows which PC it is pairing with |
+| `RH_QUIET_MS` / `RH_IDLE_KILL_MINUTES` / `RH_AWAKE` | Activity classification, idle kill, keep-awake |
+| `RH_MANIFESTS` | Alternate manifests directory (tests) |
+
+The console endpoint is the only way to reach the lock screen, UAC prompts or the
+machine before anyone signs in. It is opt-in (`install.ps1 -Console`), a separate
+SYSTEM task, a separate port, a separate token in `%ProgramData%\PocketDesk\console\config.json`
+and a separate phone entry named "PC (console)"; see [docs/SETUP-PC.md](docs/SETUP-PC.md)
+§ "Console access".
+
 Ports in use: 8765 (daemon, configurable), the loopback page the phone opens for pairing is
-the daemon port + 10 (8775 by default),
+the daemon port + 10 (8775 by default), the phone-storage drive (WebDAV) is the daemon
+port + 20 (8785),
 8766 (optional SYSTEM console endpoint),
 4679 or `RH_CLI_PORT` (loopback CLI server for `pocketdesk pair|record|list`).
 
