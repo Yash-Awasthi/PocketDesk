@@ -576,12 +576,12 @@ Proposals auto-expire after 5 minutes.
 JSON frames; binary payloads are base64.
 
 **Client → Server:**
-`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg {id, text, model?, mode?}` (model and mode for this message only) · `chatcancel` · `history_list {agent?}` · `history_get {agent, id}` · `history_resume {agent, id, mode?: "terminal"}` · `agent_panel {agent}` · `agent_doc {agent, kind: skill|command|file, name}` · `agent_file_set {agent, name, content}` · `fs_op {op: mkdir|rename|delete}` · `fs_search {path, q}` · `propose` · `approve {id, all?}` · `reject` · `proposal_list` · `pc_power {action}` · `totp_status` · `totp_setup` · `totp_enable {code}` · `totp_disable {code}` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
+`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg {id, text, model?, mode?}` (model and mode for this message only) · `chatcancel` · `history_list {agent?}` · `history_get {agent, id}` · `history_resume {agent, id, mode?: "terminal"}` · `agent_panel {agent}` · `agent_doc {agent, kind: skill|command|file, name}` · `agent_file_set {agent, name, content}` · `fs_op {op: mkdir|rename|delete}` · `fs_search {path, q}` · `propose` · `approve {id, all?}` · `reject` · `proposal_list` · `pc_power {action}` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
 <details>
 <summary>Absorbed-feature messages</summary>
 
 `prompt_enqueue` · `prompt_queue` · `prompt_remove` — queued follow-ups ·
-`todos_set` · `todos_get` · `todos_status` — live todo boards (+ `todos_updated` broadcasts) ·
+`todos_set` · `todos_get` · `todos_status` — live todo boards (each change is broadcast as a todos_updated frame) ·
 `schedule_create` · `schedule_list` · `schedule_pause` · `schedule_resume` · `schedule_cancel` — auto-continue runs ·
 `doctor` — self-diagnosis report ·
 `approval_waiting` — chats on the auto-deny countdown ·
@@ -595,7 +595,14 @@ JSON frames; binary payloads are base64.
 </details>
 
 **Server → Client:**
-`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `fs_result` · `fs_found` · `chatreplay` · `chatuser` · `chatdelta` · `chartool {toolId?}` (same toolId again = the call's completed input) · `chatstate` · `chat_info {model, permissionMode, commands, pocketdesk}` · `history` · `history_item` · `agent_panel` · `agent_doc` · `agent_file_saved` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `proposal_expired` · `pc_power` · `totp_status` · `totp_setup` · `activity` · `gui_opened` · `apps` · `error`
+`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `fs_result` · `fs_found` · `chatreplay` · `chatuser` · `chatdelta` · `chartool {toolId?}` (same toolId again = the call's completed input) · `chatstate` · `chat_info {model, permissionMode, commands, pocketdesk}` · `history` · `history_item` · `agent_panel` · `agent_doc` · `agent_file_saved` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `proposal_expired` · `pc_power` · `activity` · `gui_opened` · `apps` · `todos_updated` · `error`
+
+The PC, KVM, phone-mirroring and Clippy pages use the rest of the surface, one type per action:
+`sources_list` · `pc_list` · `kvm_get` · `pc_pairing_link` · `pc_rename` · `pc_remove` · `kvm_set` · `desktop_nav` · `desktop_key` · `desktop_start` · `desktop_monitors` · `desktop_mouse` · `clipboard_set` · `desktop_stop` · `phone_watch` · `phone_sync_get` · `timeline_list` · `phone_sync_set` · `timeline_clear` · `adb_screenshot` · `adb_action` · `adb_clipboard_set` · `adb_gamepad` · `phone_req` · `phone_hub` · `adb_state` · `clippy_status` · `clippy_latest` · `clippy_setdir` · `adb_type` · `adb_apps` · `adb_cameras` · `adb_webcam_register` · `adb_webcam` · `adb_webcam_status` · `phone_drive` · `adb_clipboard_get` · `phone_doctor` · `phone_doctor_fix` · `adb_setup` · `adb_select` · `adb_disconnect` · `adb_qr_start` · `adb_qr_stop` · `adb_pair` · `adb_connect` · `adb_install_app` · `adb_grant_app` · `adb_input` · `adb_close` · `adb_push` · `phone_share_end` · `phone_switch` · `phone_input`.
+
+Two-factor pairing is not a WebSocket message: the settings page calls the loopback endpoints
+`/access/totp/setup`, `/access/totp/enable` and `/access/totp/disable`, and the 6-digit code rides
+on `hello` as `totp`.
 
 Every `out` frame carries a monotonic `seq`; on reconnect send `attach {id, since: <last seq>}` and the daemon replays only what you missed.
 
