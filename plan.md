@@ -126,6 +126,14 @@ pre-releases change R8 and native ABI behaviour between builds of one commit.
 **Done when:** release builds use stable versions and a second build of the same
 commit is byte-identical.
 
+> Corrected 2026-11-24 (m1.4.4): a signed APK can never be byte-identical — APK
+> Signature Scheme v2/v3 signs a salted digest with a random 32-byte salt, so the
+> signing block differs between two signings of identical content. Measured on this
+> tree: file `sha256` differs between an incremental and a clean build while every
+> zip entry (name, size, CRC-32, time) and every byte outside the signing block is
+> identical. The check is therefore "same content fingerprint", which
+> `app/scripts/apk-content-hash.mjs` prints; see `docs/REPRODUCIBLE-BUILD.md`.
+
 - [x] Pin AGP, Kotlin and Compose to the newest **stable** line that supports `compileSdk 37.2`; record the blocker in a comment if one remains. `[C]`
   verified-here: `cd app && JAVA_HOME=/c/work/jdk21 ./gradlew :app:dependencyInsight --configuration debugCompileClasspath --dependency androidx.compose:compose-bom` → `compose-bom:2026.11.01`, `org.gradle.status = release`; the same for `navigation3-runtime:1.2.2`; `./gradlew -q :app:compileDebugKotlin` → EXIT=0 with AGP 9.5.2, Kotlin 2.4.21, activity 1.13.0, lifecycle 2.11.1, navigation3 1.2.2, kotlinx-serialization 1.13.0
   also: pre-release versions this subtask removed — `agp 9.5.0-alpha09`, `kotlin 2.5.0-Beta1`, `compose-bom-alpha 2026.10.00`, `activity 1.14.0-alpha03`, `lifecycle 2.12.0-alpha04`, `navigation3 1.3.0-alpha02`, `serialization 1.12.0-RC`
@@ -136,7 +144,11 @@ commit is byte-identical.
 - [x] Add a check that fails the build when `libs.versions.toml` or `package.json` gains a pre-release version without a `# prerelease:` note. `[P]`
   verified-here: `cd daemon && node --test test/prerelease-pins.test.mjs` → 9 PASS on the current tree; with `agp = "9.6.0-alpha01"` and `ws: "8.23.0-beta.1"` injected → `FAILED: 2 — agp=9.6.0-alpha01 line 6; ws@8.23.0-beta.1`; with `# prerelease: …` on the pin and a `"prerelease"` map in package.json → ALL PASS; files restored, `git diff` empty
   also: the note must be on the pin's own line or as the whole comment line above it — a sentence further up that merely mentions `# prerelease:` does not count (found by that first injected run, which passed when it should have failed).
-- [ ] Reproducible APK: build the same commit twice with the same keystore, compare `sha256sum`, document any non-deterministic input. `[C]`
+- [x] Reproducible APK: build the same commit twice with the same keystore, compare `sha256sum`, document any non-deterministic input. `[C]`
+  verified-here: two `assembleRelease` runs (one incremental, one after `clean`) with a throwaway key → file sha256 `870fe1a7…` vs `3a94e284…` (differ), entry fingerprint `d187d072…` both (511 entries), unsigned-bytes sha256 `a76d5286…` both, block start/length `12021512/12280` both, `apksigner verify` exit 0 both with certificate `61bb67fb…`
+  documented: `docs/REPRODUCIBLE-BUILD.md` — the salt in the v2/v3 block, the recipe, and the unpinned inputs (JDK 21.0.12.1, build-tools 37.0.0, platform android-37.2, fetched not vendored dependencies, keystore)
+  also: `daemon/test/apk-hash.unit.test.mjs` → 7 PASS (non-zip rejected with a reason, missing argument prints usage, same content fingerprints the same, a changed byte moves it)
+  needs-verify: the two builds were of the same working tree, which carried uncommitted edits in `app/app/src`; nobody has repeated this on a second machine with a different JDK.
 
 ### M1.5 Make the stale docs true
 
@@ -573,3 +585,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.4.1 [x] Android toolchain pinned to stable: AGP 9.5.2, Kotlin 2.4.21, Compose BOM 2026.11.01, activity 1.13.0, lifecycle 2.11.1, nav3 1.2.2, serialization 1.13.0 | proof: dependencyInsight shows org.gradle.status=release; `./gradlew -q :app:compileDebugKotlin` EXIT=0 (JDK 21, SDK 37.2) | next: m1.4.2
 - 2026-11-24 m1.4.2 [x] node-pty 1.2.0-beta.15 -> 1.1.0 (stable latest, N-API prebuilds, no compiler) | proof: spawn+echo PTY_OK, term-cli/stream/crash-kills-agents 3/3 ALL PASS, ssh-ui 1 PASS, clean `npm ci` -> CI PTY OK | next: m1.4.3
 - 2026-11-24 m1.4.3 [x] prerelease-pins.test.mjs: un-noted pre-release in libs.versions.toml or package.json fails npm test (note on the pin line, or a "prerelease" map) | proof: 9 PASS clean; injected alpha/beta -> FAILED: 2 with names; noted -> ALL PASS | next: m1.4.4
+- 2026-11-24 m1.4.4 [x] reproducible release build measured: signed APK sha256 cannot match (v2/v3 random salt) but content fingerprint can; added app/scripts/apk-content-hash.mjs + docs/REPRODUCIBLE-BUILD.md | proof: two assembleRelease runs -> entry fingerprint d187d072 both, unsigned sha256 a76d5286 both, apksigner verify exit 0 both; apk-hash.unit.test.mjs 7 PASS | deviation: plan "Done when" was wrong (byte-identical signed APK is impossible) and was corrected in place | next: m1.5.1
