@@ -133,7 +133,9 @@ commit is byte-identical.
   verified-here: `cd daemon && node -e 'require("node-pty").spawn(...)'` with `node-pty 1.1.0` → `PTY_OK seen`; `node --test test/term-cli.test.mjs test/stream.test.mjs test/crash-kills-agents.test.mjs` → 3/3 suites ALL PASS; `test/ssh-ui.test.mjs` → 1 PASS; clean `npm ci` from the committed lock in an empty dir → `CI PTY OK`
   exit from the beta line: node-pty 1.2.0-beta.15 → **1.1.0** (`latest` dist-tag). The 1.2 line still ships betas only (`1.2.0-beta.18`), so the stable major is the release choice; 1.1.0 publishes win32-x64/darwin N-API prebuilds, so no compiler is needed and Node 26 loads it unchanged.
   not covered: nothing in the tree used a 1.2-only option (`useConpty*` appears nowhere), but the beta's Windows conhost fixes are given up — if a conpty bug shows up on a real desktop, that reopens this decision.
-- [ ] Add a check that fails the build when `libs.versions.toml` or `package.json` gains a pre-release version without a `# prerelease:` note. `[P]`
+- [x] Add a check that fails the build when `libs.versions.toml` or `package.json` gains a pre-release version without a `# prerelease:` note. `[P]`
+  verified-here: `cd daemon && node --test test/prerelease-pins.test.mjs` → 9 PASS on the current tree; with `agp = "9.6.0-alpha01"` and `ws: "8.23.0-beta.1"` injected → `FAILED: 2 — agp=9.6.0-alpha01 line 6; ws@8.23.0-beta.1`; with `# prerelease: …` on the pin and a `"prerelease"` map in package.json → ALL PASS; files restored, `git diff` empty
+  also: the note must be on the pin's own line or as the whole comment line above it — a sentence further up that merely mentions `# prerelease:` does not count (found by that first injected run, which passed when it should have failed).
 - [ ] Reproducible APK: build the same commit twice with the same keystore, compare `sha256sum`, document any non-deterministic input. `[C]`
 
 ### M1.5 Make the stale docs true
@@ -570,3 +572,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.3.3 [x] uninstall removes task/shortcut/firewall/policy always, data only after -RemoveData or a y answer (-KeepData opts out) | proof: `node --test test/installer.unit.test.mjs` -> 34 PASS; uninstall.ps1 PARSE OK | next: m1.4.1
 - 2026-11-24 m1.4.1 [x] Android toolchain pinned to stable: AGP 9.5.2, Kotlin 2.4.21, Compose BOM 2026.11.01, activity 1.13.0, lifecycle 2.11.1, nav3 1.2.2, serialization 1.13.0 | proof: dependencyInsight shows org.gradle.status=release; `./gradlew -q :app:compileDebugKotlin` EXIT=0 (JDK 21, SDK 37.2) | next: m1.4.2
 - 2026-11-24 m1.4.2 [x] node-pty 1.2.0-beta.15 -> 1.1.0 (stable latest, N-API prebuilds, no compiler) | proof: spawn+echo PTY_OK, term-cli/stream/crash-kills-agents 3/3 ALL PASS, ssh-ui 1 PASS, clean `npm ci` -> CI PTY OK | next: m1.4.3
+- 2026-11-24 m1.4.3 [x] prerelease-pins.test.mjs: un-noted pre-release in libs.versions.toml or package.json fails npm test (note on the pin line, or a "prerelease" map) | proof: 9 PASS clean; injected alpha/beta -> FAILED: 2 with names; noted -> ALL PASS | next: m1.4.4

@@ -205,6 +205,21 @@ Expected output: none. `plan.md`, `docs/INTEGRITY.md` and this file are exempt
 because naming the forbidden pattern is their job — everywhere else a match is a
 bug.
 
+### Stable pins only
+
+What users install is built from two version files: `app/gradle/libs.versions.toml`
+and `daemon/package.json`. A pre-release in either one changes build output between
+two builds of one commit, so it needs a reason next to the pin:
+
+- `libs.versions.toml`: `# prerelease: <why>` on the pin line or as the whole line above it.
+- `daemon/package.json`: a top-level `"prerelease": { "<dep>": "<why>" }` entry.
+
+`npm test` enforces it:
+
+```bash
+cd daemon && node --test test/prerelease-pins.test.mjs
+```
+
 ## Commit Messages
 ```
 feat: add Discord notification channel
