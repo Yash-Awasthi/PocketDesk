@@ -195,6 +195,7 @@ commit is byte-identical.
 - [ ] Leak guards: `sessions-leakguard` exists; extend it to 100 create/kill cycles and to the phone-adb and desktop-video paths, asserting handle and memory stability. `[P]`
 - [ ] Filesystem safety: every `fs_op` path resolved and confined; tests for `..`, symlinks, `\?\` prefixes, and Windows reserved names. `[P]`
 - [ ] Windows-only code paths (`ConPTY`, `SendInput`, `Task Scheduler`) get a CI job on `windows-latest`; they are the least covered and most used. `[P]`
+- [ ] Added 2026-11-24 (measured): the suite is 113 tests, 108 pass, 5 fail on this machine — `absorb`, `graceful-shutdown`, `sessions-leakguard`, `smoke`, `smoke-chat`. `smoke` and `smoke-chat` fail on a fixed 1.5 s wait for daemon startup; the daemon needs ~5–7 s from a cold cache here (measured with a stdout timestamp probe), so replace every fixed sleep with a readiness wait on the banner or `/health` and re-measure. `[P]`
 
 ### M2.2 Lint and format for JavaScript
 
@@ -608,3 +609,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.5.4 [x] daemon/README.md protocol table generated from the handler registry (222 messages, 13 files) with a --check gate | proof: gen writes 222 rows; protocol-doc.test.mjs 11 PASS; pointing a row at gone.js -> 3 FAIL | note: README test badge 58 -> 61 (guard caught the 3 new test files) | next: m1.5.5
 - 2026-11-24 m1.5.5 [x] pair payload label + console parity folded into suites: `n` only with RH_LABEL; capture geometry/encoder args byte-identical with and without RH_CONSOLE | proof: auth.test.mjs ALL PASS (label checks), console-parity.test.mjs 5 PASS; removing the label or perturbing ffmpegArgs under RH_CONSOLE fails by name; badge 61 -> 62 | next: m1.5.6
 - 2026-11-24 m1.5.6 [x] CONTEXT.md gains the env-var table (RH_HOME/RH_CONSOLE/RH_LABEL/...), the console-endpoint paragraph and the full port list; SETUP-PC console section re-checked against the installer | proof: install-service.ps1 lines 99/150/153/155/161 match the doc; server.js:59 audit log, :866 WebDAV port+20 | next: m1.6.1
+- 2026-11-24 note: full suite 113 tests / 108 pass / 5 fail (absorb, graceful-shutdown, sessions-leakguard, smoke, smoke-chat) — startup-timing flakes, now tracked as an M2.1 subtask with the measured 5-7 s cold-start figure
