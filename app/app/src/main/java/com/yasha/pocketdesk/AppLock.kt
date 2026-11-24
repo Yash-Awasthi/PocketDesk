@@ -27,7 +27,7 @@ class AppLock(private val activity: ComponentActivity, private val onUnlocked: (
 
     /** True when the UI must stay hidden until [prompt] succeeds. */
     fun shouldLock(): Boolean {
-        locked = locked || (enabled && available && (stoppedAt == 0L || System.currentTimeMillis() - stoppedAt > GRACE_MS))
+        locked = decide(enabled, available, locked, stoppedAt, System.currentTimeMillis())
         return locked
     }
 
@@ -47,9 +47,18 @@ class AppLock(private val activity: ComponentActivity, private val onUnlocked: (
     }
 
     companion object {
-        private const val GRACE_MS = 30_000L
+        internal const val GRACE_MS = 30_000L
         // Process-lived so a rotation (stop, then a fresh activity) does not re-lock.
         private var stoppedAt = 0L
         private var locked = false
+
+        /**
+         * The lock decision on its own, so the grace window can be tested without a phone
+         * that has a screen lock: never lock a phone with no lock set, never lock while the
+         * app has been away for less than [GRACE_MS], and stay locked once locked.
+         * `stoppedAt == 0` means the app has not been stopped yet in this process.
+         */
+        internal fun decide(enabled: Boolean, available: Boolean, locked: Boolean, stoppedAt: Long, now: Long): Boolean =
+            locked || (enabled && available && (stoppedAt == 0L || now - stoppedAt > GRACE_MS))
     }
 }
