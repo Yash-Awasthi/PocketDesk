@@ -61,6 +61,19 @@ async function main() {
   const pairHtml = await fetch(`http://127.0.0.1:${PORT}/pair?k=${rev.pairingToken}`).then((r) => r.text());
   const pairPayload = JSON.parse(Buffer.from(pairHtml.match(/pocketdesk:\/\/pair#([\w-]+)/)[1], "base64url").toString());
   check("pairing QR carries the rotated token", pairPayload.t === rev.pairingToken);
+  // A machine label is opt-in: it rides in the payload only when RH_LABEL names this PC.
+  check("pairing QR omits the machine label when RH_LABEL is unset", !("n" in pairPayload), JSON.stringify(pairPayload));
+  check("pairing QR carries the relay/token fields the app reads", typeof pairPayload.u === "string" && pairPayload.u.startsWith("ws"));
+
+  // Same daemon, one env var: the label appears, and nothing else in the payload changes.
+  const LABEL_PORT = 8834;
+  const labelled = startDaemon(LABEL_PORT, 46834, { token: TOKEN, manifests: tmp, dataDir: ".pocketdesk-authlabel", env: { RH_LABEL: "Studio PC" } });
+  await labelled.ready;
+  const labelHtml = await fetch(`http://127.0.0.1:${LABEL_PORT}/pair?k=${TOKEN}`).then((r) => r.text());
+  const labelPayload = JSON.parse(Buffer.from(labelHtml.match(/pocketdesk:\/\/pair#([\w-]+)/)[1], "base64url").toString());
+  check("pairing QR carries the machine label when RH_LABEL is set", labelPayload.n === "Studio PC", JSON.stringify(labelPayload.n));
+  check("the label changes nothing else in the payload", Object.keys(labelPayload).filter((k) => k !== "n" && k !== "u" && k !== "t").sort().join() === Object.keys(pairPayload).filter((k) => k !== "u" && k !== "t").sort().join());
+  labelled.kill();
   // DNS rebinding: a web page's request reaches 127.0.0.1 but still names its own host.
   const rebound = await new Promise((res) => http.get({ host: "127.0.0.1", port: PORT, path: `/pair?k=${rev.pairingToken}`, headers: { host: `evil.example:${PORT}` } }, (r) => { r.resume(); res(r.statusCode); }));
   check("pair page refuses a non-loopback Host", rebound === 403);
