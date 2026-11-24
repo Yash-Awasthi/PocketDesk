@@ -164,7 +164,10 @@ commit is byte-identical.
   also: the 2026-09 "Wired in this pass" protocol section is now labelled historical with the measured split — of 110 names it lists, 38 have a handler today and 72 do not.
   proof the gates bite: adding `share_create` to a ✅ matrix row and to the README client list → `FAIL no ✅ row claims a removed message family` + `FAIL every documented client message has a handler (no handler: share_create)`; both files restored, 18 PASS again.
   needs-verify: the matrix is 356 lines of historical claims; only the rows naming a message were machine-checked. Rows that claim ⚙️ behaviour with no message name (e.g. tmux-backed detach, origin check) were read, not executed.
-- [ ] `daemon/README`-level statement of every protocol message with its handler file, generated from the registry. `[C]`
+- [x] `daemon/README`-level statement of every protocol message with its handler file, generated from the registry. `[C]`
+  verified-here: `node daemon/scripts/gen-protocol-doc.mjs` → `wrote 222 message types to daemon/README.md` (13 handler files + `src/server.js`); `cd daemon && node --test test/protocol-doc.test.mjs` → 11 PASS incl. "every listed handler file exists"
+  proof it bites: pointing the `chatsession` row at `src/handlers/gone.js` → 3 FAIL (stale table, missing file); restored → 11 PASS
+  also: the generator imports each handler factory with a stub context and falls back to reading the object literal if a factory needs a live server, printing which file it had to read statically.
 - [ ] Fold the console-pairing checks into existing suites rather than new files: a pair payload carrying `n` when `RH_LABEL` is set and omitting it otherwise (extend a pairing/protocol test), and a byte-identity test that `DesktopController` output is identical with and without `RH_CONSOLE` (driven through a `node -e` subprocess, because `IS_CONSOLE` is read at module load). `[C]`
 - [ ] Write the `docs/SETUP-PC.md` "Console access (lock screen / UAC / before login)" section and add the console module, ports 8765/8766 and `RH_CONSOLE`/`RH_LABEL`/`RH_HOME` to `CONTEXT.md`. `[C]`
 
@@ -598,3 +601,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m1.5.1 [x] CONTEXT.md rewritten from the tree: 65 src modules, 13 handlers, 17 manifests, 3 plugins, 57 test files, stable Android pins, real ports (8765 / +10 / 8766 / 4679) | proof: each count from `ls | wc -l`, versions from libs.versions.toml + build.gradle.kts, `node src/cli.js status` EXIT=0 | next: m1.5.2
 - 2026-11-24 m1.5.2 [x] README test badge 28 suites -> 58 files, guarded by readme-truth.unit.test.mjs | proof: 6 PASS; dummy 59th test file -> FAILED with the real count; removed -> ALL PASS | next: m1.5.3
 - 2026-11-24 m1.5.3 [x] README + FEATURE-MATRIX re-checked against handler names: TOTP moved to HTTP, 7 dead ✅ rows corrected (2 to module-present), old protocol section labelled historical (38/110 names still live) | proof: readme-protocol + feature-matrix tests 18 PASS; injecting `share_create` fails both | next: m1.6.1
+- 2026-11-24 m1.5.4 [x] daemon/README.md protocol table generated from the handler registry (222 messages, 13 files) with a --check gate | proof: gen writes 222 rows; protocol-doc.test.mjs 11 PASS; pointing a row at gone.js -> 3 FAIL | note: README test badge 58 -> 61 (guard caught the 3 new test files) | next: m1.5.5
