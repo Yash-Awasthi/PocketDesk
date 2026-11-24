@@ -68,7 +68,11 @@ try {
   // 1. Enumerate and kill, unelevated — the whole client story.
   const found = pocketdeskProcesses();
   for (const pid of found) treeKill(pid);
-  await new Promise((r) => setTimeout(r, 1500));
+  // Wait for the processes to actually go, instead of sleeping a fixed 1.5 s: on a loaded
+  // machine a killed tree takes longer than that to stop answering (measured 2026-11-24).
+  for (let i = 0; i < 40 && !(alive(d.pid) === false && alive(helper.pid) === false); i++) {
+    await new Promise((r) => setTimeout(r, 250));
+  }
 
   // 2. Nothing is left.
   const left = pocketdeskProcesses().filter((pid) => alive(pid));

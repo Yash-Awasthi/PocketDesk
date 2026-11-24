@@ -220,6 +220,21 @@ two builds of one commit, so it needs a reason next to the pin:
 cd daemon && node --test test/prerelease-pins.test.mjs
 ```
 
+### Coverage floors only go up
+
+`daemon/coverage-floors.json` holds a statements/branches/functions floor per
+folder of `daemon/src`. Measure before changing anything:
+
+```bash
+cd daemon && npm run coverage
+```
+
+That runs the suite under `c8`, prints each area, and fails if any area is under
+its floor. When coverage improves, raise the floor **and** the `measured` number
+in the same commit; never lower either. `test/coverage-floors.test.mjs` rejects a
+floor set above what was measured, a floor more than six points below it (a stale
+floor that would let coverage rot), and a folder of `src/` with no floor at all.
+
 ## Commit Messages
 ```
 feat: add Discord notification channel
