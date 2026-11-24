@@ -15,12 +15,12 @@
     "test": "node --test --test-global-setup=test/setup.mjs \"test/*.test.mjs\""
   },
   "dependencies": {
-    "node-pty": "1.2.0-beta.15",
+    "node-pty": "1.1.0",
     "ssh2": "^1.17.0",
     "ws": "^8.22.0"
   },
   "allowScripts": {
-    "node-pty@1.2.0-beta.15": true
+    "node-pty@1.1.0": true
   },
   "optionalDependencies": {
     "@number0/iroh": "^1.1.0"
