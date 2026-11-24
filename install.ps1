@@ -10,7 +10,8 @@ param(
     [string]$Source = "",                                # install from a local checkout instead of downloading
     [string]$InstallDir = "$env:LOCALAPPDATA\PocketDesk",
     [switch]$NoStart,
-    [switch]$Console                                     # also install the SYSTEM console endpoint (one UAC prompt)
+    [switch]$Console,                                    # also install the SYSTEM console endpoint (one UAC prompt)
+    [switch]$Protected                                   # advanced: run elevated (cannot be closed by ordinary programs)
 )
 $ErrorActionPreference = "Stop"
 # The progress bar makes Invoke-WebRequest many times slower on Windows PowerShell 5.
@@ -139,9 +140,9 @@ try {
         [Environment]::SetEnvironmentVariable("Path", (@($userPath, $binDir) | Where-Object { $_ }) -join ';', "User")
     }
 
-    # 5. The hidden daemon: starts at logon in the background.
-    Step "Installing the hidden daemon"
-    & "$daemon\scripts\install-service.ps1" -DaemonDir $daemon -InstallDir $InstallDir -NoStart:$NoStart
+    # 5. The daemon: starts at logon in the background. Unelevated by default, so you can stop it.
+    Step "Installing the daemon"
+    & "$daemon\scripts\install-service.ps1" -DaemonDir $daemon -InstallDir $InstallDir -NoStart:$NoStart -Protected:$Protected
 
     # Listed under Settings > Apps > Installed apps, whose Uninstall button runs uninstall.ps1.
     $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PocketDesk"
@@ -152,7 +153,7 @@ try {
         DisplayVersion  = if ($Ref) { $Ref.TrimStart("v") } else { "dev" }
         Publisher       = "PocketDesk"
         InstallLocation = $InstallDir
-        DisplayIcon     = Join-Path $env:ProgramFiles ("PocketDesk\" + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value + "\PocketDeskLauncher.exe")
+        DisplayIcon     = Join-Path $InstallDir "PocketDesk.exe"
         UninstallString = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$InstallDir\uninstall.ps1`""
         URLInfoAbout    = "https://github.com/$repo"
     }
@@ -195,6 +196,7 @@ try {
     Write-Host "PocketDesk is installed in $InstallDir" -ForegroundColor Green
     Write-Host "Scan the QR code with the PocketDesk app. Later: open the Start-menu PocketDesk to pair."
     if (-not $Console) { Write-Host "Lock screen / UAC / before-login from the phone? Re-run with -Console (one UAC prompt)." }
+    if (-not $Protected) { Write-Host "Need to control elevated windows? Re-run with -Protected: it installs into Program Files and runs elevated, and then only an administrator can stop it." }
 } finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }

@@ -1,0 +1,61 @@
+{
+  "_comment": [
+    "Coverage floors per area of daemon/src, from `npm run coverage` (c8, json-summary).",
+    "`measured` is what the suite actually reached when the floor was last set; `floor` is a few",
+    "points below it so ordinary jitter does not fail a run. The rule is one-way: raise a floor",
+    "when coverage improves, never lower one. scripts/check-coverage.mjs enforces the floors and",
+    "test/coverage-floors.test.mjs keeps this file honest (no unlisted area, no floor above what",
+    "was measured, no floor more than 6 points below it — a stale floor gets tightened)."
+  ],
+  "setAt": "2026-11-24",
+  "areas": {
+    "src": {
+      "measured": {
+        "statements": 64.7,
+        "branches": 69,
+        "functions": 52.6
+      },
+      "floor": {
+        "statements": 60,
+        "branches": 65,
+        "functions": 48
+      }
+    },
+    "handlers": {
+      "measured": {
+        "statements": 37.6,
+        "branches": 56.2,
+        "functions": 7.1
+      },
+      "floor": {
+        "statements": 33,
+        "branches": 52,
+        "functions": 3
+      }
+    },
+    "phone_adb": {
+      "measured": {
+        "statements": 32.7,
+        "branches": 92.9,
+        "functions": 1.4
+      },
+      "floor": {
+        "statements": 28,
+        "branches": 88,
+        "functions": 0
+      }
+    },
+    "plugins": {
+      "measured": {
+        "statements": 88.1,
+        "branches": 93.3,
+        "functions": 83.3
+      },
+      "floor": {
+        "statements": 84,
+        "branches": 89,
+        "functions": 79
+      }
+    }
+  }
+}

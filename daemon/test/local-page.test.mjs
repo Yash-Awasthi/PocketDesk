@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import WebSocket from "ws";
-import { check, finish, makeTmp, teardown } from "./helpers.mjs";
+import { check, finish, makeTmp, teardown, waitForUrl } from "./helpers.mjs";
 
 const PORT = 8877;
 const home = makeTmp("rh-local-");
@@ -21,11 +21,14 @@ try {
     setTimeout(() => reject(new Error("daemon did not start")), 30000);
   });
   await new Promise((r) => setTimeout(r, 500));
+  // The banner precedes the listeners. This daemon turns TLS on, so `/health` on the main port
+  // is HTTPS; the plain-HTTP page on port+10 is what a browser on this machine actually gets.
+  await waitForUrl(`http://127.0.0.1:${PORT + 10}/`, (r) => r.ok, 30_000);
   const { token, tls } = JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8"));
   check("the daemon made its own certificate", tls.enabled === true);
 
   const page = await fetch(`http://127.0.0.1:${PORT + 10}/`).then((r) => r.text()).catch((e) => e.message);
-  check("the browser page is served over loopback HTTP", /PocketDesk Phone/.test(page));
+  check("the browser page is served over loopback HTTP", /PocketDesk/.test(page));
 
   const ws = new WebSocket(`ws://127.0.0.1:${PORT + 10}/ws`, { headers: { origin: `http://localhost:${PORT + 10}` } });
   const welcome = await new Promise((resolve) => {

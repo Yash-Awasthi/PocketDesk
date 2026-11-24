@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { REPO, check, connect, failureCount, failureNames, makeTmp } from "./helpers.mjs";
+import { REPO, check, connect, failureCount, failureNames, makeTmp, waitForHealth } from "./helpers.mjs";
 
 const PORT = 8812;
 const tmp = makeTmp("rh-eof-");
@@ -32,6 +32,7 @@ try {
     d.stdout.on("data", (x) => { if (String(x).includes("registry scanned")) resolve(); });
     d.on("exit", () => reject(new Error("daemon exited early")));
   });
+  await waitForHealth(PORT, 30_000);
   const c = connect(PORT);
   await new Promise((r) => c.ws.on("open", r));
   c.send({ type: "hello", token: "testtoken" });

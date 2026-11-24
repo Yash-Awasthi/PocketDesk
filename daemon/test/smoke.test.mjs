@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import WebSocket from "ws";
+import { waitForHealth } from "./helpers.mjs";
 
 const PORT = 8799;
 const TOKEN = "smoketoken";
@@ -12,7 +13,7 @@ fs.writeFileSync(path.join(tmpMan, "node.json"), JSON.stringify({ id: "node", na
 const daemon = spawn(process.execPath, ["src/index.js"], {
   cwd: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
   // Test-only state: never the real ~/.pocketdesk.
-  env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-smoketest", RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT) },
+  env: { ...process.env, RH_PORT: String(PORT), RH_CLI_PORT: String(PORT + 1), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-smoketest", RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT) },
   stdio: ["ignore", "pipe", "pipe"],
 });
 daemon.stdout.on("data", (d) => process.stdout.write("[daemon] " + d));
@@ -49,7 +50,9 @@ function send(o) {
 
 async function run() {
   try {
-    await new Promise((res) => setTimeout(res, 1500));
+    // Wait for the server that answers, not for a fixed number of milliseconds: a cold cache
+    // needs seconds longer than a warm one. See waitForHealth in helpers.mjs.
+    await waitForHealth(PORT);
   ws = new WebSocket(`ws://localhost:${PORT}/ws`);
   await new Promise((res, rej) => {
     ws.on("open", res);

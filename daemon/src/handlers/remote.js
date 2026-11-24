@@ -337,7 +337,7 @@ export default function remoteHandlers(ctx) {
     async clippy_paste(ws, msg) {
       if (!access.controlAllowed || ws._viewOnlyForced)
         return send(ws, { type: "clippy_paste_ok", ok: false, error: "control is paused on the PC" });
-      const c = await clippy.latest();
+      const c = await clippy.latest(msg.at);
       if (!c.ok) return send(ws, { type: "clippy_paste_ok", ok: false, error: c.error });
       const body = c.typed || c.text;
       if (!body) return send(ws, { type: "clippy_paste_ok", ok: false, error: "capture is empty" });

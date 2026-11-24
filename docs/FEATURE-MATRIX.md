@@ -28,15 +28,15 @@ Status legend:
 | PTY create/attach/detach/input/resize/kill over WS | node-pty family (the 42 `pty_basic_*` clones are one tutorial template) | ⚙️ |
 | Scrollback replay on attach | gotty, ttyd | ⚙️ |
 | Monotonic seq numbers on output + missed-output backfill (`attach {since}`) | cc-pocket, ccpocket, codeman, gotty reconnect | ✅ `seq` on `out`, incremental `replay` |
-| Read-only spectator mode (server-enforced input drop) | ttyd, gotty, tty2web, termpair, tmate ro-keys | ✅ `share_create`/`share_join` |
+| Read-only spectator mode (server-enforced input drop) | ttyd, gotty, tty2web, termpair, tmate ro-keys | ➖ removed — no `share_*` handler and no share module in `daemon/src/` (2026-11-24) |
 | N-viewer broadcast of one session | gotty, ttyd, interactive-terminal | ✅ (share + multi-subscriber attach) |
-| Share tokens with TTL + revoke | gotty URLs, tty-share | ✅ `share_*` (expiry sweep, `share_revoke`) |
+| Share tokens with TTL + revoke | gotty URLs, tty-share | ➖ removed — same check: no handler, no module |
 | Origin check on WS upgrade | ttyd, gotty | ✅ 403 at HTTP upgrade |
 | Idle-session reaper | persistent-terminal-api | ✅ `RH_IDLE_KILL_MINUTES` |
 | Session recording with timestamps + export | asciinema, termpair, terminal-mcp, gateone | ✅ `record_*` (SessionRecorder wired) |
 | tmux-backed detach (process survives daemon restart) | terminal-web, webtmux, multimux | ➖ removed 2026-09-22 — the tmux manager had no caller and no screen; PTY sessions survive a reconnect, not a daemon restart |
 | ZMODEM/trzsz in-band file transfer | ttyd, tabby | 🗺️ |
-| Read-only/plain-text digest render (token savings) | mcp-interactive-terminal | ✅ `render_digest` → `digest_render` (ANSI-stripped plain rows, trailing blank trimmed; `terminal_renderer.js` ported CJS→ESM) + ✅ `digest_attach` live digest mode (diffed row updates streamed to cheap subscribers) |
+| Read-only/plain-text digest render (token savings) | mcp-interactive-terminal | ➖ removed — no `digest_*` handler and no `terminal_renderer.js` in the tree (2026-11-24) |
 | Per-user ACLs / TOTP / OIDC | warpgate, gateone | ✅ TOTP for master-token pairing (`totp_*`, close 4011); ACLs/OIDC ➖ single-user |
 | Reverse-connect relay / E2E blind relay | tty2web, yepanywhere, sshx | ✅ `relay_*` — outbound relay link (phone can reach the PC off-LAN) + optional relay hosting; `relay_server.js` ported CJS→ESM |
 | REST command API alongside WS | persistent-terminal-api, tty2web | ⚙️ (CLI server `/sessions /status /query`) |
@@ -55,8 +55,8 @@ Status legend:
 | Boot persistence (service/launchd start) | pm2, muxterm | ⚙️ install-service.ps1 + tray |
 | remain-on-exit + respawn | tmux | ✅ tmux respawn-config on session create; `remain_on_exit` |
 | Windows/panes/layouts | tmux, zellij, muxterm | ➖ removed 2026-09-22 with the tmux manager |
-| Git-worktree-per-agent | vmux, orca, ccpocket | ✅ `wt_create`/`wt_list`/`wt_remove` (worktrees.js) |
-| Asciicast export with player | asciinema | ✅ asciicast v2 export (`record_asciicast`) + JSON export (`record_get`) |
+| Git-worktree-per-agent | vmux, orca, ccpocket | ✅ a new chat or terminal can start in its own worktree (`create {worktree}`, `chatsession {worktree}`, `worktree.js`); there is no `wt_*` message |
+| Asciicast export with player | asciinema | ✅ `recorder.js` writes an asciicast v2 `.cast` per terminal session when recording is on (off by default); there is no `record_*` message and no player |
 | Read-only vs read-write share split | tmate, termpair | ✅ |
 
 ## 3. Agent control  *(claude-code-remote, claudecodeui, cc-pocket, mobvibe, oc-remote, c9watch, codeman, control-room, agentapi, …)*
@@ -80,7 +80,7 @@ Status legend:
 | Thinking/reasoning blocks as collapsible cards | rikkaagent, oc-remote, format-claude-stream | ✅ `stream_parse` (JSONL → typed messages + formatted cards) + `stream_stats` (tokens, pending tools) + `stream_reset`; parser ported TS→ESM |
 | Live todo/task list of running session | c9watch, claude-threads, codeman | ✅ `todos_set`/`todos_get`/`todos_status` + live `todos_updated`; board also auto-derived from markdown checkboxes in the finished turn's last assistant message |
 | Activity-state classifier (working/asking/done) driving alerts | control-room, codeman, agent-tmux-web | ✅ `activity_*` + `activity` broadcasts |
-| Busy→quiet detection with push | webmux, purplemux | ✅ (quiet → `session_quiet` notification) |
+| Busy→quiet detection with push | webmux, purplemux | ➖ partly: the daemon classifies quiet (`RH_QUIET_MS`, `activity` broadcasts); there is no `session_quiet` message and no push channel |
 | Fleet dashboard across sessions | c9watch, quil, codeman, control-room | ➖ removed 2026-09-22 — orchestrator and grid had no UI on either client |
 | Attention-first session list (stuck agents surface to top) | c9watch | ✅ `sessions` ordering: waiting → running → error → rest |
 | Chat forking (sub-chat from any message) | 1code | ✅ `chat_fork` — clones transcript up to message N, optional cwd/env overrides |
@@ -92,8 +92,8 @@ Status legend:
 | Diff review + git actions from phone | cc-pocket, vibego, orca | ✅ read-only `git_status/git_diff/git_log/git_branches`; staging/commit via agent |
 | Quick-reply chips (y/continue/approve) | webmux, remotecc | 🗺️ (client-side; daemon state via `activity` ready) |
 | @file mentions / file attach into prompt | hermes-android, mobvibe, agent-tmux-web | ✅ `@path` expansion in chat prompts (size-capped inline fenced blocks anchored at chat cwd; `chatmentions` report frame; uploads still exist) |
-| Expose harness as MCP server | quil, systemprompt-code-orchestrator, paseo | ✅ embedded MCP endpoint (JSON-RPC 2.0 over localhost HTTP, `tools/list` + `tools/call` → real chat turns with `pocketdesk_agents`/`pocketdesk_prompt`); env `RH_MCP_PORT`, protocol `mcp_start`/`mcp_stop`/`mcp_status` |
-| Worktree isolation per session | orca, claude-threads, paseo | ✅ `wt_create`/`wt_list`/`wt_remove` — per-agent git worktrees (worktrees.js) |
+| Expose harness as MCP server | quil, systemprompt-code-orchestrator, paseo | ➖ removed — no `RH_MCP_PORT`, no `mcp_*` handler and no MCP module in the tree (2026-11-24) |
+| Worktree isolation per session | orca, claude-threads, paseo | ✅ same mechanism as above: `create`/`chatsession` with `worktree` — per-agent git worktrees, created on demand |
 
 ## 4. Remote access & networking  *(frp, bore, cloudflared, tailscale, netbird, rustdesk, ws-scrcpy, guacamole, code-server, …)*
 
@@ -103,13 +103,13 @@ Status legend:
 | QR pairing (loopback page, deep link) | — | ⚙️ |
 | TCP forwarding (phone → PC-local services) | frp, bore, cli-tunnel | ✅ `tunnel_*` (TunnelManager wired) |
 | Port forwarding (daemon-side, local listener → remote host) | ssh, frp | ⚙️ `forward_*` |
-| LAN file transfer w/ UDP discovery (LocalSend protocol) | lanlink, syncthing | ✅ `lan_peers` (UDP discovery, lazy start) + `lan_send` (LocalSend v2 push, byte-verified e2e) |
+| LAN file transfer w/ UDP discovery (LocalSend protocol) | lanlink, syncthing | ➖ removed — no `lan_*` handler and no LocalSend module (2026-11-24) |
 | Watch-folder file sync w/ ignore patterns + conflict copies | syncthing | ➖ removed 2026-09-22 — the engine tracked state for files nothing ever fed it; `lan_send` covers phone↔PC transfer |
 | Self-hosted relay fallback / hole punching | netbird, rustdesk, frp XTCP, tty-share proxy | 🗺️ |
 | mkcert-style local CA install (no cert warnings) | mkcert, selfsigned | 🗺️ (pinning covers it today) |
 | Remote desktop / screen streaming | rustdesk, ws-scrcpy, novnc, guacamole | ✅ `rd_*` (session lifecycle w/ async connect, frame buffering, input forwarding, quality presets, stats) — TS→ESM port; full WebRTC video remains roadmap (frame relay transport is simulated) |
-| VNC frame bridge (TCP frame server + frame feed) | novnc, guacamole-server | ✅ `vnc_start`/`vnc_stop`/`vnc_status`/`vnc_frame` + `vnc_event` broadcasts — `vnc_bridge.js` CJS→ESM, ephemeral-port bind, frame push to TCP clients; full RFB proxy remains roadmap |
-| **Real desktop control (capture + input)** | rustdesk, anydesk | ✅ `desktop_start/stop/frame/mouse/key/type/quality/status` — Windows PowerShell helpers (warm ~3 fps JPEG capture in-memory to dodge AMSI RAT heuristics + warm SendInput input helper), canvas viewer in the browser tab (click/right-click/wheel/keyboard), watcher-scoped frame feed (no broadcast fan-out), capture loop stops at zero viewers; browser 🖨️ Desktop tab + relay status pill + 🔔 Test-push button |
+| VNC frame bridge (TCP frame server + frame feed) | novnc, guacamole-server | ➖ the frame bridge is gone (no `vnc_*` handler, no `vnc_bridge.js`); VNC survives only as an outbound client through `profile_connect` (`ssh_vnc_client.js`) |
+| **Real desktop control (capture + input)** | rustdesk, anydesk | ✅ `desktop_start/stop/frame/mouse/key/type/quality/status` — Windows PowerShell helpers (warm ~3 fps JPEG capture in-memory + warm SendInput input helper), canvas viewer in the browser tab (click/right-click/wheel/keyboard), watcher-scoped frame feed (no broadcast fan-out), capture loop stops at zero viewers; browser 🖨️ Desktop tab + relay status pill + 🔔 Test-push button |
 | SSH jump-host / bastion access control | sshportal, ssh_bastion_cardea, bifroest | ✅ `bastion_*` — users/hosts registry, access rules w/ expiry, session gating, invite tokens (`bastion_user_add/host_add/rule_add/access/session_start/session_end/sessions/stats/invite/invite_accept`) |
 | SSH server auth + per-user command allowlists | bifroest, sshwifty | ✅ `sshserver_*` — user registry, session lifecycle, allowlisted commands w/ recording, idle reaping (`sshserver_user_add/session_create/exec/session_end/sessions/stats`) |
 | Wake-on-LAN | rustdesk | ✅ `wake` — magic-packet UDP broadcast (multi-MAC, custom port/address) |
@@ -147,9 +147,9 @@ Status legend:
 | WhatsApp two-way channel | baileys, whatsapp-web.js | ✅ `wa_*` channel surface (QR auth lifecycle, allowlist, command-prefix dispatch into real sessions, replies, history) — TS→ESM port + fixed unreachable `ready` state; real baileys transport remains roadmap |
 | Per-chat-user allowlist + prompt-injection-safe approval | whatsapp-claude-plugin | ✅ (`TELEGRAM_ALLOW_CHAT_IDS`; approvals from chat map to proposals) |
 | Rich notification payload (what the agent asked) | anotifier | ⚙️ partial (proposals carry summary) |
-| Quiet hours / focus mode / priority tiers | marchat, shooter | ✅ `quiet_set` — off/notify/priority/silent with time windows (quiet_hours.js) |
+| Quiet hours / focus mode / priority tiers | marchat, shooter | ➖ removed — no `quiet_set` handler and no `quiet_hours.js` (2026-11-24) |
 | Lock-screen action buttons (approve/deny from push) | shooter, remote-control | ✅ Allow/Deny on the approval notification |
-| Notification coalescing/dedupe + telemetry | shooter, anotifier | ✅ `notify_send`/`notify_stats`/`notify_bursts` — shooter brain (decision-first, dedupe window, per-project coalescing, idle gate, telemetry) feeding the channel registry; two latent bugs fixed |
+| Notification coalescing/dedupe + telemetry | shooter, anotifier | 🧩 `pc_notifs.js` exists and `handlers/phone_sync.js` reads the phone's notifications, but there is no `notify_*` message on either end |
 | Pusher-style pub/sub channels + presence | soketi | ➖ (direct WS model fits better) |
 | History replay on reconnect | marchat | ✅ chat transcript replay + terminal backfill |
 | Voice transcription | — | ⚙️ (Whisper) |
@@ -171,7 +171,15 @@ Status legend:
 
 ---
 
-## Wired in this pass (protocol summary)
+## What one absorption pass claimed (2026-09, historical)
+
+> **Re-checked 2026-11-24.** Of the 110 message and event names listed in this
+> section, 38 belong to handlers that exist today; the other 72 are gone (share,
+> record, tunnel, relay, LAN, VNC, digest, MCP, notification and Telegram surfaces
+> were removed). The current protocol is the one in
+> [README § Protocol](README.md#-protocol-v1), and `daemon/test/readme-protocol.test.mjs`
+> fails when that list names a message with no handler. The table rows above were
+> corrected one by one; the narrative below describes a pass, not the tree.
 
 New client → server: `share_create` · `share_join` · `share_list` · `share_revoke` ·
 `stats` · `git_status` · `git_diff` · `git_log` · `git_branches` · `record_start` ·

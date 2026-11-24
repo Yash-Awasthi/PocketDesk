@@ -18,7 +18,7 @@ export const chatEvents = new EventEmitter();
 chatEvents.setMaxListeners(50);
 
 const DATA_DIR = process.env.POCKETDESK_DATA || ".pocketdesk";
-const HISTORY_DIR = path.join(os.homedir(), DATA_DIR, "chat-history");
+const HISTORY_DIR = path.resolve(os.homedir(), DATA_DIR, "chat-history");
 
 function ensureHistoryDir() {
   if (!fs.existsSync(HISTORY_DIR)) fs.mkdirSync(HISTORY_DIR, { recursive: true });
@@ -32,7 +32,7 @@ function saveHistory(c) {
   } catch {}
 }
 
-const ATTACH_DIR = path.join(os.homedir(), DATA_DIR, "attachments");
+const ATTACH_DIR = path.resolve(os.homedir(), DATA_DIR, "attachments");
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const MAX_IMAGES = 4;
 const IMAGE_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };

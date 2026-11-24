@@ -176,15 +176,66 @@ node --test --watch "test/*.test.mjs"
 - Plugin isolation: plugins cannot access other plugins' state
 
 ## Pull Request Checklist
-
 - [ ] Tests pass (`cd daemon && npm test`)
 - [ ] No console.log in production code (use logger)
 - [ ] WebSocket messages validated
 - [ ] Plugin hooks documented
 - [ ] README updated if new feature
+- [ ] No detection-evasion code (see [docs/INTEGRITY.md](docs/INTEGRITY.md)): the daemon
+      stays visible to process/task/port enumeration and usable with a machine policy
+      kill switch
+
+### No detection evasion, ever
+
+PocketDesk stays visible to the machine it runs on: no process hiding, no kernel
+or user-mode driver, no anti-forensics, no workaround aimed at an antivirus, EDR
+or anti-cheat product. The rule, the threat model behind it and the cases we
+refuse are in [docs/INTEGRITY.md](docs/INTEGRITY.md) (P4). Two checks keep it
+true; the first runs in `npm test`, the second is a copy-paste gate:
+
+```bash
+cd daemon && node --test test/no-evasion.test.mjs
+
+grep -rniE 'invisible to anti-?cheat|invisible to antivirus|RAT heuristics|\bAMS[A-Z]?\b|undetectab|hide from (task manager|enumeration)|evade (detection|antivirus|anti-?cheat)' \
+  --include='*.md' --include='*.js' --include='*.mjs' --include='*.cs' --include='*.ps1' --include='*.kt' \
+  . | grep -v node_modules | grep -v '^./plan.md' | grep -v '^./docs/INTEGRITY.md' | grep -v '^./CONTRIBUTING.md' | grep -v '^./daemon/test/no-evasion.test.mjs'
+```
+
+Expected output: none. `plan.md`, `docs/INTEGRITY.md` and this file are exempt
+because naming the forbidden pattern is their job — everywhere else a match is a
+bug.
+
+### Stable pins only
+
+What users install is built from two version files: `app/gradle/libs.versions.toml`
+and `daemon/package.json`. A pre-release in either one changes build output between
+two builds of one commit, so it needs a reason next to the pin:
+
+- `libs.versions.toml`: `# prerelease: <why>` on the pin line or as the whole line above it.
+- `daemon/package.json`: a top-level `"prerelease": { "<dep>": "<why>" }` entry.
+
+`npm test` enforces it:
+
+```bash
+cd daemon && node --test test/prerelease-pins.test.mjs
+```
+
+### Coverage floors only go up
+
+`daemon/coverage-floors.json` holds a statements/branches/functions floor per
+folder of `daemon/src`. Measure before changing anything:
+
+```bash
+cd daemon && npm run coverage
+```
+
+That runs the suite under `c8`, prints each area, and fails if any area is under
+its floor. When coverage improves, raise the floor **and** the `measured` number
+in the same commit; never lower either. `test/coverage-floors.test.mjs` rejects a
+floor set above what was measured, a floor more than six points below it (a stale
+floor that would let coverage rot), and a folder of `src/` with no floor at all.
 
 ## Commit Messages
-
 ```
 feat: add Discord notification channel
 fix: handle WebSocket disconnection gracefully

@@ -3,7 +3,7 @@
 import WebSocket from "ws";
 import fs from "node:fs";
 import path from "node:path";
-import { check, failureCount, failureNames, makeTmp, startDaemon, teardown } from "./helpers.mjs";
+import { check, failureCount, failureNames, makeTmp, startDaemon, teardown, waitForHealth } from "./helpers.mjs";
 
 const PORT = 8847;
 const CLI = 4707;
@@ -40,8 +40,13 @@ fs.writeFileSync(path.join(tmp, "fakewait.json"), JSON.stringify({
   chat: { args: [waitAgentJs] },
 }));
 
-const daemon = startDaemon(PORT, CLI, { token: TOKEN, manifests: tmp });
+// A fresh data dir per run: the device registry lives on disk, so a fixed one made this file
+// depend on earlier runs (`welcome echoes clientId` failed once test-device-1 had a token from
+// a previous run, because the daemon then mints a random id instead — which is correct).
+const daemon = startDaemon(PORT, CLI, { token: TOKEN, manifests: tmp, dataDir: path.join(tmp, "data") });
 await daemon.ready;
+// `.ready` is the stdout banner, which the daemon prints before its listeners are up.
+await waitForHealth(PORT);
 
 const seen = [];
 const waiters = [];
@@ -62,7 +67,7 @@ function send(obj) {
   ws.send(JSON.stringify(obj));
 }
 
-function next(pred, timeoutMs = 15000) {
+function next(pred, timeoutMs = 30000) {
   for (const m of seen) if (pred(m)) return Promise.resolve(m);
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("timeout waiting for frame")), timeoutMs);

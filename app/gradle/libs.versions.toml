@@ -1,23 +1,29 @@
 [versions]
-agp = "9.5.0-alpha09"
-kotlin = "2.5.0-Beta1"
-composeBom = "2026.10.00"
-activity = "1.14.0-alpha03"
+# Stable lines only. AGP 9.5.x is the newest stable line that takes `compileSdk 37.2` (max API 37);
+# Kotlin 2.4.21 is the newest stable language release (2.5.0 is still Beta/RC); Compose BOM
+# 2026.11.01 is the Compose 1.13 stable BOM, which itself needs compileSdk 37.1+ and Kotlin 2.2+.
+# Anything here that is a pre-release must carry a `# prerelease:` note on its line.
+agp = "9.5.2"
+kotlin = "2.4.21"
+composeBom = "2026.11.01"
+activity = "1.13.0"
 coreKtx = "1.19.1"
-lifecycle = "2.12.0-alpha04"
-navigation3 = "1.3.0-alpha02"
+lifecycle = "2.11.1"
+navigation3 = "1.2.2"
 okhttp = "5.5.0"
 coroutines = "1.11.0"
-serialization = "1.12.0-RC"
+serialization = "1.13.0"
 iroh = "1.1.0"
 jna = "5.19.1"
 codeScanner = "16.1.0"
 docScanner = "16.0.0"
 zxing = "3.5.3"
 junit = "6.1.3"
+androidxTestJunit = "1.3.0"
+androidxTestRunner = "1.7.0"
 
 [libraries]
-compose-bom = { module = "androidx.compose:compose-bom-alpha", version.ref = "composeBom" }
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "composeBom" }
 compose-material3 = { module = "androidx.compose.material3:material3" }
 compose-material-icons-core = { module = "androidx.compose.material:material-icons-core" }
 compose-ui = { module = "androidx.compose.ui:ui" }
@@ -38,6 +44,12 @@ kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serializa
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+androidx-test-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestJunit" }
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
+androidx-test-core = { module = "androidx.test:core", version.ref = "androidxTestRunner" }
+okhttp-tls = { module = "com.squareup.okhttp3:okhttp-tls" }
+compose-ui-test-junit4 = { module = "androidx.compose.ui:ui-test-junit4" }
+compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

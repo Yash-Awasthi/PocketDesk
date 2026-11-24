@@ -7,7 +7,9 @@ param(
     [string]$InstallDir = "$env:LOCALAPPDATA\PocketDesk",
     # The admin-only copy the elevated daemon runs from; passed on re-run, since another admin's elevation changes the SID.
     [string]$UserRoot = (Join-Path $env:ProgramFiles ("PocketDesk\" + [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)),
-    [switch]$RemoveData
+    [switch]$RemoveData,
+    # Keep settings and paired phones without asking (the default answer is also keep).
+    [switch]$KeepData
 )
 $ErrorActionPreference = "Stop"
 
@@ -66,9 +68,12 @@ Remove-Item "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PocketDes
 foreach ($task in "PocketDesk", "PocketDeskConsole") {
     try { Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue } catch {}
 }
-# The protected bin holds no secrets; the console token dir is kept unless -RemoveData (below).
+# The protected bin holds no secrets; the console token dir is kept unless the user says otherwise (below).
 $consoleBin = Join-Path $consoleRoot "bin"
 if (Test-Path $consoleBin) { Remove-Item -Recurse -Force $consoleBin -ErrorAction SilentlyContinue }
+# The machine policy belongs to the program, not to the user's data: a removed install must not leave
+# a policy behind that the next install silently inherits.
+Remove-Item (Join-Path $consoleRoot "policy.json") -Force -ErrorAction SilentlyContinue
 
 $binDir = Join-Path $InstallDir "bin"
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -79,7 +84,15 @@ if (Test-Path $InstallDir) { Remove-Item -Recurse -Force $InstallDir }
 if (Test-Path $UserRoot) { Remove-Item -Recurse -Force $UserRoot -ErrorAction SilentlyContinue }
 $pfRoot = Split-Path $UserRoot
 if ((Test-Path $pfRoot) -and -not (Get-ChildItem $pfRoot -Force)) { Remove-Item $pfRoot -Force -ErrorAction SilentlyContinue }
-if ($RemoveData) {
+# Settings, paired phones and console access go only on confirmation: -RemoveData says so up front,
+# -KeepData says no, and otherwise the person uninstalling is asked once here.
+$removeData = [bool]$RemoveData
+if (-not $removeData -and -not $KeepData) {
+    $answer = ""
+    try { $answer = Read-Host "Also delete settings and paired phones in $env:USERPROFILE\.pocketdesk? [y/N]" } catch { }
+    $removeData = $answer -match '^(y|yes)$'
+}
+if ($removeData) {
     $data = Join-Path $env:USERPROFILE ".pocketdesk"
     if (Test-Path $data) { Remove-Item -Recurse -Force $data }
     if (Test-Path $consoleRoot) { Remove-Item -Recurse -Force $consoleRoot -ErrorAction SilentlyContinue }

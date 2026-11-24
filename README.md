@@ -9,7 +9,7 @@
 [![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-orange.svg)](#protocol-v1)
 [![Android](https://img.shields.io/badge/Android-Kotlin-purple.svg)](https://developer.android.com)
 [![Plugins](https://img.shields.io/badge/Plugins-4-blueviolet.svg)](#plugin-system)
-[![Tests](https://img.shields.io/badge/Tests-28%20suites-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-65%20files-brightgreen.svg)](#testing)
 
 **No cloud. No accounts. Your machine, your data, your agents.**
 
@@ -107,9 +107,12 @@ so the installer detects it and runs the daemon from signed programs only (`conh
 the bundled Node.js, through `run-daemon.ps1`); the Start Menu shortcut then opens pairing through
 `open-pairing.ps1`. Nothing to do on your side.
 
-It downloads the daemon with its own Node.js and ffmpeg, starts it hidden at logon (it shows only
-in Task Manager, as PocketDesk.exe), adds a **PocketDesk** shortcut to the Start Menu, and opens the
-pairing QR. Scan it with the app and you are done. Clicking the shortcut later starts PocketDesk,
+It downloads the daemon with its own Node.js and ffmpeg, starts it at logon with a **tray icon**
+near the clock (right-click it to open, stop or uninstall; the daemon process is `PocketDesk.exe` in
+Task Manager), adds a **PocketDesk** shortcut to the Start Menu, and opens the pairing QR. It runs
+with your own rights by default; add `-Protected` to the installer only if you need admin windows
+to be controllable from the phone, because that build can only be stopped by an administrator.
+Scan the QR with the app and you are done. Clicking the shortcut later starts PocketDesk,
 or shows the pairing QR again if it is already running.
 To remove it: **Settings > Apps > Installed apps > PocketDesk > Uninstall**.
 Full guide, updating and uninstalling: [docs/SETUP-PC.md](docs/SETUP-PC.md).
@@ -273,6 +276,8 @@ pocketdesk read s1                    # the screen as it looks now, as text
 pocketdesk attach s1                  # use it in this window; Ctrl+] leaves it running
 pocketdesk resize s1 120 40
 pocketdesk kill s1
+pocketdesk stop                       # stops the daemon and its helpers, and checks nothing restarts
+pocketdesk --status                   # elevated? autostart? restart policy? ports and data folder
 ```
 
 ### 📱 Your phone on the PC
@@ -571,12 +576,12 @@ Proposals auto-expire after 5 minutes.
 JSON frames; binary payloads are base64.
 
 **Client → Server:**
-`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg {id, text, model?, mode?}` (model and mode for this message only) · `chatcancel` · `history_list {agent?}` · `history_get {agent, id}` · `history_resume {agent, id, mode?: "terminal"}` · `agent_panel {agent}` · `agent_doc {agent, kind: skill|command|file, name}` · `agent_file_set {agent, name, content}` · `fs_op {op: mkdir|rename|delete}` · `fs_search {path, q}` · `propose` · `approve {id, all?}` · `reject` · `proposal_list` · `pc_power {action}` · `totp_status` · `totp_setup` · `totp_enable {code}` · `totp_disable {code}` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
+`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg {id, text, model?, mode?}` (model and mode for this message only) · `chatcancel` · `history_list {agent?}` · `history_get {agent, id}` · `history_resume {agent, id, mode?: "terminal"}` · `agent_panel {agent}` · `agent_doc {agent, kind: skill|command|file, name}` · `agent_file_set {agent, name, content}` · `fs_op {op: mkdir|rename|delete}` · `fs_search {path, q}` · `propose` · `approve {id, all?}` · `reject` · `proposal_list` · `pc_power {action}` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
 <details>
 <summary>Absorbed-feature messages</summary>
 
 `prompt_enqueue` · `prompt_queue` · `prompt_remove` — queued follow-ups ·
-`todos_set` · `todos_get` · `todos_status` — live todo boards (+ `todos_updated` broadcasts) ·
+`todos_set` · `todos_get` · `todos_status` — live todo boards (each change is broadcast as a todos_updated frame) ·
 `schedule_create` · `schedule_list` · `schedule_pause` · `schedule_resume` · `schedule_cancel` — auto-continue runs ·
 `doctor` — self-diagnosis report ·
 `approval_waiting` — chats on the auto-deny countdown ·
@@ -590,7 +595,14 @@ JSON frames; binary payloads are base64.
 </details>
 
 **Server → Client:**
-`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `fs_result` · `fs_found` · `chatreplay` · `chatuser` · `chatdelta` · `chartool {toolId?}` (same toolId again = the call's completed input) · `chatstate` · `chat_info {model, permissionMode, commands, pocketdesk}` · `history` · `history_item` · `agent_panel` · `agent_doc` · `agent_file_saved` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `proposal_expired` · `pc_power` · `totp_status` · `totp_setup` · `activity` · `gui_opened` · `apps` · `error`
+`welcome` · `manifests` · `sessions` · `created` · `replay` · `out {seq}` · `exit` · `progress` · `fs` · `fchunk` · `fwritten` · `fs_result` · `fs_found` · `chatreplay` · `chatuser` · `chatdelta` · `chartool {toolId?}` (same toolId again = the call's completed input) · `chatstate` · `chat_info {model, permissionMode, commands, pocketdesk}` · `history` · `history_item` · `agent_panel` · `agent_doc` · `agent_file_saved` · `proposal_created` · `proposal_approved` · `proposal_rejected` · `proposal_expired` · `pc_power` · `activity` · `gui_opened` · `apps` · `todos_updated` · `error`
+
+The PC, KVM, phone-mirroring and Clippy pages use the rest of the surface, one type per action:
+`sources_list` · `pc_list` · `kvm_get` · `pc_pairing_link` · `pc_rename` · `pc_remove` · `kvm_set` · `desktop_nav` · `desktop_key` · `desktop_start` · `desktop_monitors` · `desktop_mouse` · `clipboard_set` · `desktop_stop` · `phone_watch` · `phone_sync_get` · `timeline_list` · `phone_sync_set` · `timeline_clear` · `adb_screenshot` · `adb_action` · `adb_clipboard_set` · `adb_gamepad` · `phone_req` · `phone_hub` · `adb_state` · `clippy_status` · `clippy_latest` · `clippy_setdir` · `adb_type` · `adb_apps` · `adb_cameras` · `adb_webcam_register` · `adb_webcam` · `adb_webcam_status` · `phone_drive` · `adb_clipboard_get` · `phone_doctor` · `phone_doctor_fix` · `adb_setup` · `adb_select` · `adb_disconnect` · `adb_qr_start` · `adb_qr_stop` · `adb_pair` · `adb_connect` · `adb_install_app` · `adb_grant_app` · `adb_input` · `adb_close` · `adb_push` · `phone_share_end` · `phone_switch` · `phone_input`.
+
+Two-factor pairing is not a WebSocket message: the settings page calls the loopback endpoints
+`/access/totp/setup`, `/access/totp/enable` and `/access/totp/disable`, and the 6-digit code rides
+on `hello` as `totp`.
 
 Every `out` frame carries a monotonic `seq`; on reconnect send `attach {id, since: <last seq>}` and the daemon replays only what you missed.
 
@@ -605,7 +617,9 @@ node test/smoke.test.mjs        # session smoke tests
 node test/features.test.mjs     # absorbed-features suite (backfill, stats, git, activity, accounts)
 ```
 
-The suite never leaves loopback. To exercise the SSH, SFTP and VNC transports
+The suite never leaves loopback. The test-count badge above is checked against the
+number of `daemon/test/*.test.mjs` files by `test/readme-truth.unit.test.mjs`, so it
+cannot go stale. To exercise the SSH, SFTP and VNC transports
 against a machine you actually own:
 
 ```bash
@@ -684,6 +698,17 @@ PocketDesk/
 - **Two-factor pairing**: optional authenticator code before the master token can pair a new device; paired devices keep their own tokens.
 - **At the PC**: a red frame and a viewer bar show when someone is connected; with *Ask before someone views this PC* on, the Allow button ignores keys for the first 1.5 s so typing cannot approve by accident.
 - **No open ports**: Reach the PC over LAN or iroh. **Do not** port-forward to the internet — the protocol has full shell control of your PC.
+
+### Responsible use
+
+PocketDesk is a remote-control tool: it can stream a screen, inject input and lend a
+camera. Use it only on machines you own or are responsible for, and only for your own
+work. **Do not use it during a proctored assessment, interview, or exam**, and do not
+use it to drive another person's session — that is cheating, and it breaks the platform's
+terms even where the platform cannot see it. PocketDesk deliberately stays visible to
+the machine it runs on, so the owner can block or stop it; the audit of what the tool
+could be misused for, and the guardrails that follow from it, are in
+[docs/INTEGRITY.md](docs/INTEGRITY.md).
 
 ---
 

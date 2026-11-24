@@ -25,6 +25,8 @@ android {
         targetSdk = 37
         versionCode = 26
         versionName = "0.11.0"
+        // Instrumented tests run on a device; the runner ships with the debug APK only.
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // iroh's native library is ~14 MB per ABI: phones are arm64, debug adds the emulator's.
         ndk { abiFilters += "arm64-v8a" }
     }
@@ -104,4 +106,14 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
+    // Instrumented Compose tests need the empty activity createComposeRule() launches.
+    debugImplementation(libs.compose.ui.test.manifest)
+    // Instrumented tests (androidTest) exercise the pairing payload and the TLS pinning on a device.
+    androidTestImplementation(libs.androidx.test.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    androidTestImplementation(platform(libs.okhttp.bom))
+    androidTestImplementation(libs.okhttp.tls)
 }

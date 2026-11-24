@@ -5,6 +5,7 @@ import { loadConfig, saveConfig } from "./config.js";
 import { start, closeClients } from "./server.js";
 import { killAll, liveIds, stopReaper } from "./sessions.js";
 import * as chat from "./chat.js";
+import { EVENT_IDS, logEvent, logEventSync } from "./eventlog.js";
 
 // ps, Activity Monitor and system monitors list the daemon by this name instead of "node".
 process.title = process.env.RH_CONSOLE ? "PocketDeskConsole" : "PocketDesk";
@@ -32,7 +33,8 @@ useBundledFfmpeg();
 
 // Surviving a stray rejection keeps the unsupervised user daemon alive; uncaughtException is left
 // to crash on purpose so an agent's child processes die with it (see crash-kills-agents test).
-// ponytail: real restart-on-crash is a Scheduled Task with RestartCount, like the SYSTEM console task.
+// ponytail: a crash restarts nothing on purpose (no RestartCount on the default task): a stop is a
+// stop. Only an explicit -Protected install keeps a restart policy, like the SYSTEM console task.
 process.on("unhandledRejection", (e) => console.error(`[warn] unhandled rejection (kept alive): ${e?.stack || e}`));
 
 // ── Graceful shutdown ───────────────────────────────────────────────────────
@@ -61,6 +63,10 @@ function gracefulShutdown(signal) {
   chat.killAll();
   stopReaper();
 
+  // Synchronous: the process exits in 500 ms, and a stop the machine owner can read afterwards is
+  // the whole point of writing it down.
+  logEventSync(EVENT_IDS.stop, `PocketDesk stopped (${signal}); ${killed} terminal session(s) closed`);
+
   console.log("[shutdown] clean exit");
   // Gives the close frames a moment to leave before the sockets die with the process.
   setTimeout(() => process.exit(0), 500);
@@ -79,6 +85,7 @@ if (process.env.RH_STOP_ON_STDIN_EOF === "1") {
 }
 
 const cfg = loadConfig();
+logEvent(EVENT_IDS.start, `PocketDesk started: port ${cfg.port}${process.env.RH_CONSOLE ? ", console endpoint" : ""}, pid ${process.pid}`);
 start(cfg, {
   onTokenRotated(token) {
     cfg.token = token;

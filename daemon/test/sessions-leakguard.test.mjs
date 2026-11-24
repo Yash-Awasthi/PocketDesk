@@ -12,6 +12,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import WebSocket from "ws";
+import { waitForHealth } from "./helpers.mjs";
 
 const PORT = 8801;
 const TOKEN = "leakguard";
@@ -23,7 +24,7 @@ fs.writeFileSync(
 
 const daemon = spawn(process.execPath, ["src/index.js"], {
   cwd: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
-  env: { ...process.env, RH_PORT: String(PORT), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-test-" + PORT, RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT), RH_STOP_ON_STDIN_EOF: "1" },
+  env: { ...process.env, RH_PORT: String(PORT), RH_CLI_PORT: String(PORT + 1), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-test-" + PORT, RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT), RH_STOP_ON_STDIN_EOF: "1" },
   stdio: ["pipe", "pipe", "pipe"],
 });
 daemon.stderr.on("data", (d) => process.stderr.write("[daemon!] " + d));
@@ -57,7 +58,8 @@ function send(o) { ws.send(JSON.stringify(o)); }
 
 async function run() {
   try {
-    await new Promise((res) => setTimeout(res, 1500));
+    // A cold cache needs seconds longer than a warm one; ask the server instead of guessing.
+    await waitForHealth(PORT);
     ws = new WebSocket(`ws://localhost:${PORT}/ws`);
     await new Promise((res, rej) => { ws.on("open", res); ws.on("error", rej); });
     pump();

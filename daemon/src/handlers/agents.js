@@ -20,6 +20,60 @@ import * as agentPanel from "../agent_panel.js";
 import * as accounts from "../accounts.js";
 import { isRunning } from "../freebuff_control.js";
 
+/** How long a process scan is reused before it is probed again. */
+const SCAN_CACHE_MS = 30_000;
+/** How long a caller waits for a probe before it gets the last list plus `refreshing: true`. */
+const SCAN_WAIT_MS = 2_000;
+/** Last completed scan, shared by every caller in this daemon. */
+let scanCache = { at: 0, items: [] };
+/** The probe currently running, so concurrent callers wait on one dump instead of queuing two. */
+let scanInFlight = null;
+
+/** Start (or join) the shared probe; resolves with its list. */
+function startScan() {
+  if (!scanInFlight) {
+    scanInFlight = probeAgents()
+      .then((items) => {
+        scanCache = { at: Date.now(), items };
+        return items;
+      })
+      .finally(() => {
+        scanInFlight = null;
+      });
+  }
+  return scanInFlight;
+}
+
+/**
+ * Which known agent binaries have a live process right now.
+ *
+ * Shells out because Windows offers no cheap process listing: `wmic` was removed in 11 24H2 (it
+ * fails in ~90 ms) so `tasklist` is the normal path, and it takes ~6 s here for 498 processes and
+ * much longer on a loaded machine. `tasklist` must not use `/v`: window titles take it from
+ * ~0.35 s to ~21 s, and only image names are matched anyway.
+ */
+async function probeAgents() {
+  const probe = process.platform === "win32"
+    ? "wmic process get processid,commandline /format:csv 2>nul || tasklist /fo csv /nh"
+    : "ps -eo pid=,args=";
+  const { stdout: out } = await promisify(exec)(probe, { encoding: "utf-8", timeout: 120_000, windowsHide: true });
+  const lines = String(out).split(/\r?\n/).filter(Boolean);
+  // GUI manifests have no `bin`: they are detected by path, not by a process name.
+  const known = registry
+    .list()
+    .map((r) => r.manifest.bin)
+    .filter(Boolean)
+    .map((bin) => bin.toLowerCase().replace(/\.(exe|cmd|bat)$/, ""));
+  const found = [];
+  for (const line of lines) {
+    const low = line.toLowerCase();
+    for (const bin of known) {
+      if (low.includes(bin) && !found.some((f) => f.bin === bin)) found.push({ bin, sample: line.slice(0, 300) });
+    }
+  }
+  return found;
+}
+
 /** Starts a chat attached to [ws] and sends its first prompt; returns { error } when the harness cannot chat. */
 export function startChat({ send, broadcast, allSessions, plugins, power }, ws, harness, cwd, prompt, resume = {}) {
   const m = registry.get(harness);
@@ -205,36 +259,18 @@ export default function agentsHandlers(ctx) {
     async sessions_scan(ws, msg) {
       // Zero-touch OS-level agent scan (c9watch/nexting): which known agent
       // binaries have live processes right now, with their command lines.
-      try {
-        // `wmic` was removed in Windows 11 24H2, so the tasklist fallback is
-        // the normal path there. It must not use `/v`: window titles take it
-        // from ~0.35s to ~21s, past the timeout, and only image names are
-        // matched here anyway.
-        const probe = process.platform === "win32"
-          ? "wmic process get processid,commandline /format:csv 2>nul || tasklist /fo csv /nh"
-          : "ps -eo pid=,args=";
-        const { stdout: out } = await promisify(exec)(probe, { encoding: "utf-8", timeout: 8000, windowsHide: true });
-        const lines = String(out).split(/\r?\n/).filter(Boolean);
-        // GUI manifests have no `bin`: they are detected by path, not by a
-        // process name, so they cannot be matched against a command line.
-        const known = registry
-          .list()
-          .map((r) => r.manifest.bin)
-          .filter(Boolean)
-          .map((bin) => bin.toLowerCase().replace(/\.(exe|cmd|bat)$/, ""));
-        const found = [];
-        for (const line of lines) {
-          const low = line.toLowerCase();
-          for (const bin of known) {
-            if (low.includes(bin) && !found.some((f) => f.bin === bin)) {
-              found.push({ bin, sample: line.slice(0, 300) });
-            }
-          }
-        }
-        send(ws, { type: "sessions_scan", items: found, scannedAt: Date.now() });
-      } catch (e) {
-        send(ws, { type: "sessions_scan", items: [], error: e.message });
-      }
+      //
+      // The probe shells out and takes ~6 s on this machine (~500 processes) and far longer on a
+      // busy one, so no caller is made to wait for it: a scan in flight is shared, the answer is
+      // the last list with `refreshing: true` until the probe lands, and the phone can ask again.
+      // An earlier version awaited the probe, which turned a loaded machine into "the scan failed".
+      const fresh = Date.now() - scanCache.at < SCAN_CACHE_MS;
+      if (fresh) return send(ws, { type: "sessions_scan", items: scanCache.items, scannedAt: scanCache.at, cached: true });
+      const pending = startScan();
+      const landed = await Promise.race([pending, new Promise((r) => setTimeout(() => r(null), SCAN_WAIT_MS))]).catch((e) => e);
+      if (landed && !(landed instanceof Error)) return send(ws, { type: "sessions_scan", items: landed, scannedAt: scanCache.at });
+      if (landed instanceof Error) return send(ws, { type: "sessions_scan", items: [], scannedAt: scanCache.at, error: landed.message });
+      send(ws, { type: "sessions_scan", items: scanCache.items, scannedAt: scanCache.at, refreshing: true });
     },
     async detach(ws, msg) {
       sessions.detach(ws, msg.id);

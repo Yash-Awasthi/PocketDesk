@@ -253,9 +253,15 @@ async function main() {
   });
   check("command runs on the target through the bastion", /hi/.test(jumpOut));
 
-  c.send({ type: "bastion_sessions" });
-  const jsess = await c.next((m) => m.type === "bastion_sessions");
-  const proxied = jsess.items.find((x) => x.hostId === jh.host.id) || jsess.items[0];
+  // The counters move as the channel is torn down, so ask again instead of sampling once:
+  // a single read raced the close under a loaded machine (measured 2026-11-24).
+  let proxied = null;
+  for (let i = 0; i < 20 && !(proxied?.outputBytes > 0 && proxied?.commandCount === 1); i++) {
+    c.send({ type: "bastion_sessions" });
+    const jsess = await c.next((m) => m.type === "bastion_sessions");
+    proxied = jsess.items.find((x) => x.hostId === jh.host.id) || jsess.items[0];
+    if (!(proxied?.outputBytes > 0 && proxied?.commandCount === 1)) await new Promise((r) => setTimeout(r, 250));
+  }
   check("proxied traffic is accounted", !!proxied && proxied.outputBytes > 0 && proxied.commandCount === 1);
 
   // Offers alice2's public key but signs with another key: only a verified signature stops it.

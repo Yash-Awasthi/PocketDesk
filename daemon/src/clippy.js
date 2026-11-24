@@ -4,8 +4,8 @@
  * clippy.exe (built from ../clippy/clippy.cs) runs as an elevated scheduled task
  * with a low-level keyboard hook. On Ctrl+C it overwrites clippy_capture.json with the
  * latest snapshot (foreground window title, system clipboard text and the typed buffer
- * since the previous Ctrl+C) and appends one line to clippy_history.json, which is a
- * session log: nothing is ever removed from it. The UI shows the last 20 entries.
+ * since the previous Ctrl+C) and rewrites clippy_history.json with the last 20 captures.
+ * The UI shows that same tail.
  *
  * Everything happens in the daemon. The browser toggle sends clippy_start /
  * clippy_stop; the daemon installs clippy as a HighestAvailable scheduled task
@@ -172,6 +172,14 @@ export class Clippy {
   async start() {
     if (this.running) return { ok: true, already: true };
     if (!fs.existsSync(CLIPPY_EXE)) return { ok: false, error: `clippy.exe not found at ${CLIPPY_EXE}` };
+    // A task started before this daemon run is already recording; /Run would fail on it.
+    if (this._processRunning()) {
+      this.running = true;
+      this._lastCapture = null;
+      this._startWatch();
+      this._emit();
+      return { ok: true, already: true };
+    }
     const inst = await this.install();
     if (!inst.ok) return inst;
     try {
@@ -239,8 +247,12 @@ export class Clippy {
     return { ok: true, running: this.running, installed: this.installed, exe: CLIPPY_EXE, dir, history };
   }
 
-  /** The most recent Ctrl+C capture, or { ok:false } when none yet. */
-  async latest() {
+  /** The most recent Ctrl+C capture, or the history entry with [at] when given. */
+  async latest(at) {
+    if (at) {
+      const hit = readHistory(path.join(dataDir(), HISTORY_NAME), 200).reverse().find((e) => e.at === at);
+      if (hit) return { ok: true, window: hit.window || "", text: hit.text || "", typed: hit.typed || "", at: hit.at || "" };
+    }
     const cap = readJson(path.join(dataDir(), CAPTURE_NAME));
     if (!cap || (!cap.text && !cap.typed)) return { ok: false, error: "no clippy capture yet" };
     return { ok: true, window: cap.window || "", text: cap.text || "", typed: cap.typed || "", at: cap.at || "" };
