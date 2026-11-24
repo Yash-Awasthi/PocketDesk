@@ -46,5 +46,7 @@ const sources = tests.map((f) => fs.readFileSync(path.join(dir, f), "utf8")).joi
 check("they are JUnit4 (what the Android runner executes)", /org\.junit\.Test/.test(sources) && !/org\.junit\.jupiter/.test(sources));
 check("they cover pairing", /class PairingInstrumentedTest/.test(sources));
 check("they cover TLS pinning", /class TlsInstrumentedTest/.test(sources) && /pinnedClient/.test(sources));
+check("they render the main screens", /class ScreensRenderTest/.test(sources));
+check("the emulator job can compose screens", /androidTestImplementation\(libs\.compose\.ui\.test\.junit4\)/.test(gradle));
 
 finish();
