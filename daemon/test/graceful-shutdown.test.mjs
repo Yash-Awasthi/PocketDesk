@@ -18,6 +18,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import WebSocket from "ws";
+import { waitForHealth } from "./helpers.mjs";
 
 const PORT = 8805;
 const TOKEN = "gs-logic";
@@ -62,7 +63,8 @@ async function run() {
   daemon.stderr.on("data", () => {});
 
   try {
-    await new Promise((res) => setTimeout(res, 2000));
+    // Ready means the server answers, not that 2000 ms have passed (see waitForHealth).
+    await waitForHealth(PORT);
     const ws = new WebSocket(`ws://localhost:${PORT}/ws`);
     await new Promise((res, rej) => { ws.on("open", res); ws.on("error", rej); });
     pump(ws);

@@ -3,7 +3,7 @@
 import WebSocket from "ws";
 import fs from "node:fs";
 import path from "node:path";
-import { check, failureCount, failureNames, makeTmp, startDaemon, teardown } from "./helpers.mjs";
+import { check, failureCount, failureNames, makeTmp, startDaemon, teardown, waitForHealth } from "./helpers.mjs";
 
 const PORT = 8847;
 const CLI = 4707;
@@ -42,6 +42,8 @@ fs.writeFileSync(path.join(tmp, "fakewait.json"), JSON.stringify({
 
 const daemon = startDaemon(PORT, CLI, { token: TOKEN, manifests: tmp });
 await daemon.ready;
+// `.ready` is the stdout banner, which the daemon prints before its listeners are up.
+await waitForHealth(PORT);
 
 const seen = [];
 const waiters = [];

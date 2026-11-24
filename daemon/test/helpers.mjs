@@ -24,6 +24,33 @@ export function failureNames() {
 }
 
 /**
+ * Resolve once the daemon answers `GET /health` on [port], or throw after [timeoutMs].
+ *
+ * The "registry scanned" banner on stdout is not enough on its own: the daemon prints it
+ * before every listener is up, so a test that connects on the banner alone still races the
+ * socket (measured 2026-11-24: 5 of 113 tests failed on a cold cache for exactly this reason).
+ * `/health` is only served by a listening server, so it is the readiness signal.
+ */
+export async function waitForHealth(port, timeoutMs = 60_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      if (res.ok) {
+        const body = await res.json();
+        if (body.status === "healthy") return body;
+        last = new Error(`health said ${JSON.stringify(body)}`);
+      } else last = new Error(`health returned ${res.status}`);
+    } catch (e) {
+      last = e;
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`daemon on ${port} never became healthy: ${last?.message}`);
+}
+
+/**
  * Create a tmp dir pre-seeded with a "node" terminal-harness manifest, as
  * every e2e test needs. Caller must rmSync it when done.
  */

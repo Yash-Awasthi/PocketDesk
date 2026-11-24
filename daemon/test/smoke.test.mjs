@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import WebSocket from "ws";
+import { waitForHealth } from "./helpers.mjs";
 
 const PORT = 8799;
 const TOKEN = "smoketoken";
@@ -49,7 +50,9 @@ function send(o) {
 
 async function run() {
   try {
-    await new Promise((res) => setTimeout(res, 1500));
+    // Wait for the server that answers, not for a fixed number of milliseconds: a cold cache
+    // needs seconds longer than a warm one. See waitForHealth in helpers.mjs.
+    await waitForHealth(PORT);
   ws = new WebSocket(`ws://localhost:${PORT}/ws`);
   await new Promise((res, rej) => {
     ws.on("open", res);

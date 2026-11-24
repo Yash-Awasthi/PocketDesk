@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn, execFileSync } from "node:child_process";
 import WebSocket from "ws";
+import { waitForHealth } from "./helpers.mjs";
 
 const PORT = 8796;
 const TOKEN = "chattoken";
@@ -91,7 +92,8 @@ async function collect(preds, timeoutMs = 15000) {
 
 async function run() {
   try {
-    await new Promise((r) => setTimeout(r, 1200));
+    // The banner on stdout precedes the listeners; /health is only served by a listening server.
+    await waitForHealth(PORT);
     ws = new WebSocket(`ws://localhost:${PORT}/ws`);
     await new Promise((res) => ws.on("open", res));
     ws.on("message", (raw) => {
