@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import crypto from "node:crypto";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { generateSelfSignedCert } from "./tls-gen.js";
 import { writeFileAtomic } from "./atomic_write.js";
 
@@ -19,7 +19,7 @@ export function loadConfig() {
   // and SYSTEM (S-1-5-18) may read its folder. Well-known SIDs keep this locale-independent.
   if (process.env.RH_CONSOLE && process.platform === "win32") {
     try {
-      execSync(`icacls "${dir}" /inheritance:r /grant *S-1-5-32-544:(OI)(CI)F /grant *S-1-5-18:(OI)(CI)F`, { stdio: "ignore", windowsHide: true });
+      execFileSync("icacls", [dir, "/inheritance:r", "/grant", "*S-1-5-32-544:(OI)(CI)F", "/grant", "*S-1-5-18:(OI)(CI)F"], { stdio: "ignore", windowsHide: true });
     } catch { /* best effort, like the chmod below */ }
   }
   let cfg = {};

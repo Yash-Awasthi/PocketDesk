@@ -6,7 +6,7 @@
  * assertions, stale status detection, and auto-mode switching.
  */
 
-import { execSync, spawn } from 'child_process';
+import { spawn } from 'child_process';
 
 // --- Constants ---
 
@@ -86,7 +86,14 @@ class LinuxAssertion {
   start(reason) {
     if (this.inhibited) return;
     try {
-      execSync('systemd-inhibit --what=idle --who=PocketDesk --why="' + reason + '" --mode=block &', { stdio: 'ignore' });
+      // Detached: the inhibitor lives until this process exits. spawn reports a missing binary
+      // asynchronously, so the error handler restores the bookkeeping execSync's catch used to do.
+      const child = spawn('systemd-inhibit', ['--what=idle', '--who=PocketDesk', '--why=' + reason, '--mode=block'], { detached: true, stdio: 'ignore', windowsHide: true });
+      child.on('error', (e) => {
+        this.inhibited = false;
+        this.logger.warn(`[power] Failed to inhibit Linux idle: ${e.message}`);
+      });
+      child.unref();
       this.inhibited = true;
       this.logger.debug(`[power] Linux idle inhibited: ${reason}`);
     } catch (e) {

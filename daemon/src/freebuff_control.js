@@ -19,7 +19,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execSync, execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { writeFileAtomic } from "./atomic_write.js";
 import { docDescription } from "./agent_panel.js";
 
@@ -73,7 +73,7 @@ function appBasename() {
 export function isRunning(exeName = appBasename()) {
   try {
     if (process.platform === "win32") {
-      const out = execSync(`tasklist /FI "IMAGENAME eq ${exeName}" /NH`, {
+      const out = execFileSync("tasklist", ["/FI", `IMAGENAME eq ${exeName}`, "/NH"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 5000,
@@ -326,9 +326,9 @@ export function appOpen() {
 export function appQuit() {
   try {
     if (process.platform === "win32") {
-      execSync(`taskkill /IM ${appBasename()} /T`, { stdio: "ignore", timeout: 10000, windowsHide: true });
+      execFileSync("taskkill", ["/IM", appBasename(), "/T"], { stdio: "ignore", timeout: 10000, windowsHide: true });
     } else {
-      execSync(`pkill -f ${JSON.stringify(appBasename())} || true`, { stdio: "ignore", timeout: 10000 });
+      execFileSync("pkill", ["-f", appBasename()], { stdio: "ignore", timeout: 10000 });
     }
     return { ok: true };
   } catch {

@@ -1,8 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import * as worktree from "../worktree.js";
-import { exec, execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { execFile } from "node:child_process";
 import * as registry from "../registry.js";
 import * as appDiscovery from "../app_discovery.js";
 import * as sessions from "../sessions.js";
@@ -44,6 +43,11 @@ function startScan() {
   return scanInFlight;
 }
 
+/** execFile as a promise of { stdout }. */
+const execFileP = (bin, args, opts) => new Promise((resolve, reject) => {
+  execFile(bin, args, opts, (err, stdout) => (err ? reject(err) : resolve({ stdout })));
+});
+
 /**
  * Which known agent binaries have a live process right now.
  *
@@ -53,10 +57,17 @@ function startScan() {
  * ~0.35 s to ~21 s, and only image names are matched anyway.
  */
 async function probeAgents() {
-  const probe = process.platform === "win32"
-    ? "wmic process get processid,commandline /format:csv 2>nul || tasklist /fo csv /nh"
-    : "ps -eo pid=,args=";
-  const { stdout: out } = await promisify(exec)(probe, { encoding: "utf-8", timeout: 120_000, windowsHide: true });
+  const opts = { encoding: "utf-8", timeout: 120_000, windowsHide: true };
+  let out;
+  if (process.platform === "win32") {
+    try {
+      ({ stdout: out } = await execFileP("wmic", ["process", "get", "processid,commandline", "/format:csv"], opts));
+    } catch {
+      ({ stdout: out } = await execFileP("tasklist", ["/fo", "csv", "/nh"], opts));
+    }
+  } else {
+    ({ stdout: out } = await execFileP("ps", ["-eo", "pid=,args="], opts));
+  }
   const lines = String(out).split(/\r?\n/).filter(Boolean);
   // GUI manifests have no `bin`: they are detected by path, not by a process name.
   const known = registry

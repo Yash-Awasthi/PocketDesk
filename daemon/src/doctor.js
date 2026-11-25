@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import https from "node:https";
-import { execSync, spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { wakeArmedAdapters } from "./wake.js";
 import { forPlatform } from "./registry.js";
 
@@ -23,9 +23,9 @@ export function versionProbe(m, platform = process.platform) {
 
 const DATA_DIR = process.env.POCKETDESK_DATA || ".pocketdesk";
 
-function tryExec(cmd, timeoutMs = 4000) {
+function tryExec(bin, args, timeoutMs = 4000) {
   try {
-    return { ok: true, out: execSync(cmd, { encoding: "utf8", timeout: timeoutMs, stdio: "pipe", windowsHide: true }).trim() };
+    return { ok: true, out: execFileSync(bin, args, { encoding: "utf8", timeout: timeoutMs, stdio: "pipe", windowsHide: true }).trim() };
   } catch (e) {
     return { ok: false, out: String(e.message).split("\n")[0] };
   }
@@ -126,7 +126,7 @@ export async function diagnose({ tls, manifests } = {}) {
 
   // Console endpoint (optional SYSTEM secure-desktop daemon on 8766).
   if (process.platform === "win32") {
-    const task = tryExec('schtasks /query /TN "PocketDeskConsole" /fo LIST');
+    const task = tryExec("schtasks", ["/query", "/TN", "PocketDeskConsole", "/fo", "LIST"]);
     const registered = task.ok && !/Disabled/i.test(task.out);
     let reachable = false;
     if (registered) {

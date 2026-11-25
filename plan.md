@@ -245,7 +245,8 @@ commit is byte-identical.
 
 - [ ] The daemon has no linter; add ESLint (flat config) + Prettier, blocking, with `node --check` kept as the cheap first gate. `[P]`
 - [ ] Add `--experimental-strip-types`-free JSDoc types and `tsc --checkJs --noEmit` on `src/` with a per-file allowlist that shrinks. `[P]`
-- [ ] Ban `child_process.exec` with interpolated strings; allow only `execFile`/spawn with an argv array. `[P]`
+- [x] Ban `child_process.exec` with interpolated strings; allow only `execFile`/spawn with an argv array. `[P]`
+  verified-here: cd daemon && node --test test/child-process-guard.test.mjs -> ALL PASS (7 checks); reintroducing execSync(`echo ${x}`) FAILs naming the file
 - [x] Assert no `shell: true` outside `scripts/`. `[P]`
   verified-here: cd daemon && node --test test/shell-flag-guard.test.mjs → ALL PASS (3 checks, 156 files walked), exit 0
 
