@@ -270,7 +270,8 @@ commit is byte-identical.
 
 - [ ] Protocol version in the hello message plus a mismatch message on both ends, tested. `[P]`
 - [ ] Doc + test: adding a message is additive; changing one needs a version bump and a compatibility note. `[P]`
-- [ ] Android `versionCode` monotonic check in CI and a changelog entry per release. `[P]`
+- [x] Android `versionCode` monotonic check in CI and a changelog entry per release. `[P]`
+  verified-here: cd daemon && node --test test/android-ci.unit.test.mjs -> ALL PASS, 22 checks; versionCode is read from all 27 commits that touched build.gradle.kts and never goes backwards (2..26), and the newest CHANGELOG.md section must equal versionName. Perturbing the file to versionCode 25 / versionName 0.12.0 -> FAILED: 2, naming both checks; restored, diff empty
 
 ---
 
