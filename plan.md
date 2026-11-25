@@ -416,7 +416,8 @@ re-shoot.
 - [ ] `docs/for-proctoring-vendors.md`: process names, task name, service keys, install path, ports, data folder, the capture marker, how to verify and how to block, plus a contact. `[E]`
 - [x] `ALPHA-CAPTURE.md` gets the "do not use in proctoring, exam or DRM windows" warning. `[E]`
   verified-here: grep -n -i "proctoring|exam|DRM" docs/ALPHA-CAPTURE.md -> 2 hits; cd daemon && node --test test/no-evasion.test.mjs -> ALL PASS
-- [ ] `SECURITY.md`: disclosure path, supported versions, response time. `[E]`
+- [x] `SECURITY.md`: disclosure path, supported versions, response time. `[E]`
+  verified-here: grep -n "^## " SECURITY.md -> 4 sections; cd daemon && node --test test/no-evasion.test.mjs -> ALL PASS
 
 ### M6.3 Operability
 
