@@ -7,6 +7,8 @@ import * as fbCtrl from "../freebuff_control.js";
 import * as doctor from "../doctor.js";
 import * as devices from "../devices.js";
 import { startChat } from "./agents.js";
+import { snapshot, daemonVersion } from "../running.js";
+import * as totp from "../totp.js";
 import fs from "node:fs";
 import path from "node:path";
 import { RECORDINGS } from "../recorder.js";
@@ -141,6 +143,16 @@ export default function systemHandlers(ctx) {
     // ── Client devices: read-only here; revoke and allow live on the local settings page ──
     async device_list(ws, msg) {
       send(ws, { type: "device_list", items: devices.list() });
+    },
+    // ── What is running (the hub's Running page): version, ports, sessions, streams, policy ──
+    async running_state(ws) {
+      send(ws, { type: "running_state", ...snapshot({
+        version: daemonVersion(),
+        ports: { daemon: ctx.port, page: Number(process.env.RH_LOCAL_PORT) || ctx.port + 10, cli: Number(process.env.RH_CLI_PORT) || 4679, usb: ctx.usbPort },
+        sessions: ctx.allSessions(),
+        streams: { video: ctx.videoWatchers.size, desktop: ctx.desktopWatchers.size, audio: ctx.audioListeners.size, remote: [...ctx.videoWatchers].filter((w) => w._audio).length },
+        policy: { control: ctx.access.controlAllowed, remote: ctx.access.remoteOn, password: ctx.access.hasPassword, totp: totp.enabled(), recording: ctx.recorder.enabled },
+      }) });
     },
   };
 }

@@ -340,7 +340,8 @@ transport docs describe a design that has moved.
 
 - [ ] Settings page: an audit view of pairing, device, policy and TOTP events with timestamps. `[W]`
 - [ ] Device table: last seen, address, transport, and a per-device note. `[W]`
-- [ ] A "what is running" page: daemon version, ports, active sessions, active streams, policy state. `[W]`
+- [x] A "what is running" page: daemon version, ports, active sessions, active streams, policy state. `[W]`
+  verified-here: cd daemon && node --test test/running.test.mjs -> ALL PASS, 19 checks (daemon version, four ports, live session list, stream counts, policy flags); POST-proof fetch /ui/running.js -> 200 and index.html loads it; gen-protocol-doc --check -> current
 - [ ] One-click diagnostic bundle (logs + status + versions, no secrets) for support. `[W]`
 - [ ] PWA install for the hub with an offline shell for read-only pages. `[W]`
 
