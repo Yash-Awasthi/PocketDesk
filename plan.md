@@ -361,7 +361,8 @@ transport docs describe a design that has moved.
 
 - [ ] `docs/TRANSPORT-BENCH.md` lacks a real-phone, mobile-data measurement; publish loss, latency and bitrate adaptation from one device on 4G and one on Wi-Fi. `[D]`
 - [ ] Congestion control: unit-test the bitrate ladder against a simulated link (5% loss, 200 ms RTT, 1 Mbps) and assert bounded latency and no stall. `[D]`
-- [ ] Codec negotiation: assert AV1 → HEVC → H.264 fallback order works when the phone reports no decoder, with a synthetic capability matrix test. `[D]`
+- [x] Codec negotiation: assert AV1 → HEVC → H.264 fallback order works when the phone reports no decoder, with a synthetic capability matrix test. `[D]`
+  verified-here: cd daemon && node --test test/codec-negotiation.unit.test.mjs -> ALL PASS (5 tests, 8-row capability matrix and 6 working-encoder sets)
 - [ ] Frame pacing: measure dropped frames under load and publish the number per encoder. `[D]`
 
 ### M5.2 Security depth
