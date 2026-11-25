@@ -3,7 +3,8 @@
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
-import { check, connect, finish, openAndHello, startDaemon, teardown } from "./helpers.mjs";
+import http from "node:http";
+import { REPO, check, connect, finish, openAndHello, startDaemon, teardown } from "./helpers.mjs";
 
 const PORT = 8824;
 const CLI_PORT = 46824;
@@ -79,6 +80,30 @@ try {
   const r = await idle.next((m) => m.type === "desktop_input_ok", 8000);
   check("input without an open desktop is refused", r.ok === false && r.error === "view only");
   await idle.close();
+
+  // Three guards on every local settings route at once: the peer is loopback, the Host header is a
+  // loopback name (DNS rebinding arrives from 127.0.0.1 under an attacker's name), and the key is the
+  // pairing token. The route list is read from server.js so a new /access route cannot ship unguarded.
+  const src = fs.readFileSync(path.join(REPO, "daemon", "src", "server.js"), "utf8");
+  const routes = [...new Set([...src.matchAll(/path0 === "(\/access[^"]*)"/g)].map((m) => m[1]))];
+  check("the /access route list comes from server.js", routes.length >= 13 && routes.includes("/access/totp/setup"));
+  const probe = (target, host) => new Promise((resolve, reject) => {
+    const req = http.request({ host: "127.0.0.1", port: PORT, path: target, method: "GET", headers: { host: host || `127.0.0.1:${PORT}` } }, (res) => {
+      res.resume(); res.on("end", () => resolve(res.statusCode));
+    });
+    req.on("error", reject); req.end();
+  });
+  const unguarded = [];
+  for (const r of routes) {
+    if (await probe(r) !== 403) unguarded.push("no key: " + r);
+    if (await probe(r + "?k=not-the-token") !== 403) unguarded.push("wrong key: " + r);
+    if (await probe(r + "?k=" + TOKEN, `evil.example:${PORT}`) !== 403) unguarded.push("non-loopback Host: " + r);
+  }
+  check("every /access route is 403 without the key, with a wrong key and under a non-loopback Host", unguarded.length === 0 && routes.length >= 13);
+  check("/access with the key and a loopback Host answers", await probe(`/access?k=${TOKEN}`) === 200);
+  check("/pair is 403 without the key", await probe("/pair") === 403);
+  check("/pair is 403 under a non-loopback Host even with the key", await probe(`/pair?k=${TOKEN}`, `evil.example:${PORT}`) === 403);
+  check("/pair redirects the PC own browser to the hub", await probe(`/pair?k=${TOKEN}`) === 302);
 } finally {
   await teardown(home);
 }

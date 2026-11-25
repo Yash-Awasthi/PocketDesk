@@ -263,7 +263,8 @@ commit is byte-identical.
 
 - [ ] No test covers `daemon/public/ui/*.js`; add Playwright against a fake daemon: pairing page, device table, TOTP section, one terminal session. `[P]`
 - [ ] Accessibility smoke: axe on the settings and hub pages, zero critical findings. `[P]`
-- [ ] Assert the loopback/Host/key guard on `/pair` and every `/access/*` route: 403 without the key, 403 from a non-loopback Host. `[P]`
+- [x] Assert the loopback/Host/key guard on `/pair` and every `/access/*` route: 403 without the key, 403 from a non-loopback Host. `[P]`
+  verified-here: cd daemon && node --test test/access.test.mjs -> ALL PASS, 23 checks; the route list is read from server.js (13 /access routes) and each is 403 with no key, a wrong key and a Host of evil.example; /pair is 403 in the first two and 302 for the PC browser. Perturbing the Host regex to always match -> FAILED: 2, naming the per-route check and /pair
 
 ### M2.5 Upgrade and compatibility
 
