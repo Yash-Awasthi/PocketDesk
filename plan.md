@@ -383,7 +383,8 @@ transport docs describe a design that has moved.
   verified-here: cd daemon && node --test test/stream-unknown-fields.test.mjs -> ALL PASS (27 checks); unknown fields survive in raw, typed output and stats unchanged
 - [x] Tool-call correlation: assert start/result pairing under interleaved and cancelled turns. `[D]`
   verified-here: cd daemon && node --test test/stream-tool-correlation.test.mjs -> ALL PASS (47 checks); test/stream.test.mjs still ALL PASS
-- [ ] Approval path: every request type (command, file write, diff) has a test for deny, allow and allow-all-for-session. `[D]`
+- [x] Approval path: every request type (command, file write, diff) has a test for deny, allow and allow-all-for-session. `[D]`
+  verified-here: cd daemon && node --test test/approvals-matrix.test.mjs -> ALL PASS (51 checks); command, file write and diff each denied, allowed and allow-all
 - [ ] Resume semantics: continuing a history conversation must not duplicate messages; test against a captured history file. `[D]`
 
 ### M5.4 Interface craft
