@@ -346,7 +346,8 @@ transport docs describe a design that has moved.
 
 ### M4.4 Transport and reach
 
-- [ ] Self-hosted iroh relay recipe and a documented fallback when the relay is unreachable. `[W]`
+- [x] Self-hosted iroh relay recipe and a documented fallback when the relay is unreachable. `[W]`
+  verified-here: cd daemon && node --test test/relay-fallback.test.mjs -> ALL PASS, 10 checks (docs section present, config relays "off" parsed and saved, array preserved, iroh_link direct-only branch); node --check src/config.js -> OK
 - [ ] Bandwidth cap per stream and a data-used counter per session, visible in the phone. `[W]`
 - [ ] Audio-only mode for desktop streaming when the link is poor. `[W]`
 - [ ] Multi-monitor naming and ordering from the PC, persisted per machine. `[W]`

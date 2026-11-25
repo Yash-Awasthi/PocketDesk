@@ -57,14 +57,17 @@ export function loadConfig() {
       console.warn("[pocketdesk] run `npm run setup-tls` to fix this.");
     }
   }
-  // iroh: reach this PC by key from any network. RH_IROH=0 disables, RH_IROH=local
-  // keeps it direct-only (tests), RH_IROH_RELAYS takes comma-separated relay URLs.
+  // iroh: reach this PC by key from any network. RH_IROH=0 disables; RH_IROH=local
+  // or config.json "relays": "off" keeps it direct-only; RH_IROH_RELAYS takes
+  // comma-separated relay URLs.
   const irohEnv = process.env.RH_IROH;
+  const relaysCfg = cfg.iroh?.relays;
   cfg.iroh = {
     enabled: irohEnv !== undefined ? irohEnv !== "0" : envDriven ? false : cfg.iroh?.enabled !== false,
     relays: irohEnv === "local" ? "off"
+      : relaysCfg === "off" ? "off"
       : "RH_IROH_RELAYS" in process.env ? process.env.RH_IROH_RELAYS.split(",").map((s) => s.trim()).filter(Boolean)
-      : Array.isArray(cfg.iroh?.relays) ? cfg.iroh.relays : [],
+      : Array.isArray(relaysCfg) ? relaysCfg : [],
   };
   // Per-connection password (scrypt record) and the control gate survive restarts.
   cfg.connPassword = cfg.connPassword ?? null;
@@ -88,7 +91,10 @@ export function saveConfig(cfg) {
       port: cfg.port,
       token: cfg.token,
       tls: { enabled: cfg.tls.enabled, cert: cfg.tls.cert, key: cfg.tls.key },
-      iroh: { enabled: cfg.iroh?.enabled !== false, relays: Array.isArray(cfg.iroh?.relays) ? cfg.iroh.relays : [] },
+      iroh: {
+        enabled: cfg.iroh?.enabled !== false,
+        relays: cfg.iroh?.relays === "off" ? "off" : Array.isArray(cfg.iroh?.relays) ? cfg.iroh.relays : [],
+      },
       connPassword: cfg.connPassword ?? null,
       controlAllowed: cfg.controlAllowed !== false,
       remoteOn: cfg.remoteOn !== false,
