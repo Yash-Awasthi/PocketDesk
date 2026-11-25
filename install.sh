@@ -44,11 +44,11 @@ step "Checking prerequisites"
 
 # Node.js
 if ! command -v node &>/dev/null; then
-  fail "Node.js not found. Install from https://nodejs.org (≥24 required)"
+  fail "Node.js not found. Install from https://nodejs.org (≥26 required)"
 fi
 NODE_VERSION=$(node -v | sed 's/v//' | cut -d. -f1)
-if [ "$NODE_VERSION" -lt 24 ]; then
-  fail "Node.js ≥24 required (found v$(node -v))"
+if [ "$NODE_VERSION" -lt 26 ]; then
+  fail "Node.js ≥26 required (found v$(node -v))"
 fi
 ok "Node.js $(node -v)"
 

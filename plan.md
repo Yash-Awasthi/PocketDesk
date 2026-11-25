@@ -284,7 +284,8 @@ version set that will age badly, and the Android app is on a Kotlin beta.
 **Done when:** every runtime is on a current stable release and the suites pass.
 
 - **m3.1.1 Daemon**
-  - [ ] Node floor to the current LTS in `engines` and CI matrix; drop older runners. `[F]`
+  - [x] Node floor to the current LTS in `engines` and CI matrix; drop older runners. `[F]`
+  verified-here: node -v; node -e "console.log(require('./daemon/package.json').engines.node)"; cd daemon; npm test -> v26.8.1, >=26, tests 120 pass 118 fail 2 (protocol-contract, readme-truth; both pre-existing)
   - [ ] `node-pty` and `@number0/iroh` to current; re-run the terminal and remote-link suites. `[F]`
 - **m3.1.2 Android build**
   - [ ] Gradle: configuration cache + isolated projects, JDK 25 pinned, build-time report; target a 30% faster CI job. `[F]`

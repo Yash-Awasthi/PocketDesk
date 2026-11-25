@@ -20,8 +20,8 @@ jobs:
       matrix:
         # Windows is the main platform (ConPTY, console endpoint); macOS and Linux run the hidden daemon too.
         os: [windows-latest, ubuntu-latest, macos-latest]
-        # 24 is the supported floor, 26 the current release.
-        node: [24, 26]
+        # 26 is the current LTS and the supported floor; the 24 runner was dropped.
+        node: [26]
     defaults:
       run:
         working-directory: daemon

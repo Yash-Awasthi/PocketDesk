@@ -22,7 +22,7 @@ node daemon/src/index.js
 | Component | Technology | Version |
 |-----------|------------|---------|
 | Language | JavaScript | ES2022+ |
-| Runtime | Node.js | 24+ |
+| Runtime | Node.js | 26+ |
 | Protocol | WebSocket | ws 8.0+ |
 | Terminal | xterm.js | 5.0+ |
 | Testing | Node.js test runner | Built-in |

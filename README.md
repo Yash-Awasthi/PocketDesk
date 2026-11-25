@@ -5,7 +5,7 @@
 [![CI](https://github.com/Yash-Awasthi/PocketDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/Yash-Awasthi/PocketDesk/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/Yash-Awasthi/PocketDesk)](https://github.com/Yash-Awasthi/PocketDesk/releases/latest)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/Node-≥24-brightgreen.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/Node-≥26-brightgreen.svg)](https://nodejs.org)
 [![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-orange.svg)](#protocol-v1)
 [![Android](https://img.shields.io/badge/Android-Kotlin-purple.svg)](https://developer.android.com)
 [![Plugins](https://img.shields.io/badge/Plugins-4-blueviolet.svg)](#plugin-system)
@@ -124,7 +124,7 @@ curl -fsSL https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/inst
 On macOS you can instead download **PocketDesk-mac.zip** from the
 [latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest), unzip it and
 double-click **PocketDesk-Install.command** (the first time, right-click > **Open**, since it is not
-notarized). Both need [Node.js](https://nodejs.org) 24 or newer installed first.
+notarized). Both need [Node.js](https://nodejs.org) 26 or newer installed first.
 The daemon runs hidden in the background, like on Windows: a LaunchAgent on macOS (seen only in
 Activity Monitor) and a systemd user service on Linux. It serves terminals, files, chat and agent
 control. Open **PocketDesk** from Spotlight, Launchpad or the app menu to pair a phone and change
