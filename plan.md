@@ -400,7 +400,8 @@ re-shoot.
 
 ### M6.1 Machine-owner policy (the only control that works)
 
-- [ ] Policy store: `HKLM\SOFTWARE\PocketDesk\Policy` plus `C:\ProgramData\PocketDesk\policy.json`, keys `AllowRemoteControl`, `AllowWebcam`, `AllowPhoneControl`, `AllowClipboard`. `[E]`
+- [x] Policy store: `HKLM\SOFTWARE\PocketDesk\Policy` plus `C:\ProgramData\PocketDesk\policy.json`, keys `AllowRemoteControl`, `AllowWebcam`, `AllowPhoneControl`, `AllowClipboard`. `[E]`
+  verified-here: `cd daemon && node --test test/policy.unit.test.mjs` -> 55 checks ALL PASS; the store reads a real HKCU key through reg query plus a policy.json, both stores set to 1 leave a key on, and either store set to 0 turns it off with the source named
 - [ ] Enforce before any remote sense starts; refuse with a visible `disabled_by_policy` reason naming the key, and log the refusal. `[E]`
 - [ ] `pocketdesk policy` to set, inspect and reset, admin-only, with a test per key. `[E]`
 - [ ] Lab recipe in `docs/`: set policy, verify with `--status`, hand the machine to a candidate. `[E]`
