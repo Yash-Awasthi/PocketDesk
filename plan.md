@@ -423,7 +423,8 @@ re-shoot.
 - [ ] Semver with a changelog per release; daemon, APK and native helpers versioned together. `[E]`
 - [x] `CONTRIBUTING.md`: pre-push gate, the no-evasion rule, the protocol-change rule, and the one-subtask-one-PR rule. `[E]`
   verified-here: grep -n ^## CONTRIBUTING.md -> Pre-push gate, Protocol changes, One subtask one PR; No detection evasion kept; ci.yml 42/58/72/164/166 named; syntax loop, protocol --check, no-evasion test run here
-- [ ] ADRs for protocol changes, transport changes and any new permission. `[E]`
+- [x] ADRs for protocol changes, transport changes and any new permission. `[E]`
+  verified-here: grep -n '^# 000' docs/adr/*.md -> 4 ADRs; gen-protocol-doc --check -> 222 types; every cited path:line re-grepped at HEAD
 - [ ] Dependency update cadence (monthly) with the test result recorded, and a rollback path per release. `[E]`
 
 ---
