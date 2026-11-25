@@ -92,8 +92,10 @@ async function main() {
   check("new master token pairs", byNewMaster.first.type === "welcome");
   await byNewMaster.c.close();
 
-  admin.send({ type: "constructor" });
-  check("prototype names are not handler types", /unknown type/.test((await admin.next((m) => m.type === "error")).message));
+  const rotated = await openAndHello(PORT, rev.pairingToken);
+  rotated.send({ type: "constructor" });
+  check("prototype names are not handler types", /unknown type/.test((await rotated.next((m) => m.type === "error")).message));
+  await rotated.close();
   await admin.close();
 }
 

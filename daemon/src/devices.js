@@ -76,8 +76,14 @@ export function issueToken(clientId) {
   if (!d) return null;
   const t = crypto.randomBytes(24).toString("base64url");
   d.tokenHash = hash(t);
+  d.cred = (d.cred || 0) + 1;
   save();
   return t;
+}
+
+/** Generation of this device's credential: bumps on every issue and every revoke. */
+export function credVersion(clientId) {
+  return devices.get(String(clientId))?.cred || 0;
 }
 
 /** The live, unrevoked device a device token belongs to, or null. */
@@ -108,6 +114,7 @@ export function revoke(clientId) {
   d.revoked = true;
   delete d.tokenHash;
   delete d.endpointId;
+  d.cred = (d.cred || 0) + 1;
   save();
   return { ok: true, device: d };
 }
@@ -144,7 +151,7 @@ export function remove(clientId) {
 
 export function list() {
   const now = Date.now();
-  return [...devices.values()].map(({ tokenHash, ...d }) => ({ ...d, online: now - d.lastSeen < 5 * 60_000 }));
+  return [...devices.values()].map(({ tokenHash, cred, ...d }) => ({ ...d, online: now - d.lastSeen < 5 * 60_000 }));
 }
 
 export function touch(clientId) {

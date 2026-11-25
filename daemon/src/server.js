@@ -105,6 +105,7 @@ export function closeClients(code, reason) {
 export function start(config, { onTokenRotated } = {}) {
   const { port, token: _token, tls, iroh: irohCfg } = config;
   let token = _token;
+  let tokenVersion = 0;
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
   const page = fs.readFileSync(path.join(publicDir, "index.html"), "utf8");
 
@@ -386,11 +387,17 @@ export function start(config, { onTokenRotated } = {}) {
             // The console token opens a SYSTEM daemon: once a phone holds its own token, the
             // master token (on screen, in a QR photo, in browser history) stops working.
             if (CONSOLE && auth.pairing) rotateToken();
+            // Bind the socket to the credential generation it proved. Stamped after welcome(), which may
+            // issue a device token, and after a pairing rotation so a socket is not killed by its own pairing.
+            ws._authMaster = Boolean(auth.master);
+            ws._authVersion = auth.master ? tokenVersion : devices.credVersion(auth.id);
           } else {
             ws.close(4003, "bad token");
           }
           return;
         }
+        // A rotated or revoked credential stops working on this very message, not at the next hello.
+        if (stale(ws)) return ws.close(4003, "token rotated");
         // F1: any throw inside a handler becomes an unhandled rejection and
         // kills the daemon on modern Node — surface it to the client instead.
         handle(ws, msg).catch((e) => {
@@ -439,6 +446,12 @@ export function start(config, { onTokenRotated } = {}) {
     for (const client of wss.clients) if (client._clientId === clientId) client.close(4003, "device revoked");
   }
 
+  /** True when the credential this socket authenticated with has since been rotated or revoked. */
+  function stale(ws) {
+    if (ws._authVersion === undefined) return false; // synthetic ws in tests/handlers never authenticated
+    return ws._authMaster ? ws._authVersion !== tokenVersion : devices.credVersion(ws._clientId) !== ws._authVersion;
+  }
+
   // Master token pairs a new device and gets it its own token; a device token
   // identifies that device. The id is never taken from a client claim alone.
   function authenticate(msg) {
@@ -455,11 +468,12 @@ export function start(config, { onTokenRotated } = {}) {
     // Claiming a paired device's id would replace its token and take over its identity.
     if (devices.hasToken(id)) id = crypto.randomUUID();
     if (!totp.allowsPairing(msg.totp)) return { totpRequired: true };
-    return { id, pairing: true };
+    return { id, pairing: true, master: true };
   }
 
   function rotateToken() {
     token = crypto.randomBytes(24).toString("hex");
+    tokenVersion++;
     pluginCtx.config.token = token;
     onTokenRotated?.(token);
     buildPair(useTls);
