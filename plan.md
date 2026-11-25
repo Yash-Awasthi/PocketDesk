@@ -447,7 +447,8 @@ re-shoot.
   verified-here: grep -n ^## CONTRIBUTING.md -> Pre-push gate, Protocol changes, One subtask one PR; No detection evasion kept; ci.yml 42/58/72/164/166 named; syntax loop, protocol --check, no-evasion test run here
 - [x] ADRs for protocol changes, transport changes and any new permission. `[E]`
   verified-here: grep -n '^# 000' docs/adr/*.md -> 4 ADRs; gen-protocol-doc --check -> 222 types; every cited path:line re-grepped at HEAD
-- [ ] Dependency update cadence (monthly) with the test result recorded, and a rollback path per release. `[E]`
+- [x] Dependency update cadence (monthly) with the test result recorded, and a rollback path per release. `[E]`
+  verified-here: cd daemon && node --test test/dependency-cadence.unit.test.mjs -> ALL PASS; docs/DEPENDENCIES.md covers every direct npm, Cargo and Gradle dependency with the monthly routine, and docs/dependency-log.md records the 2026-11-26 npm outdated and audit result plus the rollback steps per artifact
 
 ---
 
