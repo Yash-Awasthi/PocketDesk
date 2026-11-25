@@ -409,7 +409,8 @@ re-shoot.
 
 ### M6.3 Operability
 
-- [ ] `docs/RUNBOOK.md`: daemon will not start, phone cannot pair, stream black, PTY dead, task missing, policy refused, relay down — each with the first diagnostic command. `[E]`
+- [x] `docs/RUNBOOK.md`: daemon will not start, phone cannot pair, stream black, PTY dead, task missing, policy refused, relay down — each with the first diagnostic command. `[E]`
+  verified-here: grep -n ^## docs/RUNBOOK.md -> 7 sections; every quoted command run here (status/pair/list/pty/schtasks/reg/netstat/log greps) -> outputs in evidence/PocketDesk/PocketDesk-t82.md
 - [ ] Logging: one structured format, one file location, rotation and a size cap; no token or path leakage in logs (test). `[E]`
 - [ ] Health surface for the hub: version, uptime, active sessions, last error. `[E]`
 - [ ] Support matrix (Windows 10/11, macOS 12+, Linux X11, Android 8+) enforced by CI where possible and stated where not. `[E]`
