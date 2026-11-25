@@ -216,7 +216,8 @@ commit is byte-identical.
   needs-verify: `npm run coverage` has not run in CI yet (it is a suite-length job, ~114 s here); the numbers are this machine's.
 - [x] `protocol-contract.test.mjs` is the contract: assert every message in the registry has a handler, a doc line and a round-trip test; unknown type returns the documented error. `[P]`
   verified-here: `cd daemon && node --test test/protocol-contract.test.mjs` → ALL PASS, `tests 1 / pass 1 / fail 0`; an unknown type answers `unknown type: no_such_message_type` and the same socket still answers afterwards.
-- [ ] Failure injection: kill a PTY child mid-stream, drop the socket mid-transfer, corrupt a chunked `fread`; each asserts a user-visible error and no orphaned process. `[P]`
+- [x] Failure injection: kill a PTY child mid-stream, drop the socket mid-transfer, corrupt a chunked `fread`; each asserts a user-visible error and no orphaned process. `[P]`
+  verified-here: `cd daemon && node --test test/failure-injection.test.mjs` → ALL PASS, `tests 1 / pass 1 / fail 0`; after the kill the PTY and its child are gone, the transfer resumes at the offset the client asks for, and every corrupted read answers without a restart.
 - [x] Added 2026-11-24 (measured): make the daemon suite green before deepening it. Result: **115 tests, 115 pass** (`EXIT=0`), where the session started at 113 tests / 108 pass. `[P]`
   what was actually broken, in the order it was found:
   1. tests waited a fixed 0.5–2 s for a daemon that needs 5–7 s cold → `waitForHealth`/`waitForUrl` (see the subtask above).
