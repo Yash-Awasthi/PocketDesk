@@ -429,7 +429,9 @@ re-shoot.
 
 - [x] `docs/RUNBOOK.md`: daemon will not start, phone cannot pair, stream black, PTY dead, task missing, policy refused, relay down — each with the first diagnostic command. `[E]`
   verified-here: grep -n ^## docs/RUNBOOK.md -> 7 sections; every quoted command run here (status/pair/list/pty/schtasks/reg/netstat/log greps) -> outputs in evidence/PocketDesk/PocketDesk-t82.md
-- [ ] Logging: one structured format, one file location, rotation and a size cap; no token or path leakage in logs (test). `[E]`
+- [x] Logging: one structured format, one file location, rotation and a size cap; no token or path leakage in logs (test). `[E]`
+  verified-here: cd daemon && node --test test/logging.test.mjs -> ALL PASS (16 checks: one JSONL shape, token and home-folder redaction, 240-byte cap keeping 3 files, the logger writes logs/)
+  deviation: the console endpoint's audit trail (console-audit.log) stays its own file; it is an audit record, not a debugging log.
 - [ ] Health surface for the hub: version, uptime, active sessions, last error. `[E]`
 - [x] Support matrix (Windows 10/11, macOS 12+, Linux X11, Android 8+) enforced by CI where possible and stated where not. `[E]`
   verified-here: cd daemon && node --test test/support-matrix.unit.test.mjs -> ALL PASS; docs/SUPPORT-MATRIX.md rows match ci.yml (windows-latest, ubuntu-latest, macos-latest; emulator API 30 and 37) and minSdk 30, so Android 11+ is supported and Android 8-10 is stated as not supported
