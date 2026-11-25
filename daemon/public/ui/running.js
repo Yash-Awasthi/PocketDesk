@@ -19,7 +19,13 @@ PD.page("running", {
   render(sec) {
     const body = h("div", { className: "col" });
     sec.append(
-      h("div", { className: "bar" }, btn("Refresh", () => PD.send({ type: "running_state" }))),
+      h("div", { className: "bar" },
+        btn("Refresh", () => PD.send({ type: "running_state" })),
+        h("button", {
+          textContent: "Support bundle",
+          title: "Download logs, status and versions for support (no secrets)",
+          onclick: () => PD.send({ type: "diagnostic_bundle" }),
+        })),
       body);
     const draw = (m) => {
       const v = m.version || {};
@@ -57,6 +63,14 @@ PD.page("running", {
           row("Screen recording", onOff(po.recording))));
     };
     PD.on("running_state", draw);
+    // The bar's second button asks for a bundle; save it beside the phone's other downloads.
+    PD.on("diagnostic_bundle", (m) => {
+      const blob = new Blob([JSON.stringify(m, null, 2)], { type: "application/json" });
+      const a = h("a", { href: URL.createObjectURL(blob), download: `pocketdesk-diagnostic-${String(m.at || new Date().toISOString()).replace(/[:.]/g, "-")}.json` });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      PD.toast("Diagnostic bundle saved");
+    });
   },
   show() { PD.send({ type: "running_state" }); },
 });
