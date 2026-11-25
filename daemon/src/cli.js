@@ -7,6 +7,7 @@ import path from "node:path";
 import net from "node:net";
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
+import { VERSION } from "./version.js";
 
 const port = Number(process.env.RH_CLI_PORT) || 4679;
 const home = process.env.RH_HOME || path.join(os.homedir(), ".pocketdesk");
@@ -36,7 +37,7 @@ const KEYS = {
   PageUp: "\x1b[5~", PageDown: "\x1b[6~", PgUp: "\x1b[5~", PgDn: "\x1b[6~", Delete: "\x1b[3~", DC: "\x1b[3~",
 };
 function keys(args) {
-  return args.map((a) => KEYS[a] ?? (/^C-[a-zA-Z@\[\]\\^_]$/.test(a) ? String.fromCharCode(a[2].toUpperCase().charCodeAt(0) & 31) : a)).join("");
+  return args.map((a) => KEYS[a] ?? (/^C-[a-zA-Z@[\]\\^_]$/.test(a) ? String.fromCharCode(a[2].toUpperCase().charCodeAt(0) & 31) : a)).join("");
 }
 
 /**
@@ -115,7 +116,9 @@ async function stop() {
 const [cmd, id, ...rest] = process.argv.slice(2);
 const need = (v, what) => v || fail(`${cmd}: missing ${what}`);
 
-if (cmd === "list") {
+if (cmd === "--version" || cmd === "version") {
+  console.log(VERSION);
+} else if (cmd === "list") {
   for (const s of await (await call("GET", "/term")).json()) console.log(`${s.id}\t${s.harnessId}\t${s.cols}x${s.rows}\t${s.cwd}`);
 } else if (cmd === "new") {
   const args = process.argv.slice(3);
@@ -141,7 +144,7 @@ if (cmd === "list") {
   process.stdin.setRawMode(true);
   // Ctrl+] leaves the terminal running, as telnet's escape does. PowerShell turns on win32-input-mode,
   // after which keys arrive as ESC[Vk;Sc;Char;Down;Ctrl;Repeat_ and Ctrl+] is char 29.
-  const DETACH = /\x1d|\x1b\[\d*;\d*;29;1;\d*;\d*_/;
+  const DETACH = /\x1d|\x1b\[\d*;\d*;29;1;\d*;\d*_/; // eslint-disable-line no-control-regex -- matching raw terminal bytes is the point
   process.stdin.on("data", (d) => {
     const m = DETACH.exec(d.toString("latin1"));
     if (!m) return call("POST", `/term/${id}/in`, { data: d.toString() });

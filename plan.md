@@ -435,7 +435,8 @@ re-shoot.
 
 ### M6.4 Delivery discipline
 
-- [ ] Semver with a changelog per release; daemon, APK and native helpers versioned together. `[E]`
+- [x] Semver with a changelog per release; daemon, APK and native helpers versioned together. `[E]`
+  verified-here: cd daemon && node --test test/release-version.unit.test.mjs -> ALL PASS; VERSION, app versionName, native workspace version and the newest CHANGELOG section are all 0.11.0, and node src/index.js --version prints 0.11.0
 - [x] `CONTRIBUTING.md`: pre-push gate, the no-evasion rule, the protocol-change rule, and the one-subtask-one-PR rule. `[E]`
   verified-here: grep -n ^## CONTRIBUTING.md -> Pre-push gate, Protocol changes, One subtask one PR; No detection evasion kept; ci.yml 42/58/72/164/166 named; syntax loop, protocol --check, no-evasion test run here
 - [x] ADRs for protocol changes, transport changes and any new permission. `[E]`
