@@ -118,10 +118,7 @@ export class StreamJsonParser {
         const inputStr = JSON.stringify(block.tool_use.input).slice(0, 200);
         parts.push(`[TOOL: ${block.tool_use.name}] ${inputStr}${inputStr.length >= 200 ? "..." : ""}`);
       } else if (block.type === "tool_result" && block.tool_result) {
-        const result = block.tool_result;
-        const contentPreview = result.content.slice(0, 200);
-        parts.push(`[RESULT: ${result.toolUseId}] ${result.isError ? "ERROR: " : ""}${contentPreview}${result.content.length >= 200 ? "..." : ""}`);
-        this.sessionTools.delete(result.toolUseId);
+        parts.push(this.formatToolResult(block.tool_result));
       }
     }
 
@@ -134,10 +131,29 @@ export class StreamJsonParser {
     return { ...base, type: "assistant_text", formatted };
   }
 
+  /**
+   * Format one tool_result block into a RESULT line, clearing its pending tool_use.
+   * content is optional: a cancelled result can arrive without one.
+   * @param {{toolUseId: string, content?: string, isError?: boolean}} result
+   * @returns {string}
+   */
+  formatToolResult(result) {
+    const contentPreview = String(result.content ?? "").slice(0, 200);
+    this.sessionTools.delete(result.toolUseId);
+    return `[RESULT: ${result.toolUseId}] ${result.isError ? "ERROR: " : ""}${contentPreview}${contentPreview.length >= 200 ? "..." : ""}`;
+  }
+
   formatUserMessage(event, base) {
     const msg = event.message;
-    const text = msg?.content?.map((b) => b.text || "").join("") || "";
-    return { ...base, type: "user_message", formatted: `[USER] ${text}` };
+    const parts = [];
+    for (const block of msg?.content || []) {
+      if (block.type === "tool_result" && block.tool_result) {
+        parts.push(this.formatToolResult(block.tool_result));
+      } else if (block.text) {
+        parts.push(block.text);
+      }
+    }
+    return { ...base, type: "user_message", formatted: `[USER] ${parts.join("")}` };
   }
 
   formatMetadata(event) {
