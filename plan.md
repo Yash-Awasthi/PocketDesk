@@ -380,7 +380,7 @@ transport docs describe a design that has moved.
 
 - [ ] Golden transcript set per agent (Claude Code, Codex, Gemini, Qwen, OpenCode, Copilot, Cline) captured from current versions; parse tests run on all of them. `[D]`
 - [x] Unknown-field tolerance: a new field in a stream must not break parsing; test with a synthetic augmented transcript. `[D]`
-  verified-here: cd daemon && node --test test/stream-unknown-fields.test.mjs -> ALL PASS (30 checks); unknown fields survive in raw, typed output and stats unchanged
+  verified-here: cd daemon && node --test test/stream-unknown-fields.test.mjs -> ALL PASS (27 checks); unknown fields survive in raw, typed output and stats unchanged
 - [ ] Tool-call correlation: assert start/result pairing under interleaved and cancelled turns. `[D]`
 - [ ] Approval path: every request type (command, file write, diff) has a test for deny, allow and allow-all-for-session. `[D]`
 - [ ] Resume semantics: continuing a history conversation must not duplicate messages; test against a captured history file. `[D]`
