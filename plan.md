@@ -385,7 +385,8 @@ transport docs describe a design that has moved.
   verified-here: cd daemon && node --test test/stream-tool-correlation.test.mjs -> ALL PASS (47 checks); test/stream.test.mjs still ALL PASS
 - [x] Approval path: every request type (command, file write, diff) has a test for deny, allow and allow-all-for-session. `[D]`
   verified-here: cd daemon && node --test test/approvals-matrix.test.mjs -> ALL PASS (51 checks); command, file write and diff each denied, allowed and allow-all
-- [ ] Resume semantics: continuing a history conversation must not duplicate messages; test against a captured history file. `[D]`
+- [x] Resume semantics: continuing a history conversation must not duplicate messages; test against a captured history file. `[D]`
+  verified-here: cd daemon && node --test test/chat-resume.test.mjs -> ALL PASS (20 checks); seeded turns survive once and the new reply lands once in chat and saved history
 
 ### M5.4 Interface craft
 
