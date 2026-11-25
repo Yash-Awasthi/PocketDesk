@@ -177,6 +177,7 @@ node --test --watch "test/*.test.mjs"
 
 ## Pull Request Checklist
 - [ ] Tests pass (`cd daemon && npm test`)
+- [ ] Pre-push gate run (see [Pre-push gate](#pre-push-gate))
 - [ ] No console.log in production code (use logger)
 - [ ] WebSocket messages validated
 - [ ] Plugin hooks documented
@@ -234,6 +235,77 @@ its floor. When coverage improves, raise the floor **and** the `measured` number
 in the same commit; never lower either. `test/coverage-floors.test.mjs` rejects a
 floor set above what was measured, a floor more than six points below it (a stale
 floor that would let coverage rot), and a folder of `src/` with no floor at all.
+
+## Pre-push gate
+
+CI runs on every push; run the same four jobs before you do. Each block below is
+one job from `.github/workflows/ci.yml`:
+
+```bash
+# daemon: syntax check (ci.yml line 42)
+(cd daemon && for f in $(git ls-files 'src/*.js' 'scripts/*.js' 'scripts/*.mjs'); do node --check "$f" || exit 1; done)
+
+# daemon: tests (ci.yml line 58)
+(cd daemon && npm test)
+
+# android: lint, unit tests, debug APK (ci.yml line 72)
+(cd app && chmod +x gradlew && ./gradlew lintDebug testDebugUnitTest assembleDebug --no-daemon)
+
+# native: Windows helpers (ci.yml lines 164 and 166)
+(cd native && cargo build --release && cargo test --release)
+```
+
+No git hook is installed: `.git/hooks` holds only `*.sample` files. This is a
+checklist, not automation.
+
+The daemon job is the cheapest to run on its own:
+
+```bash
+cd daemon
+node --test test/no-evasion.test.mjs
+node --test test/protocol-doc.test.mjs
+```
+
+Both are green. On Windows, `npm.cmd test` is the shim for the same `test`
+script.
+
+The rules these checks protect are in
+[No detection evasion, ever](#no-detection-evasion-ever).
+
+## Protocol changes
+
+A protocol change lands on both ends in one change:
+
+- **Daemon.** `handle()` in `daemon/src/server.js` dispatches on
+  `handlers[msg.type]`; each module in `daemon/src/handlers/` is a factory
+  returning a message-keyed object.
+- **Phone.** `app/app/src/main/java/com/yasha/pocketdesk/Protocol.kt`.
+
+The table in `daemon/README.md`, between `<!-- BEGIN protocol-table -->` and
+`<!-- END protocol-table -->`, is generated: one row per message type with its
+handler file, 222 types today. Regenerate it when the protocol moves:
+
+```bash
+node daemon/scripts/gen-protocol-doc.mjs
+```
+
+`node daemon/scripts/gen-protocol-doc.mjs --check` exits 1 when the table is
+stale, and `daemon/test/protocol-doc.test.mjs` runs it. Keep that test and
+`daemon/test/protocol-contract.test.mjs` (the app<->daemon contract) current in
+the same change.
+
+The check is green now: in `daemon/`, `node scripts/gen-protocol-doc.mjs --check`
+prints `protocol table is current (222 message types)` and exits 0.
+
+## One subtask, one PR
+
+One checklist item in [plan.md](plan.md) is one PR with one proving command. Tick
+the box and add the `verified-here:` line in the same commit that changes the
+code, so the plan never claims work the diff does not contain.
+
+Stage by path; never `git add -A`, `git add .` or `git commit -a`, so nothing
+unrelated rides along. The integrity rules behind this are in
+[docs/INTEGRITY.md](docs/INTEGRITY.md).
 
 ## Commit Messages
 ```
