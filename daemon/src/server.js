@@ -34,6 +34,7 @@ import * as approvalGuard from "./approval_guard.js";
 import * as statsUsage from "./stats_usage.js";
 import * as devices from "./devices.js";
 import * as totp from "./totp.js";
+import * as pairing_budget from "./pairing_budget.js";
 import agentsHandlers from "./handlers/agents.js";
 import filesHandlers from "./handlers/files.js";
 import remoteHandlers from "./handlers/remote.js";
@@ -52,8 +53,6 @@ import { startIroh } from "./iroh_link.js";
 import { configDir, configPath } from "./config.js";
 
 const HELLO_TIMEOUT = 10_000;
-const MAX_AUTH_ATTEMPTS = 5;
-const authAttempts = new Map();
 const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
 const CONSOLE = Boolean(process.env.RH_CONSOLE);
 const AUDIT_LOG = path.join(configDir, "console-audit.log");
@@ -361,7 +360,11 @@ export function start(config, { onTokenRotated } = {}) {
       plugins.callHook("onMessage", ws, msg).then(({ blocked }) => {
         if (blocked) return;
         if (!ws._authed) {
-          const auth = authenticate(msg);
+          const auth = authenticate(msg, clientIp);
+          if (auth?.blocked) {
+            ws.close(4029, "too many attempts");
+            return;
+          }
           if (auth?.totpRequired) {
             ws.close(4011, "two-factor code required");
             return;
@@ -371,6 +374,7 @@ export function start(config, { onTokenRotated } = {}) {
             return;
           }
           if (auth) {
+            pairing_budget.succeed(clientIp);
             // Checked before welcome(), which would re-issue a pairing device's token.
             if (ws._irohId && !devices.claimEndpoint(auth.id, ws._irohId)) {
               ws.close(4003, "device key mismatch");
@@ -392,6 +396,7 @@ export function start(config, { onTokenRotated } = {}) {
             ws._authMaster = Boolean(auth.master);
             ws._authVersion = auth.master ? tokenVersion : devices.credVersion(auth.id);
           } else {
+            pairing_budget.fail(clientIp);
             ws.close(4003, "bad token");
           }
           return;
@@ -454,7 +459,8 @@ export function start(config, { onTokenRotated } = {}) {
 
   // Master token pairs a new device and gets it its own token; a device token
   // identifies that device. The id is never taken from a client claim alone.
-  function authenticate(msg) {
+  function authenticate(msg, ip) {
+    if (!pairing_budget.allowed(ip)) return { blocked: true };
     if (msg.type !== "hello" || typeof msg.token !== "string") return null;
     const t = msg.token;
     const master = t.length === token.length && crypto.timingSafeEqual(Buffer.from(t), Buffer.from(token));

@@ -368,7 +368,8 @@ transport docs describe a design that has moved.
 ### M5.2 Security depth
 
 - [ ] Threat model for the daemon and phone app: LAN attacker, stolen phone, revoked-but-cached token, malicious QR, iroh relay, local unprivileged user, paper: what each can do today and which control stops it. `[D]`
-- [ ] Pairing budget: a wrong-token attempt counter with backoff, tested; today the token is long-lived and the QR is the only secret. `[D]`
+- [x] Pairing budget: a wrong-token attempt counter with backoff, tested; today the token is long-lived and the QR is the only secret. `[D]`
+  verified-here: cd daemon && node --test test/pairing-budget.unit.test.mjs -> ALL PASS (6 tests); auth.test.mjs still ALL PASS
 - [x] Token rotation on every pairing and on revoke, with a test that an old token is refused immediately (not after reconnect). `[D]`
   verified-here: cd daemon && node --test test/token-rotation.test.mjs -> ALL PASS (17 checks); auth, approvals, absorb, control, features and iroh suites ALL PASS too
 - [ ] iroh identity binding: assert the pinned endpoint id is checked, not just the TLS cert. `[D]`
