@@ -373,7 +373,8 @@ transport docs describe a design that has moved.
   verified-here: cd daemon && node --test test/token-rotation.test.mjs -> ALL PASS (17 checks); auth, approvals, absorb, control, features and iroh suites ALL PASS too
 - [ ] iroh identity binding: assert the pinned endpoint id is checked, not just the TLS cert. `[D]`
 - [ ] TOTP: recovery path, clock-skew tolerance and a test for replay of a used code. `[D]`
-- [ ] Dependency and native-helper integrity: verify `scrcpy-server` and `adb` downloads against a pinned hash before execution. `[D]`
+- [x] Dependency and native-helper integrity: verify `scrcpy-server` and `adb` downloads against a pinned hash before execution. `[D]`
+  verified-here: cd daemon && node --test test/tool-integrity.test.mjs -> ALL PASS (17 checks); both helpers share downloadVerified
 
 ### M5.3 Agent stream robustness
 
