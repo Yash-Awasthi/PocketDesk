@@ -214,7 +214,8 @@ commit is byte-identical.
   verified-here: `node scripts/check-coverage.mjs` → 4 × PASS + "all coverage floors met" (EXIT=0); forcing `handlers.floor.statements = 90` → `FAIL handlers … under floor: statements 90%` and `handlers: statements 37.6% < floor 90%` (EXIT=1); restored → met again. Guard test: `node --test test/coverage-floors.test.mjs` → ALL PASS, and it first failed on its own initial data (the functions floors had been set 8 points low) → tightened to 4 points.
   ratchet rule now documented in `CONTRIBUTING.md` ("Coverage floors only go up"): raise the floor and the `measured` number in the same commit, never lower either.
   needs-verify: `npm run coverage` has not run in CI yet (it is a suite-length job, ~114 s here); the numbers are this machine's.
-- [ ] `protocol-contract.test.mjs` is the contract: assert every message in the registry has a handler, a doc line and a round-trip test; unknown type returns the documented error. `[P]`
+- [x] `protocol-contract.test.mjs` is the contract: assert every message in the registry has a handler, a doc line and a round-trip test; unknown type returns the documented error. `[P]`
+  verified-here: `cd daemon && node --test test/protocol-contract.test.mjs` → ALL PASS, `tests 1 / pass 1 / fail 0`; an unknown type answers `unknown type: no_such_message_type` and the same socket still answers afterwards.
 - [ ] Failure injection: kill a PTY child mid-stream, drop the socket mid-transfer, corrupt a chunked `fread`; each asserts a user-visible error and no orphaned process. `[P]`
 - [x] Added 2026-11-24 (measured): make the daemon suite green before deepening it. Result: **115 tests, 115 pass** (`EXIT=0`), where the session started at 113 tests / 108 pass. `[P]`
   what was actually broken, in the order it was found:
