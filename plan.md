@@ -375,7 +375,8 @@ transport docs describe a design that has moved.
   verified-here: cd daemon && node --test test/pairing-budget.unit.test.mjs -> ALL PASS (6 tests); auth.test.mjs still ALL PASS
 - [x] Token rotation on every pairing and on revoke, with a test that an old token is refused immediately (not after reconnect). `[D]`
   verified-here: cd daemon && node --test test/token-rotation.test.mjs -> ALL PASS (17 checks); auth, approvals, absorb, control, features and iroh suites ALL PASS too
-- [ ] iroh identity binding: assert the pinned endpoint id is checked, not just the TLS cert. `[D]`
+- [x] iroh identity binding: assert the pinned endpoint id is checked, not just the TLS cert. `[D]`
+  verified-here: cd daemon && node --test test/devices.unit.test.mjs test/iroh.test.mjs -> ALL PASS (13 device checks incl. a different key refused; iroh e2e 2/2 pass, 0 skipped, real endpoint id)
 - [ ] TOTP: recovery path, clock-skew tolerance and a test for replay of a used code. `[D]`
 - [x] Dependency and native-helper integrity: verify `scrcpy-server` and `adb` downloads against a pinned hash before execution. `[D]`
   verified-here: cd daemon && node --test test/tool-integrity.test.mjs -> ALL PASS (17 checks); both helpers share downloadVerified
