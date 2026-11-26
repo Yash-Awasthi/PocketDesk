@@ -44,6 +44,7 @@ import com.yasha.pocketdesk.ui.DesktopScreen
 import com.yasha.pocketdesk.ui.ConnectScreen
 import com.yasha.pocketdesk.ui.FilesScreen
 import com.yasha.pocketdesk.ui.FreebuffScreen
+import com.yasha.pocketdesk.ui.QuickAction
 import com.yasha.pocketdesk.ui.SessionsScreen
 import com.yasha.pocketdesk.ui.SshScreen
 import com.yasha.pocketdesk.ui.TerminalScreen
@@ -81,6 +82,14 @@ private val NavConfig = SavedStateConfiguration { serializersModule = ScreenSeri
 
 private object NoMotion : androidx.compose.ui.MotionDurationScale {
     override val scaleFactor = 0f
+}
+
+/** The surface a home-screen quick action opens once the phone is linked to that PC. */
+internal fun quickActionDestination(action: QuickAction): Screen = when (action) {
+    QuickAction.Chat -> Screen.Chats
+    QuickAction.Terminal -> Screen.Sessions
+    QuickAction.Files -> Screen.Files
+    QuickAction.Desktop -> Screen.Desktop
 }
 
 class MainActivity : ComponentActivity() {
@@ -260,12 +269,14 @@ class MainActivity : ComponentActivity() {
                 if (Peer.open) {
                     com.yasha.pocketdesk.ui.PeerScreen(onClose = { Peer.open = false })
                 } else if (client.status == Status.Disconnected) {
-                    ConnectScreen(client) { showTab(Screen.Sessions) }
+                    ConnectScreen(client, onConnected = { showTab(Screen.Sessions) }, onQuickAction = { action, _ -> showTab(quickActionDestination(action)) })
                 } else NavDisplay(
                     backStack = backStack,
                     onBack = { back() },
                     entryProvider = entryProvider {
-                        entry<Screen.Connect> { ConnectScreen(client) { showTab(Screen.Sessions) } }
+                        entry<Screen.Connect> {
+                            ConnectScreen(client, onConnected = { showTab(Screen.Sessions) }, onQuickAction = { action, _ -> showTab(quickActionDestination(action)) })
+                        }
                         entry<Screen.Tools> {
                             ToolsScreen(
                                 client,

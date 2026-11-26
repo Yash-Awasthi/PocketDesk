@@ -355,7 +355,9 @@ transport docs describe a design that has moved.
 - [x] Session search and filter across agents, projects and dates. `[W]`
   verified-here: cd daemon && npx playwright test -> 9 passed. The Sessions page asks history_list and filters in the browser on the fields the daemon already returns (title, agent, app, cwd, updated): typing "retries" leaves one row, agent claude leaves two, project api leaves the codex row, From date 2026-11-25 leaves the newest, and a future date shows the empty line and "0 of 3 saved conversations". A project is the last folder of cwd; the axe pass over the page adds no critical findings.
 - [ ] Share a file into PocketDesk from any app (share target) and route it to the active session or a chosen folder. `[W]`
-- [ ] Per-PC quick actions on the home screen (new chat, new terminal, files, desktop) as an editable grid. `[W]`
+- [x] Per-PC quick actions on the home screen (new chat, new terminal, files, desktop) as an editable grid. `[W]`
+  verified-here: `cd app && ./gradlew :app:testDebugUnitTest --tests '*HomeQuickActions*'` -> 5 tests, 0 failures, run twice; bite: load() ignored the saved order -> only 'reorder persists when the screen is recreated' failed, restored green; full `:app:testDebugUnitTest` -> 108 tests, 0 failures; `./gradlew :app:verifyGoldens --rerun-tasks` -> BUILD SUCCESSFUL, five golden compare images
+  also: a live new-terminal session still needs the PC (the action lands on the New session surface; the id exists only after the PC creates it), and the connect-then-open handoff needs one run on a real phone and PC.
 
 ### M4.2 Daemon and agents
 
