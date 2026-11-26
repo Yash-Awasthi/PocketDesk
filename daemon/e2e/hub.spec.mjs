@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The hub's pages against a fake daemon: pairing, the device table, the two-factor section, one
 // live session, and an axe pass over the hub and settings pages.
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { startFakeDaemon } from "./fake-daemon.mjs";
@@ -141,18 +144,103 @@ test("the sessions page searches and filters by agent, project and date", async 
   await expect(count).toHaveText("0 of 3 saved conversations");
 });
 
-for (const [id, name] of [
-  ["home", "hub"],
-  ["thispc", "settings"],
-  ["sessions", "sessions"],
-]) {
-  test(`the ${name} page has no critical axe findings`, async ({ page }) => {
-    await open(page, id);
-    const results = await new AxeBuilder({ page }).include(`#page-${id}`).analyze();
-    const critical = results.violations.filter((v) => v.impact === "critical");
-    expect(
-      critical.map((v) => ({ id: v.id, nodes: v.nodes.length })),
-      JSON.stringify(critical, null, 2),
-    ).toEqual([]);
-  });
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+
+// The same regex the capture script uses, so neither side owns a hardcoded page list.
+function screenshotIds() {
+  const ui = path.join(HERE, "..", "public", "ui");
+  const ids = new Set();
+  for (const file of fs.readdirSync(ui)) {
+    if (!file.endsWith(".js")) continue;
+    const src = fs.readFileSync(path.join(ui, file), "utf8");
+    for (const m of src.matchAll(/PD\.page\("([a-z]+)"/g)) ids.add(m[1]);
+  }
+  return [...ids].sort();
 }
+
+// The accessibility claim, bounded: these four rule tags, on every page the module entry registers,
+// in both themes. color-contrast is part of wcag2aa, so 4.5:1 for normal text and 3:1 for large is
+// enforced here rather than in a second hand-rolled calculation.
+const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
+
+/** A full load per page: a goto that only changes the hash leaves the previous page on screen. */
+async function visit(page, id) {
+  await page.goto("about:blank");
+  await open(page, id);
+}
+
+test("every hub page passes axe WCAG 2 A/AA in both themes", async ({ page }) => {
+  test.setTimeout(300_000);
+  const findings = [];
+  for (const theme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme: theme });
+    for (const id of screenshotIds()) {
+      await visit(page, id);
+      const results = await new AxeBuilder({ page }).withTags(AXE_TAGS).include(`#page-${id}`).analyze();
+      for (const v of results.violations) {
+        for (const n of v.nodes) {
+          const why = (n.failureSummary || "").trim().split("\n").pop();
+          findings.push(`${theme} ${id}: [${v.id}] ${n.target.join(" ")} :: ${why}`);
+        }
+      }
+    }
+  }
+  expect(findings, `axe ${AXE_TAGS.join(",")}:\n${findings.join("\n")}`).toEqual([]);
+});
+
+// 44 CSS px is 44 dp at 1x, the smallest target this browser can see. Checkbox and radio inputs are
+// skipped because their wrapping .check label is the target; inline text links (the "all" link in a
+// card heading) are named in plan.md instead of being given a 44 px box.
+test("every control is a 44 px target", async ({ page }) => {
+  test.setTimeout(300_000);
+  const small = [];
+  for (const id of screenshotIds()) {
+    await visit(page, id);
+    const rows = await page.evaluate((pid) => {
+      const roots = [globalThis.document.querySelector(`#page-${pid}`)];
+      if (pid === "home") roots.push(globalThis.document.querySelector("#side"));
+      const sel = 'button, a[href], input, select, textarea, [role="button"], [role="tab"], [tabindex]';
+      const out = [];
+      for (const el of roots.flatMap((r) => [...r.querySelectorAll(sel)])) {
+        if (el.closest("[hidden]")) continue;
+        if (/^(checkbox|radio|hidden)$/.test(el.type || "")) continue;
+        if (el.matches("a:not(.navlink)")) continue;
+        const box = el.getBoundingClientRect();
+        if (!box.width && !box.height) continue;
+        if (box.width < 44 || box.height < 44) {
+          const cls = String(el.className).trim().split(/\s+/).filter(Boolean).join(".");
+          const label = (el.textContent || el.getAttribute("aria-label") || "").trim().slice(0, 24);
+          out.push(
+            `${el.tagName.toLowerCase()}${cls ? "." + cls : ""} ${box.width.toFixed(1)}x${box.height.toFixed(1)} ${label}`,
+          );
+        }
+      }
+      return out;
+    }, id);
+    for (const row of rows) small.push(`${id}: ${row}`);
+  }
+  expect(small, `controls under 44x44 CSS px:\n${small.join("\n")}`).toEqual([]);
+});
+
+test("every hub page has a baseline screenshot", async () => {
+  const dir = path.join(HERE, "..", "..", "docs", "screenshots", "before");
+  const ids = screenshotIds();
+  const bad = [];
+  for (const id of ids) {
+    let ok = false;
+    try {
+      const buf = fs.readFileSync(path.join(dir, `${id}.png`));
+      ok = buf.length >= 8 && PNG_SIG.every((b, i) => buf[i] === b);
+    } catch {
+      // a missing or unreadable file leaves ok false
+    }
+    if (!ok) bad.push(`${id}.png`);
+  }
+  expect(
+    bad,
+    "missing or invalid baseline screenshots (run: cd daemon && node e2e/capture-screenshots.mjs)",
+  ).toEqual([]);
+  const pngs = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".png")) : [];
+  expect(pngs.length, `baseline PNG count in ${dir}`).toBe(ids.length);
+});

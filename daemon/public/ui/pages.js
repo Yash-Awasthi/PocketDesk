@@ -323,7 +323,9 @@ PD.page("camera", {
   title: "Camera", icon: I.camera,
   render(sec) {
     const facing = h("select", {}, h("option", { value: "back", textContent: "Back camera" }), h("option", { value: "front", textContent: "Front camera" }));
+    facing.setAttribute("aria-label", "Camera");
     const size = h("select", {}, h("option", { value: "", textContent: "Best size" }));
+    size.setAttribute("aria-label", "Capture size");
     PD.on("adb_cameras", (m) => {
       size.replaceChildren(h("option", { value: "", textContent: "Best size" }));
       const cam = m.cameras.find((c) => c.facing === facing.value);

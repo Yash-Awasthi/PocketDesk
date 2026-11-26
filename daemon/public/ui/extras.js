@@ -50,6 +50,7 @@ PD.page("timeline", {
   render(sec) {
     const q = h("input", { type: "search", placeholder: "Search everything that moved", oninput: () => ask() });
     const kind = h("select", { onchange: () => ask() }, h("option", { value: "", textContent: "All" }), Object.entries(KIND).map(([k, v]) => h("option", { value: k, textContent: v })));
+    kind.setAttribute("aria-label", "Kind");
     const list = h("div", { className: "list" });
     let timer;
     const ask = () => { clearTimeout(timer); timer = setTimeout(() => PD.send({ type: "timeline_list", q: q.value, kind: kind.value }), 200); };

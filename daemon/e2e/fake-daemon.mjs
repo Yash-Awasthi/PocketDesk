@@ -215,6 +215,15 @@ export async function startFakeDaemon(options = {}) {
       if (m.type === "adb_state") reply({ type: "adb_state", toolsReady: true, devices: [], serial: null });
       if (m.type === "clippy_status") reply({ type: "clippy_status", running: false, installed: false });
       if (m.type === "clippy_latest") reply({ type: "clippy_latest", ok: false });
+      if (m.type === "desktop_monitors")
+        reply({
+          type: "desktop_monitors",
+          monitors: [
+            { index: 0, title: "Built-in", w: 1920, h: 1080, primary: true },
+            { index: 1, title: "", w: 1280, h: 1024, primary: false },
+          ],
+          order: [0, 1],
+        });
       if (m.type === "pc_list") reply({ type: "pc_list", items: [] });
       if (m.type === "sources_list") reply({ type: "sources_list", items: [] });
       if (m.type === "history_list") reply({ type: "history", items: history });
