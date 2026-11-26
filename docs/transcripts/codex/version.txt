@@ -1,0 +1,16 @@
+# Golden transcript: OpenAI Codex CLI (codex)
+# package: @openai/codex
+# binary: codex
+# command: codex --version
+# argv: ["codex","--version"]
+# cwd: C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd
+# env-overrides: CODEX_HOME=C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd\codex-home
+# credential-probe: no
+# outcome: exit 0 in 1134 ms
+# captured: 2026-11-26
+
+# ---- stdout ----
+codex-cli 0.172.0
+# ---- stderr ----
+WARNING: proceeding, even though we could not create PATH aliases: Refusing to create helper binaries under temporary dir "C:\\Users\\Yash\\AppData\\Local\\Temp\\" (codex_home: AbsolutePathBuf("C:\\Users\\Yash\\AppData\\Local\\Temp\\pocketdesk-transcripts-cwd\\codex-home"))
+# ---- end ----

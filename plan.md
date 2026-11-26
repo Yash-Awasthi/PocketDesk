@@ -438,6 +438,13 @@ transport docs describe a design that has moved.
 ### M5.3 Agent stream robustness
 
 - [ ] Golden transcript set per agent (Claude Code, Codex, Gemini, Qwen, OpenCode, Copilot, Cline) captured from current versions; parse tests run on all of them. `[D]`
+  measured: 2026-11-26 - seven CLIs installed under the npm global prefix and captured at
+  @anthropic-ai/claude-code 2.1.332, @openai/codex 0.172.0, @google/gemini-cli 0.71.1,
+  @qwen-code/qwen-code 0.28.6, opencode-ai 1.19.6, @github/copilot 1.0.116, cline 3.0.76;
+  each agent has docs/transcripts/<agent>/{version,help,print}.txt; the existing
+  StreamJsonParser passes over all 21 files in daemon/test/transcripts.test.mjs.
+  limits: every CLI is credential-gated on this machine, so no captured file contains a
+  successful assistant turn or a tool_use block - only init, refusal and result events.
 - [x] Unknown-field tolerance: a new field in a stream must not break parsing; test with a synthetic augmented transcript. `[D]`
   verified-here: cd daemon && node --test test/stream-unknown-fields.test.mjs -> ALL PASS (27 checks); unknown fields survive in raw, typed output and stats unchanged
 - [x] Tool-call correlation: assert start/result pairing under interleaved and cancelled turns. `[D]`
@@ -772,3 +779,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m2.1.1 [x] daemon startup readiness: waitForHealth(/health) replaces fixed 0.5-2 s sleeps in 7 test files; new startup-readiness guard (6 checks) | proof: smoke reproduced red then ALL PASS; smoke-chat/graceful/leakguard/absorb ALL PASS individually; guard perturbations fail by name | needs-verify: full parallel npm test not re-measured (interrupted run showed absorb/local-page/smoke/ssh-ui red under load) | next: one clean full-suite run
 - 2026-11-24 m2.1.2 [x] daemon suite green: 115/115 pass (was 108/113) | proof: cd daemon && npm test -> EXIT=0 tests 115 pass 115 | fixed: TLS-vs-HTTP readiness probe, hardcoded guard ports, 4 spawns missing RH_CLI_PORT, awaited 6 s sessions_scan (now shared probe + 2 s bounded wait + refreshing flag), absorb device-registry leak from previous runs, POCKETDESK_DATA joined instead of resolved (6 modules + logger), bastion counter race | guard: startup-readiness 10 checks | needs-verify: tasklist cost on GitHub runners unmeasured | next: M2.1 coverage floor
 - 2026-11-24 m2.1.3 [x] c8 coverage floors per src/ area + ratchet guard; suite 116/116 | proof: npm run coverage -> st 58.42%% br 69%% fn 38.1%%, areas src 64.7 / handlers 37.6 / phone_adb 32.7 / plugins 88.1; handlers floor forced to 90 -> check FAILS naming it; coverage-floors guard 25 checks | also: lockdown-client waits for the killed tree instead of 1.5 s | needs-verify: npm run coverage not yet in CI | next: protocol-contract test
+- 2026-11-26 row 428 [ ] golden transcripts captured for all seven agents, parser green, row left open on credentials | measured: installed @anthropic-ai/claude-code 2.1.332, @openai/codex 0.172.0, @google/gemini-cli 0.71.1, @qwen-code/qwen-code 0.28.6, opencode-ai 1.19.6, @github/copilot 1.0.116, cline 3.0.76 under C:\Users\Yash\AppData\Roaming\npm (769/523.2/128.7/196.6/609.5/195.1/309.5 MB); docs/transcripts/<agent>/{version,help,print}.txt plus manifest.json; daemon/test/transcripts.test.mjs ALL PASS over 21 files | proof: node docs/transcripts/capture.mjs; node daemon/test/transcripts.test.mjs -> ALL PASS | limits: every CLI is credential-gated here, so no capture holds a successful assistant turn or a tool_use block | next: one capture with a real key per agent, then tick

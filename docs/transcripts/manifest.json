@@ -1,0 +1,76 @@
+{
+  "captured": "2026-11-26",
+  "npmGlobalRoot": "C:\\Users\\Yash\\AppData\\Roaming\\npm\\node_modules",
+  "agents": [
+    {
+      "id": "claude-code",
+      "title": "Claude Code",
+      "package": "@anthropic-ai/claude-code",
+      "version": "2.1.332",
+      "installPath": "C:\\Users\\Yash\\AppData\\Roaming\\npm\\node_modules\\@anthropic-ai\\claude-code",
+      "diskBytes": 806377233,
+      "diskMB": 769,
+      "files": 11
+    },
+    {
+      "id": "codex",
+      "title": "OpenAI Codex CLI",
+      "package": "@openai/codex",
+      "version": "0.172.0",
+      "installPath": "C:\\Users\\Yash\\AppData\\Roaming\\npm\\node_modules\\@openai\\codex",
+      "diskBytes": 548575900,
+      "diskMB": 523.2,
+      "files": 50
+    },
+    {
+      "id": "gemini",
+      "title": "Gemini CLI",
+      "package": "@google/gemini-cli",
+      "version": "0.71.1",
+      "installPath": "C:\\Users\\Yash\\AppData\\Roaming\\npm\\node_modules\\@google\\gemini-cli",
+      "diskBytes": 134988149,
+      "diskMB": 128.7,
+      "files": 546
+    },
+    {
+      "id": "qwen",
+      "title": "Qwen Code",
+      "package": "@qwen-code/qwen-code",
+      "version": "0.28.6",
+      "installPath": "C:\\Users\\Yash\\AppData\\Roaming\\npm\\node_modules\\@qwen-code\\qwen-code",
+      "diskBytes": 206109929,
+      "diskMB": 196.6,
+      "files": 1709
+    },
+    {
+      "id": "opencode",
+      "title": "OpenCode",
+      "package": "opencode-ai",
+      "version": "1.19.6",
+      "installPath": "C:\\Users\\Yash\\AppData\\Roaming\\npm\\node_modules\\opencode-ai",
+      "diskBytes": 639086212,
+      "diskMB": 609.5,
+      "files": 8
+    },
+    {
+      "id": "copilot",
+      "title": "GitHub Copilot CLI",
+      "package": "@github/copilot",
+      "version": "1.0.116",
+      "installPath": "C:\\Users\\Yash\\AppData\\Roaming\\npm\\node_modules\\@github\\copilot",
+      "diskBytes": 204554742,
+      "diskMB": 195.1,
+      "files": 20
+    },
+    {
+      "id": "cline",
+      "title": "Cline CLI",
+      "package": "cline",
+      "version": "3.0.76",
+      "installPath": "C:\\Users\\Yash\\AppData\\Roaming\\npm\\node_modules\\cline",
+      "diskBytes": 324579037,
+      "diskMB": 309.5,
+      "files": 24436
+    }
+  ]
+}

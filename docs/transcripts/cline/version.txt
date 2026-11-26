@@ -1,0 +1,16 @@
+# Golden transcript: Cline CLI (cline)
+# package: cline
+# binary: cline
+# command: cline --version
+# argv: ["cline","--version"]
+# cwd: C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd
+# env-overrides: none
+# credential-probe: no
+# outcome: exit 0 in 3044 ms
+# captured: 2026-11-26
+
+# ---- stdout ----
+3.0.76
+# ---- stderr ----
+(empty)
+# ---- end ----

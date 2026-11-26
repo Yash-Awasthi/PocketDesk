@@ -1,0 +1,27 @@
+# Golden transcript: GitHub Copilot CLI (copilot)
+# package: @github/copilot
+# binary: copilot
+# command: copilot -p "Reply with OK" --output-format json
+# argv: ["copilot","-p","Reply with OK","--output-format","json"]
+# cwd: C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd
+# env-overrides: none
+# credential-probe: yes, no credentials supplied
+# outcome: exit 1 in 12804 ms
+# captured: 2026-11-26
+
+# note: gh keyring token is reported invalid by `gh auth status`; no GITHUB_TOKEN set
+
+# ---- stdout ----
+{"type":"result","timestamp":"2026-11-26T12:19:21.363Z","sessionId":"2615014f-b01d-486b-b1da-6bbfaeab26e4","exitCode":1,"usage":{"premiumRequests":0,"totalApiDurationMs":0,"sessionDurationMs":1764,"codeChanges":{"linesAdded":0,"linesRemoved":0,"filesModified":[]}}}
+# ---- stderr ----
+Error: Authentication token found but could not be validated.
+
+  Failed to fetch GitHub CLI user login: network fetch failed: proxied request failed: request failed: error sending request for url (https://api.github.com/copilot_internal/user)
+
+Your token may still be valid. Check your network connection and try again.
+
+To authenticate, you can use any of the following methods:
+  • Start 'copilot' and run the '/login' command
+  • Set the COPILOT_GITHUB_TOKEN, GH_TOKEN, or GITHUB_TOKEN environment variable
+  • Run 'gh auth login' to authenticate with the GitHub CLI
+# ---- end ----
