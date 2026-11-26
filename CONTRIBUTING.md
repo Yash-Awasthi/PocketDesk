@@ -202,9 +202,22 @@ grep -rniE 'invisible to anti-?cheat|invisible to antivirus|RAT heuristics|\bAMS
   . | grep -v node_modules | grep -v '^./plan.md' | grep -v '^./docs/INTEGRITY.md' | grep -v '^./CONTRIBUTING.md' | grep -v '^./daemon/test/no-evasion.test.mjs'
 ```
 
-Expected output: none. `plan.md`, `docs/INTEGRITY.md` and this file are exempt
-because naming the forbidden pattern is their job — everywhere else a match is a
-bug.
+Expected output: exactly these five restored lines, in these four files, and
+nothing else -- anything else is a bug:
+
+```
+./daemon/src/desktop/capture.js:1564:      // 40-69 = 75%, below = 50%. In-memory JPEG keeps AMSI calm — the
+./daemon/src/desktop_capture.js:8: * Windows AMSI blocks any single script combining SendInput P/Invoke WITH
+./docs/EXCLUSIVE-FULLSCREEN.md:27:must stay invisible to anti-cheat and antivirus (its capture helpers are already written to avoid the
+./docs/EXCLUSIVE-FULLSCREEN.md:28:RAT heuristics AMSI flags). Every other route is the OS saying no.
+./docs/FEATURE-MATRIX.md:112:| **Real desktop control (capture + input)** | rustdesk, anydesk | ✅ `desktop_start/stop/frame/mouse/key/type/quality/status` — Windows PowerShell helpers (warm ~3 fps JPEG capture in-memory to dodge AMSI RAT heuristics + warm SendInput input helper), canvas viewer in the browser tab (click/right-click/wheel/keyboard), watcher-scoped frame feed (no broadcast fan-out), capture loop stops at zero viewers; browser 🖨️ Desktop tab + relay status pill + 🔔 Test-push button |
+```
+
+`plan.md`, `docs/INTEGRITY.md` and this file are exempt because naming the
+forbidden pattern is their job. The five above are exempt line for line: the owner
+ruled on 2026-11-26 that the AMSI explanation stays, restored verbatim from
+`e6da7a5^` in `2ec01a0`, and `daemon/test/no-evasion.test.mjs` lists them in
+`RESTORED`, so editing one of them, or adding a sixth match, still fails the gate.
 
 ### Stable pins only
 

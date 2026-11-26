@@ -26,6 +26,32 @@ const ALLOWED = new Set([
   "CONTRIBUTING.md",
   "daemon/test/no-evasion.test.mjs",
 ]);
+
+// The owner ruled on 2026-11-26 that the AMSI explanation stays: `2ec01a0`
+// restored these passages verbatim from `e6da7a5^`, so the rule keeps the
+// framing and exempts exactly these lines, one by one. A hit passes only when
+// its trimmed text equals a listed line for that same file.
+const RESTORED = new Map([
+  ["daemon/src/desktop/capture.js", ["// 40-69 = 75%, below = 50%. In-memory JPEG keeps AMSI calm — the"]],
+  [
+    "daemon/src/desktop_capture.js",
+    ["* Windows AMSI blocks any single script combining SendInput P/Invoke WITH"],
+  ],
+  [
+    "docs/EXCLUSIVE-FULLSCREEN.md",
+    [
+      "must stay invisible to anti-cheat and antivirus (its capture helpers are already written to avoid the",
+      "RAT heuristics AMSI flags). Every other route is the OS saying no.",
+    ],
+  ],
+  [
+    "docs/FEATURE-MATRIX.md",
+    [
+      "| **Real desktop control (capture + input)** | rustdesk, anydesk | ✅ `desktop_start/stop/frame/mouse/key/type/quality/status` — Windows PowerShell helpers (warm ~3 fps JPEG capture in-memory to dodge AMSI RAT heuristics + warm SendInput input helper), canvas viewer in the browser tab (click/right-click/wheel/keyboard), watcher-scoped frame feed (no broadcast fan-out), capture loop stops at zero viewers; browser 🖨️ Desktop tab + relay status pill + 🔔 Test-push button |",
+    ],
+  ],
+]);
+
 const SKIP_DIRS = new Set(["node_modules", ".git", ".gradle", "build", "screenshots", ".freebuff"]);
 const SCANNED = [".md", ".js", ".mjs", ".cs", ".ps1", ".kt"];
 
@@ -44,17 +70,44 @@ const files = walk(REPO);
 check(`scanned the tree (${files.length} files)`, files.length > 50);
 
 const hits = [];
+const exempted = [];
 for (const file of files) {
   const rel = path.relative(REPO, file).replace(/\\/g, "/");
   if (ALLOWED.has(rel)) continue;
+  const restored = RESTORED.get(rel) || [];
   const text = fs.readFileSync(file, "utf8");
   text.split("\n").forEach((line, i) => {
-    for (const re of BANNED) if (re.test(line)) hits.push(`${rel}:${i + 1} ${line.trim().slice(0, 120)}`);
+    const trimmed = line.trim();
+    if (!BANNED.some((re) => re.test(line))) return;
+    if (restored.includes(trimmed)) exempted.push(`${rel}:${i + 1}`);
+    else hits.push(`${rel}:${i + 1} ${trimmed.slice(0, 120)}`);
   });
 }
 check(
   `no doc or comment claims PocketDesk evades detection${hits.length ? ": " + hits.join(" | ") : ""}`,
   hits.length === 0,
+);
+
+// The exemption cannot rot into a blanket: every listed path still exists, every
+// listed line is still in that file, and the exempted hits are exactly those lines.
+for (const [rel, listedLines] of RESTORED) {
+  const file = path.join(REPO, rel);
+  const present = fs.existsSync(file);
+  check(`RESTORED path exists: ${rel}`, present);
+  const fileLines = present
+    ? fs
+        .readFileSync(file, "utf8")
+        .split("\n")
+        .map((l) => l.trim())
+    : [];
+  for (const line of listedLines) {
+    check(`RESTORED line still in ${rel}: ${line.slice(0, 70)}`, fileLines.includes(line));
+  }
+}
+const listed = [...RESTORED.values()].reduce((n, ls) => n + ls.length, 0);
+check(
+  `the exempted hits are exactly the ${listed} restored lines (${exempted.length}: ${exempted.join(", ")})`,
+  exempted.length === listed,
 );
 
 // The rule has to be findable where a contributor reads it.
