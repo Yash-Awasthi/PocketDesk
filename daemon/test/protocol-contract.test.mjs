@@ -29,6 +29,7 @@ import sshHandlers from "../src/handlers/ssh.js";
 import systemHandlers from "../src/handlers/system.js";
 import phoneHandlers from "../src/handlers/phone.js";
 import { withSources } from "../src/handlers/sources.js";
+import { PROTOCOL_VERSION } from "../src/version.js";
 
 const APP = path.join(REPO, "app", "app", "src", "main", "java", "com", "yasha", "pocketdesk");
 const DAEMON = path.join(REPO, "daemon", "src");
@@ -67,6 +68,19 @@ check(`every type the app handles is sent by the daemon${neverSent.length ? ": n
 
 // The generated table: `| \`type\` | \`src/handlers/x.js\` |` rows, one per message.
 const daemonDir = path.join(REPO, "daemon");
+// The daemon's wire version is declared once, by the compatibility baseline beside
+// daemon/src; server.js reads it through version.js instead of carrying a second literal.
+const compat = JSON.parse(fs.readFileSync(path.join(daemonDir, "protocol", "compat.json"), "utf8"));
+const serverSource = fs.readFileSync(path.join(daemonDir, "src", "server.js"), "utf8");
+check(
+  `the daemon speaks the baseline protocol version (v${PROTOCOL_VERSION})`,
+  PROTOCOL_VERSION === compat.protocolVersion,
+  `daemon v${PROTOCOL_VERSION}, baseline v${compat.protocolVersion}`,
+);
+check(
+  "the server takes its protocol version from version.js",
+  /import \{[^}]*PROTOCOL_VERSION[^}]*\} from "\.\/version\.js"/.test(serverSource),
+);
 const readme = fs.readFileSync(path.join(daemonDir, "README.md"), "utf8");
 const rows = [...readme.matchAll(/^\| `([a-z][a-z0-9_]*)` \| `([^`]+)` \|$/gm)].map((m) => ({ type: m[1], file: m[2] }));
 const types = [...new Set(rows.map((r) => r.type))].sort();

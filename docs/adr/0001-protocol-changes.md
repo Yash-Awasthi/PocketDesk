@@ -40,6 +40,9 @@ additive version has no line, because nothing that was already sent changes mean
 
 - v1: initial baseline, the 226 message types README.md listed at the time and now
   recorded in `daemon/protocol/compat.json`. Later additions took no version bump.
+- v2: `hello` may carry an optional integer `protocolVersion`. A daemon on v2 answers a
+  different value with `protocol_mismatch {expected, found}` and closes with 4026; a hello
+  that omits the field is still accepted as an older client.
 
 ## Alternatives considered
 

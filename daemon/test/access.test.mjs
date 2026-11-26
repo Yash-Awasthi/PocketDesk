@@ -4,7 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
+import WebSocket from "ws";
 import { REPO, check, connect, finish, openAndHello, startDaemon, teardown } from "./helpers.mjs";
+import { PROTOCOL_VERSION } from "../src/version.js";
 
 const PORT = 8824;
 const CLI_PORT = 46824;
@@ -25,6 +27,35 @@ const attempt = (password, token = TOKEN) =>
     c.next((m) => m.type === "welcome", 8000)
       .then(() => resolve({ welcome: true }))
       .catch(() => {});
+  });
+
+/** Open a socket, send a hello, and resolve its frames plus the close code (null while open). */
+const greeting = (extra) =>
+  new Promise((resolve) => {
+    const c = connect(PORT, TOKEN);
+    const frames = [];
+    let settled = false;
+    let timer;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (result.welcome) c.ws.close();
+      resolve({ ...result, frames, client: c });
+    };
+    c.ws.on("open", () => c.send({ type: "hello", token: TOKEN, ...extra }));
+    c.ws.on("message", (raw) => {
+      let m;
+      try {
+        m = JSON.parse(raw.toString());
+      } catch {
+        return;
+      }
+      frames.push(m);
+      if (m.type === "welcome") done({ welcome: m });
+    });
+    c.ws.on("close", (code, reason) => done({ code, reason: String(reason) }));
+    timer = setTimeout(() => done({ code: "timeout" }), 8000);
   });
 
 const policyFile = path.join(home, "policy.json");
@@ -77,6 +108,32 @@ try {
   check("right token and password connects", (await attempt("s3cret-pass")).welcome === true);
   await post("/access/password", { password: "" });
   check("password cleared", (await status()).hasPassword === false);
+
+  // Protocol version in hello: absent is an older app and stays welcome; a named version must
+  // be ours. The daemon speaks v2 after the hello field list changed, so v1 is the biting case.
+  check(`the daemon's protocol version is 2 for this test`, PROTOCOL_VERSION === 2, String(PROTOCOL_VERSION));
+  const legacy = await greeting({});
+  check("a hello with no protocolVersion is accepted as legacy", legacy.welcome?.type === "welcome");
+  check("the welcome names the daemon's protocol version", legacy.welcome?.version === PROTOCOL_VERSION);
+  const current = await greeting({ protocolVersion: 2 });
+  check("a hello that names v2 is welcomed", current.welcome?.type === "welcome");
+  const older = await greeting({ protocolVersion: 1 });
+  const mismatch = older.frames.find((m) => m.type === "protocol_mismatch");
+  check(
+    "v1 against a v2 daemon answers protocol_mismatch with expected 2 and found 1",
+    mismatch?.expected === 2 && mismatch?.found === 1,
+    JSON.stringify(mismatch),
+  );
+  check("the mismatched socket closes with its own code (4026)", older.code === 4026, String(older.code));
+  check("a mismatched hello is never welcomed", !older.frames.some((m) => m.type === "welcome"));
+  const seenBefore = older.frames.length;
+  older.client.ws.send(JSON.stringify({ type: "sessions" }));
+  await new Promise((r) => setTimeout(r, 150));
+  check(
+    "a message after the mismatch is refused",
+    older.client.ws.readyState === WebSocket.CLOSED && older.frames.length === seenBefore,
+    `readyState ${older.client.ws.readyState}, frames ${older.frames.length - seenBefore}`,
+  );
 
   await post("/access/record", { on: true });
   check("recording toggle turns on", (await status()).recording === true);
@@ -178,6 +235,10 @@ try {
     }
   }
   const refusedLines = logLines().filter((l) => l.includes('"event":"refused"'));
+  check(
+    "the protocol refusal is in the daemon log",
+    refusedLines.some((l) => l.includes('"key":"protocol_version"')),
+  );
   check(
     "each refusal is in the daemon log with its key",
     senses.every((sense) => refusedLines.some((l) => l.includes(sense.key))),

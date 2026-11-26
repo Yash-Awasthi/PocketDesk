@@ -1,6 +1,6 @@
 {
   "_comment": "Baseline for docs/adr/0001-protocol-changes.md: message -> the field list README.md documents. Regenerate with node daemon/scripts/gen-protocol-compat.mjs; a removal or a changed field list needs a protocol version bump and a vN note in that ADR.",
-  "protocolVersion": 1,
+  "protocolVersion": 2,
   "messages": {
     "account_forget": "",
     "account_save": "",

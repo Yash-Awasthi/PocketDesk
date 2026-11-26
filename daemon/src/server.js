@@ -55,8 +55,11 @@ import { createTransport, guardRequest, isLoopback, tlsEnabled } from "./http/tr
 import { createStatic, withPcMetas } from "./http/static.js";
 import { createRoutes } from "./http/routes.js";
 import { lastError, recordLastError } from "./last_error.js";
+import { PROTOCOL_VERSION } from "./version.js";
 
 const HELLO_TIMEOUT = 10_000;
+// Distinct from auth and policy closes so the phone can say "upgrade needed" instead of "bad token".
+const PROTOCOL_MISMATCH_CLOSE = 4026;
 const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
 const CONSOLE = Boolean(process.env.RH_CONSOLE);
 const AUDIT_LOG = path.join(configDir, "console-audit.log");
@@ -544,6 +547,23 @@ export function start(config, { onTokenRotated } = {}) {
               return;
             }
             if (auth) {
+              // A hello that names a protocol version must name ours. Absent is an older app,
+              // which is still welcome so an update on one side never locks the other out.
+              if (msg.protocolVersion !== undefined && msg.protocolVersion !== PROTOCOL_VERSION) {
+                const found = msg.protocolVersion;
+                send(ws, { type: "protocol_mismatch", expected: PROTOCOL_VERSION, found });
+                logEvent(
+                  EVENT_IDS.refused,
+                  `protocol version mismatch: expected ${PROTOCOL_VERSION}, found ${JSON.stringify(found)}`,
+                );
+                plugins.callHook("onRefused", ws, {
+                  type: "hello",
+                  key: "protocol_version",
+                  message: "protocol version mismatch",
+                });
+                ws.close(PROTOCOL_MISMATCH_CLOSE, "protocol version mismatch");
+                return;
+              }
               pairing_budget.succeed(clientIp);
               // Checked before welcome(), which would re-issue a pairing device's token.
               if (ws._irohId && !devices.claimEndpoint(auth.id, ws._irohId)) {
@@ -629,7 +649,7 @@ export function start(config, { onTokenRotated } = {}) {
     const iroh = irohEp?.ticket() || undefined;
     return {
       type: "welcome",
-      version: 1,
+      version: PROTOCOL_VERSION,
       clientId: auth.id,
       deviceToken,
       sessions: allSessions(),

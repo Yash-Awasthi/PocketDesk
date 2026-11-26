@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const PROTOCOL_VERSION = 1;
+import { PROTOCOL_VERSION } from "./version.js";
+export { PROTOCOL_VERSION };
 
 /** The daemon's own package version, read from package.json beside this module's folder. */
 export function daemonVersion(dir = path.dirname(fileURLToPath(import.meta.url))) {

@@ -25,7 +25,6 @@ adb_select
 adb_setup
 adb_state
 adb_type
-adb_webcam
 adb_webcam_register
 adb_webcam_status
 agent_doc
