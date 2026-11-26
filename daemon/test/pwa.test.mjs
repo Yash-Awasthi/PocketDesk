@@ -10,23 +10,14 @@ const REPO = path.dirname(url.fileURLToPath(new URL("..", import.meta.url)));
 
 // ---- Unit: run public/sw.js against minimal fakes -------------------------------
 
-const CACHE = "pocketdesk-shell-v1";
+// Read the real worker so these copies cannot drift from what ships.
+const swFile = path.join(REPO, "daemon", "public", "sw.js");
+const swText = fs.readFileSync(swFile, "utf8");
+const CACHE = swText.match(/const CACHE = "([^"]+)"/)[1];
+const ASSETS = [...swText.match(/const ASSETS = \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(
+  (m) => m[1],
+);
 const SHELL = "/";
-const ASSETS = [
-  "/ui/app.css",
-  "/ui/core.js",
-  "/ui/app.js",
-  "/ui/phone.js",
-  "/ui/hub.js",
-  "/ui/share.js",
-  "/ui/pages.js",
-  "/ui/thispc.js",
-  "/ui/computers.js",
-  "/ui/extras.js",
-  "/ui/running.js",
-  "/ui/manifest.webmanifest",
-  "/vendor/qrcode.min.js",
-];
 // What the daemon serves the PC browser: the page plus the metas only loopback gets.
 const SERVED =
   '<html><head><meta name="pd-token" content="tok"><meta name="pd-qr" content="qr"></head><body>hi</body></html>';
@@ -105,8 +96,7 @@ const caches = {
 
 const sandbox = { self, caches, fetch: net.fetch, Response: FakeResponse, URL, console };
 vm.createContext(sandbox);
-const swFile = path.join(REPO, "daemon", "public", "sw.js");
-vm.runInContext(fs.readFileSync(swFile, "utf8"), sandbox, { filename: swFile });
+vm.runInContext(swText, sandbox, { filename: swFile });
 
 // Every fake event only records the promise the worker handed over.
 const drive = (type, event) => {
@@ -133,6 +123,32 @@ try {
   check(
     "install caches every shell asset",
     ASSETS.every((a) => store.map.has(a)),
+  );
+
+  // 52a38c2 made app.js the only entry; a stale pre-module cache killed the page, so the shell
+  // list must follow the real import graph and the cache name must be a deliberate bump.
+  check("the shell cache name is the module bump", CACHE === "pocketdesk-shell-v2");
+  check("the shell cache name stays versioned", /^pocketdesk-shell-v\d+$/.test(CACHE));
+  const walk = (file) => {
+    const seen = new Set();
+    const queue = [file];
+    while (queue.length) {
+      const cur = queue.pop();
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      const src = fs.readFileSync(path.join(REPO, "daemon", "public", cur), "utf8");
+      for (const m of src.matchAll(/^\s*import\b[^"']*["'](\.\/[^"']+\.js)["']/gm)) {
+        queue.push(path.posix.join(path.posix.dirname(cur), m[1]));
+      }
+    }
+    return [...seen];
+  };
+  const graph = walk("/ui/app.js");
+  const missing = graph.filter((f) => !ASSETS.includes(f));
+  check(
+    "every module imported by /ui/app.js is in the shell list" +
+      (missing.length ? ": missing " + missing.join(", ") : ""),
+    missing.length === 0,
   );
 
   names.push("pocketdesk-shell-v9");

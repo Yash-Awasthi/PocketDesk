@@ -2,7 +2,7 @@
 // so caching the shell is enough for read-only pages to load with the daemon unreachable.
 "use strict";
 
-const CACHE = "pocketdesk-shell-v1";
+const CACHE = "pocketdesk-shell-v2";
 const SHELL = "/";
 const ASSETS = [
   "/ui/app.css",
@@ -11,10 +11,12 @@ const ASSETS = [
   "/ui/hub.js",
   "/ui/share.js",
   "/ui/pages.js",
+  "/ui/sessions.js",
   "/ui/thispc.js",
   "/ui/computers.js",
   "/ui/extras.js",
   "/ui/running.js",
+  "/ui/screens.js",
   "/ui/app.js",
   "/ui/manifest.webmanifest",
   "/vendor/qrcode.min.js",
