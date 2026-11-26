@@ -377,7 +377,9 @@ transport docs describe a design that has moved.
 
 - [x] Self-hosted iroh relay recipe and a documented fallback when the relay is unreachable. `[W]`
   verified-here: cd daemon && node --test test/relay-fallback.test.mjs -> ALL PASS, 10 checks (docs section present, config relays "off" parsed and saved, array preserved, iroh_link direct-only branch); node --check src/config.js -> OK
-- [ ] Bandwidth cap per stream and a data-used counter per session, visible in the phone. `[W]`
+- [x] Bandwidth cap per stream and a data-used counter per session, visible in the phone. `[W]`
+  verified-here: cd daemon && node --test test/congestion.unit.test.mjs -> 8 of 8 pass; node test/running.test.mjs -> ALL PASS. The cap is the smallest of RH_STREAM_MAX_KBPS, config.json stream.maxKbps and every viewer's stream.maxKbps, clamped to 50 Mbps, and it only lowers a preset's own rate: ffmpeg, the native helper and wf-recorder all get the capped rate. A viewer leaving lifts the cap and with no viewers it returns to 0. Sessions count pty bytes as they arrive, sessions summary carries bytes, and running_state lists it per session.
+  also: the phone display is not built (Compose); the value already rides in desktop_started.maxKbps, the sessions items and running_state, so the phone only has to render it.
 - [ ] Audio-only mode for desktop streaming when the link is poor. `[W]`
 - [x] Multi-monitor naming and ordering from the PC, persisted per machine. `[W]`
   verified-here: cd daemon && node --test test/monitor_names.test.mjs -> ALL PASS, 35 checks (stable adapter/output keys, label fallback chain, saved order survives a reload and appends a new monitor, rename/order handlers over a fake ctx); gen-protocol-doc --check -> current

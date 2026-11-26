@@ -124,6 +124,7 @@ export function saveConfig(cfg) {
         connPassword: cfg.connPassword ?? null,
         controlAllowed: cfg.controlAllowed !== false,
         remoteOn: cfg.remoteOn !== false,
+        stream: { maxKbps: Number(cfg.stream?.maxKbps) || 0 },
       },
       null,
       2,
@@ -135,6 +136,19 @@ export function saveConfig(cfg) {
   } catch {
     /* Windows ACLs: best effort */
   }
+}
+
+/** Per-stream ceiling in kbps from RH_STREAM_MAX_KBPS or config.json (0 = each preset's own rate). */
+export function streamCapKbps() {
+  let kbps = Number(process.env.RH_STREAM_MAX_KBPS);
+  if (!Number.isFinite(kbps) || kbps <= 0) {
+    try {
+      kbps = Number(JSON.parse(fs.readFileSync(file, "utf8")).stream?.maxKbps);
+    } catch {
+      kbps = 0;
+    }
+  }
+  return Number.isFinite(kbps) && kbps > 0 ? Math.min(Math.round(kbps), 50_000) : 0;
 }
 
 export const configDir = dir;

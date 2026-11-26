@@ -138,6 +138,15 @@ export const ENCODER_ORDER = {
   // wf-recorder carries its own encoder, without NVENC.
   wayland: ["h264_vaapi", "libx264"],
 };
+const kbpsOf = (rate) => (/k$/i.test(rate) ? Number.parseFloat(rate) : Number.parseFloat(rate) * 1000);
+
+/** A preset with its maxrate lowered to a per-stream cap; a cap never raises a preset's own rate. */
+export function presetWithCap(name, capKbps = 0) {
+  const p = PRESETS[name] || PRESETS.balanced;
+  if (!(capKbps > 0)) return p;
+  return { ...p, maxrate: `${Math.min(Math.round(kbpsOf(p.maxrate)), Math.round(capKbps))}k` };
+}
+
 export const CODECS = ["av1", "hevc", "h264"];
 export const codecOf = (enc) => (enc.startsWith("av1") ? "av1" : enc.startsWith("hevc") ? "hevc" : "h264");
 const START_CODE = Buffer.from([0, 0, 0, 1]);
@@ -147,8 +156,8 @@ const LADDER = ["low", "saver", "balanced", "quality"];
 export const KIND = { config: 0, key: 1, delta: 2, audio: 3 };
 
 /* * ffmpeg arguments for one encoder; a monitor on another GPU needs its own D3D11 device. */
-export function ffmpegArgs(enc, presetName, monitor, platform = process.platform) {
-  const p = PRESETS[presetName];
+export function ffmpegArgs(enc, presetName, monitor, platform = process.platform, capKbps = 0) {
+  const p = presetWithCap(presetName, capKbps);
   let input;
   if (platform === "darwin") input = grabMac(p, monitor?.output || 0);
   else if (platform === "linux") input = grabX11(p, monitor, enc.endsWith("_vaapi"));
@@ -408,6 +417,7 @@ export class DesktopVideo extends EventEmitter {
     this.audio = false;
     this.failed = new Set();
     this.preset = "balanced";
+    this.capKbps = 0;
     this.monitor = null;
     this.stats = { packets: 0, bytes: 0, restarts: 0 };
   }
@@ -422,6 +432,13 @@ export class DesktopVideo extends EventEmitter {
   /** Unknown names keep the current preset. */
   setPreset(name) {
     if (PRESETS[name]) this.preset = this.wanted = name;
+  }
+
+  /** The narrowest per-stream ceiling among config and viewers; 0 means each preset's own maxrate. */
+  setCap(kbps) {
+    const n = Math.round(Number(kbps));
+    this.capKbps = Number.isFinite(n) && n > 0 ? Math.min(n, 50_000) : 0;
+    return this.capKbps;
   }
 
   /** Codecs every viewer decodes, best first; H.264 is always there as the floor. */
@@ -513,7 +530,7 @@ export class DesktopVideo extends EventEmitter {
   _spawnNative(gen) {
     const opts = {
       monitor: this.monitor,
-      preset: PRESETS[this.preset],
+      preset: presetWithCap(this.preset, this.capKbps),
       codecs: this.codecs,
       audio: this.audio,
     };
@@ -554,8 +571,8 @@ export class DesktopVideo extends EventEmitter {
   _spawn(enc, gen) {
     return new Promise((resolve) => {
       const [bin, args] = IS_WAYLAND
-        ? ["wf-recorder", wfRecorderArgs(enc, PRESETS[this.preset], this.monitor)]
-        : [this.ffmpeg, ffmpegArgs(enc, this.preset, this.monitor)];
+        ? ["wf-recorder", wfRecorderArgs(enc, presetWithCap(this.preset, this.capKbps), this.monitor)]
+        : [this.ffmpeg, ffmpegArgs(enc, this.preset, this.monitor, process.platform, this.capKbps)];
       let proc;
       try {
         proc = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });

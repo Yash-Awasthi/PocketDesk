@@ -1,7 +1,13 @@
 // The video bitrate ladder on a simulated slow link: settle, bounded latency, no stall, recovery.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DesktopVideo, PRESETS } from "../src/desktop_video.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { DesktopVideo, PRESETS, ffmpegArgs, presetWithCap } from "../src/desktop_video.js";
+import remoteHandlers from "../src/handlers/remote.js";
 
 const LADDER = ["low", "saver", "balanced", "quality"];
 const RTT_MS = 200;
@@ -199,4 +205,129 @@ test("the ladder stops at low and never passes the requested preset", () => {
   assert.equal(w.preset, "saver");
   assert.equal(w.stepUp(), false);
   assert.equal(w.preset, "saver");
+});
+
+test("a per-stream cap lowers a preset and never raises it", () => {
+  assert.equal(presetWithCap("balanced", 1200).maxrate, "1200k");
+  assert.equal(presetWithCap("balanced", 50_000).maxrate, "6000k", "a high cap keeps the preset rate");
+  assert.equal(presetWithCap("balanced", 0).maxrate, PRESETS.balanced.maxrate);
+  assert.equal(presetWithCap("low", 0).maxrate, "600k");
+
+  const args = ffmpegArgs("libx264", "balanced", null, "win32", 1200);
+  assert.equal(args[args.indexOf("-maxrate") + 1], "1200k");
+  assert.equal(args[args.indexOf("-bufsize") + 1], "1200k");
+  const plain = ffmpegArgs("libx264", "balanced", null, "win32");
+  assert.equal(plain[plain.indexOf("-maxrate") + 1], PRESETS.balanced.maxrate);
+
+  const v = new DesktopVideo();
+  assert.equal(v.setCap(900), 900);
+  assert.equal(v.setCap(-5), 0);
+  assert.equal(v.setCap("nope"), 0);
+  assert.equal(v.setCap(1e9), 50_000);
+});
+
+test("the narrowest viewer or config request becomes the stream cap", async () => {
+  const caps = [];
+  const sent = [];
+  const video = {
+    running: false,
+    capKbps: 0,
+    preset: "balanced",
+    codec: "h264",
+    monitor: null,
+    setPreset() {},
+    setCodecs() {},
+    setCap(k) {
+      caps.push(k);
+      this.capKbps = k;
+      return k;
+    },
+    async start() {
+      return "libx264";
+    },
+    async restart() {
+      return "libx264";
+    },
+    stop() {},
+  };
+  const desktop = {
+    monitorList: [{ index: 0, all: false, output: 0, w: 1920, h: 1080 }],
+    watchCursor() {},
+    watchClipboard() {},
+    watchProtected() {},
+    setCaptureAllowed() {},
+    async monitors() {
+      return { monitors: this.monitorList };
+    },
+    async pointer() {
+      return { x: 0, y: 0 };
+    },
+    async inputMouse() {},
+    stopFrameStream() {
+      return { ok: true };
+    },
+  };
+  const h = remoteHandlers({
+    send: (_ws, m) => sent.push(m),
+    desktop,
+    clippy: {},
+    desktopWatchers: new Set(),
+    video,
+    videoWatchers: new Set(),
+    recorder: { log() {}, screenWatched() {}, recordingScreen: false },
+    access: { controlAllowed: true, remoteOn: true },
+    syncAudio() {},
+    audioListeners: new Set(),
+    monitorRefresh() {},
+  });
+  const viewer = () => ({ bufferedAmount: 0, once() {}, _codecs: [] });
+
+  const wide = viewer();
+  const narrow = viewer();
+  await h.desktop_start(wide, { video: true, stream: { maxKbps: 4000 } });
+  await h.desktop_start(narrow, { video: true, stream: { maxKbps: 1200 } });
+  assert.equal(video.capKbps, 1200, "the smallest viewer cap wins");
+  assert.equal(sent.at(-1).maxKbps, 1200, "the reply tells the viewer the cap in force");
+  assert.equal(caps.at(-1), 1200);
+
+  await h.desktop_stop(narrow, {});
+  assert.equal(video.capKbps, 4000, "the cap lifts when the narrow viewer leaves");
+  await h.desktop_stop(wide, {});
+  assert.equal(video.capKbps, 0, "with no viewers the preset carries its own rate");
+});
+
+test("the cap comes from RH_STREAM_MAX_KBPS or config.json and survives a save", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "rh-cap-"));
+  const daemon = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+  try {
+    fs.writeFileSync(path.join(home, "config.json"), JSON.stringify({ stream: { maxKbps: 1800 } }));
+    const read = (extra = {}) =>
+      execFileSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          'const c=await import("./src/config.js"); process.stdout.write(String(c.streamCapKbps()))',
+        ],
+        { cwd: daemon, env: { ...process.env, RH_HOME: home, ...extra }, encoding: "utf8" },
+      );
+    assert.equal(read(), "1800", "config.json sets the ceiling");
+    assert.equal(read({ RH_STREAM_MAX_KBPS: "900" }), "900", "the environment overrides the file");
+    assert.equal(read({ RH_STREAM_MAX_KBPS: "junk" }), "1800", "junk falls back to the file");
+    assert.equal(read({ RH_STREAM_MAX_KBPS: "999999" }), "50000", "an absurd cap is clamped");
+
+    execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        'const {saveConfig}=await import("./src/config.js"); saveConfig({ port: 1, token: "t", tls: { enabled: false, cert: "c", key: "k" }, stream: { maxKbps: 2400 } })',
+      ],
+      { cwd: daemon, env: { ...process.env, RH_HOME: home }, encoding: "utf8" },
+    );
+    const saved = JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8"));
+    assert.equal(saved.stream.maxKbps, 2400, "a save keeps the hand-set cap");
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
 });

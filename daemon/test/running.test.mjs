@@ -27,8 +27,8 @@ const built = snapshot({
   version: "9.9.9",
   ports: { daemon: "8941", page: 8951, cli: "abc", usb: undefined },
   sessions: [
-    { id: "0123456789abcdef", harnessId: "node", state: "running" },
-    { id: 7, harnessId: null },
+    { id: "0123456789abcdef", harnessId: "node", state: "running", bytes: 4096 },
+    { id: 7, harnessId: null, bytes: "nope" },
   ],
   streams: { video: "2", desktop: 1, audio: 0, remote: 2 },
   policy: { control: true, remote: 1, password: 0, totp: true, recording: false },
@@ -47,6 +47,10 @@ check(
     built.sessions.items[1].harnessId === "",
 );
 check("streams are counted", built.streams.video === 2 && built.streams.remote === 2);
+check(
+  "session output bytes are carried, junk becomes 0",
+  built.sessions.items[0].bytes === 4096 && built.sessions.items[1].bytes === 0,
+);
 check(
   "policy flags are booleans",
   built.policy.control === true && built.policy.password === false && built.policy.recording === false,
@@ -83,6 +87,22 @@ try {
     "a live session is listed",
     live.sessions.count >= 1 && live.sessions.items.some((it) => it.harnessId === "node"),
   );
+  check(
+    "every listed session carries a byte counter",
+    live.sessions.items.every((it) => Number.isInteger(it.bytes) && it.bytes >= 0),
+  );
+
+  // A session that prints grows its counter, which is what the Running page reads.
+  c.send({ type: "create", harness: "node", args: ["-e", "setInterval(() => console.log('rhbytes'), 200)"] });
+  const chatty = await c.next((m) => m.type === "created", 15000);
+  let mine = null;
+  for (let i = 0; i < 20 && !(mine && mine.bytes > 0); i++) {
+    c.send({ type: "running_state" });
+    const counted = await c.next((m) => m.type === "running_state");
+    mine = counted.sessions.items.find((it) => it.id === chatty.id);
+    if (!(mine && mine.bytes > 0)) await new Promise((r) => setTimeout(r, 200));
+  }
+  check("the session's byte counter grew with its output", mine && mine.bytes > 0);
 
   const script = await fetch(`http://127.0.0.1:${PORT}/ui/running.js`);
   check("the page's script is served", script.status === 200);

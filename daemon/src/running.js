@@ -28,6 +28,7 @@ export function snapshot({
     kind: String(s.kind ?? "terminal"),
     state: String(s.state ?? ""),
     cwd: typeof s.cwd === "string" ? s.cwd : "",
+    bytes: Number(s.bytes) || 0,
   }));
   return {
     at: new Date(now).toISOString(),

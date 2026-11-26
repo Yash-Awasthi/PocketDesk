@@ -4,6 +4,7 @@ import { centerFor, fromFraction } from "../desktop_capture.js";
 import { PcMedia } from "../pc_media.js";
 import { keyOf, label, loadPrefs, savePrefs } from "../monitor_names.js";
 import { spawn } from "node:child_process";
+import { streamCapKbps } from "../config.js";
 
 const pcMedia = new PcMedia();
 
@@ -25,6 +26,13 @@ export default function remoteHandlers(ctx) {
   const snapshots = new Map();
   const deviceName = (ws) => devices.list().find((d) => d.id === ws._clientId)?.name || "A remote device";
   const watching = (ws) => videoWatchers.has(ws) || desktopWatchers.has(ws);
+  /** One encoder serves every viewer, so the smallest non-zero request wins. */
+  function applyCap() {
+    const caps = [streamCapKbps(), ...[...videoWatchers].map((w) => w._capKbps)].filter(
+      (n) => Number.isFinite(n) && n > 0,
+    );
+    return video.setCap(caps.length ? Math.min(...caps) : 0);
+  }
   /** Codecs every current video viewer can decode, in the first viewer's order; H.264 is the floor. */
   function sharedCodecs() {
     const lists = [...videoWatchers].map((w) => w._codecs || []);
@@ -104,6 +112,9 @@ export default function remoteHandlers(ctx) {
         ? msg.codecs.filter((c) => ["av1", "hevc", "h264"].includes(c))
         : [];
       ws._audio = !!msg.audio;
+      // A viewer may ask for less than the machine's ceiling; 0 means "whatever the preset does".
+      const asked = Number(msg.stream?.maxKbps);
+      ws._capKbps = Number.isFinite(asked) && asked > 0 ? Math.min(asked, 50_000) : 0;
       // A screen plugged in or unplugged while this viewer watches must reach it without a reconnect.
       monitorRefresh?.();
       // Binary frames need a real socket; relay shims fall back to JPEG.
@@ -124,12 +135,14 @@ export default function remoteHandlers(ctx) {
           const list = desktop.monitorList || (await desktop.monitors()).monitors || [];
           video.monitor = list.find((m) => m.all) || null;
         }
+        applyCap();
         const encoder = video.running ? await video.restart() : await video.start();
         if (encoder) {
           if (!ws._videoCloseHooked) {
             ws._videoCloseHooked = true;
             ws.once?.("close", () => {
               videoWatchers.delete(ws);
+              applyCap();
               if (!videoWatchers.size) video.stop();
               syncCursor();
               syncAudio();
@@ -151,6 +164,7 @@ export default function remoteHandlers(ctx) {
             codec: video.codec,
             audio: ws._audio,
             preset: video.preset,
+            maxKbps: video.capKbps,
             monitor: video.monitor?.index ?? 0,
             viewOnly: ws._viewOnly,
             recording: recorder.recordingScreen,
@@ -271,7 +285,8 @@ export default function remoteHandlers(ctx) {
     async desktop_stop(ws, _msg) {
       release(ws);
       ws._audio = false;
-      if (videoWatchers.delete(ws) && !videoWatchers.size) video.stop();
+      if (videoWatchers.delete(ws)) applyCap();
+      if (!videoWatchers.size) video.stop();
       desktopWatchers.delete(ws);
       const r = desktop.stopFrameStream(ws._clientId || "anon");
       syncAudio();

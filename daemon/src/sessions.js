@@ -138,6 +138,7 @@ export function create({ harnessId, bin, cwd, args = [] }, broadcast) {
     scrollback: "",
     chunks: [],
     seq: 0,
+    bytes: 0,
     subs: new Set(),
     exitCode: null,
     lastActivity: Date.now(),
@@ -145,6 +146,7 @@ export function create({ harnessId, bin, cwd, args = [] }, broadcast) {
   sessions.set(id, s);
   sessionEvents.emit("create", { id, harnessId: s.harnessId, cwd: dir });
   proc.onData((data) => {
+    s.bytes += Buffer.byteLength(data);
     const text = s.decoder.write(Buffer.from(data));
     if (!text) return;
     s.scrollback = (s.scrollback + text).slice(-SCROLLBACK);
@@ -173,7 +175,7 @@ export function get(id) {
 export function summary() {
   return [...sessions.values()]
     .filter((s) => s.exitCode === null)
-    .map(({ id, harnessId, cwd, cols, rows }) => ({ id, harnessId, cwd, cols, rows }));
+    .map(({ id, harnessId, cwd, cols, rows, bytes }) => ({ id, harnessId, cwd, cols, rows, bytes }));
 }
 
 export function attach(id, ws, { since } = {}) {
