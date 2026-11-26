@@ -75,6 +75,8 @@ android {
 
     testOptions {
         unitTests.all { it.useJUnitPlatform() }
+        // Robolectric needs the merged debug manifest and resources to launch an activity.
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
@@ -115,6 +117,17 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
+    // Robolectric runs JUnit 4 tests through the vintage engine, beside the Jupiter ones.
+    testImplementation(libs.junit4)
+    testRuntimeOnly(libs.junit.vintage.engine)
+    // Golden screenshots: Roborazzi captures the Compose tree through the Robolectric runtime.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.androidx.test.junit)
+    testImplementation(libs.androidx.test.core)
     // Instrumented Compose tests need the empty activity createComposeRule() launches.
     debugImplementation(libs.compose.ui.test.manifest)
     // Instrumented tests (androidTest) exercise the pairing payload and the TLS pinning on a device.
@@ -126,6 +139,44 @@ dependencies {
     androidTestImplementation(platform(libs.okhttp.bom))
     androidTestImplementation(libs.okhttp.tls)
 }
+
+// Golden screenshots of the five screens live in the repo, beside the hand-shot baselines:
+// a diff is reviewable, and the test only compares. The directory is passed in because a unit
+// test's working directory is this module, not the repo root.
+val goldenDir = rootDir.resolve("../docs/screenshots/golden")
+
+// Verify by default: a plain test run must never rewrite a golden, or a red diff could be
+// "fixed" by running the tests again. Recording is the opt-in -Pgolden.record=true flag.
+val recordRequested = providers.gradleProperty("golden.record").orNull == "true"
+
+tasks.withType<Test>().configureEach {
+    // A unit test's working directory is this module, not the repo root.
+    systemProperty("golden.dir", goldenDir.absolutePath)
+    systemProperty("roborazzi.test.record", recordRequested.toString())
+    systemProperty("roborazzi.test.verify", (!recordRequested).toString())
+}
+
+tasks.register("verifyGoldens") {
+    group = "verification"
+    description = "Compares the five screen goldens; fails naming the PNG and never rewrites them."
+    dependsOn("testDebugUnitTest")
+}
+
+val goldenRecordFlag = tasks.register("checkGoldenRecordFlag") {
+    doLast {
+        check(recordRequested) {
+            "recordGoldens rewrites checked-in PNGs; pass -Pgolden.record=true to opt in"
+        }
+    }
+}
+
+tasks.register("recordGoldens") {
+    group = "verification"
+    description = "Rewrites docs/screenshots/golden; only with -Pgolden.record=true. Review the PNGs after."
+    dependsOn(goldenRecordFlag, "testDebugUnitTest")
+}
+
+tasks.matching { it.name == "testDebugUnitTest" }.configureEach { mustRunAfter(goldenRecordFlag) }
 
 // SBOM for a release APK: only the runtime graph that ships, not test or debug jars.
 tasks.withType<CyclonedxDirectTask>().configureEach {
