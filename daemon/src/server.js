@@ -1,6 +1,4 @@
 import fs from "node:fs";
-import http from "node:http";
-import https from "node:https";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
@@ -51,6 +49,9 @@ import kvmHandlers from "./handlers/kvm.js";
 import { withSources } from "./handlers/sources.js";
 import { startIroh } from "./iroh_link.js";
 import { configDir, configPath } from "./config.js";
+import { createTransport, guardRequest, isLoopback, tlsEnabled } from "./http/transport.js";
+import { createStatic, withPcMetas } from "./http/static.js";
+import { createRoutes } from "./http/routes.js";
 
 const HELLO_TIMEOUT = 10_000;
 const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
@@ -219,7 +220,7 @@ export function start(config, { onTokenRotated } = {}) {
   let token = _token;
   let tokenVersion = 0;
   const publicDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public");
-  const page = fs.readFileSync(path.join(publicDir, "index.html"), "utf8");
+  const staticFiles = createStatic(publicDir);
 
   function lanAddress() {
     const all = Object.values(os.networkInterfaces())
@@ -256,13 +257,7 @@ export function start(config, { onTokenRotated } = {}) {
       irohTicket = t;
       buildPair(useTls);
     }
-    return page.replace(
-      "</head>",
-      `<meta name="pd-token" content="${token}">\n` +
-        `<meta name="pd-qr" content="${pairLink}">\n` +
-        `<meta name="pd-hub" content="${pairHub}">\n` +
-        `<meta name="pd-fp" content="${pairFp}">\n</head>`,
-    );
+    return withPcMetas(staticFiles.page, { token, pairLink, pairHub, pairFp });
   };
   // Rebuilt on token rotation and when iroh answers, so the QR never shows a dead token or address.
   function buildPair(useTls, fingerprint = pairFp) {
@@ -300,236 +295,156 @@ export function start(config, { onTokenRotated } = {}) {
     return bootstrapPromise;
   }
 
-  const requestHandler = (req, res) => {
-    // No page here may be framed or content-sniffed; the pair page also carries a secret.
-    res.setHeader("x-frame-options", "DENY");
-    res.setHeader("content-security-policy", "frame-ancestors 'none'");
-    res.setHeader("x-content-type-options", "nosniff");
-    res.setHeader("referrer-policy", "no-referrer");
-    // /access changes local settings, so it alone may POST; everything else is read-only GET.
-    if (req.method !== "GET" && !(req.method === "POST" && req.url.startsWith("/access"))) {
-      res.writeHead(405).end();
-      return;
-    }
-    if (
-      (req.url.startsWith("/vendor/") || req.url.startsWith("/ui/")) &&
-      !req.url.includes("..") &&
-      /^[\w/.-]+$/.test(req.url)
-    ) {
-      const file = path.join(publicDir, req.url);
-      if (fs.existsSync(file)) {
-        const type = req.url.endsWith(".js")
-          ? "text/javascript"
-          : req.url.endsWith(".css")
-            ? "text/css"
-            : req.url.endsWith(".svg")
-              ? "image/svg+xml"
-              : req.url.endsWith(".webmanifest")
-                ? "application/manifest+json"
-                : "text/plain";
-        res.writeHead(200, { "content-type": type, "cache-control": "no-cache" });
-        res.end(fs.readFileSync(file));
-        return;
-      }
-    }
-    // /pair carries the pairing token and is only ever served to the local machine.
-    // Windows dual-stack sockets present IPv4 clients as ::ffff:127.0.0.1.
-    const remoteAddr = (req.socket.remoteAddress || "").replace(/^::ffff:/, "");
-    // Host must be loopback too: DNS rebinding delivers a web page's requests from 127.0.0.1 under its own name.
-    const loopback =
-      !req.socket._usb &&
-      (remoteAddr === "127.0.0.1" || remoteAddr === "::1" || remoteAddr === "[::1]") &&
-      /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(req.headers.host || "");
-    if (req.url === "/health") {
-      res.writeHead(200, { "content-type": "application/json" });
-      // Anyone on the network may probe liveness; only this machine learns what answers and how busy it is.
-      res.end(
-        JSON.stringify(
-          loopback
-            ? { status: "healthy", service: "pocketdesk", sessions: allSessions().length }
-            : { status: "healthy" },
-        ),
-      );
-      setImmediate(bootstrap);
-      return;
-    }
-    // The service worker must sit at the root to control the whole page, and the plain-HTTP LAN
-    // page needs it too, so this is a plain GET with no loopback or token requirement.
-    if (req.url === "/sw.js") {
-      res.writeHead(200, {
-        "content-type": "text/javascript",
-        "cache-control": "no-cache",
-        "service-worker-allowed": "/",
-      });
-      res.end(fs.readFileSync(path.join(publicDir, "sw.js")));
-      return;
-    }
-    // The launcher's check before it hands the token to a plain-HTTP page: only the daemon can sign its nonce.
-    if (req.url.startsWith("/prove?") && loopback) {
-      const n = new URL(req.url, "http://x").searchParams.get("n") || "";
-      res.writeHead(200, { "content-type": "text/plain" });
-      res.end(crypto.createHmac("sha256", token).update(n).digest("hex"));
-      return;
-    }
-    // Loopback alone admits every local account, and the console endpoint's token is SYSTEM;
-    // the key is the token itself, so only whoever can read the config dir can open the page.
+  // Local, token-gated settings the pair page drives. Security settings live only here, never on the
+  // socket, so a stolen phone or device token can use the PC but cannot change who may reach it.
+  // The route list stays in this file because test/access.test.mjs reads it to prove every entry is
+  // guarded by loopback, the Host header and the pairing token.
+  function localSettings(req, res) {
     const key = new URL(req.url, "http://x").searchParams.get("k") || "";
     const keyOk = key.length === token.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(token));
-    // Local, token-gated settings the pair page drives. Security settings live only here, never on the
-    // socket, so a stolen phone or device token can use the PC but cannot change who may reach it.
-    if (req.url.startsWith("/access") && loopback && keyOk) {
-      const path0 = req.url.split("?")[0];
-      const reply = (code, obj) => {
-        res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
-        res.end(JSON.stringify(obj));
-      };
-      const status = () => ({
-        hasPassword: access.hasPassword,
-        controlAllowed: access.controlAllowed,
-        totpEnabled: totp.enabled(),
-        recording: recorder.enabled,
-        remoteOn: access.remoteOn,
-      });
-      if (req.method === "GET") {
-        if (path0 === "/access") return reply(200, status());
-        if (path0 === "/access/devices") return reply(200, { items: devices.list() });
-        if (path0 === "/access/audit")
-          return reply(200, {
-            events: devices.audit(),
-            // Said out loud instead of guessed at: these two keep state, not a history.
-            categories: [
-              { id: "pairing", label: "Pairing", recorded: true },
-              { id: "device", label: "Devices", recorded: true },
-              {
-                id: "policy",
-                label: "Policy changes",
-                recorded: false,
-                reason: "the daemon stores the current switches only",
-              },
-              {
-                id: "totp",
-                label: "Two-factor changes",
-                recorded: false,
-                reason: "totp.json stores the current secret only",
-              },
-            ],
-          });
-        return reply(404, { ok: false });
-      }
-      let body = "";
-      req.on("data", (d) => {
-        body += d;
-        if (body.length > 4096) req.destroy();
-      });
-      req.on("end", () => {
-        try {
-          let msg = {};
-          try {
-            msg = JSON.parse(body || "{}");
-          } catch {
-            /* empty */
-          }
-          const id = String(msg.clientId ?? "");
-          if (path0 === "/access/control") access.setControlAllowed(msg.allowed !== false);
-          else if (path0 === "/access/password")
-            access.setPassword(typeof msg.password === "string" ? msg.password : "");
-          else if (path0 === "/access/remote") access.setRemoteOn(msg.on !== false);
-          else if (path0 === "/access/uninstall") {
-            // Detached, because the uninstaller stops this daemon; it may ask for elevation on the PC.
-            const script = path.join(process.env.LOCALAPPDATA || "", "PocketDesk", "uninstall.ps1");
-            if (process.platform !== "win32" || !fs.existsSync(script))
-              return reply(400, {
-                ok: false,
-                error: "no installed copy to uninstall; run uninstall.sh or remove the checkout",
-              });
-            spawn(
-              "powershell.exe",
-              [
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                script,
-                ...(msg.removeData ? ["-RemoveData"] : []),
-              ],
-              { detached: true, stdio: "ignore" },
-            ).unref();
-            return reply(200, { ok: true });
-          } else if (path0 === "/access/record") {
-            if (msg.on) fs.writeFileSync(RECORD_FLAG, "");
-            else fs.rmSync(RECORD_FLAG, { force: true });
-          } else if (path0 === "/access/devices/revoke") {
-            const r = devices.revoke(id);
-            if (!r.ok) return reply(404, r);
-            disconnectDevice(id);
-            // The revoked device knew the pairing token too, so it must change.
-            return reply(200, { ...r, pairingToken: rotateToken() });
-          } else if (path0 === "/access/devices/note") {
-            const r = devices.setNote(id, msg.note);
-            return reply(r.ok ? 200 : 404, r);
-          } else if (path0 === "/access/devices/allow") {
-            const r = devices.allow(id);
-            return reply(r.ok ? 200 : 404, r);
-          } else if (path0 === "/access/devices/remove") {
-            const r = devices.remove(id);
-            return reply(r.ok ? 200 : 400, r);
-          } else if (path0 === "/access/totp/setup")
-            return reply(200, { ok: true, ...totp.setup(os.hostname()) });
-          else if (path0 === "/access/totp/enable" || path0 === "/access/totp/disable") {
-            const ok =
-              path0 === "/access/totp/enable"
-                ? totp.enable(String(msg.code ?? ""))
-                : totp.disable(String(msg.code ?? ""));
-            const recovery = ok && path0 === "/access/totp/enable" ? totp.takeRecovery() : null;
-            return reply(ok ? 200 : 400, {
-              ok,
-              ...status(),
-              ...(recovery ? { recovery } : {}),
-              ...(ok ? {} : { error: "wrong code" }),
-            });
-          } else if (path0 === "/access/totp/recover") {
-            // Lost authenticator: one unused recovery code turns two-factor off for re-enrollment.
-            const ok = totp.recover(String(msg.code ?? ""));
-            return reply(ok ? 200 : 400, {
-              ok,
-              ...status(),
-              ...(ok ? {} : { error: "unknown recovery code" }),
-            });
-          } else return reply(404, { ok: false });
-          reply(200, { ok: true, ...status() });
-        } catch (e) {
-          reply(500, { ok: false, error: String(e?.message || e) });
-        }
-      });
-      return;
-    }
-    if (req.url.startsWith("/access")) {
+    if (!isLoopback(req) || !keyOk) {
       res.writeHead(403).end();
       return;
     }
-    // /pair was its own settings document; it is now the hub's This PC page, so every launcher and
-    // bookmark that still opens it lands there signed in.
-    if (req.url.startsWith("/pair?") && loopback && keyOk) {
-      res.writeHead(302, { location: `/#go=thispc&t=${token}`, "cache-control": "no-store" }).end();
-      return;
-    }
-    if (req.url.startsWith("/pair")) {
-      res.writeHead(403).end();
-      return;
-    }
-    res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-    res.end(loopback ? pageForPc() : page);
-  };
-
-  const useTls = Boolean(tls?.enabled && fs.existsSync(tls.cert) && fs.existsSync(tls.key));
-  const server = useTls
-    ? https.createServer({ cert: fs.readFileSync(tls.cert), key: fs.readFileSync(tls.key) }, requestHandler)
-    : http.createServer(requestHandler);
-  // Plaintext would put the token and every byte on the LAN in the clear, so without TLS only this machine may connect.
-  if (!useTls)
-    server.on("connection", (s) => {
-      if (!/^(::ffff:)?127\.|^::1$/.test(s.remoteAddress || "")) s.destroy();
+    const path0 = req.url.split("?")[0];
+    const reply = (code, obj) => {
+      res.writeHead(code, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify(obj));
+    };
+    const status = () => ({
+      hasPassword: access.hasPassword,
+      controlAllowed: access.controlAllowed,
+      totpEnabled: totp.enabled(),
+      recording: recorder.enabled,
+      remoteOn: access.remoteOn,
     });
+    if (req.method === "GET") {
+      if (path0 === "/access") return reply(200, status());
+      if (path0 === "/access/devices") return reply(200, { items: devices.list() });
+      if (path0 === "/access/audit")
+        return reply(200, {
+          events: devices.audit(),
+          // Said out loud instead of guessed at: these two keep state, not a history.
+          categories: [
+            { id: "pairing", label: "Pairing", recorded: true },
+            { id: "device", label: "Devices", recorded: true },
+            {
+              id: "policy",
+              label: "Policy changes",
+              recorded: false,
+              reason: "the daemon stores the current switches only",
+            },
+            {
+              id: "totp",
+              label: "Two-factor changes",
+              recorded: false,
+              reason: "totp.json stores the current secret only",
+            },
+          ],
+        });
+      return reply(404, { ok: false });
+    }
+    let body = "";
+    req.on("data", (d) => {
+      body += d;
+      if (body.length > 4096) req.destroy();
+    });
+    req.on("end", () => {
+      try {
+        let msg = {};
+        try {
+          msg = JSON.parse(body || "{}");
+        } catch {
+          /* empty */
+        }
+        const id = String(msg.clientId ?? "");
+        if (path0 === "/access/control") access.setControlAllowed(msg.allowed !== false);
+        else if (path0 === "/access/password")
+          access.setPassword(typeof msg.password === "string" ? msg.password : "");
+        else if (path0 === "/access/remote") access.setRemoteOn(msg.on !== false);
+        else if (path0 === "/access/uninstall") {
+          // Detached, because the uninstaller stops this daemon; it may ask for elevation on the PC.
+          const script = path.join(process.env.LOCALAPPDATA || "", "PocketDesk", "uninstall.ps1");
+          if (process.platform !== "win32" || !fs.existsSync(script))
+            return reply(400, {
+              ok: false,
+              error: "no installed copy to uninstall; run uninstall.sh or remove the checkout",
+            });
+          spawn(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              script,
+              ...(msg.removeData ? ["-RemoveData"] : []),
+            ],
+            { detached: true, stdio: "ignore" },
+          ).unref();
+          return reply(200, { ok: true });
+        } else if (path0 === "/access/record") {
+          if (msg.on) fs.writeFileSync(RECORD_FLAG, "");
+          else fs.rmSync(RECORD_FLAG, { force: true });
+        } else if (path0 === "/access/devices/revoke") {
+          const r = devices.revoke(id);
+          if (!r.ok) return reply(404, r);
+          disconnectDevice(id);
+          // The revoked device knew the pairing token too, so it must change.
+          return reply(200, { ...r, pairingToken: rotateToken() });
+        } else if (path0 === "/access/devices/note") {
+          const r = devices.setNote(id, msg.note);
+          return reply(r.ok ? 200 : 404, r);
+        } else if (path0 === "/access/devices/allow") {
+          const r = devices.allow(id);
+          return reply(r.ok ? 200 : 404, r);
+        } else if (path0 === "/access/devices/remove") {
+          const r = devices.remove(id);
+          return reply(r.ok ? 200 : 400, r);
+        } else if (path0 === "/access/totp/setup")
+          return reply(200, { ok: true, ...totp.setup(os.hostname()) });
+        else if (path0 === "/access/totp/enable" || path0 === "/access/totp/disable") {
+          const ok =
+            path0 === "/access/totp/enable"
+              ? totp.enable(String(msg.code ?? ""))
+              : totp.disable(String(msg.code ?? ""));
+          const recovery = ok && path0 === "/access/totp/enable" ? totp.takeRecovery() : null;
+          return reply(ok ? 200 : 400, {
+            ok,
+            ...status(),
+            ...(recovery ? { recovery } : {}),
+            ...(ok ? {} : { error: "wrong code" }),
+          });
+        } else if (path0 === "/access/totp/recover") {
+          // Lost authenticator: one unused recovery code turns two-factor off for re-enrollment.
+          const ok = totp.recover(String(msg.code ?? ""));
+          return reply(ok ? 200 : 400, {
+            ok,
+            ...status(),
+            ...(ok ? {} : { error: "unknown recovery code" }),
+          });
+        } else return reply(404, { ok: false });
+        reply(200, { ok: true, ...status() });
+      } catch (e) {
+        reply(500, { ok: false, error: String(e?.message || e) });
+      }
+    });
+    return;
+  }
+
+  const routes = createRoutes({
+    staticFiles,
+    pageForPc,
+    allSessions,
+    bootstrap,
+    localSettings,
+    token: () => token,
+  });
+
+  const requestHandler = (req, res) => {
+    if (!guardRequest(req, res)) return;
+    routes.handle(req, res);
+  };
 
   // Origin check: browsers always send Origin, so cross-origin upgrades are refused (403) before any
   // socket opens; native clients send none. Max payload is a clipboard image (24 MB base64).
@@ -555,29 +470,16 @@ export function start(config, { onTokenRotated } = {}) {
     }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   };
-  server.on("upgrade", onUpgrade);
-  // The PC's own browser: plain HTTP bound to loopback, which browsers treat as a secure context, so the
-  // phone page opens without a certificate warning while phones keep the pinned TLS port.
-  const localPort = Number(process.env.RH_LOCAL_PORT) || port + 10;
-  const local = useTls ? http.createServer(requestHandler) : null;
-  local?.on("upgrade", onUpgrade);
-  local?.on("error", (e) => console.warn(`  local page unavailable on ${localPort}: ${e.message}`));
-  local?.listen(localPort, "127.0.0.1");
-  // A phone on a USB cable, through adb reverse: it arrives from 127.0.0.1 but is not this PC, so
-  // its own port marks every socket and nothing loopback-only is granted to it.
-  const usbPort = Number(process.env.RH_USB_PORT) || port + 30;
-  const usb = useTls
-    ? https.createServer({ cert: fs.readFileSync(tls.cert), key: fs.readFileSync(tls.key) }, requestHandler)
-    : null;
-  usb?.on("connection", (s) => {
-    s._usb = true;
+
+  const useTls = tlsEnabled(tls);
+  const transport = createTransport({
+    tls,
+    tlsOn: useTls,
+    port,
+    handler: requestHandler,
+    onUpgrade,
   });
-  usb?.on("secureConnection", (s) => {
-    s._usb = true;
-  });
-  usb?.on("upgrade", onUpgrade);
-  usb?.on("error", (e) => console.warn(`  USB link unavailable on ${usbPort}: ${e.message}`));
-  usb?.listen(usbPort, "127.0.0.1");
+  const { usbPort } = transport;
 
   wss.on("connection", (ws, req) => {
     if (stopping) return ws.close(stopping.code, stopping.reason);
@@ -1400,7 +1302,7 @@ export function start(config, { onTokenRotated } = {}) {
   // Roadmap 2.1: without TLS the hello (the pairing token) would cross the LAN in cleartext, so a
   // plaintext daemon answers this machine only. It used to bind every interface and rely on the
   // firewall; the loopback bind is the guarantee. iroh carries its own encryption and is untouched.
-  server.listen(port, useTls ? undefined : "127.0.0.1", () => {
+  transport.listen(() => {
     const scheme = useTls ? "wss" : "ws";
     let fp = "";
     if (useTls) {
