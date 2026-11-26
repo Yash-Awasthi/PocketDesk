@@ -400,6 +400,7 @@ transport docs describe a design that has moved.
   verified-here: cd daemon && node --test test/token-rotation.test.mjs -> ALL PASS (17 checks); auth, approvals, absorb, control, features and iroh suites ALL PASS too
 - [x] iroh identity binding: assert the pinned endpoint id is checked, not just the TLS cert. `[D]`
   verified-here: cd daemon && node --test test/devices.unit.test.mjs test/iroh.test.mjs -> ALL PASS (13 device checks incl. a different key refused; iroh e2e 2/2 pass, 0 skipped, real endpoint id)
+  also: the dial layer itself now enforces the saved endpoint id: daemon/src/iroh_link.js passes the pin into IrohClient, which closes 4003 "endpoint id mismatch" instead of opening when the dialled id differs, and test/iroh-pin.unit.test.mjs ("a dial whose pin does not match the endpoint id is closed, never opened") proves it with two local endpoints.
 - [x] TOTP: recovery path, clock-skew tolerance and a test for replay of a used code. `[D]`
   verified-here: cd daemon && node --test test/totp-recovery.unit.test.mjs -> ALL PASS (4 tests); eight hashed recovery codes shown once, one disables two-factor, a spent code is refused; skew accepts one step either side and rejects two; a used code cannot replay; /access/totp/recover returns 400 for an unknown code and 200 once
 - [x] Dependency and native-helper integrity: verify `scrcpy-server` and `adb` downloads against a pinned hash before execution. `[D]`

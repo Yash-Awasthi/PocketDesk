@@ -3,9 +3,7 @@ coverage/
 public/
 clippy/
 package-lock.json
-# Edited by another unit that is still in flight; drop these lines when it lands.
-src/handlers/computers.js
-src/iroh_link.js
+# Edited by another unit that is still in flight; drop this line when it lands.
 src/policy.js
 # Owned by other units in flight; drop these lines once those files are formatted.
 test/desktop_video.test.mjs
