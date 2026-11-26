@@ -40,8 +40,8 @@ useBundledFfmpeg();
 
 // Surviving a stray rejection keeps the unsupervised user daemon alive; uncaughtException is left
 // to crash on purpose so an agent's child processes die with it (see crash-kills-agents test).
-// ponytail: a crash restarts nothing on purpose (no RestartCount on the default task): a stop is a
-// stop. Only an explicit -Protected install keeps a restart policy, like the SYSTEM console task.
+// ponytail: a crash exits non-zero, so the task's failure restart brings it back; a deliberate
+// stop exits 0, so the task does not restart it.
 process.on("unhandledRejection", (e) =>
   console.error(`[warn] unhandled rejection (kept alive): ${e?.stack || e}`),
 );

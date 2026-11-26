@@ -7,6 +7,12 @@ an entry or reuses a build number fails the suite.
 
 Tags before 0.11.0 predate this file.
 
+## Unreleased
+
+### Corrective
+- The default logon task restarts only a failed run; an explicit stop ends the
+  task successfully, so it stays down.
+
 ## 0.11.0
 
 ### Corrective

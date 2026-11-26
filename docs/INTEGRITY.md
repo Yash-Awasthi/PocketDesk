@@ -16,8 +16,9 @@ because three properties stack:
 1. **No tray, no icon, no notice - hidden by design.** As audited, the daemon was installed as a
    *hidden* process: no tray, no window, an elevated Scheduled Task at logon, a protected copy
    under `Program Files`, auto-restart on crash. The W0 work changed the default to an unelevated
-   per-user task with no restart policy, and the owner then ruled the tray out entirely: no tray
-   icon, no window and no logon notice, with the local settings page as the only entry point.
+   per-user task that restarts only a failed run (an explicit stop stays stopped), and the owner
+   then ruled the tray out entirely: no tray icon, no window and no logon notice, with the local
+   settings page as the only entry point.
    What still announces it: the `PocketDesk.exe` process in Task Manager, `pocketdesk --status`
    (elevated, auto-start, restart policy, ports, data folder) and start/stop/policy events in the
    Windows Event Log. Elevation is the explicit `-Protected` option and says so in `--status`.
@@ -189,9 +190,9 @@ But making PocketDesk stop when asked moves it from "defeats the control" to
    `Program Files` admin copy). Keep an explicit `--elevate`/`-Protected`
    install for people who need to drive elevated windows, with a clear warning
    that it makes PocketDesk uncloseable by ordinary apps.
-2. **No silent restart.** If the daemon is stopped or killed, the task does not
-   bring it back inside the session; the next start is a user action and
-   `pocketdesk --status` says so. `RestartCount 3` is removed from the default task.
+2. **No silent restart after a stop.** The default task restarts only a failed run; an
+   explicit stop ends the task successfully, so it stays down and the next start is a
+   user action. `pocketdesk --status` says so.
 3. **Stop means stop.** A `pocketdesk stop` (the same request the installer sends to the
    loopback CLI port) ends the
 4. Add a self-check the machine owner can run before an exam:

@@ -19,7 +19,7 @@ PocketDesk installs no Windows service; autostart is scheduled tasks only.
 
 | Task | Trigger and account | Notes |
 |---|---|---|
-| `PocketDesk` | At logon of the installing user. RunLevel Limited. | Default install. No restart policy, so a stop stays stopped. |
+| `PocketDesk` | At logon of the installing user. RunLevel Limited. | Default install. Restarts only a failed run, so a stop stays stopped. |
 | `PocketDesk` (`-Protected`) | At logon of the installing user. RunLevel Highest. | Re-registers the same task name, not a second task. RestartCount 3, one minute apart, so a failed run is restarted. |
 | `PocketDeskConsole` | At startup, as SYSTEM. RunLevel Highest. | Only with `-Console`. RestartCount 3, one minute apart. Runs `PocketDeskConsole.exe` on port 8766. |
 

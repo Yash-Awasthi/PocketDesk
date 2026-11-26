@@ -9,7 +9,7 @@ try {
     $cfg = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json
     if ($cfg.port) { $port = [int]$cfg.port }
 } catch {}
-# Delete the autostart task before killing the daemon: a -Protected install's task has RestartCount,
+# Delete the autostart task before killing the daemon: the task has RestartCount,
 # so ending it without deleting it would let it respawn mid-uninstall.
 try { schtasks /End /TN "PocketDesk" 2>$null | Out-Null } catch {}
 try { schtasks /Delete /F /TN "PocketDesk" 2>$null | Out-Null } catch {}
