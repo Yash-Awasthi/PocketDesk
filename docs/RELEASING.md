@@ -26,6 +26,27 @@ as `versionName`, and the native workspace takes its version from
 6. Commit, tag `vX.Y.Z`, and build every artifact (daemon, APK, native helpers)
    from that tag. A tag must never point at a tree whose `VERSION` differs.
 
+## Source offer (GPL-3.0-or-later)
+
+PocketDesk is distributed under the GNU GPL, version 3 or later, so every binary
+it publishes carries its corresponding source. The offer is the tag itself:
+
+- Every artefact of a release (daemon, APK, native helpers, checksums) is built
+  from the tag `vX.Y.Z`, and nothing is published from a working tree that
+  differs from that tag.
+- The corresponding source is the tree that tag names, at
+  `https://github.com/Yash-Awasthi/PocketDesk/archive/refs/tags/vX.Y.Z.tar.gz`,
+  and the release notes link it next to each binary.
+- A downstream build that patches the tag publishes the patch as a further tag
+  and links that tag's archive with the binary. A binary whose source is not
+  reachable this way is not a release.
+- `LICENSE` (GPL-3.0) and `NOTICE` (copyright, adapted projects, bundled
+  components) travel with the source and the binaries; the per-dependency
+  inventory is `docs/LICENCES.md`.
+- The release check in step 5 fails when `VERSION`, `versionName` and the
+  native workspace version disagree, so a mis-tagged source cannot be published
+  beside a binary.
+
 `daemon/package.json` is private npm tooling metadata (`"private": true`) and is
 never published to a registry, so its `version` field is not the product
 version. The shipped daemon version is `VERSION`, printed by
