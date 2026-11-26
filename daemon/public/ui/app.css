@@ -40,6 +40,7 @@
   --radius-pill: 999px;
   /* motion */
   --motion-slow: 400ms;
+  --motion-none: 0s;
   /* colour */
   --bg: #f4f5f7;
   --panel: #ffffff;
@@ -75,6 +76,11 @@
 * { box-sizing: border-box; }
 html, body { margin: 0;height: 100%;background: var(--bg);color: var(--text);font: var(--text-4)/1.4 system-ui, "Segoe UI", sans-serif; }
 button, select, input, textarea { font: inherit;color: var(--text); }
+/* The OS setting for less motion wins over every transition and animation in the hub. The toast
+   fade is the only one today; a new one inherits this without touching the media query. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: var(--motion-none) !important;transition-duration: var(--motion-none) !important; }
+}
 /* Every control reaches 44 CSS px on both axes, which is 44 dp at 1x. */
 button, select, textarea, input:not([type="checkbox"]):not([type="radio"]) { min-height: var(--space-22); }
 button { min-width: var(--space-22); }
