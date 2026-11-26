@@ -43,40 +43,44 @@ export function ffmpegPath() {
 
 /** Capture a single frame via ffmpeg + DXGI Desktop Duplication (ddagrab).
  *  Captures exclusive fullscreen game surfaces that GDI CopyFromScreen cannot see.
- *  Returns { ok, b64, width, height } or { ok: false, error }. */
-export async function captureFrameDXGI(quality = 60) {
-  const ffmpeg = ffmpegPath();
+ *  Returns { ok, b64, width, height } or { ok: false, error }.
+ *
+ *  ddagrab is a filter, not an input device: `-f ddagrab -i desktop` is rejected
+ *  with "Unknown input format", so the frame never existed and this route always
+ *  reported failure. The filter form below is the one the streaming path uses. */
+/** The ffmpeg argv for one DXGI snapshot frame. Exported so the shape can be
+ *  asserted without launching ffmpeg; the form is easy to get wrong and was. */
+export function dxgiArgs(quality = 60, output = 0) {
   // MJPEG quality: -qscale:v 1..31, lower = better. Map our 0-100 quality to that range.
   const qscale = Math.round(31 - (Math.min(95, Math.max(10, quality)) / 100) * 30);
+  // dup_frames=1: a still screen otherwise yields no frame at all and the pipe closes empty.
+  const graph = `ddagrab=output_idx=${output}:framerate=1:dup_frames=1:draw_mouse=0,hwdownload,format=bgra`;
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-filter_complex",
+    graph,
+    "-frames:v",
+    "1",
+    "-f",
+    "image2pipe",
+    "-vcodec",
+    "mjpeg",
+    "-qscale:v",
+    String(qscale),
+    "-",
+  ];
+}
+
+export async function captureFrameDXGI(quality = 60, output = 0) {
+  const ffmpeg = ffmpegPath();
 
   return new Promise((resolve) => {
     let stdout = Buffer.alloc(0);
     let stderr = "";
     let resolved = false;
-    const child = spawn(
-      ffmpeg,
-      [
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-f",
-        "ddagrab",
-        "-framerate",
-        "1",
-        "-i",
-        "desktop",
-        "-frames:v",
-        "1",
-        "-f",
-        "image2pipe",
-        "-vcodec",
-        "mjpeg",
-        "-qscale:v",
-        String(qscale),
-        "-",
-      ],
-      { windowsHide: true },
-    );
+    const child = spawn(ffmpeg, dxgiArgs(quality, output), { windowsHide: true });
 
     const finish = (ok, error, b64, width, height) => {
       if (resolved) return;
