@@ -335,6 +335,17 @@ export function start(config, { onTokenRotated } = {}) {
       );
       return;
     }
+    // The service worker must sit at the root to control the whole page, and the plain-HTTP LAN
+    // page needs it too, so this is a plain GET with no loopback or token requirement.
+    if (req.url === "/sw.js") {
+      res.writeHead(200, {
+        "content-type": "text/javascript",
+        "cache-control": "no-cache",
+        "service-worker-allowed": "/",
+      });
+      res.end(fs.readFileSync(path.join(publicDir, "sw.js")));
+      return;
+    }
     // The launcher's check before it hands the token to a plain-HTTP page: only the daemon can sign its nonce.
     if (req.url.startsWith("/prove?") && loopback) {
       const n = new URL(req.url, "http://x").searchParams.get("n") || "";

@@ -345,7 +345,8 @@ transport docs describe a design that has moved.
   verified-here: cd daemon && node --test test/running.test.mjs -> ALL PASS, 19 checks (daemon version, four ports, live session list, stream counts, policy flags); POST-proof fetch /ui/running.js -> 200 and index.html loads it; gen-protocol-doc --check -> current
 - [x] One-click diagnostic bundle (logs + status + versions, no secrets) for support. `[W]`
   verified-here: cd daemon && node --test test/diagnostic.test.mjs -> ALL PASS, 34 checks (redaction by key and value, log tail, live bundle over the socket with no token or password in it); gen-protocol-doc --check -> current
-- [ ] PWA install for the hub with an offline shell for read-only pages. `[W]`
+- [x] PWA install for the hub with an offline shell for read-only pages. `[W]`
+  verified-here: cd daemon && node --test test/pwa.test.mjs -> ALL PASS, 16 checks (install caches the shell with the token and QR metas stripped, navigation falls back to it offline, /sw.js served at root scope with Service-Worker-Allowed, page registers it)
 
 ### M4.4 Transport and reach
 
