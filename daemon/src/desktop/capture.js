@@ -10,7 +10,8 @@ import { configDir } from "../config.js";
 import { LinuxDesktop, IS_LINUX } from "../linux_desktop.js";
 import { WaylandDesktop, IS_WAYLAND } from "../wayland_desktop.js";
 import { InputController, inputError } from "./input.js";
-import { clampQuality, captureFrameDXGI, parseRate } from "./encode.js";
+import { clampQuality, captureFrameDXGI, dxgiArgs, ffmpegPath, parseRate } from "./encode.js";
+import { orderFor, describeModes, classifyCause, verdict } from "./capture_modes.js";
 import { macMonitors } from "./topology.js";
 // Helper scripts live in the private config dir: in a shared temp dir another user could
 // swap one in before it runs, as SYSTEM for the console endpoint.
@@ -63,6 +64,59 @@ function wireLine(obj) {
       (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
     ) + "\n"
   );
+}
+
+/** One raw BGRA frame from a DXGI output, cropped to the window rectangle. */
+function captureFrameDXGIRaw(output, crop) {
+  const args = dxgiArgs(60, output);
+  const gi = args.indexOf("-filter_complex");
+  if (gi >= 0) args[gi + 1] += `,crop=${crop.w}:${crop.h}:${crop.x}:${crop.y}`;
+  const fi = args.indexOf("-f");
+  const argv = fi >= 0 ? [...args.slice(0, fi), "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"] : args;
+  return new Promise((resolve) => {
+    let out = Buffer.alloc(0);
+    let stderr = "";
+    let done = false;
+    const child = spawn(ffmpegPath(), argv, { windowsHide: true });
+    const finish = (r) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try {
+        child.kill("SIGKILL");
+      } catch {}
+      resolve(r);
+    };
+    const timer = setTimeout(() => finish({ ok: false, error: "ffmpeg_timeout" }), 10000);
+    child.stdout.on("data", (d) => (out = Buffer.concat([out, d])));
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+    child.on("error", (e) => finish({ ok: false, error: e.message }));
+    child.on("close", (code) => {
+      if (code !== 0 || out.length < crop.w * crop.h * 4)
+        return finish({ ok: false, error: stderr.trim() || `ffmpeg exited ${code}` });
+      finish({ ok: true, frame: out });
+    });
+  });
+}
+
+/** Distinct colours (cap 50000) and mean luminance on every 2nd pixel, as the helper counts. */
+function measureBgra(buf, w, h) {
+  const seen = new Set();
+  let sum = 0;
+  let n = 0;
+  for (let y = 0; y < h; y++) {
+    const row = y * w * 4;
+    for (let x = 0; x < w; x += 2) {
+      const i = row + x * 4;
+      const b = buf[i];
+      const g = buf[i + 1];
+      const r = buf[i + 2];
+      if (seen.size < 50000) seen.add((r << 16) | (g << 8) | b);
+      sum += (r * 299 + g * 587 + b * 114) / 1000;
+      n++;
+    }
+  }
+  return { colours: seen.size, luminance: n ? sum / n : 0 };
 }
 
 const COMMON_PRELUDE = `
@@ -259,6 +313,12 @@ using System.Runtime.InteropServices;
 using System.Collections.Generic;
 public static class RHD {
   [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+  /** Real pixels on every monitor: a system-aware process gets virtualised coords on other-DPI screens. */
+  public static void DpiAware() {
+    try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return; } catch { }
+    SetProcessDPIAware();
+  }
   [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
   public struct OUTPUT_DESC { [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string Name; public int L, T, R, B, Attached, Rotation; public IntPtr Monitor; }
   // Slots before the first real method are IDXGIObject's, never called.
@@ -313,6 +373,311 @@ public static class RHD {
       sb.ToString(),
     };
   }
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr p);
+  [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr h, IntPtr dc, uint flags);
+  [DllImport("user32.dll")] static extern IntPtr GetWindowDC(IntPtr h);
+  [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr h, IntPtr dc);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleBitmap(IntPtr dc, int w, int h);
+  [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
+  [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr d, int x, int y, int w, int h, IntPtr s, int sx, int sy, int rop);
+  [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
+  [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+  [DllImport("gdi32.dll")] static extern int GetDIBits(IntPtr dc, IntPtr bmp, uint start, uint lines, byte[] bits, ref BMI bi, uint usage);
+  delegate bool EnumProc(IntPtr h, IntPtr p);
+  [StructLayout(LayoutKind.Sequential)] public struct BIH { public uint size; public int width, height; public ushort planes, bits; public uint compression, image; public int xppm, yppm; public uint used, important; }
+  [StructLayout(LayoutKind.Sequential)] public struct BMI { public BIH h; public uint colors; }
+
+  /** One-line JSON text: quotes and backslashes escaped, control characters flattened. */
+  public static string Esc(string s) {
+    if (s == null) return "";
+    StringBuilder b = new StringBuilder(s.Length + 8);
+    foreach (char c in s) {
+      if (c == '"' || c == (char)92) { b.Append((char)92); b.Append(c); }
+      else if (c < 32) b.Append(' ');
+      else b.Append(c);
+    }
+    return b.ToString();
+  }
+  static string K(string k) { return '"' + k + '"' + ':'; }
+  static string Num(double v) { return v.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture); }
+  static string Aff(uint a) {
+    if (a == 0) return "none (0)";
+    if (a == 1) return "monitor (1)";
+    if (a == 0x11) return "excluded (17)";
+    return "0x" + a.ToString("X");
+  }
+
+  /** The shape every window entry carries; titles are clipped to 80 characters. */
+  static string WinJson(IntPtr h) {
+    StringBuilder t = new StringBuilder(512);
+    GetWindowText(h, t, t.Capacity);
+    string title = t.ToString();
+    if (title.Length > 80) title = title.Substring(0, 80);
+    StringBuilder c = new StringBuilder(256);
+    GetClassName(h, c, c.Capacity);
+    uint pid = 0;
+    GetWindowThreadProcessId(h, out pid);
+    string proc = "?";
+    try { proc = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch { }
+    WRECT r = new WRECT();
+    if (!GetWindowRect(h, out r)) { r.L = 0; r.T = 0; r.R = 0; r.B = 0; }
+    uint a = 0;
+    GetWindowDisplayAffinity(h, out a);
+    StringBuilder b = new StringBuilder(256);
+    b.Append('{');
+    b.Append(K("hwnd")).Append(h.ToInt64());
+    b.Append(',').Append(K("title")).Append('"').Append(Esc(title)).Append('"');
+    b.Append(',').Append(K("pid")).Append(pid);
+    b.Append(',').Append(K("process")).Append('"').Append(Esc(proc)).Append('"');
+    b.Append(',').Append(K("class")).Append('"').Append(Esc(c.ToString())).Append('"');
+    b.Append(',').Append(K("affinity")).Append('"').Append(Esc(Aff(a))).Append('"');
+    b.Append(',').Append(K("w")).Append(r.R - r.L);
+    b.Append(',').Append(K("h")).Append(r.B - r.T);
+    b.Append(',').Append(K("x")).Append(r.L);
+    b.Append(',').Append(K("y")).Append(r.T);
+    b.Append('}');
+    return b.ToString();
+  }
+
+  /** Pixels of a window (PrintWindow) or of the desktop under the same rect, top-down 32bpp. */
+  static byte[] Grab(IntPtr hwnd, int x, int y, int w, int h, bool print, out bool ok) {
+    ok = false;
+    IntPtr src = print ? GetWindowDC(hwnd) : GetWindowDC(IntPtr.Zero);
+    if (src == IntPtr.Zero) return null;
+    IntPtr mem = CreateCompatibleDC(src);
+    IntPtr bmp = CreateCompatibleBitmap(src, w, h);
+    IntPtr old = SelectObject(mem, bmp);
+    try {
+      if (print) ok = PrintWindow(hwnd, mem, 2);
+      else ok = BitBlt(mem, 0, 0, w, h, src, x, y, 0x00CC0020);
+      SelectObject(mem, old);
+      BMI bi = new BMI();
+      bi.h.size = (uint)Marshal.SizeOf(typeof(BIH));
+      bi.h.width = w;
+      bi.h.height = -h;
+      bi.h.planes = 1;
+      bi.h.bits = 32;
+      byte[] buf = new byte[w * h * 4];
+      int got = GetDIBits(mem, bmp, 0, (uint)h, buf, ref bi, 0);
+      return got == h ? buf : null;
+    } finally {
+      DeleteObject(bmp);
+      DeleteDC(mem);
+      ReleaseDC(print ? hwnd : IntPtr.Zero, src);
+    }
+  }
+
+  /** Every 2nd pixel: distinct colours capped at 50000, mean luminance on the 299/587/114 weights. */
+  static void Count(byte[] buf, int w, int h, out int colours, out double luminance) {
+    HashSet<int> seen = new HashSet<int>();
+    long sum = 0, n = 0;
+    for (int y = 0; y < h; y++) {
+      int row = y * w * 4;
+      for (int x = 0; x < w; x += 2) {
+        int i = row + x * 4;
+        int b = buf[i], g = buf[i + 1], r = buf[i + 2];
+        if (seen.Count < 50000) seen.Add((r << 16) | (g << 8) | b);
+        sum += (r * 299 + g * 587 + b * 114) / 1000;
+        n++;
+      }
+    }
+    colours = seen.Count;
+    luminance = n == 0 ? 0 : (double)sum / n;
+  }
+
+  /** Percent of sampled pixels that differ by more than 24 summed channels, as the probe measured it. */
+  static double Diff(byte[] a, byte[] b, int w, int h, int inset = 0) {
+    long differ = 0, total = 0;
+    for (int y = inset; y < h - inset; y++) {
+      int row = y * w * 4;
+      for (int x = inset; x < w - inset; x += 2) {
+        int i = row + x * 4;
+        int d = Math.Abs(a[i] - b[i]) + Math.Abs(a[i + 1] - b[i + 1]) + Math.Abs(a[i + 2] - b[i + 2]);
+        if (d > 24) differ++;
+        total++;
+      }
+    }
+    return total == 0 ? 0 : 100.0 * differ / total;
+  }
+
+  static string RoutesJson(IntPtr hwnd, int x, int y, int w, int h) {
+    bool pok, sok;
+    byte[] pb = Grab(hwnd, 0, 0, w, h, true, out pok);
+    byte[] sb = Grab(hwnd, x, y, w, h, false, out sok);
+    if (pb == null || sb == null) return "null";
+    int pc, sc;
+    double pl, sl;
+    Count(pb, w, h, out pc, out pl);
+    Count(sb, w, h, out sc, out sl);
+    string verdict = pc <= 2 ? "blocked" : Diff(pb, sb, w, h) < 0.5 ? "identical_to_desktop" : "usable";
+    StringBuilder b = new StringBuilder(256);
+    b.Append('{').Append(K("printwindow")).Append('{');
+    b.Append(K("ok")).Append(pok ? "true" : "false");
+    b.Append(',').Append(K("colours")).Append(pc);
+    b.Append(',').Append(K("luminance")).Append(Num(pl));
+    b.Append(',').Append(K("verdict")).Append('"').Append(verdict).Append('"');
+    b.Append('}');
+    b.Append(',').Append(K("screen")).Append('{');
+    b.Append(K("ok")).Append(sok ? "true" : "false");
+    b.Append(',').Append(K("colours")).Append(sc);
+    b.Append(',').Append(K("luminance")).Append(Num(sl));
+    b.Append('}').Append('}');
+    return b.ToString();
+  }
+
+  static string JsonError(string cause, string detail) {
+    StringBuilder b = new StringBuilder(128);
+    b.Append('{').Append(K("ok")).Append("false");
+    b.Append(',').Append(K("cause")).Append('"').Append(Esc(cause)).Append('"');
+    if (detail != null && detail.Length > 0) b.Append(',').Append(K("detail")).Append('"').Append(Esc(detail)).Append('"');
+    b.Append('}');
+    return b.ToString();
+  }
+  static string Pct(double v) { return v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture); }
+
+  /** One route, one window: colours and mean luminance. mode is printwindow or screen. */
+  public static string ShotJson(string mode, long hwndValue) {
+    IntPtr h = new IntPtr(hwndValue);
+    if (h == IntPtr.Zero) return JsonError("no_window", "");
+    WRECT r = new WRECT();
+    if (!GetWindowRect(h, out r) || r.R <= r.L || r.B <= r.T) return JsonError("no_window", "");
+    int w = r.R - r.L, hh = r.B - r.T;
+    bool ok;
+    byte[] buf = Grab(h, r.L, r.T, w, hh, mode == "printwindow", out ok);
+    if (buf == null) return JsonError("capture_empty", "");
+    int colours; double lum;
+    Count(buf, w, hh, out colours, out lum);
+    StringBuilder b = new StringBuilder(256);
+    b.Append('{').Append(K("ok")).Append("true");
+    b.Append(',').Append(K("mode")).Append('"').Append(Esc(mode)).Append('"');
+    b.Append(',').Append(K("w")).Append(w);
+    b.Append(',').Append(K("h")).Append(hh);
+    b.Append(',').Append(K("colours")).Append(colours);
+    b.Append(',').Append(K("luminance")).Append(Num(lum));
+    b.Append(',').Append(K("uniform")).Append(colours <= 2 ? "true" : "false");
+    b.Append('}');
+    return b.ToString();
+  }
+
+  /** control/gate/reverse on the screen route against the gated PrintWindow render; leaves the gate off. */
+  public static string CheckJson(long hwndValue) {
+    IntPtr h = new IntPtr(hwndValue);
+    if (h == IntPtr.Zero) return JsonError("no_window", "");
+    WRECT r = new WRECT();
+    if (!GetWindowRect(h, out r) || r.R <= r.L || r.B <= r.T) return JsonError("no_window", "");
+    int w = r.R - r.L, hh = r.B - r.T;
+    string err = "";
+    bool on = false;
+    try {
+      if (!RHGate.Ensure(hwndValue, true, out err)) return JsonError(CauseFor(err), err);
+      on = true;
+      System.Threading.Thread.Sleep(120);
+      bool rok;
+      byte[] reference = Grab(h, 0, 0, w, hh, true, out rok);
+      if (reference == null) return JsonError("exclusive_fullscreen", "PrintWindow returned nothing");
+      int rc; double rl;
+      Count(reference, w, hh, out rc, out rl);
+      if (rc <= 2) return JsonError("exclusive_fullscreen", "PrintWindow is still uniform with the gate on");
+      bool rok2;
+      byte[] again = Grab(h, 0, 0, w, hh, true, out rok2);
+      if (again == null || Diff(reference, again, w, hh, 12) > 0.5)
+        return JsonError("window_moving", "the window redrew between frames; pause it and run the check again");
+      if (!RHGate.Ensure(hwndValue, false, out err)) return JsonError(CauseFor(err), err);
+      on = false;
+      System.Threading.Thread.Sleep(120);
+      bool cok;
+      byte[] control = Grab(h, r.L, r.T, w, hh, false, out cok);
+      if (!RHGate.Ensure(hwndValue, true, out err)) return JsonError(CauseFor(err), err);
+      on = true;
+      System.Threading.Thread.Sleep(120);
+      bool gok;
+      byte[] gated = Grab(h, r.L, r.T, w, hh, false, out gok);
+      if (!RHGate.Ensure(hwndValue, false, out err)) return JsonError(CauseFor(err), err);
+      on = false;
+      System.Threading.Thread.Sleep(120);
+      bool vok;
+      byte[] reverse = Grab(h, r.L, r.T, w, hh, false, out vok);
+      if (control == null || gated == null || reverse == null) return JsonError("capture_empty", "");
+      int cc, gc, vc; double cl, gl, vl;
+      Count(control, w, hh, out cc, out cl);
+      Count(gated, w, hh, out gc, out gl);
+      Count(reverse, w, hh, out vc, out vl);
+      double controlPct = Diff(control, reference, w, hh, 12);
+      double gatedPct = Diff(gated, reference, w, hh, 12);
+      double reversePct = Diff(reverse, reference, w, hh, 12);
+      StringBuilder b = new StringBuilder(320);
+      b.Append('{').Append(K("ok")).Append("true");
+      b.Append(',').Append(K("route")).Append('"').Append("screen").Append('"');
+      b.Append(',').Append(K("reference")).Append('"').Append("printwindow").Append('"');
+      b.Append(',').Append(K("w")).Append(w);
+      b.Append(',').Append(K("h")).Append(hh);
+      b.Append(',').Append(K("controlPct")).Append(Pct(controlPct));
+      b.Append(',').Append(K("gatedPct")).Append(Pct(gatedPct));
+      b.Append(',').Append(K("reversePct")).Append(Pct(reversePct));
+      b.Append(',').Append(K("controlColours")).Append(cc);
+      b.Append(',').Append(K("gatedColours")).Append(gc);
+      b.Append(',').Append(K("reverseColours")).Append(vc);
+      b.Append('}');
+      return b.ToString();
+    } finally {
+      if (on) { string ignored; RHGate.Ensure(hwndValue, false, out ignored); }
+    }
+  }
+
+  static string CauseFor(string err) {
+    if (err == null) return "unknown";
+    if (err.IndexOf("win32=5") >= 0) return "needs_elevation";
+    if (err.IndexOf("open_process") >= 0) return "protected_process";
+    if (err.IndexOf("target_is_32bit") >= 0 || err.IndexOf("helper_not_64bit") >= 0) return "architecture_mismatch";
+    if (err.IndexOf("prologue_not_indirect_jump") >= 0 || err.IndexOf("export_missing") >= 0) return "unsupported_export";
+    if (err.IndexOf("no_window") >= 0 || err.IndexOf("no_target_process") >= 0) return "no_window";
+    return "unknown";
+  }
+  /** What this PC offers right now: windows, foreground, fullscreen state and which route reads it. */
+  public static string ProbeJson() {
+    List<string> wins = new List<string>();
+    EnumWindows(delegate(IntPtr h, IntPtr p) {
+      if (wins.Count >= 60) return false;
+      try {
+        if (!IsWindowVisible(h)) return true;
+        StringBuilder t = new StringBuilder(512);
+        if (GetWindowText(h, t, t.Capacity) <= 0) return true;
+        wins.Add(WinJson(h));
+      } catch { }
+      return true;
+    }, IntPtr.Zero);
+
+    StringBuilder b = new StringBuilder(8192);
+    b.Append('{').Append(K("windows")).Append('[').Append(string.Join(",", wins)).Append(']');
+
+    IntPtr fg = GetForegroundWindow();
+    string fgj = "null";
+    if (fg != IntPtr.Zero) {
+      try { fgj = WinJson(fg); } catch { fgj = "null"; }
+    }
+    b.Append(',').Append(K("foreground")).Append(fgj);
+
+    string[] f = Fullscreen();
+    b.Append(',').Append(K("fullscreen")).Append('{');
+    b.Append(K("d3d")).Append(f[1] == "true" ? "true" : "false");
+    b.Append(',').Append(K("state")).Append(f[0]);
+    b.Append(',').Append(K("pid")).Append(f[2]);
+    b.Append(',').Append(K("title")).Append('"').Append(Esc(f[5])).Append('"');
+    b.Append('}');
+
+    string routes = "null";
+    if (fg != IntPtr.Zero) {
+      WRECT r = new WRECT();
+      if (GetWindowRect(fg, out r) && r.R > r.L && r.B > r.T) {
+        try { routes = RoutesJson(fg, r.L, r.T, r.R - r.L, r.B - r.T); } catch { routes = "null"; }
+      }
+    }
+    b.Append(',').Append(K("routes")).Append(routes).Append('}');
+    return b.ToString();
+  }
   /** Outputs in the adapter/output order ffmpeg's ddagrab uses, as JSON objects. */
   public static string Monitors() {
     var g = typeof(IFactory).GUID; IFactory f;
@@ -330,8 +695,267 @@ public static class RHD {
     return string.Join(",", list);
   }${DESK_MEMBERS}
 }
+public static class RHGate {
+  const uint PROCESS_CREATE_THREAD = 0x0002, PROCESS_VM_OPERATION = 0x0008;
+  const uint PROCESS_VM_WRITE = 0x0020, PROCESS_VM_READ = 0x0010, PROCESS_QUERY_INFORMATION = 0x0400;
+  const uint MEM_COMMIT_RESERVE = 0x3000, MEM_RELEASE = 0x8000;
+  const uint PAGE_EXECUTE_READWRITE = 0x40, PAGE_READWRITE = 0x04;
+  const int STUB_AT = 0x000, ORIGINAL_AT = 0x100, SWITCH_AT = 0x110, PAGE_SIZE = 0x1000;
+
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint a, bool inherit, uint pid);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr VirtualAllocEx(IntPtr p, IntPtr at, UIntPtr n, uint type, uint prot);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool VirtualFreeEx(IntPtr p, IntPtr at, UIntPtr n, uint type);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool VirtualProtectEx(IntPtr p, IntPtr at, UIntPtr n, uint prot, out uint old);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool WriteProcessMemory(IntPtr p, IntPtr at, byte[] b, UIntPtr n, out UIntPtr written);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool ReadProcessMemory(IntPtr p, IntPtr at, byte[] b, UIntPtr n, out UIntPtr read);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateRemoteThread(IntPtr p, IntPtr attrs, UIntPtr stack, IntPtr start, IntPtr param, uint flags, out uint id);
+  [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr h, uint ms);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool CloseHandle(IntPtr h);
+  [DllImport("kernel32.dll")] static extern IntPtr GetModuleHandle(string name);
+  [DllImport("kernel32.dll", CharSet = CharSet.Ansi)] static extern IntPtr GetProcAddress(IntPtr module, string name);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool IsWow64Process(IntPtr p, out bool wow);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  [DllImport("user32.dll")] static extern bool GetWindowDisplayAffinity(IntPtr h, out uint a);
+  [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+  delegate bool GateProc(IntPtr h, IntPtr p);
+  [DllImport("user32.dll")] static extern bool EnumWindows(GateProc cb, IntPtr p);
+
+  static string Q(string s) { return '"' + RHD.Esc(s) + '"'; }
+  static string Fail(string error, int win32, string note) {
+    return "{" + Q("ok") + ":false" + "," + Q("error") + ":" + Q(error) +
+           "," + Q("win32") + ":" + win32 + "," + Q("note") + ":" + Q(note) + "}";
+  }
+  static string OkJson(bool hasBefore, uint before, bool hasAfter, uint after, bool gated, IntPtr hwnd, uint pid, string note) {
+    return "{" + Q("ok") + ":true" +
+           "," + Q("affinityBefore") + ":" + (hasBefore ? before.ToString() : "-1") +
+           "," + Q("affinityAfter") + ":" + (hasAfter ? after.ToString() : "-1") +
+           "," + Q("gated") + ":" + (gated ? "true" : "false") +
+           "," + Q("hwnd") + ":" + hwnd.ToInt64() +
+           "," + Q("pid") + ":" + pid +
+           "," + Q("note") + ":" + Q(note) + "}";
+  }
+
+  /** action is on, off or status; hwnd and pid are both optional but one must resolve a process. */
+  public static string Run(string action, long hwndValue, uint pidArg) {
+    if (action == null) action = "";
+    if (action != "on" && action != "off" && action != "status") return Fail("bad_action", 0, "");
+    if (IntPtr.Size != 8) return Fail("helper_not_64bit", 0, "the stub is x64 only");
+    IntPtr hwnd = new IntPtr(hwndValue);
+    uint pid = pidArg;
+    if (hwndValue != 0 && pid == 0) GetWindowThreadProcessId(hwnd, out pid);
+    if (pid == 0) return Fail("no_target_process", 0, "pass hwnd or pid");
+    bool beforeKnown = false;
+    uint before = 0;
+    if (hwndValue != 0) beforeKnown = GetWindowDisplayAffinity(hwnd, out before);
+    if (hwndValue == 0) {
+      hwnd = FindWindow(pid);
+      if (hwnd != IntPtr.Zero) beforeKnown = GetWindowDisplayAffinity(hwnd, out before);
+    }
+    IntPtr p = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, false, pid);
+    if (p == IntPtr.Zero) {
+      int e = Marshal.GetLastWin32Error();
+      string note = e == 5 ? "the target is elevated or owned by another user; this caller cannot open it" : "";
+      return Fail(e == 5 ? "open_process_denied" : "open_process", e, note);
+    }
+    try { return Step(action, p, hwnd, pid, beforeKnown, before); }
+    catch (Exception ex) { return Fail(ex.GetType().Name, 0, ""); }
+    finally { CloseHandle(p); }
+  }
+
+  static string Step(string action, IntPtr p, IntPtr hwnd, uint pid, bool beforeKnown, uint before) {
+    bool wow = false;
+    if (IsWow64Process(p, out wow) && wow) return Fail("target_is_32bit", 0, "this helper is x64; a 32-bit target needs the x86 stub");
+    IntPtr export = GetProcAddress(GetModuleHandle("user32.dll"), "SetWindowDisplayAffinity");
+    if (export == IntPtr.Zero) return Fail("export_missing", 0, "");
+    byte[] head = new byte[6];
+    UIntPtr got;
+    if (!ReadProcessMemory(p, export, head, (UIntPtr)6, out got) || (int)got != 6)
+      return Fail("prologue_unreadable", Marshal.GetLastWin32Error(), "");
+    if (head[0] != 0xFF || head[1] != 0x25) return Fail("prologue_not_indirect_jump", 0, "");
+    IntPtr slot = new IntPtr(export.ToInt64() + 6 + BitConverter.ToInt32(head, 2));
+    if ((slot.ToInt64() & 7) != 0) return Fail("slot_not_aligned", 0, "refusing a non-atomic pointer write");
+    byte[] ptr = new byte[8];
+    if (!ReadProcessMemory(p, slot, ptr, (UIntPtr)8, out got) || (int)got != 8)
+      return Fail("slot_unreadable", Marshal.GetLastWin32Error(), "");
+    long current = BitConverter.ToInt64(ptr, 0);
+    bool ours = current != 0 && current != export.ToInt64() && LooksLikeStub(p, current);
+
+    if (action == "status") {
+      bool on = false;
+      if (ours) {
+        byte[] swb = new byte[1];
+        if (ReadProcessMemory(p, new IntPtr(current + SWITCH_AT), swb, (UIntPtr)1, out got) && (int)got == 1) on = swb[0] == 1;
+      }
+      return OkJson(beforeKnown, before, beforeKnown, before, on, hwnd, pid, ours ? (on ? "gate_on" : "gate_off") : "nothing_to_turn_off");
+    }
+
+    if (action == "off") {
+      if (!ours) return Fail("no_gate", 0, "nothing to turn off");
+      if (!WriteBytes(p, new IntPtr(current + SWITCH_AT), new byte[] { 0 })) return Fail("switch_write", Marshal.GetLastWin32Error(), "");
+      byte[] rb = new byte[1];
+      ReadProcessMemory(p, new IntPtr(current + SWITCH_AT), rb, (UIntPtr)1, out got);
+      if (rb[0] != 0) return Fail("switch_readback", 0, "");
+      uint after = 0;
+      bool afterKnown = hwnd != IntPtr.Zero && GetWindowDisplayAffinity(hwnd, out after);
+      return OkJson(beforeKnown, before, afterKnown, after, false, hwnd, pid, "switch_off");
+    }
+
+    if (hwnd == IntPtr.Zero) return Fail("no_window", 0, "the process has no visible window to clear");
+    if (ours) {
+      // Already gated: find the existing page from the slot and flip the switch back, then clear once.
+      if (!WriteBytes(p, new IntPtr(current + SWITCH_AT), new byte[] { 1 })) return Fail("switch_write", Marshal.GetLastWin32Error(), "");
+      byte[] saved = new byte[8];
+      if (!ReadProcessMemory(p, new IntPtr(current + ORIGINAL_AT), saved, (UIntPtr)8, out got) || (int)got != 8)
+        return Fail("original_unreadable", Marshal.GetLastWin32Error(), "");
+      string t = Clear(p, hwnd, BitConverter.ToInt64(saved, 0));
+      if (t != "") return Fail(t, 0, "");
+      uint now = 0;
+      bool nowKnown = GetWindowDisplayAffinity(hwnd, out now);
+      if (nowKnown && now != 0) return Fail("clear_failed", 0, "the gate is in place but the flag is still set");
+      return OkJson(beforeKnown, before, nowKnown, now, true, hwnd, pid, "gate_was_present");
+    }
+
+    IntPtr page = VirtualAllocEx(p, IntPtr.Zero, (UIntPtr)PAGE_SIZE, MEM_COMMIT_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (page == IntPtr.Zero) return Fail("alloc_page", Marshal.GetLastWin32Error(), "");
+    IntPtr stub = new IntPtr(page.ToInt64() + STUB_AT);
+    IntPtr orig = new IntPtr(page.ToInt64() + ORIGINAL_AT);
+    IntPtr sw = new IntPtr(page.ToInt64() + SWITCH_AT);
+    if (!WriteBytes(p, orig, BitConverter.GetBytes(current)) || !WriteBytes(p, sw, new byte[] { 1 })) {
+      VirtualFreeEx(p, page, UIntPtr.Zero, MEM_RELEASE);
+      return Fail("page_write", Marshal.GetLastWin32Error(), "");
+    }
+    byte[] code = Stub(stub.ToInt64(), sw.ToInt64(), orig.ToInt64());
+    if (code == null) {
+      VirtualFreeEx(p, page, UIntPtr.Zero, MEM_RELEASE);
+      return Fail("stub_range", 0, "the saved pointer is more than 2 GB from the stub");
+    }
+    if (!WriteBytes(p, stub, code) || !WritePointer(p, slot, stub.ToInt64())) {
+      VirtualFreeEx(p, page, UIntPtr.Zero, MEM_RELEASE);
+      return Fail("install", Marshal.GetLastWin32Error(), "");
+    }
+    byte[] verify = new byte[8];
+    ReadProcessMemory(p, slot, verify, (UIntPtr)8, out got);
+    if (BitConverter.ToInt64(verify, 0) != stub.ToInt64()) return Fail("slot_verify", 0, "the write did not take");
+    string err = Clear(p, hwnd, current);
+    if (err != "") return Fail(err, 0, "the gate is in place but the clear thread failed");
+    uint finalAff = 0;
+    bool finalKnown = GetWindowDisplayAffinity(hwnd, out finalAff);
+    if (finalKnown && finalAff != 0) return Fail("clear_failed", 0, "the slot points at the gate but the flag is still set");
+    return OkJson(beforeKnown, before, finalKnown, finalAff, true, hwnd, pid, "gated");
+  }
+
+  /** mov al, byte [switch] / test al, al / jz +6 / mov eax, 1 / ret / jmp qword [original]. */
+  static byte[] Stub(long at, long sw, long originalSlot) {
+    List<byte> c = new List<byte>();
+    c.Add(0xA0);
+    c.AddRange(BitConverter.GetBytes(sw));
+    c.AddRange(new byte[] { 0x84, 0xC0 });
+    c.AddRange(new byte[] { 0x74, 0x06 });
+    c.AddRange(new byte[] { 0xB8, 0x01, 0x00, 0x00, 0x00 });
+    c.Add(0xC3);
+    // The last jump stays rip-relative: the slot sits above 4 GB and a disp32 absolute truncates.
+    c.AddRange(new byte[] { 0xFF, 0x25 });
+    long rel = originalSlot - (at + c.Count + 4);
+    if (rel < int.MinValue || rel > int.MaxValue) return null;
+    c.AddRange(BitConverter.GetBytes((int)rel));
+    return c.ToArray();
+  }
+
+  /** mov rcx, hwnd / mov edx, 0 / mov rax, fn / sub rsp,0x28 / call rax / add rsp,0x28 / ret. */
+  static byte[] CallCode(long hwnd, long fn) {
+    List<byte> c = new List<byte>();
+    c.AddRange(new byte[] { 0x48, 0xB9 });
+    c.AddRange(BitConverter.GetBytes(hwnd));
+    c.AddRange(new byte[] { 0xBA });
+    c.AddRange(BitConverter.GetBytes(0));
+    c.AddRange(new byte[] { 0x48, 0xB8 });
+    c.AddRange(BitConverter.GetBytes(fn));
+    c.AddRange(new byte[] { 0x48, 0x83, 0xEC, 0x28 });
+    c.AddRange(new byte[] { 0xFF, 0xD0 });
+    c.AddRange(new byte[] { 0x48, 0x83, 0xC4, 0x28 });
+    c.Add(0xC3);
+    return c.ToArray();
+  }
+
+  /** Runs the call stub in a remote thread; empty string means it returned. */
+  static string Clear(IntPtr p, IntPtr hwnd, long fn) {
+    byte[] code = CallCode(hwnd.ToInt64(), fn);
+    IntPtr mem = VirtualAllocEx(p, IntPtr.Zero, (UIntPtr)code.Length, MEM_COMMIT_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (mem == IntPtr.Zero) return "alloc_thread_code";
+    if (!WriteBytes(p, mem, code)) {
+      VirtualFreeEx(p, mem, UIntPtr.Zero, MEM_RELEASE);
+      return "thread_code_write";
+    }
+    uint id;
+    IntPtr th = CreateRemoteThread(p, IntPtr.Zero, UIntPtr.Zero, mem, IntPtr.Zero, 0, out id);
+    if (th == IntPtr.Zero) {
+      VirtualFreeEx(p, mem, UIntPtr.Zero, MEM_RELEASE);
+      return "create_thread";
+    }
+    uint waited = WaitForSingleObject(th, 5000);
+    CloseHandle(th);
+    VirtualFreeEx(p, mem, UIntPtr.Zero, MEM_RELEASE);
+    return waited == 0 ? "" : "thread_timeout";
+  }
+
+  static bool LooksLikeStub(IntPtr p, long at) {
+    byte[] head = new byte[1];
+    UIntPtr got;
+    if (!ReadProcessMemory(p, new IntPtr(at), head, (UIntPtr)1, out got) || (int)got != 1) return false;
+    return head[0] == 0xA0;
+  }
+
+  /** Engages or releases the gate for one window; empty error means it worked. */
+  public static bool Ensure(long hwndValue, bool on, out string error) {
+    error = "";
+    if (IntPtr.Size != 8) { error = "helper_not_64bit"; return false; }
+    IntPtr hwnd = new IntPtr(hwndValue);
+    uint pid = 0;
+    if (hwndValue != 0) GetWindowThreadProcessId(hwnd, out pid);
+    if (pid == 0) { error = "no_target_process"; return false; }
+    IntPtr p = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, false, pid);
+    if (p == IntPtr.Zero) { error = "open_process win32=" + Marshal.GetLastWin32Error(); return false; }
+    try {
+      uint before = 0;
+      bool beforeKnown = GetWindowDisplayAffinity(hwnd, out before);
+      string r = Step(on ? "on" : "off", p, hwnd, pid, beforeKnown, before);
+      if (r.IndexOf("\\\"ok\\\":true") < 0) { error = r; return false; }
+      return true;
+    } catch (Exception ex) { error = ex.GetType().Name; return false; }
+    finally { CloseHandle(p); }
+  }
+  static bool WriteBytes(IntPtr p, IntPtr at, byte[] bytes) {
+    UIntPtr written;
+    return WriteProcessMemory(p, at, bytes, (UIntPtr)bytes.Length, out written) && (int)written == bytes.Length;
+  }
+
+  static bool WritePointer(IntPtr p, IntPtr slot, long value) {
+    uint old;
+    if (!VirtualProtectEx(p, slot, (UIntPtr)8, PAGE_READWRITE, out old)) return false;
+    bool ok = WriteBytes(p, slot, BitConverter.GetBytes(value));
+    uint ignored;
+    VirtualProtectEx(p, slot, (UIntPtr)8, old, out ignored);
+    return ok;
+  }
+
+  static IntPtr FindWindow(uint pid) {
+    IntPtr found = IntPtr.Zero;
+    EnumWindows(delegate(IntPtr h, IntPtr x) {
+      if (!IsWindowVisible(h)) return true;
+      uint other;
+      GetWindowThreadProcessId(h, out other);
+      if (other != pid) return true;
+      StringBuilder t = new StringBuilder(256);
+      if (GetWindowText(h, t, t.Capacity) <= 0) return true;
+      found = h;
+      return false;
+    }, IntPtr.Zero);
+    return found;
+  }
+}
 '@
-[RHD]::SetProcessDPIAware() | Out-Null
+[RHD]::DpiAware()
 $stdin = [Console]::In
 while ($true) {
   $line = $stdin.ReadLine()
@@ -353,6 +977,40 @@ while ($true) {
     try {
       $f = [RHD]::Fullscreen()
       [Console]::Out.WriteLine((@{id=$cmd.id; ok=$true; state=[int]$f[0]; d3d=($f[1] -eq 'true'); pid=[int]$f[2]; w=[int]$f[3]; h=[int]$f[4]; title=$f[5]} | ConvertTo-Json -Compress))
+    }
+    catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
+    continue
+  }
+  if ($op -eq 'probe') {
+    try { [Console]::Out.WriteLine(('{"id":' + $cmd.id + ',"ok":true,' + [RHD]::ProbeJson().Substring(1))) }
+    catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
+    continue
+  }
+  if ($op -eq 'gate') {
+    try {
+      $h = [long]0
+      if ($null -ne $cmd.hwnd) { $h = [long]$cmd.hwnd }
+      $tg = [uint32]0
+      if ($null -ne $cmd.pid) { $tg = [uint32]$cmd.pid }
+      [Console]::Out.WriteLine(('{"id":' + $cmd.id + ',' + [RHGate]::Run([string]$cmd.action, $h, $tg).Substring(1)))
+    }
+    catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message; win32=0} | ConvertTo-Json -Compress)) }
+    continue
+  }
+  if ($op -eq 'shot') {
+    try {
+      $h = [long]0
+      if ($null -ne $cmd.hwnd) { $h = [long]$cmd.hwnd }
+      [Console]::Out.WriteLine(('{"id":' + $cmd.id + ',' + [RHD]::ShotJson([string]$cmd.mode, $h).Substring(1)))
+    }
+    catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
+    continue
+  }
+  if ($op -eq 'check') {
+    try {
+      $h = [long]0
+      if ($null -ne $cmd.hwnd) { $h = [long]$cmd.hwnd }
+      [Console]::Out.WriteLine(('{"id":' + $cmd.id + ',' + [RHD]::CheckJson($h).Substring(1)))
     }
     catch { [Console]::Out.WriteLine((@{id=$cmd.id; ok=$false; error=$_.Exception.Message} | ConvertTo-Json -Compress)) }
     continue
@@ -1439,6 +2097,7 @@ export class DesktopController extends InputController {
     this.origin = { x: 0, y: 0 };
     this.monitorList = null;
     this.blocked = ""; // focused window that excludes itself from capture
+    this.captureModeId = "auto"; // rung order the phone asked for
     this.captureAllowed = false;
     this.protectedTimer = null;
   }
@@ -1809,6 +2468,199 @@ export class DesktopController extends InputController {
     return this.helperCapture.cmd({ op: "request" }, 8000);
   }
 
+  /** The window the phone means: an explicit hwnd, else a protected one, else the foreground. */
+  async captureTarget(msg = {}) {
+    if (!IS_WIN) return null;
+    await this.helperCapture.ensure();
+    const probe = await this.helperCapture.cmd({ op: "probe" }, 20000);
+    if (!probe?.ok) return null;
+    const wins = probe.windows || [];
+    if (msg.hwnd) return wins.find((w) => w.hwnd === Number(msg.hwnd)) || null;
+    if (probe.foreground && probe.foreground.affinity !== "none (0)") return probe.foreground;
+    return wins.find((w) => w.affinity !== "none (0)") || probe.foreground || wins[0] || null;
+  }
+
+  /** The monitor holding the window centre, for the DXGI output index and pixel origin. */
+  async monitorFor(win) {
+    try {
+      const r = await this.helperCapture.cmd({ op: "monitors" }, 8000);
+      const list = r?.ok ? r.monitors || [] : [];
+      const cx = win.x + win.w / 2;
+      const cy = win.y + win.h / 2;
+      return (
+        list.find((m) => cx >= m.left && cx < m.left + m.w && cy >= m.top && cy < m.top + m.h) ||
+        list[0] ||
+        null
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /** A DXGI frame cropped to the window rectangle, or null when the output cannot be read. */
+  async dxgiCrop(win) {
+    const mon = await this.monitorFor(win);
+    if (!mon) return null;
+    const x = Math.max(0, win.x - mon.left);
+    const y = Math.max(0, win.y - mon.top);
+    const w = Math.min(win.w, mon.w - x) & ~1;
+    const h = Math.min(win.h, mon.h - y) & ~1;
+    if (w < 2 || h < 2) return null;
+    const r = await captureFrameDXGIRaw(mon.output, { x, y, w, h });
+    return r.ok ? { frame: r.frame, w, h } : null;
+  }
+
+  /** One rung, measured. A uniform frame is a refusal, not a picture. */
+  async shotMode(mode, win) {
+    if (!IS_WIN) return { ok: false, cause: "no_window" };
+    if (!win) return { ok: false, cause: "no_window" };
+    if (mode === "printwindow" || mode === "screen") {
+      const r = await this.helperCapture.cmd({ op: "shot", mode, hwnd: win.hwnd }, 20000);
+      if (!r?.ok) return { ok: false, cause: r?.cause || "capture_empty" };
+      return {
+        ok: r.colours > 2,
+        mode,
+        w: r.w,
+        h: r.h,
+        colours: r.colours,
+        luminance: r.luminance,
+        uniform: !!r.uniform,
+        cause: r.colours > 2 ? "" : "uniform",
+      };
+    }
+    if (mode === "dxgi") {
+      const c = await this.dxgiCrop(win);
+      if (!c) return { ok: false, cause: "exclusive_fullscreen" };
+      const m = measureBgra(c.frame, c.w, c.h);
+      return {
+        ok: m.colours > 2,
+        mode,
+        w: c.w,
+        h: c.h,
+        colours: m.colours,
+        luminance: m.luminance,
+        uniform: m.colours <= 2,
+        cause: m.colours > 2 ? "" : "uniform",
+      };
+    }
+    if (mode === "fullscreen") {
+      const f = await this.fullscreenNow();
+      return {
+        ok: false,
+        mode,
+        cause: f?.d3d ? "exclusive_fullscreen" : "no_window",
+        d3d: !!f?.d3d,
+      };
+    }
+    return { ok: false, cause: "unknown" };
+  }
+
+  /** The phone's list/set: no mode lists the rungs, a mode walks the ladder and remembers the pick. */
+  async captureMode(msg = {}) {
+    if (!IS_WIN) return { type: "desktop_capture", ok: false, error: "unsupported_platform" };
+    const requested = msg.mode ? String(msg.mode) : "";
+    if (!requested)
+      return {
+        type: "desktop_capture",
+        ok: true,
+        current: this.captureModeId,
+        modes: describeModes(this.captureModeId),
+      };
+    let order;
+    try {
+      order = orderFor(requested);
+    } catch (e) {
+      return {
+        type: "desktop_capture",
+        ok: false,
+        error: "unknown_mode",
+        mode: requested,
+        cause: classifyCause("unknown", e.message),
+      };
+    }
+    const win = await this.captureTarget(msg);
+    if (!win)
+      return {
+        type: "desktop_capture",
+        ok: false,
+        error: "no_window",
+        mode: requested,
+        attempts: [],
+        cause: classifyCause("no_window"),
+      };
+    const attempts = [];
+    for (const mode of order) {
+      const r = await this.shotMode(mode, win);
+      attempts.push({ mode, ok: r.ok, why: r.ok ? "readable" : r.cause || "failed" });
+      if (r.ok) {
+        this.captureModeId = requested;
+        return {
+          type: "desktop_capture",
+          ok: true,
+          mode,
+          requested,
+          current: this.captureModeId,
+          window: { hwnd: win.hwnd, title: win.title, pid: win.pid },
+          frame: { w: r.w, h: r.h, colours: r.colours, luminance: r.luminance },
+          attempts,
+        };
+      }
+    }
+    const last = attempts[attempts.length - 1] || { why: "unknown" };
+    const detail =
+      last.why === "uniform" ? "the window returned a uniform frame; engage the gate, then try again" : "";
+    return {
+      type: "desktop_capture",
+      ok: false,
+      error: last.why,
+      requested,
+      window: { hwnd: win.hwnd, title: win.title, pid: win.pid },
+      attempts,
+      cause: classifyCause(last.why === "uniform" ? "unknown" : last.why, detail),
+    };
+  }
+
+  /** The check: control, gate, gated, off, reverse, measured against the window's own render. */
+  async checkCapture(msg = {}) {
+    if (!IS_WIN) return { type: "desktop_capture_check", ok: false, error: "unsupported_platform" };
+    const win = await this.captureTarget(msg);
+    if (!win)
+      return {
+        type: "desktop_capture_check",
+        ok: false,
+        error: "no_window",
+        cause: classifyCause("no_window"),
+      };
+    await this.helperCapture.ensure();
+    const r = await this.helperCapture.cmd({ op: "check", hwnd: win.hwnd }, 60000);
+    if (!r?.ok)
+      return {
+        type: "desktop_capture_check",
+        ok: false,
+        error: r?.error || "check_failed",
+        window: { hwnd: win.hwnd, title: win.title, pid: win.pid },
+        cause: classifyCause(r?.cause || "unknown", r?.detail),
+      };
+    const numbers = {
+      controlPct: r.controlPct,
+      gatedPct: r.gatedPct,
+      reversePct: r.reversePct,
+      width: r.w,
+      height: r.h,
+      expectedWidth: win.w,
+      expectedHeight: win.h,
+    };
+    const v = verdict(numbers);
+    return {
+      type: "desktop_capture_check",
+      ok: v.ok,
+      route: r.route,
+      reference: r.reference,
+      window: { hwnd: win.hwnd, title: win.title, pid: win.pid },
+      numbers,
+      verdict: v,
+    };
+  }
   getStatus() {
     return {
       supported: this.usable,
@@ -1837,4 +2689,10 @@ export class DesktopController extends InputController {
     this.helperCapture.kill();
     this.helperClip.kill();
   }
+}
+
+/** The phone's two capture cases: list or set a mode, and run the gate check. */
+export function handleCaptureMode(desktop, msg = {}) {
+  if (msg.type === "desktop_capture_check") return desktop.checkCapture(msg);
+  return desktop.captureMode(msg);
 }
