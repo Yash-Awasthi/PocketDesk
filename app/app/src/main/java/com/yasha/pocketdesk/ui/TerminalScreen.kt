@@ -14,15 +14,19 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -34,6 +38,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -50,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -288,28 +294,60 @@ fun TerminalKeyRow(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        for (key in ExtraKey.ROW) {
-            val armed = (key == ExtraKey.CTRL && ctrl) || (key == ExtraKey.ALT && alt)
-            TextButton(
-                onClick = { onKey(key) },
-                enabled = enabled,
-                modifier = Modifier
-                    .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
-                    .testTag("terminalKey.${key.label}"),
-                contentPadding = PaddingValues(horizontal = 4.dp),
-                colors = if (armed) {
-                    ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
-                } else {
-                    ButtonDefaults.textButtonColors()
-                },
-            ) { Text(key.label) }
-        }
+        for (key in ExtraKey.ROW) KeyButton(key, armed(key, ctrl, alt), enabled, onKey)
     }
 }
 
 /**
+ * The key row when it sits beside the terminal: the same 48 dp targets, wrapped [perRow] to a line
+ * so the column uses the width it is given instead of scrolling under the text.
+ */
+@Composable
+fun TerminalKeyPanel(
+    ctrl: Boolean,
+    alt: Boolean,
+    enabled: Boolean,
+    onKey: (ExtraKey) -> Unit,
+    perRow: Int,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(4.dp).testTag("terminal.keys"),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        for (line in ExtraKey.ROW.chunked(perRow.coerceAtLeast(1))) {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                for (key in line) KeyButton(key, armed(key, ctrl, alt), enabled, onKey)
+            }
+        }
+    }
+}
+
+private fun armed(key: ExtraKey, ctrl: Boolean, alt: Boolean): Boolean =
+    (key == ExtraKey.CTRL && ctrl) || (key == ExtraKey.ALT && alt)
+
+/** One key: 48 dp in both directions, lit while its modifier is armed. */
+@Composable
+private fun KeyButton(key: ExtraKey, armed: Boolean, enabled: Boolean, onKey: (ExtraKey) -> Unit) {
+    TextButton(
+        onClick = { onKey(key) },
+        enabled = enabled,
+        modifier = Modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .testTag("terminalKey.${key.label}"),
+        contentPadding = PaddingValues(horizontal = 4.dp),
+        colors = if (armed) {
+            ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+        } else {
+            ButtonDefaults.textButtonColors()
+        },
+    ) { Text(key.label) }
+}
+
+/**
  * Everything above the terminal: session, font size, copy and kill, then the extra key row. The
- * row is the last child, so it sits against the IME.
+ * row is the last child, so it sits against the IME. With [keysBeside] the keys are drawn beside
+ * the terminal instead, so the chrome only draws the header.
  */
 @Composable
 fun TerminalChrome(
@@ -324,6 +362,7 @@ fun TerminalChrome(
     onKey: (ExtraKey) -> Unit,
     onClose: () -> Unit,
     onKill: () -> Unit,
+    keysBeside: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth()) {
@@ -351,7 +390,43 @@ fun TerminalChrome(
                 Icon(Icons.Filled.Close, contentDescription = "Kill session")
             }
         }
-        TerminalKeyRow(ctrl, alt, enabled, onKey)
+        if (!keysBeside) TerminalKeyRow(ctrl, alt, enabled, onKey)
+    }
+}
+
+/**
+ * The terminal's arrangement for [layout]: one column, or the key column beside the terminal on a
+ * tablet. The frame is only as wide as the region the layout allows, so a hinge is left empty.
+ */
+@Composable
+fun TerminalFrame(
+    layout: TerminalLayout,
+    chrome: @Composable () -> Unit,
+    keys: @Composable () -> Unit,
+    body: @Composable (Modifier) -> Unit,
+) {
+    Column(
+        Modifier
+            .fillMaxHeight()
+            .width(layout.start + layout.width)
+            .padding(start = layout.start),
+    ) {
+        chrome()
+        if (layout.keysBeside) {
+            Row(Modifier.fillMaxWidth().weight(1f)) {
+                if (layout.keysStart < layout.terminalStart) {
+                    keys()
+                    VerticalDivider(Modifier.fillMaxHeight())
+                    body(Modifier.weight(1f).fillMaxHeight())
+                } else {
+                    body(Modifier.weight(1f).fillMaxHeight())
+                    VerticalDivider(Modifier.fillMaxHeight())
+                    keys()
+                }
+            }
+        } else {
+            body(Modifier.weight(1f))
+        }
     }
 }
 
@@ -388,9 +463,14 @@ fun TerminalFontPreview(fontPx: Int, modifier: Modifier = Modifier) {
     }
 }
 
+/**
+ * The terminal: one column on a phone, and from [TerminalTwoPaneMinWidth] the key column beside the
+ * text. The width comes from this composition's own constraints, because nothing above it knows
+ * the window size; [foldAt] is a hinge a caller has measured, and is null until one does.
+ */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun TerminalScreen(ws: WsClient, sessionId: String, onClose: () -> Unit) {
+fun TerminalScreen(ws: WsClient, sessionId: String, onClose: () -> Unit, foldAt: Dp? = null) {
     val holder = remember { arrayOfNulls<WebView>(1) }
     val pending = remember { mutableListOf<String>() }
     var ended by remember { mutableStateOf<Int?>(null) }
@@ -463,76 +543,93 @@ fun TerminalScreen(ws: WsClient, sessionId: String, onClose: () -> Unit) {
         ws.sendInput(sessionId, b64(armer.apply(key.bytes)))
     }
 
-    Box(Modifier.fillMaxSize().imePadding()) {
-        Column(Modifier.fillMaxSize()) {
-            TerminalChrome(
-                sessionId = sessionId,
-                fontPx = fontPx,
-                ctrl = armer.ctrl,
-                alt = armer.alt,
-                enabled = ended == null,
-                onFontSmaller = { setFont(TerminalFont.smaller(fontPx)) },
-                onFontLarger = { setFont(TerminalFont.larger(fontPx)) },
-                onCopy = { copySelectionNow() },
-                onKey = { press(it) },
-                onClose = onClose,
-                onKill = { ws.kill(sessionId) },
-            )
-            Box(Modifier.weight(1f)) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        if (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
-                            WebView.setWebContentsDebuggingEnabled(true)
-                        }
-                        WebView(ctx).apply {
-                            // Without explicit params the page's layout viewport is 0px tall and xterm fits one row.
-                            layoutParams = android.view.ViewGroup.LayoutParams(
-                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                            )
-                            settings.javaScriptEnabled = true
-                            // Pinch zoom: the PC-sized grid can stay larger than the phone.
-                            settings.builtInZoomControls = true
-                            settings.displayZoomControls = false
-                            addJavascriptInterface(
-                                TermBridge(onInput = { data ->
-                                    ws.sendInput(sessionId, armedInput(data, armer))
-                                }),
-                                "Android",
-                            )
-                            webViewClient = object : WebViewClient() {
-                                // Any other page would inherit the Android bridge and could type into the PC shell.
-                                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                                    !request.url.toString().startsWith("file:///android_asset/")
-
-                                override fun onPageFinished(view: WebView, url: String) {
-                                    val flush: List<String>
-                                    synchronized(pending) {
-                                        holder[0] = view
-                                        flush = pending.toList()
-                                        pending.clear()
-                                    }
-                                    for (js in flush) view.evaluateJavascript(js, null)
-                                    view.evaluateJavascript(TerminalFont.pageScript(fontNow[0]), null)
-                                }
-                            }
-                            loadUrl("file:///android_asset/terminal.html")
-                        }
-                    },
-                    onRelease = { it.destroy() },
+    BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
+        val layout = terminalLayout(maxWidth, foldAt)
+        TerminalFrame(
+            layout = layout,
+            chrome = {
+                TerminalChrome(
+                    sessionId = sessionId,
+                    fontPx = fontPx,
+                    ctrl = armer.ctrl,
+                    alt = armer.alt,
+                    enabled = ended == null,
+                    onFontSmaller = { setFont(TerminalFont.smaller(fontPx)) },
+                    onFontLarger = { setFont(TerminalFont.larger(fontPx)) },
+                    onCopy = { copySelectionNow() },
+                    onKey = { press(it) },
+                    onClose = onClose,
+                    onKill = { ws.kill(sessionId) },
+                    keysBeside = layout.keysBeside,
                 )
-                ended?.let { code ->
-                    Column(
-                        Modifier.align(Alignment.Center),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text("Session ended (exit $code)", style = MaterialTheme.typography.titleMedium)
+            },
+            keys = {
+                TerminalKeyPanel(
+                    ctrl = armer.ctrl,
+                    alt = armer.alt,
+                    enabled = ended == null,
+                    onKey = { press(it) },
+                    perRow = keysPerRow(layout.keysWidth),
+                    modifier = Modifier.width(layout.keysWidth).fillMaxHeight(),
+                )
+            },
+            body = { fill ->
+                Box(fill) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            if (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+                                WebView.setWebContentsDebuggingEnabled(true)
+                            }
+                            WebView(ctx).apply {
+                                // Without explicit params the page's layout viewport is 0px tall and xterm fits one row.
+                                layoutParams = android.view.ViewGroup.LayoutParams(
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                    android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                                )
+                                settings.javaScriptEnabled = true
+                                // Pinch zoom: the PC-sized grid can stay larger than the phone.
+                                settings.builtInZoomControls = true
+                                settings.displayZoomControls = false
+                                addJavascriptInterface(
+                                    TermBridge(onInput = { data ->
+                                        ws.sendInput(sessionId, armedInput(data, armer))
+                                    }),
+                                    "Android",
+                                )
+                                webViewClient = object : WebViewClient() {
+                                    // Any other page would inherit the Android bridge and could type into the PC shell.
+                                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                                        !request.url.toString().startsWith("file:///android_asset/")
+
+                                    override fun onPageFinished(view: WebView, url: String) {
+                                        val flush: List<String>
+                                        synchronized(pending) {
+                                            holder[0] = view
+                                            flush = pending.toList()
+                                            pending.clear()
+                                        }
+                                        for (js in flush) view.evaluateJavascript(js, null)
+                                        view.evaluateJavascript(TerminalFont.pageScript(fontNow[0]), null)
+                                    }
+                                }
+                                loadUrl("file:///android_asset/terminal.html")
+                            }
+                        },
+                        onRelease = { it.destroy() },
+                    )
+                    ended?.let { code ->
+                        Column(
+                            Modifier.align(Alignment.Center),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text("Session ended (exit $code)", style = MaterialTheme.typography.titleMedium)
+                        }
                     }
                 }
-            }
-        }
+            },
+        )
         // Above the keys and the IME, and it never touches the terminal's selection.
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
