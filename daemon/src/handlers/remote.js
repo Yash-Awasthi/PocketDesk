@@ -1,6 +1,7 @@
 import { resolvePath } from "../fs_ops.js";
 import * as devices from "../devices.js";
 import { centerFor, fromFraction } from "../desktop_capture.js";
+import { handleCaptureMode } from "../desktop/capture.js";
 import { PcMedia } from "../pc_media.js";
 import { keyOf, label, loadPrefs, savePrefs } from "../monitor_names.js";
 import { spawn } from "node:child_process";
@@ -507,6 +508,14 @@ export default function remoteHandlers(ctx) {
     },
     async desktop_status(ws, _msg) {
       send(ws, { type: "desktop_status", ...desktop.getStatus() });
+    },
+    // Capture a window that hides itself from screen capture: a mode runs that rung,
+    // no mode lists the rungs, and the check runs the control/gate/reverse argument.
+    async desktop_capture(ws, msg) {
+      send(ws, await handleCaptureMode(desktop, { ...msg, type: "desktop_capture" }));
+    },
+    async desktop_capture_check(ws, msg) {
+      send(ws, await handleCaptureMode(desktop, { ...msg, type: "desktop_capture_check" }));
     },
     // clippy: keystroke recorder that captures Ctrl+C (foreground window + system clipboard)
     // into clippy_capture.json; PocketDesk pushes that text to the system clipboard so

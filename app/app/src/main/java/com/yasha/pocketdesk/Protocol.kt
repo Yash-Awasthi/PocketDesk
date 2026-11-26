@@ -286,6 +286,18 @@ object Proto {
         if (audio) put("audio", true)
     }
     fun desktopMonitors() = obj { put("type", "desktop_monitors") }
+    // Selecting how a game window is captured. "auto" walks the ladder and reports
+    // which rung worked; the rest pin one method so a mode that works is repeatable.
+    fun desktopCapture(mode: String? = null) = obj {
+        put("type", "desktop_capture")
+        if (mode != null) put("mode", mode)
+    }
+    // Runs the same control/gate/reverse comparison the desk probe runs, against the
+    // window the PC picked, and answers with the measured numbers.
+    fun desktopCaptureCheck(mode: String? = null) = obj {
+        put("type", "desktop_capture_check")
+        if (mode != null) put("mode", mode)
+    }
     fun desktopNav(key: String) = obj { put("type", "desktop_nav"); put("key", key) }
     fun sourcesList(of: String? = null) = obj { put("type", "sources_list"); if (of != null) put("of", of) }
     fun desktopPing(t: Long) = obj { put("type", "desktop_ping"); put("t", t) }
