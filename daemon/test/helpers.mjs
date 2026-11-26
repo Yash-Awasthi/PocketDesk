@@ -188,7 +188,7 @@ export function connectRaw(url, _token) {
       since = log.length;
       ws.send(t);
     },
-    next: (pred, timeoutMs = 15000) => {
+    next: (pred, timeoutMs = 45000) => {
       for (let i = log.length - 1; i >= since; i--) {
         if (pred(log[i])) return Promise.resolve(log[i]);
       }

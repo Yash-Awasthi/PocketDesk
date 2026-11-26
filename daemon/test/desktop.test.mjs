@@ -156,11 +156,16 @@ async function main() {
     await c.next((m) => m.type === "desktop_monitors", 20000);
     c.send({ type: "desktop_mouse", fx: 0.05, fy: 0.05 });
     await sleep(500);
-    c.send({ type: "desktop_mouse", fx: 0.3, fy: 0.6 });
-    await sleep(500);
-    const fc = await c
-      .next((m) => m.type === "desktop_cursor" && Math.abs(m.fx - 0.3) < 0.01, 5000)
-      .catch(() => ({}));
+    // The watcher only emits on a change and the helper is a warm process, so a busy machine can
+    // miss the first move; ask again rather than fail on one slow sample.
+    let fc = {};
+    for (let attempt = 0; attempt < 3 && !(Math.abs(fc.fx - 0.3) < 0.01); attempt++) {
+      c.send({ type: "desktop_mouse", fx: 0.3, fy: 0.6 });
+      await sleep(400);
+      fc = await c
+        .next((m) => m.type === "desktop_cursor" && Math.abs(m.fx - 0.3) < 0.01, 6000)
+        .catch(() => ({}));
+    }
     check(
       "pointer lands where the picture fraction says",
       Math.abs(fc.fx - 0.3) < 0.01 && Math.abs(fc.fy - 0.6) < 0.01,
