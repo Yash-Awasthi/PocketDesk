@@ -15,9 +15,8 @@ or `%LOCALAPPDATA%\PocketDesk\clippy` when the install is read-only):
 - `clippy_capture.json` — **overwritten** on every capture: the latest snapshot
   (foreground window, system clipboard text, and the typed buffer since the
   previous `Ctrl+C`).
-- `clippy_history.json` — **appended** on every capture, one JSON object per
-  line, never rewritten or pruned: the session log. PocketDesk reads its tail
-  and shows the newest 20.
+- `clippy_history.json` — **rewritten** on every capture, one JSON object per
+  line: the last 20 captures, newest last.
 
 ## Build
 
@@ -36,10 +35,9 @@ clippy --install     register the on-demand elevated task "Clippy" (one UAC prom
 clippy --uninstall   remove the task
 clippy --start       start recording
 clippy --stop        stop recording
-clippy --capture     write one snapshot now, without starting the recorder
 clippy --open        open the latest capture
-clippy --history     open the session log
-clippy --clear       empty both files
+clippy --clear       empty the capture and the history
+clippy --dir <path>  write there instead (also CLIPPY_DIR); the task bakes it in
 clippy               run the recorder directly
 ```
 
@@ -51,7 +49,8 @@ or on demand.
 
 - `Ctrl+Shift+Q` — stop
 - `Ctrl+Shift+X` — clear the buffer, keep recording
-- `Ctrl+C` — write the snapshot (latest) and append to the session log
+- `Ctrl+C` — write the snapshot (latest) and append to the history; the typed
+  buffer then starts empty, so the next capture holds only what followed
 
 Paste is not captured; typing, backspace, Enter and Tab are. Keys synthesised by
 another program (PocketDesk pasting, for example) are ignored, so the buffer only

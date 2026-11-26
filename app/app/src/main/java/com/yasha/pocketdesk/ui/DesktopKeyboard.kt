@@ -184,6 +184,8 @@ fun DesktopKeyboard(ws: WsClient) {
                 }
             }
             Key("Copy", Modifier.width(60.dp), special = true) { ws.clipboardGet() }
+            // Ctrl+C inside a game may never reach Windows; clippy's typed buffer does.
+            Key("Clippy", Modifier.width(68.dp), special = true) { ws.clippyPaste(paste = true) }
         }
     }
 }
