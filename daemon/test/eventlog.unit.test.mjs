@@ -36,8 +36,8 @@ if (process.platform === "win32") {
 
 // The daemon has to actually call it: a module nobody invokes records nothing.
 const daemonSrc = fs.readFileSync(path.join(REPO, "daemon", "src", "daemon.js"), "utf8");
-check("the daemon records a start", /logEvent\(EVENT_IDS\.start/.test(daemonSrc));
-check("the daemon records a stop before it exits", /logEventSync\(EVENT_IDS\.stop/.test(daemonSrc));
+check("the daemon records a start", /logEvent\(\s*EVENT_IDS\.start/.test(daemonSrc));
+check("the daemon records a stop before it exits", /logEventSync\(\s*EVENT_IDS\.stop/.test(daemonSrc));
 
 // End to end on Windows: write a real event and read it back with wevtutil.
 if (process.platform === "win32") {
