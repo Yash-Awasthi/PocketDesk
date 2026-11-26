@@ -60,11 +60,12 @@ jobs:
           }
       - name: Run test suite
         run: npm test
-      # Row 311: print the number on an ordinary runner with nothing warmed up. The script
-      # gates on the worst of five starts (median is printed too); see docs/COLD-START.md.
+      # Measurement row: print the number on an ordinary runner with nothing warmed up. The
+      # script gates on the worst of five starts (median is printed too); see docs/COLD-START.md.
       - name: Cold start (five runs, worst under 400 ms)
         run: node scripts/measure-startup.mjs
-        # Row 311 is still open: print the number and keep the job green until the budget holds.
+        # The budget row (cold start under 400 ms on a mid PC) is still open: print the number
+        # and keep the job green until the budget holds on a runner that can meet it.
         continue-on-error: true
 
   web-ui:

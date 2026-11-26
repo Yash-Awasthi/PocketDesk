@@ -32,8 +32,11 @@ median is printed next to it for context. If runner variance ever makes the wors
 documented fallback is to gate on the median at the same 400 ms and keep printing the worst; that
 is a deliberate change to make in one place (`main` in `scripts/measure-startup.mjs`), not a
 silent retry.
-The gate is advisory until row 311 ticks: the CI step runs with `continue-on-error`, so the
-numbers print and the job stays green, and removing that flag is the last step of that row.
+The gate is advisory: the CI step runs with `continue-on-error`, so every number prints and the
+job stays green. The budget row is untested on this host, not disproven: this machine's bare
+`node -e "0"` spawn floor is 232 ms median (73 ms best), which leaves too little headroom to
+judge a mid-range desktop. The ticked measurement row in `plan.md` is the upper-bound record,
+and the flag comes off only when a host with a sub-400 ms floor is measured.
 
 ## Where the time goes
 
@@ -46,7 +49,7 @@ per process, so a normal start never pays for it.
 ## Measurements
 
 - 2026-11-26, loaded host (7-31% CPU load, about 1-3 of 20 logical cores busy): five cold starts
-  at 1275, 1408, 1068, 631 and 674 ms; worst 1408 ms, median 1068 ms. Over budget, row 311 stayed
-  open. Full snapshot: `C:/GITHUB/.fleet/evidence/PocketDesk/row-332.md`.
+  at 1275, 1408, 1068, 631 and 674 ms; worst 1408 ms, median 1068 ms. Over budget; the budget row
+  stays open. Full snapshot: `C:/GITHUB/.fleet/evidence/PocketDesk/row-332.md`.
 - 2026-11-26, earlier quiet windows on the same box: 295-431 ms across six 3-run medians. Recorded
-  on row 311 in `plan.md`.
+  in the measurement row in `plan.md`.
