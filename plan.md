@@ -443,14 +443,10 @@ transport docs describe a design that has moved.
 
 ### M5.3 Agent stream robustness
 
-- [ ] Golden transcript set per agent (Claude Code, Codex, Gemini, Qwen, OpenCode, Copilot, Cline) captured from current versions; parse tests run on all of them. `[D]`
-  measured: 2026-11-26 - seven CLIs installed under the npm global prefix and captured at
-  @anthropic-ai/claude-code 2.1.332, @openai/codex 0.172.0, @google/gemini-cli 0.71.1,
-  @qwen-code/qwen-code 0.28.6, opencode-ai 1.19.6, @github/copilot 1.0.116, cline 3.0.76;
-  each agent has docs/transcripts/<agent>/{version,help,print}.txt; the existing
-  StreamJsonParser passes over all 21 files in daemon/test/transcripts.test.mjs.
-  limits: every CLI is credential-gated on this machine, so no captured file contains a
-  successful assistant turn or a tool_use block - only init, refusal and result events.
+- [x] Connection surface for all seven agent CLIs: all seven installed, versions and help captured, one real qwen turn through Groq parsed by the existing parser. `[D]`
+  verified-here: docs/transcripts/manifest.json is the versions table (claude-code 2.1.332, codex 0.172.0, gemini 0.71.1, qwen 0.28.6, opencode 1.19.6, copilot 1.0.116, cline 3.0.76); the 21 files at docs/transcripts/<agent>/{version,help,print}.txt; docs/transcripts/qwen/real-turn.jsonl holds a real thinking block, a real tool_use glob {"pattern":"*.md"} and its tool_result; node daemon/test/transcripts.test.mjs -> ALL PASS
+- [ ] Real assistant turns per agent: one genuine turn captured for each of the remaining six. `[D]`
+  limits: only qwen has a provider key (Groq); claude/codex/gemini/opencode/copilot/cline each need their own provider key and none is available.
 - [x] Unknown-field tolerance: a new field in a stream must not break parsing; test with a synthetic augmented transcript. `[D]`
   verified-here: cd daemon && node --test test/stream-unknown-fields.test.mjs -> ALL PASS (27 checks); unknown fields survive in raw, typed output and stats unchanged
 - [x] Tool-call correlation: assert start/result pairing under interleaved and cancelled turns. `[D]`

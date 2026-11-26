@@ -199,5 +199,97 @@ check(
 check("at least one captured event per JSON-emitting CLI", parsedEvents >= 20);
 check("all 21 files went through the parser", parsedFiles === 21);
 
+// ---- one real provider turn: qwen through Groq ----
+// real-turn.jsonl is the only capture with a real assistant turn in it: thinking, a real
+// tool_use, its tool_result, and then a real upstream failure. Groq rejects the
+// reasoning_content qwen echoes back, so the second turn ends in error_during_execution;
+// the file keeps that failure instead of a fabricated successful multi-turn.
+const REAL = path.join(DIR, "qwen", "real-turn.jsonl");
+const realBytes = fs.readFileSync(REAL);
+const realText = realBytes.toString("utf8");
+const realHeader = [];
+const realBody = [];
+for (const line of realText.split(/\r?\n/)) {
+  if (line.startsWith("#")) realHeader.push(line);
+  else if (line.trim()) realBody.push(line);
+}
+const realEnv = headerField(realHeader, "env-overrides") || "";
+check(
+  "real turn: header names the Groq base url and model, no key value",
+  realEnv.includes("OPENAI_BASE_URL=https://api.groq.com/openai/v1") &&
+    realEnv.includes("OPENAI_MODEL=openai/gpt-oss-20b") &&
+    !/gsk_[A-Za-z0-9]{8}/.test(realText),
+);
+check(
+  "real turn: header marks the credential probe and the package version",
+  /^yes\b/.test(headerField(realHeader, "credential-probe") || "") &&
+    headerField(realHeader, "package") === "@qwen-code/qwen-code" &&
+    headerField(realHeader, "version") === "0.28.6",
+);
+check(
+  "real turn: header notes the second turn fails upstream",
+  realHeader.join("\n").includes("error_during_execution"),
+);
+check(
+  "real turn: no UTF-8 BOM reached the repository copy",
+  !(realBytes[0] === 0xef && realBytes[1] === 0xbb && realBytes[2] === 0xbf) &&
+    !realText.startsWith("\uFEFF"),
+);
+
+const realParser = new StreamJsonParser();
+const realItems = realParser.parseLines(realBody.join("\n"));
+const blocks = (item) => item.raw?.message?.content || [];
+check("real turn: seven JSON lines, one item each", realBody.length === 7 && realItems.length === 7);
+check(
+  "real turn: the stream opens with the session init",
+  realItems[0].raw.type === "system" && realItems[0].type === "system_init",
+);
+
+const thinking = realItems.flatMap(blocks).find((b) => b.type === "thinking");
+check("real turn: a real thinking block is present", Boolean(thinking) && thinking.thinking.includes("glob"));
+
+const toolUse = realItems.flatMap(blocks).find((b) => b.type === "tool_use");
+check(
+  'real turn: tool_use is glob {"pattern":"*.md"}',
+  toolUse?.name === "glob" && JSON.stringify(toolUse?.input) === '{"pattern":"*.md"}',
+);
+
+const toolUseIndex = realItems.findIndex((i) => blocks(i).some((b) => b.type === "tool_use"));
+const toolResultIndex = realItems.findIndex((i) => blocks(i).some((b) => b.type === "tool_result"));
+const toolResult =
+  toolResultIndex >= 0 ? blocks(realItems[toolResultIndex]).find((b) => b.type === "tool_result") : null;
+check(
+  "real turn: a tool_result follows the tool_use and answers it",
+  toolResultIndex > toolUseIndex &&
+    toolResult?.tool_use_id === toolUse?.id &&
+    toolResult?.content === "Found 1 matching file(s)",
+);
+
+const assistantItems = realItems.filter((i) => i.raw.type === "assistant");
+const actingTurns = assistantItems.filter((i) => blocks(i).some((b) => b.type === "tool_use"));
+check(
+  "real turn: exactly one assistant turn, so there is no invented second reply",
+  actingTurns.length === 1 && realItems.flatMap(blocks).filter((b) => b.type === "tool_use").length === 1,
+);
+
+const errorTexts = assistantItems.filter((i) => blocks(i).some((b) => b.type === "text"));
+check(
+  "real turn: the assistant text after the tool_result is the upstream error, not a reply",
+  errorTexts.length === 1 &&
+    realItems.indexOf(errorTexts[0]) > toolResultIndex &&
+    errorTexts[0].formatted.includes("reasoning_content"),
+);
+
+const realResult = realItems[realItems.length - 1];
+check(
+  "real turn: the final result is an error_during_execution",
+  realResult.raw.type === "result" &&
+    realResult.raw.is_error === true &&
+    realResult.raw.subtype === "error_during_execution",
+);
+check(
+  "real turn: the failure names the Groq reasoning_content rejection",
+  JSON.stringify(realResult.raw.error || {}).includes("reasoning_content"),
+);
 finish();
 process.exit(0);
