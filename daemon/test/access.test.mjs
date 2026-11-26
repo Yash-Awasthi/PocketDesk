@@ -27,7 +27,14 @@ const attempt = (password, token = TOKEN) =>
       .catch(() => {});
   });
 
-const d = startDaemon(PORT, CLI_PORT, { token: TOKEN });
+const policyFile = path.join(home, "policy.json");
+const d = startDaemon(PORT, CLI_PORT, {
+  token: TOKEN,
+  env: {
+    RH_POLICY_JSON: policyFile,
+    RH_POLICY_REG: `HKCU\\SOFTWARE\\PocketDesk\\PolicyAccessTest-${process.pid}`,
+  },
+});
 await d.ready;
 try {
   const own = await openAndHello(PORT, TOKEN);
@@ -117,6 +124,65 @@ try {
   const r = await idle.next((m) => m.type === "desktop_input_ok", 8000);
   check("input without an open desktop is refused", r.ok === false && r.error === "view only");
   await idle.close();
+
+  // ?? Machine-owner policy: a 0 in either store refuses the sense before anything starts ??
+  const writePolicy = (v) => fs.writeFileSync(policyFile, JSON.stringify(v));
+  const settlePolicy = () => new Promise((r) => setTimeout(r, 1200));
+  const logLines = () => {
+    const dir = path.join(home, "logs");
+    const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.startsWith("daemon-")) : [];
+    return files.flatMap((f) => fs.readFileSync(path.join(dir, f), "utf8").split("\n").filter(Boolean));
+  };
+  const refusedBy = (m, key) =>
+    m.type === "error" &&
+    m.code === "disabled_by_policy" &&
+    m.key === key &&
+    new RegExp("disabled_by_policy: " + key).test(m.message);
+  const gate = await openAndHello(PORT, TOKEN);
+  const senses = [
+    {
+      key: "AllowRemoteControl",
+      msg: { type: "desktop_start" },
+      ok: (m) => m.type === "desktop_started" && m.ok === true,
+    },
+    { key: "AllowWebcam", msg: { type: "adb_webcam", on: false }, ok: (m) => m.type === "adb_webcam" },
+    {
+      key: "AllowPhoneControl",
+      msg: { type: "phone_fs", rid: 7, op: "ls", path: "/" },
+      ok: (m) => m.type === "phone_fs_result",
+    },
+    { key: "AllowClipboard", msg: { type: "clipboard_get" }, ok: (m) => m.type === "clipboard" },
+  ];
+  for (const sense of senses) {
+    writePolicy({ [sense.key]: 0 });
+    await settlePolicy();
+    gate.send(sense.msg);
+    const off = await gate.next((m) => m.type === "error" || sense.ok(m), 15000);
+    check(`${sense.key} set to 0 refuses its sense`, refusedBy(off, sense.key));
+    if (sense.key === "AllowRemoteControl") {
+      gate.send({ type: "running_state" });
+      const st = await gate.next((m) => m.type === "running_state", 8000);
+      check(
+        "the refused desktop_start started no stream",
+        st.streams.video === 0 && st.streams.desktop === 0,
+      );
+    }
+    writePolicy({});
+    await settlePolicy();
+    gate.send(sense.msg);
+    const on = await gate.next(sense.ok, 30000);
+    check(`${sense.key} back on lets the sense run`, sense.ok(on));
+    if (sense.key === "AllowRemoteControl") {
+      gate.send({ type: "desktop_stop" });
+      await gate.next((m) => m.type === "desktop_stopped", 10000);
+    }
+  }
+  const refusedLines = logLines().filter((l) => l.includes('"event":"refused"'));
+  check(
+    "each refusal is in the daemon log with its key",
+    senses.every((sense) => refusedLines.some((l) => l.includes(sense.key))),
+  );
+  await gate.close();
 
   // Three guards on every local settings route at once: the peer is loopback, the Host header is a
   // loopback name (DNS rebinding arrives from 127.0.0.1 under an attacker's name), and the key is the

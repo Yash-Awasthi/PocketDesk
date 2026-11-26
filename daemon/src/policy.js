@@ -10,7 +10,12 @@ import { writeFileAtomic } from "./atomic_write.js";
 import { isElevated } from "./status.js";
 
 /** The four keys the published contract names (docs/INTEGRITY.md, docs/SETUP-PC.md). */
-export const POLICY_KEYS = Object.freeze(["AllowRemoteControl", "AllowWebcam", "AllowPhoneControl", "AllowClipboard"]);
+export const POLICY_KEYS = Object.freeze([
+  "AllowRemoteControl",
+  "AllowWebcam",
+  "AllowPhoneControl",
+  "AllowClipboard",
+]);
 
 const IS_WIN = process.platform === "win32";
 
@@ -21,8 +26,14 @@ export function regKey() {
 
 /** The JSON store; ProgramData is where the console reads it from. */
 export function jsonPath() {
-  return process.env.RH_POLICY_JSON
-    || path.join(process.env.ProgramData || process.env.ALLUSERSPROFILE || "C:\\ProgramData", "PocketDesk", "policy.json");
+  return (
+    process.env.RH_POLICY_JSON ||
+    path.join(
+      process.env.ProgramData || process.env.ALLUSERSPROFILE || "C:\\ProgramData",
+      "PocketDesk",
+      "policy.json",
+    )
+  );
 }
 
 function dword(raw) {
@@ -50,10 +61,16 @@ export function registryValues(key = regKey()) {
   const out = {};
   for (const name of POLICY_KEYS) {
     try {
-      const text = execFileSync("reg", ["query", key, "/v", name], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+      const text = execFileSync("reg", ["query", key, "/v", name], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      });
       const v = parseRegQuery(text, name);
       if (v !== undefined) out[name] = v;
-    } catch { /* absent value, absent key, or no reg.exe: all mean unset */ }
+    } catch {
+      /* absent value, absent key, or no reg.exe: all mean unset */
+    }
   }
   return out;
 }
@@ -61,7 +78,11 @@ export function registryValues(key = regKey()) {
 /** The JSON store's values, ignoring a file that is missing, unreadable or not an object. */
 export function jsonValues(file = jsonPath()) {
   let raw;
-  try { raw = JSON.parse(fs.readFileSync(file, "utf8")); } catch { return {}; }
+  try {
+    raw = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return {};
+  }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const out = {};
   for (const name of POLICY_KEYS) {
@@ -85,7 +106,7 @@ export function policyState() {
     if (json[name] === 0) off.push(jsonPath());
     out[name] = {
       allowed: off.length === 0,
-      value: off.length ? 0 : reg[name] ?? json[name],
+      value: off.length ? 0 : (reg[name] ?? json[name]),
       source: off[0],
       registry: reg[name],
       json: json[name],
@@ -122,13 +143,17 @@ export function isAdmin() {
 
 /** A value for one key, or throw the reason a write cannot happen here. */
 export function setKey(name, value, { requireAdmin = true } = {}) {
-  if (!POLICY_KEYS.includes(name)) throw new Error(`not a policy key: ${name} (keys: ${POLICY_KEYS.join(", ")})`);
+  if (!POLICY_KEYS.includes(name))
+    throw new Error(`not a policy key: ${name} (keys: ${POLICY_KEYS.join(", ")})`);
   const v = value === true ? 1 : value === false ? 0 : dword(value);
   if (v !== 0 && v !== 1) throw new Error(`policy value must be 0 or 1, not ${value}`);
   if (requireAdmin && !isAdmin()) throw new Error("changing machine policy needs an administrator prompt");
   const done = [];
   if (IS_WIN) {
-    execFileSync("reg", ["add", regKey(), "/v", name, "/t", "REG_DWORD", "/d", String(v), "/f"], { stdio: "ignore", windowsHide: true });
+    execFileSync("reg", ["add", regKey(), "/v", name, "/t", "REG_DWORD", "/d", String(v), "/f"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
     done.push(`${regKey()}\\${name}=${v}`);
   }
   const file = jsonPath();
@@ -144,7 +169,8 @@ export function setKey(name, value, { requireAdmin = true } = {}) {
 /** Remove a key from both stores, or every key when none is named. */
 export function resetKey(name, { requireAdmin = true } = {}) {
   const names = name ? [name] : [...POLICY_KEYS];
-  for (const n of names) if (!POLICY_KEYS.includes(n)) throw new Error(`not a policy key: ${n} (keys: ${POLICY_KEYS.join(", ")})`);
+  for (const n of names)
+    if (!POLICY_KEYS.includes(n)) throw new Error(`not a policy key: ${n} (keys: ${POLICY_KEYS.join(", ")})`);
   if (requireAdmin && !isAdmin()) throw new Error("changing machine policy needs an administrator prompt");
   const done = [];
   for (const n of names) {
@@ -152,17 +178,69 @@ export function resetKey(name, { requireAdmin = true } = {}) {
       try {
         execFileSync("reg", ["delete", regKey(), "/v", n, "/f"], { stdio: "ignore", windowsHide: true });
         done.push(`removed ${regKey()}\\${n}`);
-      } catch { /* was not set */ }
+      } catch {
+        /* was not set */
+      }
     }
   }
   const file = jsonPath();
   const json = jsonValues(file);
   let changed = false;
-  for (const n of names) if (n in json) { delete json[n]; changed = true; }
+  for (const n of names)
+    if (n in json) {
+      delete json[n];
+      changed = true;
+    }
   if (changed) writeFileAtomic(file, JSON.stringify(json, null, 2) + "\n", { mode: 0o644 });
   done.push(`${file}: ${names.join(", ")} cleared`);
   invalidate();
   return done;
+}
+
+// Which messages count as a remote sense. Kept explicit: a new handler is not gated by accident,
+// and a guard test asserts every listed type is a real handler.
+const REMOTE_CONTROL = new Set([
+  "desktop_start",
+  "remote_input",
+  "desktop_mouse",
+  "desktop_key",
+  "desktop_type",
+  "deck_key",
+  "kvm_in",
+]);
+const WEBCAM = new Set(["adb_webcam", "adb_webcam_register"]);
+const PHONE_CONTROL =
+  /^adb_(input|type|open|close|gamepad|select|connect|pair|qr_start|disconnect|apps|cameras|fix|install_app|fs)$/;
+const PHONE_EXTRA = new Set(["phone_input", "phone_fs", "phone_switch"]);
+const CLIPBOARD = new Set(["clipboard_get", "clipboard_set", "clippy_paste", "handoff"]);
+
+/** The policy keys that cover one message type; empty means it is not a remote sense. */
+export function policyKeysFor(type) {
+  const keys = [];
+  if (REMOTE_CONTROL.has(type)) keys.push("AllowRemoteControl");
+  if (WEBCAM.has(type)) keys.push("AllowWebcam");
+  if (PHONE_CONTROL.test(type) || PHONE_EXTRA.has(type)) keys.push("AllowPhoneControl");
+  if (CLIPBOARD.has(type) || /^adb_clipboard_/.test(type)) keys.push("AllowClipboard");
+  return keys;
+}
+
+/**
+ * The refusal for one message, or null. The first disabled key wins, so a message covered by two
+ * keys (an adb clipboard write) is refused by either, and the message names both the key and the store.
+ */
+export function refusalFor(type, state = currentPolicy()) {
+  for (const key of policyKeysFor(type)) {
+    const s = state[key];
+    if (!s.allowed) {
+      return {
+        type,
+        key,
+        code: "disabled_by_policy",
+        message: `disabled_by_policy: ${key} is 0 in ${s.source}; ${type} is refused`,
+      };
+    }
+  }
+  return null;
 }
 
 /** One line per key for `pocketdesk policy` and `--status`. */

@@ -31,6 +31,8 @@ import * as scheduler from "./scheduler.js";
 import * as approvalGuard from "./approval_guard.js";
 import * as statsUsage from "./stats_usage.js";
 import * as devices from "./devices.js";
+import { refusalFor } from "./policy.js";
+import { EVENT_IDS, logEvent } from "./eventlog.js";
 import * as totp from "./totp.js";
 import * as pairing_budget from "./pairing_budget.js";
 import agentsHandlers from "./handlers/agents.js";
@@ -675,6 +677,13 @@ export function start(config, { onTokenRotated } = {}) {
   async function handle(ws, msg) {
     const h = Object.hasOwn(handlers, msg.type) ? handlers[msg.type] : null;
     if (!h) return send(ws, { type: "error", message: `unknown type: ${msg.type}` });
+    // The machine owner's kill switch runs before a sense starts or any input moves.
+    const refusal = refusalFor(msg.type);
+    if (refusal) {
+      logEvent(EVENT_IDS.refused, refusal.message);
+      plugins.callHook("onRefused", ws, refusal);
+      return send(ws, { type: "error", code: refusal.code, key: refusal.key, message: refusal.message });
+    }
     if (!access.controlAllowed && !PAUSE_ALLOWED.has(msg.type))
       return send(ws, { type: "error", message: `${msg.type}: control is paused on the PC` });
     if (CONSOLE) audit(ws, msg);

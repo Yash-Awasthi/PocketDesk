@@ -11,7 +11,7 @@ const NOISY = new Set(["video_ack", "desktop_mouse", "desktop_key", "desktop_typ
 export default {
   name: "logger",
   version: "1.1.0",
-  hooks: ["init", "start", "stop", "onConnect", "onDisconnect", "onMessage"],
+  hooks: ["init", "start", "stop", "onConnect", "onDisconnect", "onMessage", "onRefused"],
 
   _dir: null,
   _file: null,
@@ -44,6 +44,10 @@ export default {
     // Input and video acks arrive several times a second and would bury everything else.
     if (NOISY.has(msg.type)) return;
     this._log("message", { type: msg.type, remote: ws._remote });
+  },
+
+  onRefused(_ctx, ws, refusal) {
+    this._log("refused", { type: refusal.type, key: refusal.key, remote: ws._remote });
   },
 
   _log(event, data) {

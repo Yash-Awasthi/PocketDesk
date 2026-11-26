@@ -5,7 +5,7 @@
  * and claude-code-hermit extension/hook pattern.
  *
  * Plugins are JS files in daemon/src/plugins/ that export a manifest object.
- * Supported hooks: init, start, stop, onConnect, onDisconnect, onMessage,
+ * Supported hooks: init, start, stop, onConnect, onDisconnect, onMessage, onRefused,
  * onSessionCreated, onSessionExit, onChatCreated, onChatMessage, onProposal,
  * onProposalApproved, onProposalRejected.
  *
@@ -70,6 +70,7 @@ import { pathToFileURL } from "node:url";
  * @property {PluginHook} [onConnect]
  * @property {PluginHook} [onDisconnect]
  * @property {PluginHook} [onMessage]
+ * @property {PluginHook} [onRefused]
  * @property {PluginHook} [onSessionCreated]
  * @property {PluginHook} [onSessionExit]
  * @property {PluginHook} [onChatCreated]
@@ -93,6 +94,7 @@ const VALID_HOOKS = new Set([
   "onConnect",
   "onDisconnect",
   "onMessage",
+  "onRefused",
   "onSessionCreated",
   "onSessionExit",
   "onChatCreated",
