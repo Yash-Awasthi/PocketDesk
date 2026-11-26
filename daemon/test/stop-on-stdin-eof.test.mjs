@@ -1,4 +1,4 @@
-// The tray stops the daemon by closing its stdin: the daemon must exit and take
+// A stopped launcher closes the daemon's stdin: the daemon must exit and take
 // the processes its agents started with it, so nothing is left running.
 import fs from "node:fs";
 import os from "node:os";

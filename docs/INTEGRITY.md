@@ -13,12 +13,14 @@ native clients the one check they rely on ("close all other applications") can
 be defeated by how PocketDesk installs itself.** Not because of one feature, but
 because three properties stack:
 
-1. **Invisible persistence — shipped fixed, kept here as the diagnosis.** As audited, the daemon was
-   installed as a *hidden* process: no tray, no window, an elevated Scheduled Task at logon, a
-   protected copy under `Program Files`, auto-restart on crash. The W0 work changed the default:
-   an unelevated per-user task with no restart policy, a tray icon with Stop / Open / Uninstall, and
-   a one-time logon notice (`daemon/scripts/PocketDeskTray.cs`); elevation is the explicit
-   `-Protected` option and says so in `pocketdesk --status`.
+1. **No tray, no icon, no notice - hidden by design.** As audited, the daemon was installed as a
+   *hidden* process: no tray, no window, an elevated Scheduled Task at logon, a protected copy
+   under `Program Files`, auto-restart on crash. The W0 work changed the default to an unelevated
+   per-user task with no restart policy, and the owner then ruled the tray out entirely: no tray
+   icon, no window and no logon notice, with the local settings page as the only entry point.
+   What still announces it: the `PocketDesk.exe` process in Task Manager, `pocketdesk --status`
+   (elevated, auto-start, restart policy, ports, data folder) and start/stop/policy events in the
+   Windows Event Log. Elevation is the explicit `-Protected` option and says so in `--status`.
 2. **Remote input that the page cannot distinguish from typing.** Input goes in
    through `SendInput` (Windows), `CGEvent` (macOS) and `uinput` (Linux) from
    `daemon/src/desktop_capture.js`. An elevated daemon can drive elevated
@@ -148,8 +150,8 @@ But making PocketDesk stop when asked moves it from "defeats the control" to
 ## 4. Principles for the fix
 
 - **P1 — Visible by default, never stealthy.** Anything PocketDesk does to a
-  machine must be enumerable by that machine: a process you can see, a tray
-  entry, a log, an uninstaller entry, a documented signature.
+  machine must be enumerable by that machine: a process you can see, a Start
+  Menu entry, a log, an uninstaller entry, a documented signature.
 - **P1b — Closeable, and it stays closed.** No elevation on the default install
   (elevation becomes an explicit advanced option for controlling elevated
   windows), and no silent restart after the user or another program closes it.
@@ -188,17 +190,18 @@ But making PocketDesk stop when asked moves it from "defeats the control" to
    install for people who need to drive elevated windows, with a clear warning
    that it makes PocketDesk uncloseable by ordinary apps.
 2. **No silent restart.** If the daemon is stopped or killed, the task does not
-   bring it back inside the session; the next start is a user action and the
-   tray says so. `RestartCount 3` is removed from the default task.
-3. **Stop means stop.** A `pocketdesk stop` (and the tray's Stop) ends the
-   PowerShell/ffmpeg helpers and does not re-arm capture or input.
+   bring it back inside the session; the next start is a user action and
+   `pocketdesk --status` says so. `RestartCount 3` is removed from the default task.
+3. **Stop means stop.** A `pocketdesk stop` (the same request the installer sends to the
+   loopback CLI port) ends the
 4. Add a self-check the machine owner can run before an exam:
    `pocketdesk --status` reports elevated? restarting? auto-start? policy?
 
 ### Phase 1b — Visibility (small, high value)
-1. Tray icon (and a one-time "PocketDesk is running" notice at logon), with
-   "Stop/Open/Uninstall". `install-service.ps1` and `install.ps1` stop calling
-   the install "hidden"; `README` and `CONTEXT.md` stop advertising it.
+1. No tray, no icon and no logon notice (owner ruling, 2026-11-26): the daemon starts at logon
+   in the background and the local settings page is the only entry point. `install-service.ps1`
+   and `install.ps1` stop calling the install "hidden"; `README` and `CONTEXT.md` name the
+   named process, the settings page and the task.
 2. `pocketdesk --status` prints the running daemon, task name, ports, and the
    data folder.
 3. Write start/stop/policy events to the Windows Event Log (source
@@ -232,7 +235,8 @@ Self-enforced "exam mode" stays out of scope for P2.
 - **Virtual webcam**: off by default, and burn
   `PocketDesk Webcam — <phone name>` plus a UTC clock into every frame (an
   `ffmpeg drawtext` in the decode path, before the frames reach `vcam-host`),
-  plus a tray banner while it runs. Unstop SmartHire blocks virtual cameras and
+  plus a line in the settings page and `pocketdesk --status` while it runs. Unstop SmartHire
+  blocks virtual cameras and
   HackerRank tells candidates to uninstall virtual-camera software, so this
   feature cannot be an impersonation path; it should read as an ordinary
   virtual camera that proctoring is free to refuse.
@@ -255,8 +259,8 @@ Self-enforced "exam mode" stays out of scope for P2.
 ### Phase 5 — Verification (acceptance)
 1. With `AllowRemoteControl=0`, `desktop_start` and `remote_input` fail with a
    visible reason and the log shows the policy name; with `1` they work.
-2. The daemon appears in Task Manager, in the tray, in `Get-ScheduledTask`, and
-   in Add/Remove Programs.
+2. The daemon appears in Task Manager, in `Get-ScheduledTask`, in `pocketdesk --status`, and in
+   Add/Remove Programs.
 3. A Zoom/Meet test against the virtual camera shows the watermark.
 4. `--status` lists task, ports and policy; uninstall leaves nothing behind.
 5. No code path in the tree contains an anti-detection workaround (review
@@ -276,7 +280,8 @@ Self-enforced "exam mode" stays out of scope for P2.
 1. **Unelevated default install** (elevation becomes opt-in) — yes? This is the
    one that decides whether a native proctoring client can close PocketDesk.
 2. **No silent auto-restart** — yes?
-3. Visible tray + logon notice — yes?
+3. Tray icon and logon notice - removed by owner ruling 2026-11-26: no tray, no icon, no notice,
+   settings page only.
 4. Console (SYSTEM / secure-desktop) endpoint — drop from public builds, or keep
    admin-only?
 5. Virtual webcam — default off + watermark, or watermark only?

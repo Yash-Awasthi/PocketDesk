@@ -38,8 +38,9 @@ These are targets, not a contract, and the clock starts at the advisory.
 In scope: the Windows daemon, the Android app, the install and uninstall
 scripts, and the native helpers.
 
-PocketDesk is designed to be visible to the machine it runs on: a tray icon,
-Windows Event Log entries, and a status command that reports what is running.
+PocketDesk is designed to be visible to the machine it runs on: a named
+process in Task Manager, Windows Event Log entries, and a status command that reports what is
+running.
 It is not to be used in proctored exams. See [docs/INTEGRITY.md](docs/INTEGRITY.md)
 for why the current defaults make that possible and what is being changed, and
 [docs/ALPHA-CAPTURE.md](docs/ALPHA-CAPTURE.md) for the capture-consent contract.

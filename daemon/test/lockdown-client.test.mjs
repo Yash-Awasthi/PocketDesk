@@ -90,7 +90,7 @@ const helper = spawn(
 const d = startDaemon(PORT, CLI, { home, manifests, dataDir: ".pocketdesk-test-" + PORT });
 try {
   await d.ready;
-  check("PocketDesk is running with a helper beside it", alive(d.pid) && alive(helper.pid));
+  check("the daemon is running with a helper beside it", alive(d.pid) && alive(helper.pid));
   check("the client can see the daemon", pocketdeskProcesses().includes(d.pid));
 
   // 1. Enumerate and kill, unelevated — the whole client story.

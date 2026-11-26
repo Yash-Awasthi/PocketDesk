@@ -224,7 +224,7 @@ async function run() {
     console.error("LEAKGUARD ERROR:", e.message);
     failures.push(e.message);
   } finally {
-    // A hard kill leaves the live REPL sessions running; the tray's clean stop takes them down.
+    // A hard kill leaves the live REPL sessions running; a clean stop takes them down.
     const exited = new Promise((r) => daemon.on("exit", r));
     daemon.stdin.end();
     await Promise.race([exited, new Promise((r) => setTimeout(r, 15000))]);

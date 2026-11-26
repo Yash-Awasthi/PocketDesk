@@ -7,7 +7,7 @@ PocketDesk is self-hosted remote control of the owner's own PC. The owner runs t
 | Name | What it is |
 |---|---|
 | `PocketDesk.exe` | The daemon: listener, desktop and webcam capture, input injection. Installed as a copy of `node.exe` (`daemon/scripts/install-service.ps1`), so Task Manager shows this name. |
-| `PocketDeskLauncher.exe` | Launcher and tray in one executable. The logon task runs it with `--supervise`; it starts the daemon and shows the tray icon. No separate tray executable is built. |
+| `PocketDeskLauncher.exe` | Launcher. The logon task runs it with `--daemon`: it starts the daemon in the background and exits. No tray icon, no window, no separate tray executable. |
 | `PocketDeskConsole.exe` | Console-endpoint launcher. Installed only with `-Console`; it registers the SYSTEM task and starts node as `PocketDeskConsoleDaemon.exe`. |
 | `PocketDeskConsoleDaemon.exe` | The node process behind the console endpoint on port 8766. Present only with `-Console`. |
 | `powershell.exe` | Capture, input and clipboard helpers, generated into the helpers folder under `%USERPROFILE%\.pocketdesk`. PowerShell is also an ordinary system process; match the parent process and the helper path. |

@@ -1,5 +1,5 @@
 // A daemon that crashes skips its graceful shutdown; the processes its agents
-// started must still go with it, or every tray restart leaves more behind.
+// started must still go with it, or every restart leaves more behind.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";

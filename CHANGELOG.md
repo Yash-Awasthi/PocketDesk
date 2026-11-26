@@ -13,7 +13,8 @@ Tags before 0.11.0 predate this file.
 - The default install is unelevated and stays stopped: a per-user task at
   `RunLevel Limited` with no restart policy, and `-Protected` is the explicit
   opt-in for an elevated daemon.
-- Tray icon with Open, Stop and Uninstall; `pocketdesk stop` also kills the
+- No tray, no icon, no logon notice: the daemon starts at logon and its local settings page is
+  the only entry point; `pocketdesk stop` also kills the
   PowerShell, ffmpeg and helper children; `pocketdesk --status` prints
   elevation, auto-start, restart policy, ports and the data folder.
 - Start, stop and policy events go to the Windows Event Log under `PocketDesk`.

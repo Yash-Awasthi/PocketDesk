@@ -98,11 +98,12 @@ silently approve UAC on your behalf. Remove it any time (see Uninstall).
 
 ## Daily use
 
-At each sign-in PocketDesk starts with your account and puts a **tray icon** near the clock: it is the
-one place it shows itself. Right-click it for **Open PocketDesk**, **Stop PocketDesk** and **Uninstall
-PocketDesk**; the first logon after installing also shows a one-time "PocketDesk is running" notice.
-The daemon itself has no window and is listed in Task Manager as **PocketDesk.exe**. A stop from the
-tray or the Task Manager is final — nothing restarts it until the next sign-in or the Start Menu
+At each sign-in PocketDesk starts with your account and runs in the background: there is no tray
+icon, no window and no notice. The **PocketDesk** Start Menu shortcut starts the daemon if needed
+and opens the pairing and settings page in your browser; that page is the only entry point. The
+daemon itself is listed in Task Manager as **PocketDesk.exe**. Stop it with `node src/cli.js stop`
+or from the Task Manager; a stop is final - nothing restarts it until the next sign-in or the
+Start Menu shortcut.
 shortcut.
 
 By default it runs with your own rights, from `%LOCALAPPDATA%\PocketDesk`, so it can reach anything

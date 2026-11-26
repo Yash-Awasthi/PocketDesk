@@ -107,10 +107,10 @@ stopped.
 
 ### M1.3 Visibility
 
-- [x] Tray icon with Stop / Open settings / Uninstall, and a one-time "PocketDesk is running" notice at logon. `[C]`
-  verified-here: `cd daemon && node --test test/installer.unit.test.mjs` → 28 checks ALL PASS (tray offers open/stop/uninstall, disappears with the daemon, shows the notice once, compiled into the launcher); `csc -target:winexe -r:System.Windows.Forms.dll -r:System.Drawing.dll PocketDeskLauncher.cs PocketDeskTray.cs` → CSC OK
-  deviation: under Smart App Control the autostart path is `conhost` + `run-daemon.ps1` (a signed-binary workaround), so no tray is running there. needs-verify: one SAC machine.
-  needs-verify: nobody has clicked the tray on Windows hardware yet; the menu items, balloon and Stop are compiled and statically checked, not exercised.
+- [x] No tray, no icon, no logon notice: the daemon starts at logon and is reachable only by its link. `[C]`
+  verified-here: `cd daemon && node --test test/installer.unit.test.mjs` -> 39 checks ALL PASS (both logon tasks run the headless supervisor with no tray host, the supervisor holds the daemon and exits with its code, the launcher uses no window toolkit, no tray program is left, the install compiles no tray source, no notification icon or balloon call exists under daemon/, the logon notice text is gone from every shipped file); `csc /target:winexe /r:System.dll daemon/scripts/PocketDeskLauncher.cs` -> CSC OK; that compiled supervisor run against an exe that exits 0 exited 0 and against one that exits 1 exited 1, so a clean stop ends the task and a crash arms RestartCount; the notification-icon and balloon greps over daemon and app are empty
+  stop path: `node daemon/src/cli.js stop` (the loopback CLI POST /shutdown on 4679), `schtasks /End /TN PocketDesk`, or Task Manager > PocketDesk.exe
+  limits: no tray, no window and no logon notice by owner ruling, so nothing on screen announces the daemon; only Task Manager, the Event Log, `pocketdesk --status` and the Start Menu shortcut do.
 - [x] Write start, stop and policy events to the Windows Event Log under source `PocketDesk`, so an external client can read them without guessing. `[C]`
   verified-here: `cd daemon && node --test test/eventlog.unit.test.mjs` → 10 PASS / ALL PASS, including a real write followed by `wevtutil qe Application "*[System[Provider[@Name='PocketDesk']]]"` reading the same message back
   partial: ids 1002/1003 (policy, policy refusal) are wired in `eventlog.js` but nothing emits them yet — M6.1 owns the call site.

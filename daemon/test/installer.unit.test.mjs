@@ -111,26 +111,66 @@ check(
   "the console install checks who holds port 8766",
   install.includes("(Get-Process -Id $listener.OwningProcess).Path -ne"),
 );
-const trayCs = fs.readFileSync(path.join(REPO, "daemon", "scripts", "PocketDeskTray.cs"), "utf8");
 check(
   "the launcher keeps no main window",
   !/new Form\(|ShowDialog\(/.test(launcherCs) && launcherCs.includes("CreateNoWindow = true"),
 );
+
+// No tray, no icon and no logon notice: the logon task starts the daemon in the background and the
+// local settings page is the only entry point.
+const NOTIFY_ICON = "Notify" + "Icon";
+const BALLOON_TIP = "Balloon" + "Tip";
+const LOGON_NOTICE = "PocketDesk is " + "running";
+const SKIP = new Set(["node_modules", ".git", "build", ".gradle", ".idea", "app"]);
+function textFiles(dir, skip, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name);
+    if (e.isDirectory()) {
+      if (!skip.has(e.name)) textFiles(full, skip, out);
+    } else if (/\.(md|mjs|cjs|js|json|ps1|cs|sh|cmd|bat|ini|txt|xml|yml|yaml|desktop|plist)$/i.test(e.name)) {
+      out.push(full);
+    }
+  }
+  return out;
+}
+const filesWith = (root, skip, needle) =>
+  textFiles(root, skip).filter((f) => fs.readFileSync(f, "utf8").includes(needle));
+const SCRIPTS = new Set(["node_modules"]);
 check(
-  "the tray offers open, stop and uninstall",
-  ["Open PocketDesk", "Stop PocketDesk", "Uninstall PocketDesk"].every((s) => trayCs.includes(s)),
+  "no tray program is left in the scripts tree",
+  !fs.existsSync(path.join(REPO, "daemon", "scripts", "PocketDeskTray.cs")),
 );
 check(
-  "the tray disappears with the daemon, so it cannot claim a dead daemon",
-  trayCs.includes("HasExited") && trayCs.includes("icon.Visible = false"),
+  "the install compiles one windowless launcher, with no tray source",
+  !install.includes("PocketDeskTray") && !/Windows\.Forms/.test(install),
 );
 check(
-  "the first logon after install shows the notice once",
-  trayCs.includes("tray-notified") && trayCs.includes("ShowBalloonTip"),
+  "both logon tasks run the headless supervisor, with no tray host",
+  (install.match(/-Argument "--supervise"/g) || []).length === 2 && !install.includes("--daemon"),
 );
 check(
-  "the installer compiles the tray into the launcher",
-  install.includes("PocketDeskTray.cs") && install.includes("/r:System.Windows.Forms.dll"),
+  "the supervisor holds the daemon and exits with its code",
+  /--supervise/.test(launcherCs) &&
+    launcherCs.includes("Process.Start(psi)") &&
+    launcherCs.includes("daemon.WaitForExit()") &&
+    launcherCs.includes("Environment.Exit(daemon.ExitCode)") &&
+    launcherCs.includes("AssignProcessToJobObject"),
+);
+check(
+  "the launcher uses no window toolkit",
+  !/System\.Windows\.Forms|System\.Drawing|Application\.Run/.test(launcherCs),
+);
+check(
+  "no tray notification icon is constructed anywhere under daemon/",
+  filesWith(path.join(REPO, "daemon"), SCRIPTS, NOTIFY_ICON).length === 0,
+);
+check(
+  "no balloon notice call exists anywhere under daemon/",
+  filesWith(path.join(REPO, "daemon"), SCRIPTS, BALLOON_TIP).length === 0,
+);
+check(
+  "the one-time logon notice text is gone from every shipped file",
+  filesWith(REPO, SKIP, LOGON_NOTICE).length === 0,
 );
 
 // macOS and Linux follow the same rule: a hidden service, an app entry that opens the settings page.

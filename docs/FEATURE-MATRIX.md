@@ -52,7 +52,7 @@ Status legend:
 | Native-scrollback passthrough (plain text lines for touch scroll) | retach | ✅ `chat_text` renders the full transcript as plain text |
 | Cell-grid snapshot replay (restore vim/htop screens) | muxterm, retach, zellij | 🗺️ |
 | mosh-style UDP roam (auth datagrams, state diff, predictive echo) | mosh, zmosh, zmx | 🗺️ (WS+TCP for now; Tailscale covers roaming) |
-| Boot persistence (service/launchd start) | pm2, muxterm | ⚙️ install-service.ps1 + tray |
+| Boot persistence (service/launchd start) | pm2, muxterm | ⚙️ install-service.ps1 + Scheduled Task |
 | remain-on-exit + respawn | tmux | ✅ tmux respawn-config on session create; `remain_on_exit` |
 | Windows/panes/layouts | tmux, zellij, muxterm | ➖ removed 2026-09-22 with the tmux manager |
 | Git-worktree-per-agent | vmux, orca, ccpocket | ✅ a new chat or terminal can start in its own worktree (`create {worktree}`, `chatsession {worktree}`, `worktree.js`); there is no `wt_*` message |
@@ -161,7 +161,7 @@ Status legend:
 | Feature | Source repos | Status |
 |---|---|---|
 | One-liner installers (bash + PowerShell) | — | ⚙️ |
-| Windows service + tray | node-windows | ⚙️ |
+| Windows service + tray | node-windows | n/a: no tray, a Scheduled Task runs the daemon |
 | Watchdog crash recovery | node-windows, pm2 | ⚙️ (service restart); the in-daemon process monitor was removed 2026-09-22, unused |
 | Keep-PC-awake while agents run (per-process assertion) | orca, LinkShell | ✅ `power_*` (`RH_AWAKE` auto/on/off) — rewritten to SetThreadExecutionState/caffeinate, **no global powercfg/pmset mutation** |
 | Host stats cards (CPU/mem/uptime) | webmux, vmux, multimux | ✅ `stats` |
@@ -368,6 +368,6 @@ the messages that tab sends. Full suite: 30 files, all pass.
 | Remote restart / power | AnyDesk, RustDesk | ✅ `pc_power` |
 | Wake on LAN | AnyDesk | ⚙️ |
 | Screen recording | AnyDesk | ⚙️ |
-| Unattended access | AnyDesk | ⚙️ tray at logon; console task at boot |
+| Unattended access | AnyDesk | ⚙️ Scheduled Task at logon; console task at boot |
 | One-click installer | AnyDesk, RustDesk | ✅ `PocketDesk-Install.exe` / `PocketDesk-Uninstall.exe` (IExpress around `install.ps1` / `uninstall.ps1`) and Start Menu shortcut |
 | Audio, whiteboard, remote printing, address book sync, group policies, REST API for admins | AnyDesk | ➖ out of scope: personal use, no sound |

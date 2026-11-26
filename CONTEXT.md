@@ -24,7 +24,7 @@ What each feature actually does today: [docs/FEATURE-MATRIX.md](docs/FEATURE-MAT
 | `daemon/src/plugins/` | 3 plugins (auth, logger, metrics), loaded by `plugins.js` |
 | `daemon/manifests/` | 17 CLI/GUI manifests: claude, codex, gemini, opencode, opencode-desktop, qwen, aider, cline, copilot, cursor, windsurf, zed, zcode, antigravity, freebuff-desktop, vscode, shell |
 | `daemon/public/` | `index.html` (the hub), `ui/` (core, hub, pages, phone, computers, extras, share, thispc), `vendor/` |
-| `daemon/scripts/` | installers (`install-service.ps1`, `uninstall-service.ps1`), launcher and tray sources (`PocketDeskLauncher.cs`, `PocketDeskTray.cs`, `PocketDeskKvm.cs`), `gen-cert.js`, bench scripts, `console/`, `linux/`, `mac/`, `unix/` |
+| `daemon/scripts/` | installers (`install-service.ps1`, `uninstall-service.ps1`), launcher sources (`PocketDeskLauncher.cs`, `PocketDeskKvm.cs`), `gen-cert.js`, bench scripts, `console/`, `linux/`, `mac/`, `unix/` |
 | `daemon/test/` | 57 `*.test.mjs` files plus `helpers.mjs` and `setup.mjs` |
 | `app/` | Android project (see versions below) |
 | `docs/` | `INTEGRITY.md`, `FEATURE-MATRIX.md`, `SETUP-PC.md`, `REPRODUCIBLE-BUILD.md`, `EXCLUSIVE-FULLSCREEN.md`, `ALPHA-CAPTURE.md`, `RELAY.md`, `CONNECTIVITY-NOTES.md`, `TRANSPORT-BENCH.md` |

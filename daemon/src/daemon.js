@@ -89,8 +89,8 @@ process.on("exit", () => {
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-// Windows has no SIGTERM for a windowless child: the tray asks for a clean stop by closing stdin,
-// which also happens when the tray itself dies, so the daemon never outlives it.
+// Windows has no SIGTERM for a windowless child: a launcher asks for a clean stop by closing
+// stdin, which also happens when that launcher dies, so the daemon never outlives it.
 if (process.env.RH_STOP_ON_STDIN_EOF === "1") {
   process.stdin.on("end", () => gracefulShutdown("stdin closed"));
   process.stdin.resume();
