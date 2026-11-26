@@ -2,7 +2,7 @@
 // This file parses and decides who may write; `policy.js` owns both stores and the admin probe.
 import { describe, isAdmin, resetKey, setKey } from "./policy.js";
 
-export const USAGE = "pocketdesk policy [set KEY 0|1 | reset [KEY|all]]";
+export const USAGE = "pocketdesk policy [--status | set KEY 0|1 | reset [KEY|all]]";
 
 const NEED_ADMIN =
   "changing machine policy needs an elevated shell: open PowerShell as administrator and run it again";
@@ -13,6 +13,12 @@ const NEED_ADMIN =
  */
 export function runPolicy(argv = [], { admin = isAdmin() } = {}) {
   const [action, key, value] = argv;
+  // `--status` is the documented spelling of inspect, so it prints the same read-only lines; a
+  // stray argument after it is a typo and must fail instead of being silently dropped.
+  if (action === "--status") {
+    if (key !== undefined) return { code: 1, out: [USAGE] };
+    return { code: 0, out: describe() };
+  }
   // Inspect is read-only: it must not create the ProgramData copy just by looking.
   if (!action || action === "inspect" || action === "show") return { code: 0, out: describe() };
   if (action !== "set" && action !== "reset") return { code: 1, out: [USAGE] };

@@ -199,6 +199,20 @@ try {
     check("policy inspect creates no policy.json", !fs.existsSync(json));
   }
   {
+    const bare = runPolicy([], { admin: false });
+    const status = runPolicy(["--status"], { admin: false });
+    check(
+      "policy --status prints the same lines as bare policy",
+      status.code === bare.code && JSON.stringify(status.out) === JSON.stringify(bare.out),
+    );
+    check("policy --status creates no policy.json", !fs.existsSync(json));
+    const stray = runPolicy(["--status", "extra"], { admin: false });
+    check(
+      "policy --status refuses a stray argument",
+      stray.code === 1 && JSON.stringify(stray.out) === JSON.stringify([USAGE]),
+    );
+  }
+  {
     const r = runPolicy(["set", "AllowWebcam", 0], { admin: false });
     const text = r.out.join(" ");
     check("a non-admin set is refused with the reason", r.code === 1 && /administrator/.test(text));

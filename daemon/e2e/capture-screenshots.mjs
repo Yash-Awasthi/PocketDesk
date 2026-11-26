@@ -80,8 +80,8 @@ try {
       await page.clock.setFixedTime(FREEZE);
       await page.goto(`${daemon.url}/#go=${id}`);
       await page.waitForFunction(() => document.body.classList.contains("online"));
-      // The section is shown by the app, not by CSS. Screens has no data source in the fake daemon
-      // (no desktop_monitors reply), so its section is zero height and a visible-only wait times out.
+      // The section is shown by the app, not by CSS. The fake daemon does answer desktop_monitors,
+      // so the wait is only for the app to unhide the section.
       await page.locator(`#page-${id}`).waitFor({ state: "attached" });
       await page.waitForFunction((pid) => {
         const sec = document.getElementById(`page-${pid}`);
