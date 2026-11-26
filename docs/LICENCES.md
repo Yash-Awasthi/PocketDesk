@@ -23,6 +23,8 @@ what the shipped tree actually declares.
 | `ssh2` | MIT | `daemon/package.json` ^1.17.0 |
 | `ws` | MIT | `daemon/package.json` ^8.22.0 |
 | `@number0/iroh` | MIT OR Apache-2.0 | `daemon/package.json` ^1.1.0 |
+| `@axe-core/playwright` | MPL-2.0 | `daemon/package.json` ^4.14.1 |
+| `@playwright/test` | Apache-2.0 | `daemon/package.json` ^1.65.1 |
 | `@eslint/js` | MIT | `daemon/package.json` ^10.0.1 |
 | `@types/node` | MIT | `daemon/package.json` ^26.6.10 |
 | `c8` | ISC | `daemon/package.json` ^12.0.0 |
