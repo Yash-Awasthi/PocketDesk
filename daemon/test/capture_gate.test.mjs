@@ -110,7 +110,10 @@ if (!WIN) {
       { captureMode: async (m) => ({ seen: "mode", m }), checkCapture: async () => ({ seen: "check" }) },
       { type: "desktop_capture", mode: "auto" },
     );
-    check("the exported handler sends a plain request to captureMode", plain.seen === "mode" && plain.m.mode === "auto");
+    check(
+      "the exported handler sends a plain request to captureMode",
+      plain.seen === "mode" && plain.m.mode === "auto",
+    );
   } finally {
     d.helperCapture.kill();
     fs.rmSync(home, { recursive: true, force: true });
