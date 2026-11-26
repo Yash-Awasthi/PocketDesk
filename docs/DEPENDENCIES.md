@@ -35,13 +35,20 @@ Cargo resolves on build.
 | ws | daemon/package.json | ^8.22.0 |
 | @number0/iroh | daemon/package.json (optionalDependencies) | ^1.1.0 |
 | @eslint/js | daemon/package.json (devDependencies) | ^10.0.1 |
+| @types/node | daemon/package.json (devDependencies) | ^26.6.10 |
 | c8 | daemon/package.json (devDependencies) | ^12.0.0 |
 | eslint | daemon/package.json (devDependencies) | ^10.15.0 |
 | globals | daemon/package.json (devDependencies) | ^17.14.0 |
 | prettier | daemon/package.json (devDependencies) | ^3.10.1 |
+| typescript | daemon/package.json (devDependencies) | ^5.9.3 |
 
 The resolved tree is recorded in daemon/package-lock.json. node-pty is a native
 module and is allow-listed for its install script in daemon/package.json.
+
+`typescript` and `@types/node` are dev-only and exist for the JSDoc type check:
+`npm run typecheck` runs `tsc --checkJs --noEmit` over `src/` (row 250, commit
+`688ae36`), where TypeScript is the checker and `@types/node` supplies the Node API
+typings it reads. Neither is loaded by the shipped daemon.
 
 ### Native (Cargo)
 
