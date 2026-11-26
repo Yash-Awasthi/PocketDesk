@@ -310,7 +310,8 @@ most changes touch, and neither has a module boundary.
 **Done when:** each is four modules with the existing tests as the net.
 
 - **m3.2.1 Capture**
-  - [ ] Split `desktop_capture.js` into capture, encode, input and topology modules with the existing tests as the safety net. `[F]`
+  - [x] Split `desktop_capture.js` into capture, encode, input and topology modules with the existing tests as the safety net. `[F]`
+  verified-here: desktop_capture.js 2208 -> barrel 29 + desktop/capture.js 1840, desktop/encode.js 128, desktop/input.js 199, desktop/topology.js 51; cd daemon && node --test test/desktop.test.mjs test/desktop_input.unit.test.mjs test/desktop_video.test.mjs test/console-parity.test.mjs -> tests 17 pass 17 fail 0; node --test test/linux_desktop.unit.test.mjs test/wayland.unit.test.mjs test/term-cli.test.mjs test/stream.test.mjs -> pass 13/13; npm run typecheck -> exit 0, allowlist 33 -> 32 files, maxFiles 33 -> 32; eslint and prettier clean; desktop coverage floor 69.0/55.2/31.9 measured, floor 66/52/29; npm test -> tests 177 pass 168 fail 9, none desktop (git-panel and iroh-pin pass alone, dependency-cadence and smoke-chat fail at HEAD too, protocol-contract/protocol-doc/readme-truth are other trees' dirty tests, 8845/8846 are the known port pairs)
 - **m3.2.2 Server and web hub**
   - [ ] Split `server.js` into transport, routing and static-serving; keep one entrypoint. `[F]`
   - [ ] Consolidate the eight `daemon/public/ui/*.js` files behind one module boundary with explicit exports; remove globals. `[F]`
