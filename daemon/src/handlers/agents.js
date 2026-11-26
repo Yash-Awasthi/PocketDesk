@@ -107,7 +107,9 @@ export function startChat(
   // Windows reports a missing working folder as the shell itself missing (spawn cmd.exe ENOENT).
   if (cwd && !fs.statSync(cwd, { throwIfNoEntry: false })?.isDirectory())
     return { error: `folder not found: ${cwd}` };
-  const s = chat.create({ manifest: m, cwd, ...resume });
+  // chat.create requires the version, so hand it the value the registry's last probe recorded.
+  const entry = registry.list().find((r) => r.manifest.id === m.id);
+  const s = chat.create({ manifest: m, cwd, ...resume, version: entry?.version ?? null });
   sessionStore.upsert(s.id, { name: m.name, project: cwd || "", type: "chat", status: "idle" });
   plugins.callHook("onChatCreated", s);
   power.addStatus({ agentId: s.id, state: "running", receivedAt: Date.now() });
