@@ -42,4 +42,26 @@ if (fs.existsSync(workflow)) {
   check("it runs gitleaks over the full history", /gitleaks/.test(wf) && /fetch-depth:\s*0/.test(wf));
 }
 
+// The history scan flags four fixture strings and one vendored bundle; the config must name those
+// exactly rather than switch rules off, so a red scan can never be silenced with a blanket ignore.
+const configPath = path.join(REPO, ".gitleaks.toml");
+check("the gitleaks config exists", fs.existsSync(configPath));
+if (fs.existsSync(configPath)) {
+  const cfg = fs.readFileSync(configPath, "utf8");
+  check("it keeps the default rules", /\[extend\][\s\S]*useDefault = true/.test(cfg));
+  for (const fixture of [
+    "abcdef1234567890",
+    "0123456789abcdef",
+    "GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ",
+    "MFRGGZDFMZTWQ2LKNNWG23TPOBYXE43U",
+  ]) {
+    check(`it allowlists the fixture ${fixture}`, cfg.includes(fixture));
+  }
+  check(
+    "it allowlists the vendored xterm bundle by path",
+    /\^app\/app\/src\/main\/assets\/vendor\//.test(cfg),
+  );
+  check("nothing is allowlisted wholesale", !/regexes = \[\s*''''\s*,?\s*\]/.test(cfg));
+}
+
 finish();
