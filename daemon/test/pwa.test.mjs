@@ -14,9 +14,7 @@ const REPO = path.dirname(url.fileURLToPath(new URL("..", import.meta.url)));
 const swFile = path.join(REPO, "daemon", "public", "sw.js");
 const swText = fs.readFileSync(swFile, "utf8");
 const CACHE = swText.match(/const CACHE = "([^"]+)"/)[1];
-const ASSETS = [...swText.match(/const ASSETS = \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map(
-  (m) => m[1],
-);
+const ASSETS = [...swText.match(/const ASSETS = \[([\s\S]*?)\];/)[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 const SHELL = "/";
 // What the daemon serves the PC browser: the page plus the metas only loopback gets.
 const SERVED =
