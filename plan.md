@@ -349,7 +349,8 @@ transport docs describe a design that has moved.
   verified-here: node test/manifest-platform.unit.test.mjs -> 10 pass, 0 fail; node src/cli.js agent compat claude -> installed: yes, compat: ok
 - [x] Stream adapter versioning: a per-agent fixture set captured from the installed CLI version; a mismatch warns instead of silently mis-parsing. `[W]`
   verified-here: cd daemon && node test/chat-adapters.unit.test.mjs -> ALL PASS, 0 failures; streamVersionStatus demo -> warn 0.56.0, refuse 3.0.0, unknown nightly; eslint + prettier --check clean
-- [ ] Session recording: opt-in, local-only, replayable in the phone (as text, not video), with a retention cap. `[W]`
+- [x] Session recording: opt-in, local-only, replayable in the phone (as text, not video), with a retention cap. `[W]`
+  verified-here: `cd daemon && node test/recordings.test.mjs` -> ALL PASS, 0 failing; demo prints replay text and prune before/after; eslint + prettier --check clean
 - [ ] Git panel: stage, commit, branch, diff view with the same proposal/approval gate as agent actions. `[W]`
 - [x] `pocketdesk doctor --json` for scripting: every probe, its result and the fix. `[W]`
   verified-here: cd daemon && node --test test/doctor-cli.unit.test.mjs -> ALL PASS; the report carries ok, problems and every check as name/ok/detail/fix, no failing probe is without a fix, and the exit code is 0 only when all probes pass

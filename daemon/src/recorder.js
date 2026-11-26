@@ -18,6 +18,83 @@ const safe = (s) =>
     .replace(/[^\w.-]+/g, "_")
     .slice(0, 40);
 
+/* eslint-disable no-control-regex -- the point is stripping control characters */
+const OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?/g;
+const CSI = /\x1b\[[0-?]*[ !-/]*[@-~]/g;
+const ESC = /\x1b[\s\S]?/g;
+const C0 = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
+/* eslint-enable no-control-regex */
+
+const stripAnsi = (s) => s.replace(OSC, "").replace(CSI, "").replace(ESC, "").replace(C0, "");
+
+/** Read an asciicast v2 file back as plain text: output only, no escapes, last overwrite per line. */
+export function replayCast(text) {
+  const lines = String(text ?? "")
+    .split(/\r?\n/)
+    .filter((l) => l.trim() !== "");
+  if (!lines.length) throw new Error("not an asciicast v2 recording");
+  let header;
+  try {
+    header = JSON.parse(lines[0]);
+  } catch {
+    throw new Error("not an asciicast v2 recording");
+  }
+  if (!header || typeof header !== "object" || header.version !== 2)
+    throw new Error("not an asciicast v2 recording");
+  let output = "";
+  for (const line of lines.slice(1)) {
+    let event;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue; // a recording cut off mid-line is still worth replaying up to the cut.
+    }
+    if (Array.isArray(event) && event[1] === "o" && typeof event[2] === "string") output += event[2];
+  }
+  const plain = stripAnsi(output).replace(/\r\n/g, "\n");
+  const kept = [];
+  for (const raw of plain.split("\n")) {
+    const line = raw.split("\r").pop().trimEnd();
+    if (!line || kept[kept.length - 1] === line) continue;
+    kept.push(line);
+  }
+  return kept.join("\n");
+}
+
+/** Cap for retained recordings; RH_RECORD_KEEP overrides the default of 50. */
+export function defaultKeep() {
+  const n = Number(process.env.RH_RECORD_KEEP);
+  return Number.isInteger(n) && n > 0 ? n : 50;
+}
+
+/** Delete the oldest .cast/.mp4 files beyond [keep]; sessions.log and other files stay. */
+export function pruneRecordings(dir, keep = defaultKeep()) {
+  const cap = Number.isInteger(keep) && keep >= 0 ? keep : defaultKeep();
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const media = [];
+  for (const name of names) {
+    if (!name.endsWith(".cast") && !name.endsWith(".mp4")) continue;
+    try {
+      media.push({ name, mtime: fs.statSync(path.join(dir, name)).mtimeMs });
+    } catch {}
+  }
+  if (media.length <= cap) return [];
+  media.sort((a, b) => b.mtime - a.mtime);
+  const deleted = [];
+  for (const { name } of media.slice(cap)) {
+    try {
+      fs.unlinkSync(path.join(dir, name));
+      deleted.push(name);
+    } catch {}
+  }
+  return deleted;
+}
+
 /** ffmpeg arguments for the audit copy of the screen: 10 fps, pointer drawn, playable even if cut off. */
 export function screenArgs(file, monitor) {
   const adapter = monitor?.adapter || 0;
@@ -65,21 +142,27 @@ export function screenArgs(file, monitor) {
 }
 
 export class Recorder {
-  constructor({ ffmpeg = process.env.FFMPEG_PATH || "ffmpeg" } = {}) {
+  constructor({
+    ffmpeg = process.env.FFMPEG_PATH || "ffmpeg",
+    recordings = RECORDINGS,
+    flag = RECORD_FLAG,
+  } = {}) {
     this.ffmpeg = ffmpeg;
+    this.recordings = recordings;
+    this.flag = flag;
     this.screen = null;
     this.casts = new Map();
   }
 
   get enabled() {
-    return fs.existsSync(RECORD_FLAG);
+    return fs.existsSync(this.flag);
   }
 
   log(event, fields = {}) {
     try {
-      fs.mkdirSync(RECORDINGS, { recursive: true });
+      fs.mkdirSync(this.recordings, { recursive: true });
       fs.appendFileSync(
-        path.join(RECORDINGS, "sessions.log"),
+        path.join(this.recordings, "sessions.log"),
         JSON.stringify({ at: new Date().toISOString(), event, ...fields }) + "\n",
       );
     } catch {
@@ -98,8 +181,9 @@ export class Recorder {
   }
 
   _startScreen(label, monitor) {
-    fs.mkdirSync(RECORDINGS, { recursive: true });
-    const file = path.join(RECORDINGS, `desktop-${stamp()}-${safe(label)}.mp4`);
+    fs.mkdirSync(this.recordings, { recursive: true });
+    pruneRecordings(this.recordings);
+    const file = path.join(this.recordings, `desktop-${stamp()}-${safe(label)}.mp4`);
     let proc;
     try {
       proc = spawn(this.ffmpeg, screenArgs(file, monitor), {
@@ -140,8 +224,9 @@ export class Recorder {
   terminalStarted({ id, harnessId, cwd }) {
     if (!this.enabled) return;
     try {
-      fs.mkdirSync(RECORDINGS, { recursive: true });
-      const file = path.join(RECORDINGS, `terminal-${stamp()}-${safe(harnessId)}-${id}.cast`);
+      fs.mkdirSync(this.recordings, { recursive: true });
+      pruneRecordings(this.recordings);
+      const file = path.join(this.recordings, `terminal-${stamp()}-${safe(harnessId)}-${id}.cast`);
       const out = fs.createWriteStream(file);
       out.write(
         JSON.stringify({

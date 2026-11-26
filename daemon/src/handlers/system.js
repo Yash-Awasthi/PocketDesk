@@ -13,13 +13,14 @@ import { statusLines } from "../status.js";
 import * as totp from "../totp.js";
 import fs from "node:fs";
 import path from "node:path";
-import { RECORDINGS } from "../recorder.js";
+import { RECORDINGS, pruneRecordings, replayCast } from "../recorder.js";
 
 export default function systemHandlers(ctx) {
   const { send, plugins, streamParser, tls, desktop } = ctx;
   return {
     // Recorded terminal sessions (asciicast) for the phone's player; the folder is flat, so a bare name is all it takes.
     async recordings_list(ws) {
+      pruneRecordings(RECORDINGS);
       let names = [];
       try {
         names = fs.readdirSync(RECORDINGS).filter((n) => n.endsWith(".cast"));
@@ -38,7 +39,13 @@ export default function systemHandlers(ctx) {
       if (name !== path.basename(name) || !name.endsWith(".cast") || !fs.existsSync(file))
         return send(ws, { type: "recording_get", name, error: `no such recording: ${name}` });
       // ponytail: whole file in one message; stream it in chunks if recordings outgrow the socket's message cap.
-      send(ws, { type: "recording_get", name, text: fs.readFileSync(file, "utf8") });
+      const raw = fs.readFileSync(file, "utf8");
+      if (msg.format !== "text") return send(ws, { type: "recording_get", name, text: raw });
+      try {
+        send(ws, { type: "recording_get", name, text: replayCast(raw) });
+      } catch (e) {
+        send(ws, { type: "recording_get", name, error: `invalid recording: ${name}: ${e.message}` });
+      }
     },
     async propose(ws, msg) {
       const p = proposals.create({
