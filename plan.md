@@ -338,7 +338,8 @@ transport docs describe a design that has moved.
 
 - [ ] Tablet and foldable layouts for the session list, terminal and desktop viewers. `[W]`
 - [ ] Notification actions on session end: open, reply, dismiss, all without opening the app. `[W]`
-- [ ] Session search and filter across agents, projects and dates. `[W]`
+- [x] Session search and filter across agents, projects and dates. `[W]`
+  verified-here: cd daemon && npx playwright test -> 9 passed. The Sessions page asks history_list and filters in the browser on the fields the daemon already returns (title, agent, app, cwd, updated): typing "retries" leaves one row, agent claude leaves two, project api leaves the codex row, From date 2026-11-25 leaves the newest, and a future date shows the empty line and "0 of 3 saved conversations". A project is the last folder of cwd; the axe pass over the page adds no critical findings.
 - [ ] Share a file into PocketDesk from any app (share target) and route it to the active session or a chosen folder. `[W]`
 - [ ] Per-PC quick actions on the home screen (new chat, new terminal, files, desktop) as an editable grid. `[W]`
 

@@ -106,9 +106,45 @@ test("the running page lists one live terminal session", async ({ page }) => {
   expect(daemon.messages.some((m) => m.type === "running_state")).toBe(true);
 });
 
+test("the sessions page searches and filters by agent, project and date", async ({ page }) => {
+  await open(page, "sessions");
+  const panel = page.locator("#page-sessions");
+  const list = panel.locator(".list");
+  const count = panel.locator("p.dim.small");
+
+  await expect(list.locator(".item")).toHaveCount(3);
+  await expect(count).toHaveText("3 of 3 saved conversations");
+  await expect(list.getByText("Fix the build")).toBeVisible();
+
+  const search = panel.getByLabel("Search sessions");
+  await search.fill("retries");
+  await expect(list.locator(".item")).toHaveCount(1);
+  await expect(list.getByText("Add retries")).toBeVisible();
+  await search.fill("");
+
+  await panel.getByLabel("Agent").selectOption("claude");
+  await expect(list.locator(".item")).toHaveCount(2);
+  await panel.getByLabel("Agent").selectOption("");
+
+  await panel.getByLabel("Project").selectOption("api");
+  await expect(list.locator(".item")).toHaveCount(1);
+  await expect(list.getByText("Add retries")).toBeVisible();
+  await panel.getByLabel("Project").selectOption("");
+
+  await panel.getByLabel("From date").fill("2026-11-25");
+  await expect(list.locator(".item")).toHaveCount(1);
+  await expect(list.getByText("Fix the build")).toBeVisible();
+
+  await panel.getByLabel("From date").fill("2027-01-01");
+  await expect(list.locator(".item")).toHaveCount(0);
+  await expect(list.getByText("No saved conversation matches these filters.")).toBeVisible();
+  await expect(count).toHaveText("0 of 3 saved conversations");
+});
+
 for (const [id, name] of [
   ["home", "hub"],
   ["thispc", "settings"],
+  ["sessions", "sessions"],
 ]) {
   test(`the ${name} page has no critical axe findings`, async ({ page }) => {
     await open(page, id);

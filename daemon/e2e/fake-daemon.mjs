@@ -57,6 +57,35 @@ export async function startFakeDaemon(options = {}) {
       revoked: true,
     },
   ];
+  const history = options.history ?? [
+    {
+      agent: "claude",
+      app: "VS Code",
+      id: "s1",
+      title: "Fix the build",
+      cwd: "C:\\proj\\desk",
+      updated: Date.UTC(2026, 10, 26, 9, 0),
+      resumable: true,
+    },
+    {
+      agent: "codex",
+      app: "CLI",
+      id: "s2",
+      title: "Add retries",
+      cwd: "C:\\proj\\api",
+      updated: Date.UTC(2026, 10, 20, 8, 0),
+      resumable: true,
+    },
+    {
+      agent: "claude",
+      app: "CLI",
+      id: "s3",
+      title: "Old spike",
+      cwd: "C:\\proj\\desk",
+      updated: Date.UTC(2026, 9, 15, 7, 0),
+      resumable: true,
+    },
+  ];
   const sessions = options.sessions ?? [
     { id: "0123456789abcdef", harnessId: "claude", kind: "terminal", state: "running" },
   ];
@@ -188,6 +217,7 @@ export async function startFakeDaemon(options = {}) {
       if (m.type === "clippy_latest") reply({ type: "clippy_latest", ok: false });
       if (m.type === "pc_list") reply({ type: "pc_list", items: [] });
       if (m.type === "sources_list") reply({ type: "sources_list", items: [] });
+      if (m.type === "history_list") reply({ type: "history", items: history });
       if (m.type === "running_state") {
         reply({
           type: "running_state",
