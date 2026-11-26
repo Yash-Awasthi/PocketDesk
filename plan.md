@@ -268,8 +268,10 @@ commit is byte-identical.
 
 ### M2.4 Browser client tests
 
-- [ ] No test covers `daemon/public/ui/*.js`; add Playwright against a fake daemon: pairing page, device table, TOTP section, one terminal session. `[P]`
-- [ ] Accessibility smoke: axe on the settings and hub pages, zero critical findings. `[P]`
+- [x] No test covers `daemon/public/ui/*.js`; add Playwright against a fake daemon: pairing page, device table, TOTP section, one terminal session. `[P]`
+  verified-here: cd daemon && npx playwright test -> 6 passed. The four page tests run the real daemon/public/ui/*.js over a fake daemon (static files, /access, /ws) and cover the pairing card (token, QR for both tabs), the device table (platform, last seen, address, Revoke -> /access/devices/revoke and the row becomes revoked), two-factor (Off -> setup QR + secret -> code -> On) and the Running page's one terminal session row (claude / terminal / 01234567). Perturbation: removing the platform from the device row fails the table test naming Android 16. New web-ui CI job runs npm run test:e2e after npx playwright install --with-deps chromium.
+- [x] Accessibility smoke: axe on the settings and hub pages, zero critical findings. `[P]`
+  verified-here: cd daemon && npx playwright test --grep axe -> 2 passed, zero critical violations on #page-home (hub) and #page-thispc (settings). The first scan found two real criticals: the readonly pairing token input had no accessible name and the role=tablist had no tab children; public/ui/thispc.js now sets aria-label on the token field and role=tab plus aria-selected on the two QR tabs. Removing the aria-label again makes the settings scan fail with rule 'label'.
 - [x] Assert the loopback/Host/key guard on `/pair` and every `/access/*` route: 403 without the key, 403 from a non-loopback Host. `[P]`
   verified-here: cd daemon && node --test test/access.test.mjs -> ALL PASS, 23 checks; the route list is read from server.js (13 /access routes) and each is 403 with no key, a wrong key and a Host of evil.example; /pair is 403 in the first two and 302 for the PC browser. Perturbing the Host regex to always match -> FAILED: 2, naming the per-route check and /pair
 

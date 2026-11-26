@@ -27,3 +27,7 @@ desktop.ini
 
 # c8 output
 daemon/coverage/
+
+# Playwright writes these next to the daemon when the hub tests run
+daemon/test-results/
+daemon/playwright-report/

@@ -31,17 +31,21 @@ PD.registerThisPc = () => PD.page("thispc", {
     }
     // ── Pairing ──
     const pwInput = h("input", { type: "password", placeholder: "Connection password (blank = none)", autocomplete: "new-password", style: "flex:1;min-width:220px" });
+    const tokenInput = h("input", { type: "text", readOnly: true, value: PD.localToken, style: "width:min(520px,100%)", onfocus: (e) => e.target.select() });
+    tokenInput.setAttribute("aria-label", "Pairing token");
     // One code at a time. Side by side, a phone's scanner locked onto whichever it framed first (the
     // browser code, every time) instead of the app's, so the two are tabs now.
     const qrBox = h("div", { className: "qr" });
     const qrNote = h("p", { className: "dim small", style: "margin:8px 0 0" });
     const hubLine = h("div", { className: "dim small" });
     const tabs = [["app", "PocketDesk app"], ["web", "Phone browser"]].map(([key, label]) =>
-      h("button", { className: "tab", textContent: label, onclick: () => { S.qrTab = key; paintQr(); } }));
+      h("button", { className: "tab", role: "tab", "aria-selected": "false", textContent: label, onclick: () => { S.qrTab = key; paintQr(); } }));
     const paintQr = () => {
       const app = S.qrTab !== "web";
       tabs[0].classList.toggle("on", app);
       tabs[1].classList.toggle("on", !app);
+      tabs[0].setAttribute("aria-selected", String(app));
+      tabs[1].setAttribute("aria-selected", String(!app));
       qrBox.innerHTML = app ? (PD.pairPayload ? qrSvg(PD.pairPayload) : "") : (PD.hubUrl ? qrSvg(PD.hubUrl) : "");
       qrNote.textContent = app
         ? "Scan with the PocketDesk app: Connect tab › Scan QR. It pairs this PC with its address and certificate fingerprint."
@@ -57,7 +61,7 @@ PD.registerThisPc = () => PD.page("thispc", {
         h("p", { className: "dim small", textContent: "If a code does not scan, enter the token by hand in the app (or in this browser's login box)." }),
         h("div", { className: "form" },
           h("label", {}, "Token"),
-          h("input", { type: "text", readOnly: true, value: PD.localToken, style: "width:min(520px,100%)", onfocus: (e) => e.target.select() }),
+          tokenInput,
           btn("Copy token", () => navigator.clipboard.writeText(PD.localToken).then(() => PD.toast("Token copied"), () => PD.toast("Could not copy", true))),
           btn("Copy app link", () => navigator.clipboard.writeText(PD.pairPayload || "").then(() => PD.toast("Pairing link copied"), () => PD.toast("Could not copy", true))))),
 

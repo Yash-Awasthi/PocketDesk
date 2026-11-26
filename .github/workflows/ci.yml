@@ -61,6 +61,24 @@ jobs:
       - name: Run test suite
         run: npm test
 
+  web-ui:
+    name: Hub pages (Playwright)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: daemon
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: daemon/package-lock.json
+      - run: npm ci
+      # Chromium is the only browser the hub is tested in; --with-deps brings its shared libraries.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
   android:
     name: Android lint, unit tests, build
     runs-on: ubuntu-latest

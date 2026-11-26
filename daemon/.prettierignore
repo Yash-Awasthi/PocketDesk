@@ -16,3 +16,6 @@ test/totp.unit.test.mjs
 README.md
 # Generated CycloneDX BOM; reflowing it would desync it from the generator.
 sbom/
+# Written by Playwright on each run.
+test-results/
+playwright-report/
