@@ -292,7 +292,8 @@ version set that will age badly, and the Android app is on a Kotlin beta.
 - **m3.1.1 Daemon**
   - [x] Node floor to the current LTS in `engines` and CI matrix; drop older runners. `[F]`
   verified-here: node -v; node -e "console.log(require('./daemon/package.json').engines.node)"; cd daemon; npm test -> v26.8.1, >=26, tests 120 pass 118 fail 2 (protocol-contract, readme-truth; both pre-existing)
-  - [ ] `node-pty` and `@number0/iroh` to current; re-run the terminal and remote-link suites. `[F]`
+  - [x] `node-pty` and `@number0/iroh` to current; re-run the terminal and remote-link suites. `[F]`
+  verified-here: @number0/iroh ^1.1.0 -> ^1.2.0 (1.2.0 stable, dist-tag latest); node-pty 1.1.0 already the current stable, the 1.2 beta line stays refused per the pin row; cd daemon && node --test test/iroh.test.mjs -> pass 1/1; node --test test/term-cli.test.mjs test/vt.unit.test.mjs -> pass 11/11; node --test test/prerelease-pins.test.mjs -> pass 1/1; npm test -> tests 176 pass 172 fail 4 (same set as baseline: protocol-contract, readme-truth badge, two duplicate-port pairs that pass alone)
 - **m3.1.2 Android build**
   - [x] Gradle: configuration cache + isolated projects, JDK 25 pinned, build-time report; target a 30% faster CI job. `[F]`
   verified-here: `cd app && ./gradlew lintDebug testDebugUnitTest assembleDebug --no-daemon --console=plain` -> BUILD SUCCESSFUL with isolated projects on and "Reusing configuration cache." on the second run; `./gradlew :app:compileDebugKotlin --rerun --info` shows jdkHome = C:\Users\Yash\.gradle\jdks\eclipse_adoptium-25-amd64-windows.2 (Temurin 25.0.4.1 auto-provisioned by foojay in settings.gradle.kts); the build prints "build timings: lintDebug+testDebugUnitTest+assembleDebug took Xs"; warm wall 36s -> 25s
