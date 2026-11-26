@@ -358,9 +358,9 @@ transport docs describe a design that has moved.
 
 ### M4.3 Web hub
 
-- [ ] Settings page: an audit view of pairing, device, policy and TOTP events with timestamps. `[W]`
+- [x] Settings page: an audit view of pairing, device, policy and TOTP events with timestamps. `[W]`
   verified-here: cd daemon && npx playwright test -> 7 passed. The Activity card reads GET /access/audit, which serves only devices.audit(): one timed event for the first pairing and one for the last connection of each device. Policy and two-factor have no recorded history, so the panel prints "Policy changes: not recorded; the daemon stores the current switches only" and "Two-factor changes: not recorded; totp.json stores the current secret only" instead of rows. Live daemon: GET /access/audit -> 1 event (pairing), categories pairing:yes device:yes policy:no totp:no.
-- [ ] Device table: last seen, address, transport, and a per-device note. `[W]`
+- [x] Device table: last seen, address, transport, and a per-device note. `[W]`
   verified-here: cd daemon && node --test test/devices.unit.test.mjs -> ALL PASS, 20 checks (transport kept on register, a note trimmed and written to devices.json, an empty note clears it, an unknown device refused, audit newest-first); cd daemon && npx playwright test -> 7 passed. The row shows platform, last seen, address and "via iroh"/"via lan" (older records say "transport unknown"); editing "Note for Pixel 9" POSTs /access/devices/note and the value survives a reload. Live daemon on 8891: hello over LAN -> transport "lan", POST note -> stored "live proof".
 - [x] A "what is running" page: daemon version, ports, active sessions, active streams, policy state. `[W]`
   verified-here: cd daemon && node --test test/running.test.mjs -> ALL PASS, 19 checks (daemon version, four ports, live session list, stream counts, policy flags); POST-proof fetch /ui/running.js -> 200 and index.html loads it; gen-protocol-doc --check -> current
