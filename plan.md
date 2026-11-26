@@ -358,7 +358,8 @@ transport docs describe a design that has moved.
   verified-here: cd daemon && node --test test/relay-fallback.test.mjs -> ALL PASS, 10 checks (docs section present, config relays "off" parsed and saved, array preserved, iroh_link direct-only branch); node --check src/config.js -> OK
 - [ ] Bandwidth cap per stream and a data-used counter per session, visible in the phone. `[W]`
 - [ ] Audio-only mode for desktop streaming when the link is poor. `[W]`
-- [ ] Multi-monitor naming and ordering from the PC, persisted per machine. `[W]`
+- [x] Multi-monitor naming and ordering from the PC, persisted per machine. `[W]`
+  verified-here: cd daemon && node --test test/monitor_names.test.mjs -> ALL PASS, 35 checks (stable adapter/output keys, label fallback chain, saved order survives a reload and appends a new monitor, rename/order handlers over a fake ctx); gen-protocol-doc --check -> current
 - [ ] KVM mesh: document and test three-PC edge crossing end to end on real hardware (design exists; verification needs machines). `[W]`
 
 ---

@@ -2,6 +2,7 @@ import { resolvePath } from "../fs_ops.js";
 import * as devices from "../devices.js";
 import { centerFor, fromFraction } from "../desktop_capture.js";
 import { PcMedia } from "../pc_media.js";
+import { keyOf, label, loadPrefs, savePrefs } from "../monitor_names.js";
 import { spawn } from "node:child_process";
 
 const pcMedia = new PcMedia();
@@ -195,7 +196,73 @@ export default function remoteHandlers(ctx) {
     },
     async desktop_monitors(ws, _msg) {
       const r = await desktop.monitors();
-      send(ws, { type: "desktop_monitors", ...r, current: video.monitor?.index ?? 0 });
+      if (!r.ok) return send(ws, { type: "desktop_monitors", ...r, current: video.monitor?.index ?? 0 });
+      send(ws, {
+        type: "desktop_monitors",
+        ok: true,
+        ...label(r.monitors, loadPrefs()),
+        current: video.monitor?.index ?? 0,
+      });
+    },
+    /** Name one screen; the capture order behind the indices never changes. */
+    async desktop_monitor_rename(ws, msg) {
+      if (!access.controlAllowed)
+        return send(ws, {
+          type: "desktop_monitor_rename",
+          ok: false,
+          error: "control is paused on the PC",
+        });
+      const r = await desktop.monitors();
+      const monitors = r.ok ? r.monitors : [];
+      const m = Number.isInteger(msg.index) ? monitors.find((x) => x.index === msg.index) : undefined;
+      if (!m) return send(ws, { type: "desktop_monitor_rename", ok: false, error: "no such monitor" });
+      const prefs = loadPrefs();
+      const key = keyOf(m);
+      const name = typeof msg.name === "string" ? msg.name.trim().slice(0, 40) : "";
+      // An empty name clears the label, back to the name the hardware reports.
+      if (name) prefs.names[key] = name;
+      else delete prefs.names[key];
+      savePrefs(prefs);
+      send(ws, { type: "desktop_monitor_rename", ok: true, index: msg.index });
+      // Every open hub window draws the list from this one message, so a rename re-sends all of it.
+      send(ws, {
+        type: "desktop_monitors",
+        ok: true,
+        ...label(monitors, prefs),
+        current: video.monitor?.index ?? 0,
+      });
+    },
+    /** Reorder the screens as the hub draws them; capture indices and streams stay as they are. */
+    async desktop_monitor_order(ws, msg) {
+      if (!access.controlAllowed)
+        return send(ws, {
+          type: "desktop_monitor_order",
+          ok: false,
+          error: "control is paused on the PC",
+        });
+      const r = await desktop.monitors();
+      const monitors = r.ok ? r.monitors : [];
+      const indices = monitors.map((m) => m.index);
+      const want = msg.order;
+      const good =
+        Array.isArray(want) &&
+        want.length === indices.length &&
+        want.every((i) => Number.isInteger(i)) &&
+        new Set(want).size === want.length &&
+        indices.every((i) => want.includes(i));
+      if (!good) return send(ws, { type: "desktop_monitor_order", ok: false, error: "bad order" });
+      const prefs = loadPrefs();
+      const byIndex = new Map(monitors.map((m) => [m.index, m]));
+      // Indices are saved as their stable adapter/output keys so a replug keeps the order.
+      prefs.order = want.map((i) => keyOf(byIndex.get(i)));
+      savePrefs(prefs);
+      send(ws, { type: "desktop_monitor_order", ok: true });
+      send(ws, {
+        type: "desktop_monitors",
+        ok: true,
+        ...label(monitors, prefs),
+        current: video.monitor?.index ?? 0,
+      });
     },
     // iroh viewers report GOP progress so the daemon sees delay hidden in QUIC and relay buffers.
     async video_ack(ws, msg) {
