@@ -19,6 +19,7 @@ import {
   waitForHealth,
   waitForUrl,
 } from "./helpers.mjs";
+import { medianLine, medianOf, measureOnce, runLine } from "../scripts/measure-startup.mjs";
 
 const dir = path.join(REPO, "daemon", "test");
 const files = fs
@@ -162,5 +163,48 @@ try {
   await new Promise((r) => blocker.close(r));
 } finally {
   await teardown(tmp);
+}
+
+// Cold start: a fresh daemon must answer /health before it pays for the registry scan, which
+// spawns ~60 version probes and blocks Windows' event loop for seconds. Three starts, no sleeps:
+// the 12 ms health poll is the wait.
+const coldRuns = [];
+let coldError = null;
+for (let i = 1; i <= 3; i++) {
+  try {
+    const r = await measureOnce();
+    coldRuns.push(r);
+    console.log(runLine(i, 3, r));
+  } catch (e) {
+    coldError = e;
+    break;
+  }
+}
+check(`all three cold starts answered${coldError ? ": " + coldError.message : ""}`, coldRuns.length === 3);
+if (coldRuns.length === 3) {
+  check(
+    "every cold start answered /health before the registry scan banner " +
+      `(${coldRuns.map((r) => `health ${r.healthMs} ms, scan ${r.scanMs ?? "absent"} ms`).join("; ")})`,
+    coldRuns.every((r) => r.healthBeforeScan),
+    JSON.stringify(coldRuns.map((r) => ({ healthMs: r.healthMs, scanMs: r.scanMs }))),
+  );
+  check(
+    "every cold start reported finite timings",
+    coldRuns.every((r) => Number.isFinite(r.listenMs) && Number.isFinite(r.healthMs)),
+    JSON.stringify(coldRuns),
+  );
+  check(
+    "every cold start answered /health under 2000 ms after listening",
+    coldRuns.every((r) => r.healthMs < 2000),
+    coldRuns.map((r) => r.healthMs).join(", "),
+  );
+  const medians = medianOf(coldRuns);
+  const line = medianLine(medians, 3);
+  console.log(line);
+  check(
+    `cold start medians printed in ms (${line})`,
+    line.includes(`start->listen ${medians.listenMs} ms`) &&
+      line.includes(`listen->first health ${medians.healthMs} ms`),
+  );
 }
 finish();

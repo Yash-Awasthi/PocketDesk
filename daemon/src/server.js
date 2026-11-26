@@ -283,6 +283,23 @@ export function start(config, { onTokenRotated } = {}) {
     pairHub = `${useTls ? "https" : "http"}://${lanAddress()}:${port}/#t=${token}`;
   }
 
+  // Deferred startup: listening and /health must not wait for the registry scan, which spawns
+  // ~60 version probes and blocks the loop for seconds on Windows.
+  let bootstrapPromise = null;
+  function bootstrap() {
+    if (!bootstrapPromise)
+      bootstrapPromise = (async () => {
+        await registry.scan(broadcast);
+        console.log("  registry scanned");
+        // Load plugins
+        await plugins.discover(pluginDir);
+        await plugins.startAll();
+        const loaded = plugins.list();
+        if (loaded.length) console.log(`  plugins: ${loaded.map((p) => p.name).join(", ")}`);
+      })().catch((e) => console.log(`  bootstrap failed: ${e?.message || e}`));
+    return bootstrapPromise;
+  }
+
   const requestHandler = (req, res) => {
     // No page here may be framed or content-sniffed; the pair page also carries a secret.
     res.setHeader("x-frame-options", "DENY");
@@ -333,6 +350,7 @@ export function start(config, { onTokenRotated } = {}) {
             : { status: "healthy" },
         ),
       );
+      setImmediate(bootstrap);
       return;
     }
     // The service worker must sit at the root to control the whole page, and the plain-HTTP LAN
@@ -1356,7 +1374,7 @@ export function start(config, { onTokenRotated } = {}) {
   // Roadmap 2.1: without TLS the hello (the pairing token) would cross the LAN in cleartext, so a
   // plaintext daemon answers this machine only. It used to bind every interface and rely on the
   // firewall; the loopback bind is the guarantee. iroh carries its own encryption and is untouched.
-  server.listen(port, useTls ? undefined : "127.0.0.1", async () => {
+  server.listen(port, useTls ? undefined : "127.0.0.1", () => {
     const scheme = useTls ? "wss" : "ws";
     let fp = "";
     if (useTls) {
@@ -1416,12 +1434,8 @@ export function start(config, { onTokenRotated } = {}) {
     sessionStore.init();
     cliServer.start(() => token, { broadcast, allSessions, pairLink: () => pairLink });
     proposals.init(broadcast);
-    await registry.scanAll(broadcast);
-    console.log("  registry scanned");
-    // Load plugins
-    await plugins.discover(pluginDir);
-    await plugins.startAll();
-    const loaded = plugins.list();
-    if (loaded.length) console.log(`  plugins: ${loaded.map((p) => p.name).join(", ")}`);
+    // The health probe normally kicks this off first; the timer is the fallback for a daemon
+    // nobody probes (tests that wait on the "registry scanned" banner).
+    setTimeout(bootstrap, 250).unref();
   });
 }

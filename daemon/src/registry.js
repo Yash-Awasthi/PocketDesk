@@ -180,6 +180,16 @@ export async function scanAll(broadcast) {
   firstScan();
 }
 
+// One shared scan: the readiness probe and the startup fallback must not each spawn 60 probes.
+let inflight = null;
+export function scan(broadcast) {
+  if (!inflight)
+    inflight = scanAll(broadcast).finally(() => {
+      inflight = null;
+    });
+  return inflight;
+}
+
 export function list() {
   return [...registry.keys()].map((id) => ({
     manifest: registry.get(id),

@@ -317,6 +317,7 @@ transport docs describe a design that has moved.
 
 - **m3.3.1 Numbers**
   - [ ] Daemon cold start measured and budgeted (<400 ms on a mid PC); print the number in CI. `[F]`
+  measured: 2026-11-26 start->listen 620 ms, listen->health 23 ms (3 runs, this machine); the 400 ms budget is not met
   - [ ] Baseline Profile + Macrobenchmark for the Android app's first frame and chat scroll. `[F]`
 - **m3.3.2 Docs**
   - [x] Regenerate `docs/CONNECTIVITY-NOTES.md` and `docs/RELAY.md` from the current transport code; delete claims that no longer hold. `[F]`
