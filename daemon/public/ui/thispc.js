@@ -2,10 +2,10 @@
 // "This PC": the one place for pairing, security and this install, on the PC itself.
 // It replaces the separate /pair settings page: same token, same loopback-only endpoints, but inside
 // the hub, so pairing, the QR and the switches are not a second frontend to find.
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = window.PD;
 const { h, $ } = PD;
 const btn = (label, onclick, cls = "") => h("button", { className: cls, textContent: label, onclick });
 const api = (p, body) => fetch(`${p}?k=${encodeURIComponent(PD.localToken)}`, body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());

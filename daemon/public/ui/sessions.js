@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The Sessions page: the conversations every agent on this PC saved, searched and narrowed by
 // agent, project and date. Reads history_list; file paths never leave the PC except as a label.
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = window.PD;
 const { h } = PD;
 const btn = (label, onclick, cls = "") => h("button", { className: cls, textContent: label, onclick });
 

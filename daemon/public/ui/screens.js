@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The Screens page: name this PC's monitors and choose the order the hub draws them in. Names and
 // order live on the PC in monitors.json; the capture indices behind them never move.
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = window.PD;
 const { h } = PD;
 
 PD.page("screens", {

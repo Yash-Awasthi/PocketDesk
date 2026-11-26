@@ -2,10 +2,10 @@
 // Without phone control set up, the phone app can still share its screen on its owner's consent
 // (Android's capture prompt) and take taps through its accessibility service; and its storage is
 // browsed through the app's "All files access".
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = window.PD;
 const { h, $ } = PD;
 
 // ── screen shared by the phone app: pane 0 is live; the others hold each recent app's last picture ──

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The pages of the PC's phone hub.
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = window.PD;
 const { h, esc, $ } = PD;
 const I = {
   home: '<svg viewBox="0 0 20 20"><path d="M3.5 9 10 3.5 16.5 9v7.5h-4.5v-5h-4v5H3.5z"/></svg>',
@@ -728,6 +728,4 @@ async function drawApp() {
         perm("notifications", "Notifications", st.notifications), perm("sms", "Texts", st.sms), perm("calls", "Calls and call log", st.calls),
         perm("contacts", "Contacts", st.contacts), perm("photos", "Photos", st.photos), perm("dnd", "Do not disturb", st.dnd), perm("settings", "Brightness", st.writeSettings)));
 }
-
-window.addEventListener("load", () => PD.start());
 })();

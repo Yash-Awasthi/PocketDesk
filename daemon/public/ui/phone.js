@@ -5,10 +5,10 @@
 //   click / drag = a finger · hover = the mouse · right click = Back · middle click = Home
 //   wheel = scroll · Ctrl+wheel or pinch = two fingers · keys = keys · Ctrl+V pastes this PC's clipboard
 // Input mapping follows TwinDesk's phone window (GPL-3.0).
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = (window.PD ||= {});
 const ACTION = { DOWN: 0, UP: 1, MOVE: 2, HOVER_MOVE: 7, HOVER_EXIT: 10 };
 const FINGER = -2;
 const BIN_VIDEO = 0x40, BIN_AUDIO = 0x41, HEAD = 11;

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The Running page: what this PC is doing right now — the daemon's version, its ports, the live
 // sessions and streams, and the policy switches. Answers `running_state` on demand.
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = window.PD;
 const { h } = PD;
 const btn = (label, onclick, cls = "") => h("button", { className: cls, textContent: label, onclick });
 const row = (label, value) => h("div", { className: "row" },

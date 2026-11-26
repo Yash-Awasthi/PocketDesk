@@ -15,7 +15,7 @@
     <div class="brand">PocketDesk</div>
     <div class="dim">Your phone and this PC, in one place</div>
     <input id="token" placeholder="Token from %USERPROFILE%\.pocketdesk\config.json" />
-    <button class="primary" onclick="PD.connect()">Connect</button>
+    <button class="primary">Connect</button>
     <div id="loginStatus" class="dim">disconnected</div>
   </div>
 </div>
@@ -41,20 +41,6 @@
 <div id="toasts"></div>
 
 <script src="/vendor/qrcode.min.js"></script>
-<script src="/ui/core.js"></script>
-<script src="/ui/phone.js"></script>
-<script src="/ui/hub.js"></script>
-<script src="/ui/share.js"></script>
-<script src="/ui/pages.js"></script>
-<script src="/ui/sessions.js"></script>
-<script src="/ui/thispc.js"></script>
-<script src="/ui/computers.js"></script>
-<script src="/ui/extras.js"></script>
-<script src="/ui/running.js"></script>
-<script src="/ui/screens.js"></script>
-<!-- Service workers need a secure context, so the plain-HTTP LAN page just skips the offline shell. -->
-<script>
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
-</script>
+<script type="module" src="/ui/app.js"></script>
 </body>
 </html>

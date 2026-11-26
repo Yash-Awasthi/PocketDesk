@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The page's connection to the daemon, a small event bus, pages and toasts. Every other ui/*.js
-// file hangs off window.PD.
-"use strict";
+// file imports this module, which owns the shared state and helpers.
 
-(() => {
-const PD = (window.PD ||= {});
+const PD = {};
 const handlers = new Map();
 const binary = [];
 PD.on = (type, fn) => { (handlers.get(type) || handlers.set(type, []).get(type)).push(fn); };
@@ -150,4 +148,5 @@ PD.start = () => {
     try { theme ? localStorage.setItem("pd_theme", theme) : localStorage.removeItem("pd_theme"); } catch {}
   };
 };
-})();
+
+export { PD };

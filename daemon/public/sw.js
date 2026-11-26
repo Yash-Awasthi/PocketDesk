@@ -15,6 +15,7 @@ const ASSETS = [
   "/ui/computers.js",
   "/ui/extras.js",
   "/ui/running.js",
+  "/ui/app.js",
   "/ui/manifest.webmanifest",
   "/vendor/qrcode.min.js",
 ];

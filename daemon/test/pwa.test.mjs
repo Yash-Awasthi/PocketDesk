@@ -15,6 +15,7 @@ const SHELL = "/";
 const ASSETS = [
   "/ui/app.css",
   "/ui/core.js",
+  "/ui/app.js",
   "/ui/phone.js",
   "/ui/hub.js",
   "/ui/share.js",
@@ -187,7 +188,14 @@ try {
   const page = await get("/");
   check("the hub page answers 200", page.status === 200);
   const pageBody = await page.text();
-  check("the hub page registers the worker", pageBody.includes('navigator.serviceWorker.register("/sw.js")'));
+  const app = await get("/ui/app.js");
+  check("the app module answers 200", app.status === 200);
+  const appBody = await app.text();
+  check("the hub page loads the app module", pageBody.includes("/ui/app.js"));
+  check(
+    "the app module registers the worker",
+    appBody.includes('navigator.serviceWorker.register("/sw.js")'),
+  );
 
   const manifest = await get("/ui/manifest.webmanifest");
   check("the web manifest is still served", manifest.status === 200);

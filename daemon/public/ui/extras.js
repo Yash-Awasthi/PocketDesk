@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The Timeline page, the command palette (Ctrl+K), this PC's game controllers on the phone, and
 // the switches for what flows by itself (clipboard, this PC's notifications).
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = window.PD;
 const { h, $ } = PD;
 const btn = (label, onclick, cls = "") => h("button", { className: cls, textContent: label, onclick });
 

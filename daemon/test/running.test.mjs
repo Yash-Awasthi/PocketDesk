@@ -107,7 +107,9 @@ try {
   const script = await fetch(`http://127.0.0.1:${PORT}/ui/running.js`);
   check("the page's script is served", script.status === 200);
   const page = await fetch(`http://127.0.0.1:${PORT}/`).then((r) => r.text());
-  check("the hub page loads it", page.includes("/ui/running.js"));
+  const app = await fetch(`http://127.0.0.1:${PORT}/ui/app.js`).then((r) => r.text());
+  check("the hub page loads the app module", page.includes("/ui/app.js"));
+  check("the app module imports the running page", app.includes('"./running.js"'));
   await c.close();
 } catch (e) {
   check("running flow: " + e.message, false);

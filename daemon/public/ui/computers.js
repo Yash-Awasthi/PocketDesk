@@ -2,10 +2,10 @@
 // The Computers page: every screen this PC reaches (its phones, other PCs running PocketDesk on
 // Windows, macOS or Linux, and their phones), each in a window of its own with mouse, keyboard and
 // clipboard. A window has its own socket to this daemon, which relays to wherever the screen is.
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = window.PD;
 const { h, $ } = PD;
 const btn = (label, onclick, cls = "") => h("button", { className: cls, textContent: label, onclick });
 const OS = { win32: "Windows", darwin: "Mac", linux: "Linux", android: "Android" };
