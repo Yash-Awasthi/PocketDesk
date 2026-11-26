@@ -5,6 +5,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { check, finish, REPO } from "./helpers.mjs";
+import { Webcam } from "../src/webcam.js";
+import { fitLabel, labelFor, stamp } from "../src/watermark.js";
 
 const // Phrases that only appear when a document is selling evasion.
   BANNED = [
@@ -68,5 +70,42 @@ const readme = fs.readFileSync(path.join(REPO, "README.md"), "utf8");
 check("README has a Responsible use section", /^### Responsible use$/m.test(readme));
 check("README prohibits proctored use", /proctored assessment/i.test(readme));
 check("README links docs/INTEGRITY.md", /docs\/INTEGRITY\.md/.test(readme));
+
+// The same rule in the frame: the virtual webcam is off until someone asks for it, and every
+// frame it does publish names the phone and the UTC time, so a recording shows both.
+{
+  const cam = new Webcam();
+  check(
+    "the virtual webcam starts off, with no helper process and no decoder",
+    cam.state === "off" && !cam.vcam && !cam.ff,
+  );
+
+  const label = labelFor("Pixel 8", new Date("2026-11-26T09:07:05.123Z"));
+  check(`the mark is the phone name and the UTC clock (${label})`, label === "Pixel 8 2026-11-26T09:07:05Z");
+  check("an unnamed phone still gets a mark", labelFor("", new Date(0)) === "Phone 1970-01-01T00:00:00Z");
+  const cut = fitLabel("X".repeat(200), 320, 1);
+  check("a long mark is cut to what the frame holds", cut === "X".repeat(50));
+  check("a frame too small for the mark is left alone", stamp(Buffer.alloc(16 * 8 * 4), 16, 8, label) === "");
+
+  const W = 320;
+  const H = 240;
+  cam.name = "Pixel 8";
+  const frame = Buffer.alloc(W * H * 4, 120);
+  check("markFrame returns the same buffer", cam.markFrame(frame, W, H) === frame);
+  check("the untouched top corner stays as it was", frame.readUInt32LE(0) === 0x78787878);
+  let white = 0;
+  let stripped = 0;
+  for (let i = 0; i < frame.length; i += 4) {
+    if (frame[i] === 255 && frame[i + 1] === 255 && frame[i + 2] === 255) white++;
+    else if (frame[i] < 60 && frame[i + 1] < 60 && frame[i + 2] < 60) stripped++;
+  }
+  check(`the mark draws glyphs (${white} white pixels)`, white > 100);
+  check(`the mark sits on a darkened strip (${stripped} dark pixels)`, stripped > 1000);
+  const webcamSource = fs.readFileSync(path.join(REPO, "daemon/src/webcam.js"), "utf8");
+  check(
+    "every decoded frame goes through markFrame",
+    /this\.markFrame\(frame, width, height\)/.test(webcamSource),
+  );
+}
 
 finish();

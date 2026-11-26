@@ -5,12 +5,14 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { findNative, runElevated, runOut } from "./native.js";
+import { labelFor, stamp } from "./watermark.js";
 
 export class Webcam extends EventEmitter {
   constructor() {
     super();
     this.on("error", () => {});
-    this.state = "off";
+    this.state = "off"; // off, and unregistered, until someone asks for it
+    this.name = "Phone";
   }
 
   get host() {
@@ -41,6 +43,7 @@ export class Webcam extends EventEmitter {
   /** [session] is a scrcpy camera session already started; its video becomes the webcam. */
   start(session, name) {
     this.stop();
+    this.name = String(name || "Phone").slice(0, 48);
     const host = this.host;
     if (!host) throw new Error("the webcam helper is not installed");
     this.session = session;
@@ -78,6 +81,12 @@ export class Webcam extends EventEmitter {
     session.on("closed", () => {
       if (this.session === session) this.stop();
     });
+  }
+
+  /** One decoded frame with the phone's name and the UTC time burned into it. */
+  markFrame(frame, width, height) {
+    stamp(frame, width, height, labelFor(this.name));
+    return frame;
   }
 
   decoder({ width, height }) {
@@ -128,6 +137,8 @@ export class Webcam extends EventEmitter {
       while (have >= len) {
         const all = pending.length === 1 ? pending[0] : Buffer.concat(pending);
         const frame = all.subarray(0, len);
+        // Every frame carries who is on the other end and when, in UTC.
+        this.markFrame(frame, width, height);
         const rest = all.subarray(len);
         pending = rest.length ? [rest] : [];
         have = rest.length;

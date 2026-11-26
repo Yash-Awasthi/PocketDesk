@@ -456,7 +456,9 @@ re-shoot.
 - [x] `pocketdesk policy` to set, inspect and reset, admin-only, with a test per key. `[E]`
   verified-here: cd daemon && node --test test/policy.unit.test.mjs -> ALL PASS. New checks: inspect prints four lines and creates no policy.json; a non-admin set or reset is refused with the administrator reason and writes nothing; set and reset work for each of the four keys through both stores; reset all clears them; an unknown key and a value of 7 are refused; and `node src/index.js policy` prints the four keys and refuses `set` in a non-elevated shell. A `git archive HEAD` extract with the new files runs the same suite against HEAD's policy.js, so the command does not depend on any uncommitted store change.
 - [ ] Lab recipe in `docs/`: set policy, verify with `--status`, hand the machine to a candidate. `[E]`
-- [ ] Marked remote senses: virtual webcam off by default, watermark with phone name and UTC clock; phone-control notification non-dismissible while attached. `[E]`
+- [x] Marked remote senses: virtual webcam off by default, watermark with phone name and UTC clock; phone-control notification non-dismissible while attached. `[E]`
+  verified-here: cd daemon && node test/no-evasion.test.mjs -> ALL PASS (18 checks) on a `git archive HEAD` extract with the changed files. `new Webcam()` is `off` with no helper process and no decoder, and `start` is reached only from `adb_webcam { on: true }`; `labelFor("Pixel 8", ...)` -> `Pixel 8 2026-11-26T09:07:05Z`; `markFrame` on a 320x240 BGRX frame draws white glyphs on a darkened strip, leaves the rest of the frame alone, returns "" for a frame too small to mark, and every decoded frame reaches `pocketdesk-vcam-host` through it. Registration is a separate admin-approved `adb_webcam_register`.
+  also: the non-dismissible phone-control notification is Compose (`app/app/src/main/java/com/yasha/pocketdesk/**` is another unit's dirty tree), so that half stays open.
 - [ ] Decide the console endpoint's fate (drop from public builds, or admin-only with an audit line per input event) — see Appendix A. `[E]`
 
 ### M6.2 Publication and third parties
