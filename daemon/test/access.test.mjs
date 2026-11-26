@@ -110,18 +110,22 @@ try {
   check("password cleared", (await status()).hasPassword === false);
 
   // Protocol version in hello: absent is an older app and stays welcome; a named version must
-  // be ours. The daemon speaks v2 after the hello field list changed, so v1 is the biting case.
-  check(`the daemon's protocol version is 2 for this test`, PROTOCOL_VERSION === 2, String(PROTOCOL_VERSION));
+  // be ours. The baseline version owns the number, so one below it is the biting case.
+  check(
+    "the daemon's protocol version is a positive integer",
+    Number.isInteger(PROTOCOL_VERSION) && PROTOCOL_VERSION > 0,
+    String(PROTOCOL_VERSION),
+  );
   const legacy = await greeting({});
   check("a hello with no protocolVersion is accepted as legacy", legacy.welcome?.type === "welcome");
   check("the welcome names the daemon's protocol version", legacy.welcome?.version === PROTOCOL_VERSION);
-  const current = await greeting({ protocolVersion: 2 });
-  check("a hello that names v2 is welcomed", current.welcome?.type === "welcome");
-  const older = await greeting({ protocolVersion: 1 });
+  const current = await greeting({ protocolVersion: PROTOCOL_VERSION });
+  check(`a hello that names v${PROTOCOL_VERSION} is welcomed`, current.welcome?.type === "welcome");
+  const older = await greeting({ protocolVersion: PROTOCOL_VERSION - 1 });
   const mismatch = older.frames.find((m) => m.type === "protocol_mismatch");
   check(
-    "v1 against a v2 daemon answers protocol_mismatch with expected 2 and found 1",
-    mismatch?.expected === 2 && mismatch?.found === 1,
+    `v${PROTOCOL_VERSION - 1} against a v${PROTOCOL_VERSION} daemon answers protocol_mismatch with both numbers`,
+    mismatch?.expected === PROTOCOL_VERSION && mismatch?.found === PROTOCOL_VERSION - 1,
     JSON.stringify(mismatch),
   );
   check("the mismatched socket closes with its own code (4026)", older.code === 4026, String(older.code));

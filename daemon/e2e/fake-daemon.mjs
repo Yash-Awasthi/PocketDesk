@@ -10,6 +10,7 @@ import { WebSocketServer } from "ws";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(HERE, "..", "public");
+const COMPAT = JSON.parse(fs.readFileSync(path.join(HERE, "..", "protocol", "compat.json"), "utf8"));
 const TOKEN = "e2e-token";
 
 const MIME = {
@@ -21,7 +22,7 @@ const MIME = {
   ".webmanifest": "application/manifest+json",
 };
 
-const WELCOME = { type: "welcome", os: "win32", deviceToken: TOKEN, protocol: 1 };
+const welcome = (protocol) => ({ type: "welcome", os: "win32", deviceToken: TOKEN, version: protocol });
 const TOTP_SECRET = "JBSWY3DPEHPK3PXP";
 
 // One item per phone list, so a page that loads has something to show.
@@ -58,6 +59,11 @@ const queue = (key) => held.get(key) || held.set(key, []).get(key);
 export async function startFakeDaemon(options = {}) {
   modes.clear();
   held.clear();
+  // The baseline is the one number: what a hello must name, and what the page publishes to the hub.
+  const protocol = Number.isInteger(options.protocol) ? options.protocol : COMPAT.protocolVersion;
+  const publishedProtocol = Number.isInteger(options.publishedProtocol)
+    ? options.publishedProtocol
+    : protocol;
   const access = {
     remoteOn: true,
     controlAllowed: true,
@@ -136,6 +142,7 @@ export async function startFakeDaemon(options = {}) {
         `<meta name="pd-qr" content="pocketdesk://pair#t=${TOKEN}" />`,
         `<meta name="pd-hub" content="https://192.168.1.10:8765/#t=${TOKEN}" />`,
         '<meta name="pd-fp" content="AA:BB:CC:DD" />',
+        `<meta name="pd-protocol" content="${publishedProtocol}" />`,
         '<meta name="theme-color"',
       ].join("\n"),
     );
@@ -148,6 +155,9 @@ export async function startFakeDaemon(options = {}) {
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     const p = url.pathname;
+
+    if (p === "/health")
+      return json(res, 200, { status: "healthy", service: "pocketdesk", protocol: publishedProtocol });
 
     if (p === "/" || p === "/index.html") {
       res.writeHead(200, { "content-type": MIME[".html"] });
@@ -236,7 +246,6 @@ export async function startFakeDaemon(options = {}) {
   const wss = new WebSocketServer({ server, path: "/ws" });
   wss.on("connection", (ws) => {
     if (down) return ws.terminate();
-    ws.send(JSON.stringify(WELCOME));
     ws.on("message", (raw) => {
       let m;
       try {
@@ -246,6 +255,15 @@ export async function startFakeDaemon(options = {}) {
       }
       messages.push(m);
       const reply = (body) => ws.send(JSON.stringify(body));
+      if (m.type === "hello") {
+        if (m.protocolVersion !== undefined && m.protocolVersion !== protocol) {
+          reply({ type: "protocol_mismatch", expected: protocol, found: m.protocolVersion });
+          ws.close(4026, "protocol version mismatch");
+          return;
+        }
+        reply(welcome(protocol));
+        return;
+      }
       const answer = (m, build) => {
         const key = keyOf(m);
         const fire = (mode) => {
@@ -294,7 +312,7 @@ export async function startFakeDaemon(options = {}) {
             ? { type: "error", message: "running failed" }
             : {
                 type: "running_state",
-                version: { daemon: "0.11.0", protocol: 1, node: "26.8.1" },
+                version: { daemon: "0.11.0", protocol, node: "26.8.1" },
                 ports: { daemon: 8765, page: 8765, cli: 8766, usb: 8767 },
                 sessions:
                   mode === "empty" ? { count: 0, items: [] } : { count: sessions.length, items: sessions },
@@ -312,6 +330,8 @@ export async function startFakeDaemon(options = {}) {
   return {
     url: `http://127.0.0.1:${port}`,
     token: TOKEN,
+    protocol,
+    publishedProtocol,
     calls,
     messages,
     access,

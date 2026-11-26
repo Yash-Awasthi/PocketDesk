@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { VERSION } from "../version.js";
+import { PROTOCOL_VERSION, VERSION } from "../version.js";
 import { isLoopback } from "./transport.js";
 
 /**
@@ -83,7 +83,9 @@ export function createRoutes(ctx) {
     {
       handle(req, res) {
         res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
-        res.end(isLoopback(req) ? pageForPc() : staticFiles.page);
+        // The page tells the hub's hello which wire version the daemon speaks; version.js owns the number.
+        const page = isLoopback(req) ? pageForPc() : staticFiles.page;
+        res.end(page.replace("</head>", `<meta name="pd-protocol" content="${PROTOCOL_VERSION}">\n</head>`));
       },
     },
   ];

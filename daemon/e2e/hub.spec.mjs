@@ -520,3 +520,36 @@ test("a page keeps the shared connection words, disables retry while down and re
   await expect(list.locator(".item")).toHaveCount(1);
   expect(await list.getAttribute("data-state")).toBeNull();
 });
+
+test("the hub sends the daemon's protocol version and reaches Connected", async ({ page }) => {
+  await page.goto(`${daemon.url}/#go=home`);
+  await expect(page.locator("#conn")).toHaveText("Connected");
+  await expect.poll(() => daemon.messages.filter((m) => m.type === "hello").length).toBe(1);
+  const hello = daemon.messages.find((m) => m.type === "hello");
+  expect(hello.protocolVersion, "hello must carry protocolVersion from the daemon's own baseline").toBe(
+    daemon.protocol,
+  );
+});
+
+test("a protocol mismatch names both numbers and never reconnects", async ({ page }) => {
+  test.setTimeout(60_000);
+  const expected = daemon.protocol;
+  await daemon.close();
+  daemon = await startFakeDaemon({ publishedProtocol: expected - 1 });
+  await page.goto(`${daemon.url}/#go=home`);
+  await expect.poll(() => daemon.messages.filter((m) => m.type === "hello").length).toBe(1);
+  const hello = daemon.messages.find((m) => m.type === "hello");
+  expect(hello.protocolVersion, "hello must carry protocolVersion from the daemon's own baseline").toBe(
+    daemon.publishedProtocol,
+  );
+  const notice = page.locator("#login #loginStatus");
+  await expect(page.locator("#login")).toBeVisible();
+  await expect(page.locator("#conn")).toHaveText("Offline");
+  await expect(notice).toContainText(`sends ${expected - 1}`);
+  await expect(notice).toContainText(`expects ${expected}`);
+  await page.waitForTimeout(5000);
+  expect(
+    daemon.messages.filter((m) => m.type === "hello").length,
+    "a protocol mismatch must not be retried",
+  ).toBe(1);
+});

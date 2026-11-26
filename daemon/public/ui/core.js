@@ -109,6 +109,9 @@ PD.buildNav = () => {
 
 // ── connection: the token comes from #t= in the link, this browser's last login, or the box ──
 const CONN = { up: "Connected", retry: "Reconnecting...", down: "Offline" };
+// A version refusal is permanent: name both numbers, keep #conn's vocabulary, never schedule a retry.
+const mismatchText = (m) =>
+  `protocol mismatch: this page sends ${m.found}, the daemon expects ${m.expected}. Reload after updating PocketDesk.`;
 // body.online follows live, not each socket: it stays on through a scheduled retry so the shell and
 // the indicator do not vanish on a blip, and drops only when no retry is scheduled.
 let reconnectTimer, reconnectDelay = 1000, pairCode, live = false;
@@ -136,7 +139,10 @@ PD.connect = () => {
   ws.binaryType = "arraybuffer";
   ws.onopen = () => {
     reconnectDelay = 1000;
-    PD.send({ type: "hello", token: PD.$("#token").value.trim(), totp: pairCode, name: "PC browser" });
+    const hello = { type: "hello", token: PD.$("#token").value.trim(), totp: pairCode, name: "PC browser" };
+    // The version comes from the served page's pd-protocol meta, itself written from compat.json.
+    if (Number.isInteger(PD.protocolVersion)) hello.protocolVersion = PD.protocolVersion;
+    PD.send(hello);
     pairCode = undefined;
   };
   ws.onclose = (ev) => {
@@ -144,6 +150,11 @@ PD.connect = () => {
     if (ev.code === 4011) {
       pairCode = prompt("Two-factor code from your authenticator app") || undefined;
       if (pairCode) { setConn("retry"); PD.connect(); } else setConn("down");
+      return;
+    }
+    // A version refusal is permanent and names both numbers; anything else 4xxx is a refusal too.
+    if (ev.code === 4026) {
+      setConn("down", PD.mismatch ? mismatchText(PD.mismatch) : "protocol version mismatch");
       return;
     }
     // 4xxx is a refusal (wrong token, locked out, switched off): retrying only burns login attempts.
@@ -162,6 +173,10 @@ PD.connect = () => {
       return;
     }
     const m = JSON.parse(ev.data);
+    if (m.type === "protocol_mismatch") {
+      PD.mismatch = { expected: m.expected, found: m.found };
+      setConn("down", mismatchText(PD.mismatch));
+    }
     if (m.type === "welcome") {
       PD.os = m.os;
       if (m.deviceToken) PD.$("#token").value = m.deviceToken;
@@ -181,6 +196,7 @@ PD.start = () => {
   // responses), so opening PocketDesk on the PC is already signed in; phones on the LAN get the
   // plain page. Read before buildNav, which renders the pages that use them.
   const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.content || "";
+  PD.protocolVersion = Number(meta("pd-protocol")) || null;
   PD.localToken = meta("pd-token");
   PD.pairPayload = meta("pd-qr");
   PD.hubUrl = meta("pd-hub");

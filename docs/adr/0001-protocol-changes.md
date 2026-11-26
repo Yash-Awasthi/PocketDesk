@@ -43,6 +43,10 @@ additive version has no line, because nothing that was already sent changes mean
 - v2: `hello` may carry an optional integer `protocolVersion`. A daemon on v2 answers a
   different value with `protocol_mismatch {expected, found}` and closes with 4026; a hello
   that omits the field is still accepted as an older client.
+- v3: the web hub always sends `protocolVersion` in `hello`, read from the daemon's
+  `pd-protocol` page meta, which comes from `daemon/protocol/compat.json` through `version.js`.
+  A different value gets `protocol_mismatch {expected, found}`, a permanent Offline notice that
+  names both numbers, and no retry; the close is still 4026.
 
 ## Alternatives considered
 

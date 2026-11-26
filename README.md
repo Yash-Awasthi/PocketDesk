@@ -571,7 +571,7 @@ Proposals auto-expire after 5 minutes.
 
 ---
 
-## 📖 Protocol (v2)
+## 📖 Protocol (v3)
 
 JSON frames; binary payloads are base64.
 
