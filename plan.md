@@ -214,8 +214,10 @@ commit is byte-identical.
   verified-here: `node scripts/check-coverage.mjs` → 4 × PASS + "all coverage floors met" (EXIT=0); forcing `handlers.floor.statements = 90` → `FAIL handlers … under floor: statements 90%` and `handlers: statements 37.6% < floor 90%` (EXIT=1); restored → met again. Guard test: `node --test test/coverage-floors.test.mjs` → ALL PASS, and it first failed on its own initial data (the functions floors had been set 8 points low) → tightened to 4 points.
   ratchet rule now documented in `CONTRIBUTING.md` ("Coverage floors only go up"): raise the floor and the `measured` number in the same commit, never lower either.
   needs-verify: `npm run coverage` has not run in CI yet (it is a suite-length job, ~114 s here); the numbers are this machine's.
-- [ ] `protocol-contract.test.mjs` is the contract: assert every message in the registry has a handler, a doc line and a round-trip test; unknown type returns the documented error. `[P]`
-- [ ] Failure injection: kill a PTY child mid-stream, drop the socket mid-transfer, corrupt a chunked `fread`; each asserts a user-visible error and no orphaned process. `[P]`
+- [x] `protocol-contract.test.mjs` is the contract: assert every message in the registry has a handler, a doc line and a round-trip test; unknown type returns the documented error. `[P]`
+  verified-here: `cd daemon && node --test test/protocol-contract.test.mjs` → ALL PASS, `tests 1 / pass 1 / fail 0`; an unknown type answers `unknown type: no_such_message_type` and the same socket still answers afterwards.
+- [x] Failure injection: kill a PTY child mid-stream, drop the socket mid-transfer, corrupt a chunked `fread`; each asserts a user-visible error and no orphaned process. `[P]`
+  verified-here: `cd daemon && node --test test/failure-injection.test.mjs` → ALL PASS, `tests 1 / pass 1 / fail 0`; after the kill the PTY and its child are gone, the transfer resumes at the offset the client asks for, and every corrupted read answers without a restart.
 - [x] Added 2026-11-24 (measured): make the daemon suite green before deepening it. Result: **115 tests, 115 pass** (`EXIT=0`), where the session started at 113 tests / 108 pass. `[P]`
   what was actually broken, in the order it was found:
   1. tests waited a fixed 0.5–2 s for a daemon that needs 5–7 s cold → `waitForHealth`/`waitForUrl` (see the subtask above).
@@ -229,7 +231,8 @@ commit is byte-identical.
   verified-here: `cd daemon && npm test` → `EXIT=0`, `tests 115 / pass 115 / fail 0`. Every fix was reproduced red first: `absorb` failed alone then passed; `absorb`+`desktop`+`iroh`+`approvals` at `--test-concurrency=4` went 1 fail → 0.
   guard: `test/startup-readiness.test.mjs` is now 10 checks — no pre-connect sleep ≥1 s, a real readiness wait in every spawner, `RH_CLI_PORT` in every raw spawn, no two files declaring the same port, plus the helpers exercised live, on a dead port and against a squatted port.
   needs-verify: timings are from this machine (Windows 11, 498 processes); the `tasklist` cost on a GitHub runner is unmeasured, and with the bounded wait the phone may see `refreshing: true` on its first scan.
-- [ ] Leak guards: `sessions-leakguard` exists; extend it to 100 create/kill cycles and to the phone-adb and desktop-video paths, asserting handle and memory stability. `[P]`
+- [x] Leak guards: `sessions-leakguard` exists; extend it to 100 create/kill cycles and to the phone-adb and desktop-video paths, asserting handle and memory stability. `[P]`
+  verified-here: `cd daemon && node --test test/sessions-leakguard.test.mjs` → ALL PASS, `tests 1 / pass 1 / fail 0`, EXIT=0; handles 415 → 773 over 90 cycles (node-pty native floor 3.55/cycle, bound 6), RSS 138 MB → 129 MB, phone 773 → 773, desktop 773 → 773, video resources 7 → 7.
 - [ ] Filesystem safety: every `fs_op` path resolved and confined; tests for `..`, symlinks, `\?\` prefixes, and Windows reserved names. `[P]`
 - [ ] Windows-only code paths (`ConPTY`, `SendInput`, `Task Scheduler`) get a CI job on `windows-latest`; they are the least covered and most used. `[P]`
 - [x] Added 2026-11-24 (measured): the suite is 113 tests, 108 pass, 5 fail on this machine — `absorb`, `graceful-shutdown`, `sessions-leakguard`, `smoke`, `smoke-chat`. `smoke` and `smoke-chat` fail on a fixed 1.5 s wait for daemon startup; the daemon needs ~5–7 s from a cold cache here (measured with a stdout timestamp probe), so replace every fixed sleep with a readiness wait on the banner or `/health` and re-measure. `[P]`
