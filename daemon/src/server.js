@@ -393,6 +393,27 @@ export function start(config, { onTokenRotated } = {}) {
       if (req.method === "GET") {
         if (path0 === "/access") return reply(200, status());
         if (path0 === "/access/devices") return reply(200, { items: devices.list() });
+        if (path0 === "/access/audit")
+          return reply(200, {
+            events: devices.audit(),
+            // Said out loud instead of guessed at: these two keep state, not a history.
+            categories: [
+              { id: "pairing", label: "Pairing", recorded: true },
+              { id: "device", label: "Devices", recorded: true },
+              {
+                id: "policy",
+                label: "Policy changes",
+                recorded: false,
+                reason: "the daemon stores the current switches only",
+              },
+              {
+                id: "totp",
+                label: "Two-factor changes",
+                recorded: false,
+                reason: "totp.json stores the current secret only",
+              },
+            ],
+          });
         return reply(404, { ok: false });
       }
       let body = "";
@@ -443,6 +464,9 @@ export function start(config, { onTokenRotated } = {}) {
             disconnectDevice(id);
             // The revoked device knew the pairing token too, so it must change.
             return reply(200, { ...r, pairingToken: rotateToken() });
+          } else if (path0 === "/access/devices/note") {
+            const r = devices.setNote(id, msg.note);
+            return reply(r.ok ? 200 : 404, r);
           } else if (path0 === "/access/devices/allow") {
             const r = devices.allow(id);
             return reply(r.ok ? 200 : 404, r);
@@ -562,6 +586,8 @@ export function start(config, { onTokenRotated } = {}) {
     // Read off `req`: ws exposes the socket as `_socket`, so `ws.socket?.remoteAddress` was always
     // undefined and every client shared one rate-limit counter, locking out the whole LAN.
     const clientIp = (req.socket?.remoteAddress || "unknown").replace(/^::ffff:/, "");
+    // What the phone actually arrived on: the iroh socket, the USB port, or the LAN listener.
+    const transport = ws._irohId ? "iroh" : req.socket?._usb ? "usb" : "lan";
     ws._subs = new Set();
     ws._loopback = !req.socket?._usb && (clientIp === "127.0.0.1" || clientIp === "::1");
     ws._authed = false;
@@ -615,7 +641,7 @@ export function start(config, { onTokenRotated } = {}) {
                 ws.close(4003, "device key mismatch");
                 return;
               }
-              const hi = welcome(auth, msg, clientIp);
+              const hi = welcome(auth, msg, clientIp, transport);
               if (ws._irohId) devices.claimEndpoint(auth.id, ws._irohId);
               ws._authed = true;
               clearTimeout(timer);
@@ -685,8 +711,8 @@ export function start(config, { onTokenRotated } = {}) {
     },
     () => {},
   );
-  function welcome(auth, hello, ip) {
-    devices.register(auth.id, { name: hello.name, platform: hello.platform, ip });
+  function welcome(auth, hello, ip, transport) {
+    devices.register(auth.id, { name: hello.name, platform: hello.platform, ip, transport });
     const deviceToken = auth.pairing ? devices.issueToken(auth.id) : undefined;
     // The phone keeps the current iroh address, which also repairs an entry paired from a QR without one.
     const iroh = irohEp?.ticket() || undefined;

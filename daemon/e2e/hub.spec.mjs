@@ -42,8 +42,18 @@ test("the device table shows platform, last seen and address, and revokes", asyn
 
   await expect(list.getByText("Pixel 9 (online)")).toBeVisible();
   await expect(list.getByText(/Android 16 \u00b7 last seen .* 192\.168\.1\.21/)).toBeVisible();
+  await expect(list.getByText(/via iroh/)).toBeVisible();
+  await expect(list.getByText(/via lan/)).toBeVisible();
   await expect(list.getByText("Old phone (revoked)")).toBeVisible();
   await expect(list.getByRole("button", { name: "Allow" })).toHaveCount(1);
+
+  const note = list.getByLabel("Note for Pixel 9");
+  await expect(note).toHaveValue("");
+  await note.fill("desk phone");
+  await note.blur();
+  await expect.poll(() => daemon.calls.some((c) => c.path === "/access/devices/note")).toBe(true);
+  await open(page, "thispc");
+  await expect(list.getByLabel("Note for Pixel 9")).toHaveValue("desk phone");
 
   page.on("dialog", (d) => d.accept());
   await list.getByRole("button", { name: "Revoke" }).click();
@@ -51,6 +61,19 @@ test("the device table shows platform, last seen and address, and revokes", asyn
   await expect.poll(() => daemon.calls.some((c) => c.path === "/access/devices/revoke")).toBe(true);
   await expect(list.getByText("Pixel 9 (revoked)")).toBeVisible();
   await expect(list.getByRole("button", { name: "Allow" })).toHaveCount(2);
+});
+
+test("the activity card shows timed device events and names the categories it cannot show", async ({
+  page,
+}) => {
+  await open(page, "thispc");
+  const card = page.locator("#page-thispc .card").filter({ hasText: "Activity" });
+
+  await expect(card.getByText("Pixel 9 paired (Android 16)")).toBeVisible();
+  await expect(card.getByText("Pixel 9 connected over iroh")).toBeVisible();
+  await expect(card.getByText(/^Policy changes: not recorded;/)).toBeVisible();
+  await expect(card.getByText(/^Two-factor changes: not recorded;/)).toBeVisible();
+  await expect(card.locator(".item .dim").first()).not.toHaveText("never");
 });
 
 test("two-factor setup shows the secret and turns on with a code", async ({ page }) => {

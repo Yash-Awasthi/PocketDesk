@@ -38,8 +38,10 @@ export async function startFakeDaemon(options = {}) {
       id: "d1",
       name: "Pixel 9",
       platform: "Android 16",
+      firstSeen: Date.UTC(2026, 9, 1, 8, 0),
       lastSeen: Date.UTC(2026, 10, 26, 9, 30),
       lastIp: "192.168.1.21",
+      transport: "iroh",
       online: true,
       revoked: false,
     },
@@ -47,8 +49,10 @@ export async function startFakeDaemon(options = {}) {
       id: "d2",
       name: "Old phone",
       platform: "Android 13",
+      firstSeen: Date.UTC(2026, 9, 2, 9, 0),
       lastSeen: Date.UTC(2026, 10, 20, 8, 0),
       lastIp: "192.168.1.40",
+      transport: "lan",
       online: false,
       revoked: true,
     },
@@ -93,6 +97,31 @@ export async function startFakeDaemon(options = {}) {
 
       if (p === "/access" && req.method === "GET") return json(res, 200, access);
       if (p === "/access/devices" && req.method === "GET") return json(res, 200, { items: devices });
+      if (p === "/access/audit" && req.method === "GET")
+        return json(res, 200, {
+          events: devices
+            .flatMap((d) => [
+              { at: d.firstSeen, kind: "pairing", text: `${d.name} paired (${d.platform})` },
+              { at: d.lastSeen, kind: "device", text: `${d.name} connected over ${d.transport}` },
+            ])
+            .sort((a, b) => b.at - a.at),
+          categories: [
+            { id: "pairing", label: "Pairing", recorded: true },
+            { id: "device", label: "Devices", recorded: true },
+            {
+              id: "policy",
+              label: "Policy changes",
+              recorded: false,
+              reason: "the daemon stores the current switches only",
+            },
+            {
+              id: "totp",
+              label: "Two-factor changes",
+              recorded: false,
+              reason: "totp.json stores the current secret only",
+            },
+          ],
+        });
 
       let body = "";
       req.on("data", (c) => (body += c));
@@ -111,6 +140,12 @@ export async function startFakeDaemon(options = {}) {
             ok: access.totpEnabled === p.endsWith("enable"),
             totpEnabled: access.totpEnabled,
           });
+        }
+        if (p === "/access/devices/note") {
+          const d = devices.find((x) => x.id === payload.clientId);
+          if (!d) return json(res, 404, { ok: false, error: "unknown device" });
+          d.note = String(payload.note || "").trim();
+          return json(res, 200, { ok: true, device: d });
         }
         if (p === "/access/devices/revoke") {
           const d = devices.find((x) => x.id === payload.clientId);

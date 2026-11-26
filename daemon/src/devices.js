@@ -44,7 +44,7 @@ export function fingerprint(token, name, platform) {
   return crypto.createHash("sha256").update(`${token}|${name}|${platform}`).digest("hex").slice(0, 16);
 }
 
-export function register(clientId, { name, platform, ip }) {
+export function register(clientId, { name, platform, ip, transport }) {
   const id = String(clientId || fingerprint("anon", name, platform));
   const now = Date.now();
   const existing = devices.get(id);
@@ -53,6 +53,7 @@ export function register(clientId, { name, platform, ip }) {
     if (ip) existing.lastIp = ip;
     if (name) existing.name = name;
     if (platform) existing.platform = platform;
+    if (transport) existing.transport = transport;
   } else {
     devices.set(id, {
       id,
@@ -61,6 +62,7 @@ export function register(clientId, { name, platform, ip }) {
       firstSeen: now,
       lastSeen: now,
       lastIp: ip || null,
+      transport: transport || null,
       revoked: false,
     });
   }
@@ -139,6 +141,20 @@ export function claimEndpoint(clientId, endpointId) {
   return true;
 }
 
+// Free text the owner attaches to a device; stored beside the device so it follows a re-pair.
+export function setNote(clientId, note) {
+  const d = devices.get(String(clientId));
+  if (!d) return { ok: false, error: `unknown device: ${clientId}` };
+  const text = String(note ?? "")
+    .trim()
+    .slice(0, 200);
+  if (text) d.note = text;
+  else delete d.note;
+  save();
+  const { tokenHash: _tokenHash, cred: _cred, ...pub } = d;
+  return { ok: true, device: pub };
+}
+
 export function allow(clientId) {
   const d = devices.get(String(clientId));
   if (!d) return { ok: false, error: `unknown device: ${clientId}` };
@@ -163,6 +179,23 @@ export function list() {
     ...d,
     online: now - d.lastSeen < 5 * 60_000,
   }));
+}
+
+/** The timestamped events this store actually holds: first pairing and last connection. */
+export function audit() {
+  const out = [];
+  for (const d of devices.values()) {
+    const name = d.name || "unknown device";
+    if (d.firstSeen)
+      out.push({ at: d.firstSeen, kind: "pairing", text: `${name} paired (${d.platform || "unknown"})` });
+    if (d.lastSeen && d.lastSeen !== d.firstSeen)
+      out.push({
+        at: d.lastSeen,
+        kind: "device",
+        text: `${name} connected${d.transport ? ` over ${d.transport}` : ""}`,
+      });
+  }
+  return out.sort((a, b) => b.at - a.at);
 }
 
 export function touch(clientId) {

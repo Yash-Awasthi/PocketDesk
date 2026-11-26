@@ -19,8 +19,33 @@ try {
     devices.list().every((d) => d.id !== "nobody"),
   );
 
-  devices.register("dev-1", { name: "phone", platform: "android" });
+  devices.register("dev-1", { name: "phone", platform: "android", transport: "lan" });
   const token = devices.issueToken("dev-1");
+
+  const dev1 = () => devices.list().find((d) => d.id === "dev-1");
+  check("register keeps the transport", dev1()?.transport === "lan");
+  check(
+    "a note is stored and trimmed",
+    devices.setNote("dev-1", "  desk phone  ").ok === true && dev1()?.note === "desk phone",
+  );
+  const stored = JSON.parse(fs.readFileSync(path.join(tmp, "devices.json"), "utf8")).find(
+    (d) => d.id === "dev-1",
+  );
+  check(
+    "the note and transport reached the device store",
+    stored?.note === "desk phone" && stored?.transport === "lan",
+  );
+  check("an empty note clears it", devices.setNote("dev-1", "").ok === true && !("note" in dev1()));
+  check("an unknown device takes no note", devices.setNote("nobody", "x").ok === false);
+  const events = devices.audit();
+  check(
+    "audit holds a timed pairing event",
+    events.some((e) => e.kind === "pairing" && e.at > 0 && e.text.includes("phone")),
+  );
+  check(
+    "audit events are newest first",
+    events.every((e, i) => i === 0 || events[i - 1].at >= e.at),
+  );
 
   check(
     "first claim pins the endpoint id",

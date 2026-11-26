@@ -18,7 +18,7 @@ const qrSvg = (text, cell = 8) => {
 };
 const fmt = (t) => (t ? new Date(t).toLocaleString() : "never");
 
-const S = { status: null, devices: [], totpOn: false, totpOffer: false, totpSecret: "", qrTab: "app" };
+const S = { status: null, devices: [], audit: { events: [], categories: [] }, totpOn: false, totpOffer: false, totpSecret: "", qrTab: "app" };
 let boxes = {}; // the DOM the paint step updates, so nothing is rebuilt while a field has focus
 
 PD.registerThisPc = () => PD.page("thispc", {
@@ -91,6 +91,13 @@ PD.registerThisPc = () => PD.page("thispc", {
         (boxes.devices = h("div", { className: "list" })),
         h("p", { className: "dim small", textContent: "Revoking disconnects the device and changes the pairing token, so the old QR stops working while other phones keep their own." })),
 
+      // Activity: only what the device store timed, and a plain line for what it never kept.
+      h("div", { className: "card" },
+        h("div", { className: "bar" }, h("h3", { className: "grow", textContent: "Activity" }), btn("Refresh", () => load())),
+        (boxes.audit = h("div", { className: "list" })),
+        (boxes.auditMissing = h("div", { className: "col" })),
+        h("p", { className: "dim small", textContent: "Pairing and device events come from the device store, the only history the daemon keeps with timestamps." })),
+
       // ── Uninstall ──
       h("div", { className: "card" },
         h("h3", { textContent: "Remove PocketDesk" }),
@@ -161,9 +168,20 @@ function drawDevices() {
   if (!items.length) return boxes.devices.replaceChildren(h("p", { className: "dim small", textContent: "No device has connected yet." }));
   boxes.devices.replaceChildren(...items.map((d) => {
     const row = h("div", { className: "item row" });
+    const meta = [d.platform || "unknown", `last seen ${fmt(d.lastSeen)}`];
+    if (d.lastIp) meta.push(d.lastIp);
+    meta.push(d.transport ? `via ${d.transport}` : "transport unknown");
+    const note = h("input", { type: "text", value: d.note || "", placeholder: "Note for this device", style: "margin-top:6px;max-width:320px" });
+    note.setAttribute("aria-label", `Note for ${d.name}`);
+    note.addEventListener("change", () =>
+      api("/access/devices/note", { clientId: d.id, note: note.value }).then((r) => {
+        if (r?.ok) { d.note = note.value.trim(); PD.toast("Note saved"); }
+        else PD.toast(r?.error || "Could not save the note", true);
+      }));
     const info = h("div", { className: "grow" },
       h("b", { textContent: d.name + (d.online ? " (online)" : "") + (d.revoked ? " (revoked)" : "") }),
-      h("div", { className: "dim small", textContent: `${d.platform || "unknown"} · last seen ${fmt(d.lastSeen)}${d.lastIp ? " · " + d.lastIp : ""}` }));
+      h("div", { className: "dim small", textContent: meta.join(" · ") }),
+      note);
     row.append(info);
     if (d.revoked) {
       row.append(btn("Allow", () => api("/access/devices/allow", { clientId: d.id }).then(load)));
@@ -182,6 +200,18 @@ function drawDevices() {
   }));
 }
 
+function drawAudit() {
+  if (!boxes.audit) return;
+  const events = (S.audit.events || []).slice(0, 30);
+  boxes.audit.replaceChildren(
+    ...(events.length
+      ? events.map((e) => h("div", { className: "item" }, h("b", { textContent: e.text }), h("div", { className: "dim small", textContent: fmt(e.at) })))
+      : [h("p", { className: "dim small", textContent: "No pairing or device events recorded yet." })]));
+  const missing = (S.audit.categories || []).filter((c) => !c.recorded);
+  boxes.auditMissing.replaceChildren(
+    ...missing.map((c) => h("p", { className: "dim small", textContent: `${c.label}: not recorded; ${c.reason}.` })));
+}
+
 function uninstall(removeData) {
   if (!confirm("Uninstall PocketDesk from this PC? Every phone is disconnected and the daemon stops.")) return;
   const wipe = removeData || confirm("Also delete its settings, paired phones and saved logins?\n\nOK = delete them, Cancel = keep them for a reinstall.");
@@ -194,5 +224,6 @@ function load() {
   if (!PD.localToken) return;
   api("/access").then(paint).catch(() => {});
   api("/access/devices").then((r) => { S.devices = r.items || []; drawDevices(); }).catch(() => {});
+  api("/access/audit").then((r) => { S.audit = r || S.audit; drawAudit(); }).catch(() => {});
 }
 })();
