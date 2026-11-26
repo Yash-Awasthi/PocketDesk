@@ -256,7 +256,8 @@ commit is byte-identical.
 
 ### M2.3 Supply chain and release
 
-- [ ] `npm audit` and `cargo audit` in CI; Gradle dependency verification (checksums) on. `[P]`
+- [x] `npm audit` and `cargo audit` in CI; Gradle dependency verification (checksums) on. `[P]`
+  verified-here: `cd app && ./gradlew --offline --write-verification-metadata sha256 help` -> BUILD SUCCESSFUL, 427 components and 702 SHA-256 digests committed as app/gradle/verification-metadata.xml; two further `./gradlew --offline help` runs -> BUILD SUCCESSFUL; flipping one AGP digest -> `Dependency verification failed for configuration 'classpath'` BUILD FAILED, restoring -> BUILD SUCCESSFUL. The two audits are CI steps in .github/workflows/supply-chain.yml and were not executed here: the box has no network (npm view and curl both fail on the stopped proxy), cargo is on PATH but cargo-audit is not installed. `:app:assembleDebug` cannot run here for an unrelated pre-existing reason: AGP 9.5.2 fails to serialize MergeResources into the configuration cache.
 - [ ] SBOM for the daemon (`cyclonedx`) and the APK; attach to the release. `[P]`
 - [ ] `SHA256SUMS` and a signed tag per release; the release workflow asserts the tag matches `package.json` and `versionName`. `[P]`
 - [x] GPL compliance check: every released artefact has a source offer and the corresponding source tag. `[P]`
