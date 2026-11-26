@@ -76,6 +76,28 @@ try {
   await post("/access/record", { on: false });
   check("recording toggle turns off", (await status()).recording === false);
 
+  // A proposal is created from the phone, reaches every authed socket, and an approval that names
+  // nothing real answers with that name instead of a silent success.
+  const proposer = await openAndHello(PORT, TOKEN);
+  proposer.send({
+    type: "propose",
+    proposalType: "command_execute",
+    summary: "restart the service",
+    sessionId: "s1",
+  });
+  const created = await proposer.next((m) => m.type === "proposal_created", 8000);
+  check(
+    "propose broadcasts the proposal with its summary and type",
+    created.proposal?.summary === "restart the service" && created.proposal?.type === "command_execute",
+  );
+  proposer.send({ type: "approve", id: "no-such-proposal" });
+  const unknownApproval = await proposer.next((m) => m.type === "error", 8000);
+  check(
+    "approving an unknown proposal answers with its id",
+    /no-such-proposal/.test(unknownApproval.message),
+  );
+  await proposer.close();
+
   const early = await new Promise((resolve) => {
     const c = connect(PORT, TOKEN);
     c.ws.on("open", () => c.send({ type: "sessions" }));

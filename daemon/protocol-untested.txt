@@ -1,4 +1,6 @@
+account_forget
 account_save
+account_switch
 accounts_list
 adb_action
 adb_apps
@@ -28,6 +30,7 @@ adb_webcam_register
 adb_webcam_status
 agent_doc
 agent_file_set
+agent_panel
 bastion_host_list
 bastion_invite
 bastion_invite_accept
@@ -52,6 +55,7 @@ fs_zip
 handoff
 history_get
 history_list
+history_resume
 kvm_get
 kvm_in
 kvm_set
@@ -81,7 +85,6 @@ phone_sync_get
 phone_sync_set
 phone_unwatch
 profile_update
-propose
 remote_input
 schedule_resume
 sessions_get
