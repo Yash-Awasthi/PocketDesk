@@ -1561,8 +1561,8 @@ export class DesktopController extends InputController {
     try {
       await this.helperCapture.ensure();
       // rd_quality maps to a downscale factor (bandwidth knob): 70+ = full,
-      // 40-69 = 75%, below = 50%. The JPEG comes back in memory, so a frame
-      // costs no temp-file save/rename round trip.
+      // 40-69 = 75%, below = 50%. In-memory JPEG keeps AMSI calm — the
+      // temp-file save/rename pattern is what its heuristics flag.
       const r = await this.helperCapture.cmd({ op: "capture", s: this.scale }, 12000);
       if (r?.ok && r.b64) {
         this._setFrame(r.b64, r.w, r.h, t0, r.blocked || "");

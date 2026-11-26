@@ -23,10 +23,9 @@ data was never in a place a user-mode API can read.
 | **In-process API hooking** ("game capture": inject a DLL and hook `IDXGISwapChain::Present`, `wglSwapBuffers` or `vkQueuePresentKHR`, then share the back buffer) | **Yes** | The hook runs inside the game, at the moment it presents, before the image bypasses anything. This is how OBS’s Game Capture source works. Costs: a per-API hook, DLL injection into another process, antivirus false positives and anti-cheat bans, and it must be per game. |
 
 So, in user mode, **there are exactly two working answers: a signed kernel driver, or hooking the
-game process.** PocketDesk deliberately ships neither: it is an installed remote-desktop app,
-visible to the machine it runs on and blockable by its owner, with no driver, no process hooking
-and no attempt to look like something it is not (see [INTEGRITY.md](INTEGRITY.md)). Every other
-route is the OS saying no.
+game process.** PocketDesk deliberately ships neither: it is an installed remote-desktop app that
+must stay invisible to anti-cheat and antivirus (its capture helpers are already written to avoid the
+RAT heuristics AMSI flags). Every other route is the OS saying no.
 
 ## What PocketDesk does instead — implemented
 

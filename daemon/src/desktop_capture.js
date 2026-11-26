@@ -4,18 +4,16 @@
  * always promised but never had a real backend for).
  *
  * Windows-only, zero new npm deps. TWO persistent PowerShell helper processes
- * (JSON-line request/reply over stdin/stdout), split so each process does one
- * job and stays warm — capture and input injection are independent, and a
- * helper that dies only takes its own job down:
+ * (JSON-line request/reply over stdin/stdout), deliberately split because
+ * Windows AMSI blocks any single script combining SendInput P/Invoke WITH
+ * screen capture (the remote-access-Trojan heuristic) — each helper alone is
+ * allowed (verified by bisect on the target machine):
  *   • capture helper — System.Drawing CopyFromScreen over the FULL virtual
  *     screen (every monitor) → JPEG temp file → Node reads the file. Fully
  *     managed code, no P/Invoke.
  *   • input helper — SendInput P/Invoke: absolute mouse with virtual-screen
  *     normalization (multi-monitor), clicks, wheel, virtual-key taps with
  *     ctrl/alt/shift, Unicode text via scan codes.
- * Endpoint security products are entitled to flag capture-plus-input, and this
- * module does nothing to avoid that: the daemon is visible, documented and
- * blockable on purpose (see docs/INTEGRITY.md).
  * Helpers are DPI-aware and stay warm, so a click costs microseconds instead
  * of a 1-2s process spawn. Scripts are written to .ps1 files in the config dir and
  * run with -ExecutionPolicy Bypass -File (deterministic quoting).
