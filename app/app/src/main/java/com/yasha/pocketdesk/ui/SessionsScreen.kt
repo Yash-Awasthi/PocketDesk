@@ -59,7 +59,12 @@ import com.yasha.pocketdesk.WsClient
 import com.yasha.pocketdesk.childPath
 
 @Composable
-fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit, foldAt: Dp? = null) {
+fun SessionsScreen(
+    ws: WsClient,
+    openTerminal: (String) -> Unit,
+    foldAt: Dp? = null,
+    send: (String) -> Boolean = { ws.sendRaw(it) },
+) {
     // A session is a PTY: a GUI application has no terminal to attach to.
     val installed = ws.tools.filter { it.installed == true && !it.manifest.isGui }
     var tool by remember { mutableStateOf<ToolInfo?>(null) }
@@ -76,10 +81,29 @@ fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit, foldAt: Dp? = n
         if (browsing) ws.browse(cwd.ifBlank { null })
     }
 
+    // The restart row belongs to the last session whose PTY exited, and only while the daemon
+    // still holds it: a live session never grows one.
+    var ended by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    var restartPhase by remember { mutableStateOf<RestartPhase?>(null) }
     LaunchedEffect(Unit) {
         ws.events.collect { ev ->
-            if (ev is RhEvent.Created) openTerminal(ev.id)
+            when (ev) {
+                is RhEvent.Created -> openTerminal(ev.id)
+                is RhEvent.Exit -> {
+                    ended = ev.id to ev.code
+                    restartPhase = RestartPhase.Ready
+                }
+                is RhEvent.Failure ->
+                    if (restartPhase == RestartPhase.Requested) restartPhase = restartOutcome(ev.message)
+                else -> {}
+            }
         }
+    }
+    // A resumed session comes back in the live list; that is the answer to the request.
+    LaunchedEffect(ws.sessions) {
+        val id = ended?.first ?: return@LaunchedEffect
+        if (restartPhase == RestartPhase.Requested && ws.sessions.any { it.id == id })
+            restartPhase = RestartPhase.Resumed
     }
 
     // The detail pane follows the list, so a session that ends stops being shown.
@@ -89,6 +113,10 @@ fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit, foldAt: Dp? = n
     }
     val chosen = ws.sessions.firstOrNull { it.id == selected }
     val startSession: () -> Unit = { ws.createSession(tool!!.manifest.id, cwd.trim(), worktree) }
+    val restart: (String) -> Unit = { id ->
+        restartPhase = RestartPhase.Requested
+        send(sessionResumeMessage(id))
+    }
     val pick = { t: ToolInfo -> tool = t }
 
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -100,6 +128,7 @@ fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit, foldAt: Dp? = n
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     item { Text("Live sessions", style = MaterialTheme.typography.titleLarge) }
+                    restartItems(ended, restartPhase, restart)
                     sessionItems(ws, openTerminal, selected, { selected = it })
                     recordingItems(ws)
                 }
@@ -122,6 +151,7 @@ fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit, foldAt: Dp? = n
                 item { Text("New session", style = MaterialTheme.typography.titleLarge) }
                 item { SessionForm(installed, tool, pick, cwd, { cwd = it }, worktree, { worktree = it }, { browsing = true }, startSession) }
                 item { Text("Live sessions", style = MaterialTheme.typography.titleLarge) }
+                restartItems(ended, restartPhase, restart)
                 sessionItems(ws, openTerminal, null, null)
                 recordingItems(ws)
             }
@@ -170,6 +200,18 @@ private fun SessionForm(
             OutlinedButton(onClick = onBrowse, enabled = tool != null) { Text("Browse") }
             Button(onClick = onStart, enabled = tool != null) { Text("Start session") }
         }
+    }
+}
+
+/** The restart row after a session's PTY exits; a live session never gets one. */
+private fun LazyListScope.restartItems(
+    ended: Pair<String, Int>?,
+    phase: RestartPhase?,
+    onRestart: (String) -> Unit,
+) {
+    if (ended == null || phase == null) return
+    item(key = "restart:" + ended.first) {
+        SessionRestartCard(ended.first, ended.second, phase, onRestart)
     }
 }
 

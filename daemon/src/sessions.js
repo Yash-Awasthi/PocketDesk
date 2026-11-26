@@ -27,7 +27,7 @@ const IS_WIN = process.platform === "win32";
 const SCROLLBACK = 100_000;
 const MAX_SESSIONS = 50; // guard against unbounded session growth
 const MAX_PENDING_INPUT = 8; // inputs held for a session that is coming back, oldest dropped first
-const DEAD_SESSION_TTL_MS = 5 * 60_000; // keep dead sessions for 5 min for replay and their queue
+const DEAD_SESSION_TTL_MS = Number(process.env.RH_DEAD_SESSION_TTL_MS) || 5 * 60_000; // dead-session replay/queue window
 const REAP_INTERVAL_MS = 60_000; // sweep dead sessions every 60s
 const MAX_CHUNKS = 2_000; // per-session chunk ring for missed-output backfill
 // Live sessions idle longer than this are killed (minutes; 0/env RH_IDLE_KILL_MINUTES disables).
@@ -186,12 +186,26 @@ function spawnPty(s, broadcast) {
 }
 
 /**
- * Puts a recently exited session's command back on a fresh PTY under the same id, then
- * delivers the inputs queued while it was down. Nothing in the ws protocol calls this yet:
- * the queue is here so a reply that lands just after the agent exits is kept instead of
- * thrown away, for the resume that follows.
+ * Why [id] can or cannot be resumed: "unknown" (no such session), "live" (its PTY is still
+ * running), "expired" (past the queue window) or "ready". The ws handler answers with this
+ * before calling resume(), so the phone gets the reason instead of a bare false.
  */
-export function resume(id, broadcast = () => {}) {
+export function resumeState(id) {
+  const s = sessions.get(id);
+  if (!s) return "unknown";
+  if (s.exitCode === null) return "live";
+  if (Date.now() - (s.endedAt ?? 0) > DEAD_SESSION_TTL_MS) return "expired";
+  return "ready";
+}
+
+/**
+ * Puts a recently exited session's command back on a fresh PTY under the same id, then
+ * delivers the inputs queued while it was down. The only caller is the explicit
+ * `session_resume` ws message: a write never respawns, because phone text would become the
+ * first command of a fresh shell. [viewer] is the client that asked, so it sees the new
+ * shell's output without a second attach round trip.
+ */
+export function resume(id, broadcast = () => {}, viewer = null) {
   const s = sessions.get(id);
   if (!s || s.exitCode === null) return false;
   if (Date.now() - (s.endedAt ?? 0) > DEAD_SESSION_TTL_MS) return false;
@@ -199,6 +213,10 @@ export function resume(id, broadcast = () => {}) {
     spawnPty(s, broadcast);
   } catch {
     return false;
+  }
+  if (viewer && viewer.readyState === 1) {
+    s.subs.add(viewer);
+    viewer._subs.add(id);
   }
   sessionEvents.emit("resumed", { id });
   return true;

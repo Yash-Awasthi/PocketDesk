@@ -1289,6 +1289,28 @@ export function start(config, { onTokenRotated } = {}) {
     },
     ctx,
   );
+  // The explicit restart: the only caller of sessions.resume(). A live session, an unknown id or
+  // one past the queue TTL is refused with a reason, never respawned implicitly.
+  handlers.session_resume = async (ws, msg) => {
+    const id = String(msg.id ?? "");
+    const why = sessions.resumeState(id);
+    if (why !== "ready")
+      return send(ws, {
+        type: "error",
+        code: `session_${why}`,
+        id,
+        message: `session_resume: ${why}: ${id}`,
+      });
+    if (!sessions.resume(id, broadcast, ws))
+      return send(ws, {
+        type: "error",
+        code: "session_failed",
+        id,
+        message: `session_resume: failed: ${id}`,
+      });
+    sessionStore.setStatus(id, "working");
+    broadcast({ type: "sessions", items: allSessions() });
+  };
   // Every real handler catches its own errors, so the global catch above is only reachable from a
   // handler that throws on purpose; this is that handler, off unless the test env asks for it.
   if (process.env.RH_TEST_THROW === "1")

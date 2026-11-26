@@ -47,6 +47,9 @@ additive version has no line, because nothing that was already sent changes mean
   `pd-protocol` page meta, which comes from `daemon/protocol/compat.json` through `version.js`.
   A different value gets `protocol_mismatch {expected, found}`, a permanent Offline notice that
   names both numbers, and no retry; the close is still 4026.
+- v4: `session_resume {id}` is added and recorded in the baseline. It restarts an exited
+  session under the same id on a fresh PTY and flushes its queued replies; it is refused while
+  the session is live or after the queue TTL. Additive: no existing message changes meaning.
 
 ## Alternatives considered
 
