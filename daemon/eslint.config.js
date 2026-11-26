@@ -5,7 +5,14 @@ import globals from "globals";
 // `node --check` stays the first gate in CI because it needs no dependencies at all.
 export default [
   {
-    ignores: ["node_modules/**", "coverage/**", "public/**", "clippy/**"],
+    ignores: [
+      "node_modules/**",
+      "coverage/**",
+      "public/**",
+      "clippy/**",
+      "test-results/**",
+      "playwright-report/**",
+    ],
   },
   js.configs.recommended,
   {
