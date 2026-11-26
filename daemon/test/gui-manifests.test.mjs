@@ -189,7 +189,7 @@ async function main() {
   check("search caps its result", search("", 5).length <= 5);
 
   // The phone must be told the outcome: the window opens where it cannot see.
-  const port = 8834;
+  const port = 8882;
   const daemon = startDaemon(port, port + 1, { manifests: tmp });
   await daemon.ready;
   const c = await openAndHello(port);

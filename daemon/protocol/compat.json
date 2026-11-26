@@ -77,6 +77,8 @@
     "clippy_stop": "",
     "create": "",
     "deck_key": "",
+    "desktop_capture": "",
+    "desktop_capture_check": "",
     "desktop_frame": "",
     "desktop_key": "",
     "desktop_monitor_order": "order: [index...]",

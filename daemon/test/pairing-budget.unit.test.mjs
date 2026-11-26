@@ -73,8 +73,8 @@ test("many keys stay bounded and a locked key survives the sweep", () => {
 
 test("the daemon closes wrong-token hellos and blocks the eleventh attempt", async () => {
   const tmp = makeTmp("rh-pairbudget-");
-  const PORT = 8845;
-  const CLI_PORT = 46845;
+  const PORT = 8885;
+  const CLI_PORT = 46885;
   const TOKEN = "pairbudgettoken";
   const d = startDaemon(PORT, CLI_PORT, { token: TOKEN, manifests: tmp, dataDir: ".pocketdesk-pairbudget" });
 

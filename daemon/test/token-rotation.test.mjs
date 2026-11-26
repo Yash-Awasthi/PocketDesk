@@ -3,8 +3,8 @@
 import { check, connect, finish, makeTmp, startDaemon, teardown } from "./helpers.mjs";
 
 const tmp = makeTmp("rh-tokenrotation-");
-const PORT = 8846;
-const CLI_PORT = 46846;
+const PORT = 8884;
+const CLI_PORT = 46884;
 const TOKEN = "rotationtoken";
 
 const base = `http://127.0.0.1:${PORT}`;

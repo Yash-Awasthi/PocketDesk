@@ -105,6 +105,12 @@ if (!WIN) {
       { type: "desktop_capture_check" },
     );
     check("the exported handler sends the check case to checkCapture", routed.seen === "check");
+
+    const plain = await handleCaptureMode(
+      { captureMode: async (m) => ({ seen: "mode", m }), checkCapture: async () => ({ seen: "check" }) },
+      { type: "desktop_capture", mode: "auto" },
+    );
+    check("the exported handler sends a plain request to captureMode", plain.seen === "mode" && plain.m.mode === "auto");
   } finally {
     d.helperCapture.kill();
     fs.rmSync(home, { recursive: true, force: true });

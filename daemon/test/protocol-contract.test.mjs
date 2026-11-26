@@ -131,8 +131,8 @@ check(
 
 // 4. An unknown type is refused with the documented error, and the socket stays usable.
 const tmp = makeTmp("rh-contract-");
-const port = 8826;
-const cliPort = 8827;
+const port = 8880;
+const cliPort = 8881;
 const d = startDaemon(port, cliPort, { token: "contract-token", manifests: tmp, dataDir: path.join(tmp, "data") });
 try {
   await d.ready;

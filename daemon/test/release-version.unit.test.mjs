@@ -39,7 +39,16 @@ check(
   headings.length > 0,
 );
 
-const names = headings.map((h) => h.name);
+// An unreleased section may sit on top of the release list; it carries no version.
+const unreleased = headings.filter((h) => h.name === "Unreleased");
+check("at most one Unreleased heading", unreleased.length <= 1, headings.map((h) => h.name).join(", "));
+check(
+  "Unreleased is the first heading when present",
+  unreleased.length === 0 || headings[0].name === "Unreleased",
+  headings.map((h) => h.name).join(", "),
+);
+const releases = headings.filter((h) => h.name !== "Unreleased");
+const names = releases.map((h) => h.name);
 check(
   "every CHANGELOG heading is semver",
   names.every((n) => /^\d+\.\d+\.\d+$/.test(n)),
