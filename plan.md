@@ -511,6 +511,9 @@ re-shoot.
 - [x] `docs/for-proctoring-vendors.md`: process names, task name, service keys, install path, ports, data folder, the capture marker, how to verify and how to block, plus a contact. `[E]`
   verified-here: `cd daemon && RH_HOME=$(mktemp -d) node src/cli.js --status` -> ports: 8765 daemon, 8775 loopback page, 4679 cli; data: /tmp/tmp.lUWAArDFBn; running: no; no-invention 75 code spans, 0 missing
   limits: no Windows service; CI does not exercise desktop capture, input or tray; policy-key enforcement open (plan M6.1)
+  cancelled 2026-11-26: publication withdrawn - the owner asked why the work centres on proctoring and ruled "no, keep it hidden", so the file stays in docs/ and off every public entry point. Owner, verbatim: "why focus on proctoring, I want it to be hidden and be a daemon inside working silently".
+  framing change 2026-11-26: removed nothing, because README.md and the docs index never linked this file (grep for-proctoring-vendors -> docs/INTEGRITY.md:248 and this row only); kept README.md "Do not use it during a proctored assessment, interview, or exam" as a safety statement, the README.md link to docs/INTEGRITY.md as the internal threat model, docs/INTEGRITY.md itself, and the docs/ALPHA-CAPTURE.md "do not use in proctoring" line, for the owner's words above.
+  operational cost 2026-11-26: a daemon that installs with no icon, no window and no logon notice, plus a SYSTEM console endpoint, will be flagged by Defender and SmartScreen, and the target machine will need an exclusion; that is the price of the hidden-daemon ruling, not a defect.
 - [x] `ALPHA-CAPTURE.md` gets the "do not use in proctoring, exam or DRM windows" warning. `[E]`
   verified-here: grep -n -i "proctoring|exam|DRM" docs/ALPHA-CAPTURE.md -> 2 hits; cd daemon && node --test test/no-evasion.test.mjs -> ALL PASS
 - [x] `SECURITY.md`: disclosure path, supported versions, response time. `[E]`
@@ -612,6 +615,7 @@ is theatre).
 | R8 | Docs describing a transport that moved | High | Wrong mental model | `CONTEXT.md` stale | M3.3 |
 | R9 | Protocol message added without a test | Med | Silent breakage | contract test partial | M2.1 |
 | R10 | Android never runs on a device in CI | High | Runtime-only bugs | `ci.yml` compiles only | M1.6 |
+| R11 | Defender and SmartScreen flag the silent install: no icon, no window, no logon notice, SYSTEM console endpoint | High | Blocked install until an exclusion is added | SmartScreen prompt, AV quarantine | Operational cost of the hidden-daemon ruling, not a defect: the target machine needs an exclusion |
 
 ---
 
@@ -656,7 +660,7 @@ guessed:
 4. Console (SYSTEM / secure desktop) endpoint: drop from public builds, or keep admin-only?
 5. Virtual webcam: default off + watermark, or watermark only?
 6. Kill-switch scope: remote control only, or all four keys?
-7. Publish the vendor detection document — yes/no?
+7. Publish the vendor detection document - decided 2026-11-26: no. Do not publish; keep it hidden; the daemon works silently. The file stays in docs/, unlinked, and is not sent to any vendor.
 8. Remove the "invisible to anti-cheat and antivirus" claim and the AMSI framing — recommended yes.
 
 From the absorbed plans and `docs/INTEGRITY.md` (needs real hardware, no agent can do it):
@@ -784,3 +788,4 @@ endpoint's architecture, and the manual checks that never ran.
 - 2026-11-24 m2.1.2 [x] daemon suite green: 115/115 pass (was 108/113) | proof: cd daemon && npm test -> EXIT=0 tests 115 pass 115 | fixed: TLS-vs-HTTP readiness probe, hardcoded guard ports, 4 spawns missing RH_CLI_PORT, awaited 6 s sessions_scan (now shared probe + 2 s bounded wait + refreshing flag), absorb device-registry leak from previous runs, POCKETDESK_DATA joined instead of resolved (6 modules + logger), bastion counter race | guard: startup-readiness 10 checks | needs-verify: tasklist cost on GitHub runners unmeasured | next: M2.1 coverage floor
 - 2026-11-24 m2.1.3 [x] c8 coverage floors per src/ area + ratchet guard; suite 116/116 | proof: npm run coverage -> st 58.42%% br 69%% fn 38.1%%, areas src 64.7 / handlers 37.6 / phone_adb 32.7 / plugins 88.1; handlers floor forced to 90 -> check FAILS naming it; coverage-floors guard 25 checks | also: lockdown-client waits for the killed tree instead of 1.5 s | needs-verify: npm run coverage not yet in CI | next: protocol-contract test
 - 2026-11-26 row 428 [ ] golden transcripts captured for all seven agents, parser green, row left open on credentials | measured: installed @anthropic-ai/claude-code 2.1.332, @openai/codex 0.172.0, @google/gemini-cli 0.71.1, @qwen-code/qwen-code 0.28.6, opencode-ai 1.19.6, @github/copilot 1.0.116, cline 3.0.76 under C:\Users\Yash\AppData\Roaming\npm (769/523.2/128.7/196.6/609.5/195.1/309.5 MB); docs/transcripts/<agent>/{version,help,print}.txt plus manifest.json; daemon/test/transcripts.test.mjs ALL PASS over 21 files | proof: node docs/transcripts/capture.mjs; node daemon/test/transcripts.test.mjs -> ALL PASS | limits: every CLI is credential-gated here, so no capture holds a successful assistant turn or a tool_use block | next: one capture with a real key per agent, then tick
+- 2026-11-26 ruling D [x] vendor-reference publication cancelled in place: docs/for-proctoring-vendors.md stays in the repo, unlinked from every public entry point; Appendix A item 7 answered no ("do not publish; keep it hidden; the daemon works silently"); no README or docs-index proctoring framing was removed, the safety statements were kept; Defender/SmartScreen exclusion recorded as an operational cost in R11 | proof: grep -rn for-proctoring-vendors --exclude-dir=node_modules --exclude-dir=.git -> docs/INTEGRITY.md:248 and the M6.2 row only, before and after; git show --stat HEAD -> plan.md 1 file | next: none unless the owner reverses
