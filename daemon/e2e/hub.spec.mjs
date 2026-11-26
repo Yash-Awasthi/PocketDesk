@@ -145,6 +145,7 @@ test("the sessions page searches and filters by agent, project and date", async 
 });
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const PNG_SIG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
 // The same regex the capture script uses, so neither side owns a hardcoded page list.
 function screenshotIds() {
@@ -220,4 +221,26 @@ test("every control is a 44 px target", async ({ page }) => {
     for (const row of rows) small.push(`${id}: ${row}`);
   }
   expect(small, `controls under 44x44 CSS px:\n${small.join("\n")}`).toEqual([]);
+});
+
+test("every hub page has a baseline screenshot", async () => {
+  const dir = path.join(HERE, "..", "..", "docs", "screenshots", "before");
+  const ids = screenshotIds();
+  const bad = [];
+  for (const id of ids) {
+    let ok = false;
+    try {
+      const buf = fs.readFileSync(path.join(dir, `${id}.png`));
+      ok = buf.length >= 8 && PNG_SIG.every((b, i) => buf[i] === b);
+    } catch {
+      // a missing or unreadable file leaves ok false
+    }
+    if (!ok) bad.push(`${id}.png`);
+  }
+  expect(
+    bad,
+    "missing or invalid baseline screenshots (run: cd daemon && node e2e/capture-screenshots.mjs)",
+  ).toEqual([]);
+  const pngs = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".png")) : [];
+  expect(pngs.length, `baseline PNG count in ${dir}`).toBe(ids.length);
 });
