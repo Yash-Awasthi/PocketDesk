@@ -92,6 +92,23 @@ internal fun quickActionDestination(action: QuickAction): Screen = when (action)
     QuickAction.Desktop -> Screen.Desktop
 }
 
+/** What an intent asks the app to open: its `open` extra, else a `pocketdesk://session/<id>` link. */
+internal fun openRequest(intent: android.content.Intent?): String? {
+    if (intent == null) return null
+    intent.getStringExtra("open")?.let { return it }
+    val data = intent.data ?: return null
+    if (data.scheme != Pairing.SCHEME || data.host != "session") return null
+    return data.pathSegments.lastOrNull()?.takeIf { it.isNotBlank() }?.let { "session:$it" }
+}
+
+/** The surface an open request names, once the phone is linked to that PC. */
+internal fun openDestination(open: String?): Screen? = when {
+    open == "remote" -> Screen.Remote
+    open != null && open.startsWith("session:") ->
+        open.removePrefix("session:").takeIf { it.isNotBlank() }?.let { Screen.Terminal(it) }
+    else -> null
+}
+
 class MainActivity : ComponentActivity() {
 
     private var locked by mutableStateOf(false)
@@ -117,10 +134,10 @@ class MainActivity : ComponentActivity() {
     }
 
     /** A screen asked for from a widget or shortcut, opened once the PC is linked. */
-    private var pendingOpen by mutableStateOf<String?>(null)
+    internal var pendingOpen by mutableStateOf<String?>(null)
 
     private fun takePairing(intent: android.content.Intent?) {
-        intent?.getStringExtra("open")?.let { pendingOpen = it }
+        openRequest(intent)?.let { pendingOpen = it }
         val link = intent?.dataString ?: return
         Pairing.parse(link).takeIf { it.isNotEmpty() }?.let { Link.pendingPair = it }
     }
@@ -190,7 +207,13 @@ class MainActivity : ComponentActivity() {
 
         val connected = client.status == Status.Connected
         LaunchedEffect(pendingOpen, connected) {
-            if (connected && pendingOpen == "remote") { pendingOpen = null; open(Screen.Remote) }
+            val next = openDestination(pendingOpen) ?: return@LaunchedEffect
+            if (connected) {
+                pendingOpen = null
+                // A session link sits on the Sessions list, so Back goes to the list, not to Connect.
+                if (next is Screen.Terminal) showTab(Screen.Sessions)
+                open(next)
+            }
         }
 
         Scaffold(
