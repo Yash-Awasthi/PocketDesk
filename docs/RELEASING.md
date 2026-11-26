@@ -19,12 +19,23 @@ as `versionName`, and the native workspace takes its version from
 5. Run the release check and the normal suites:
 
    ```sh
+   cd daemon && node scripts/release.mjs check --tag v$(cat ../VERSION)
    cd daemon && node --test test/release-version.unit.test.mjs
    cd daemon && npm test
    ```
 
 6. Commit, tag `vX.Y.Z`, and build every artifact (daemon, APK, native helpers)
    from that tag. A tag must never point at a tree whose `VERSION` differs.
+
+   Pushing the tag runs `.github/workflows/release.yml`. It re-checks the tag
+   against `VERSION`, `daemon/package.json`, `versionName` and the native
+   workspace, packs the daemon, archives the same tagged tree as the
+   corresponding source, and attaches `SHA256SUMS` beside both. The file is in
+   `sha256sum` form and name order, so `sha256sum -c SHA256SUMS` checks a
+   download as it stands.
+
+   The tag is not signed yet: a signed tag needs the owner's GPG key, so
+   `git tag -s` stays an owner step outside CI.
 
 ## SBOM
 
@@ -64,6 +75,6 @@ it publishes carries its corresponding source. The offer is the tag itself:
   beside a binary.
 
 `daemon/package.json` is private npm tooling metadata (`"private": true`) and is
-never published to a registry, so its `version` field is not the product
-version. The shipped daemon version is `VERSION`, printed by
-`pocketdesk --version`.
+never published to a registry. Its `version` mirrors `VERSION` so the tooling and
+the release gate read one number; the shipped daemon version is still `VERSION`,
+printed by `pocketdesk --version`.

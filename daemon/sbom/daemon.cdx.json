@@ -96,9 +96,9 @@
     "component": {
       "type": "application",
       "name": "pocketdesk-daemon",
-      "version": "0.1.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0",
-      "purl": "pkg:npm/pocketdesk-daemon@0.1.0",
+      "version": "0.11.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0",
+      "purl": "pkg:npm/pocketdesk-daemon@0.11.0",
       "properties": [
         {
           "name": "cdx:npm:package:constraint:engine:node",
@@ -127,7 +127,7 @@
       "name": "iroh-android-arm-eabi",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm-eabi@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh-android-arm-eabi@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -162,7 +162,7 @@
       "name": "iroh-android-arm64",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm64@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh-android-arm64@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -197,7 +197,7 @@
       "name": "iroh-darwin-arm64",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-darwin-arm64@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh-darwin-arm64@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -232,7 +232,7 @@
       "name": "iroh-linux-arm-gnueabihf",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-gnueabihf@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm-gnueabihf@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -267,7 +267,7 @@
       "name": "iroh-linux-arm-musleabihf",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-musleabihf@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm-musleabihf@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -302,7 +302,7 @@
       "name": "iroh-linux-arm64-gnu",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-gnu@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm64-gnu@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -337,7 +337,7 @@
       "name": "iroh-linux-arm64-musl",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-musl@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm64-musl@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -372,7 +372,7 @@
       "name": "iroh-linux-x64-gnu",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-gnu@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-x64-gnu@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -407,7 +407,7 @@
       "name": "iroh-linux-x64-musl",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-musl@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-x64-musl@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -442,7 +442,7 @@
       "name": "iroh-win32-arm64-msvc",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-win32-arm64-msvc@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh-win32-arm64-msvc@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -477,7 +477,7 @@
       "name": "iroh-win32-x64-msvc",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-win32-x64-msvc@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh-win32-x64-msvc@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -512,7 +512,7 @@
       "name": "iroh",
       "group": "@number0",
       "version": "1.2.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh@1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|@number0/iroh@1.2.0",
       "scope": "optional",
       "licenses": [
         {
@@ -544,7 +544,7 @@
       "type": "library",
       "name": "asn1",
       "version": "0.2.6",
-      "bom-ref": "pocketdesk-daemon@0.1.0|asn1@0.2.6",
+      "bom-ref": "pocketdesk-daemon@0.11.0|asn1@0.2.6",
       "licenses": [
         {
           "license": {
@@ -577,7 +577,7 @@
       "type": "library",
       "name": "bcrypt-pbkdf",
       "version": "1.0.2",
-      "bom-ref": "pocketdesk-daemon@0.1.0|bcrypt-pbkdf@1.0.2",
+      "bom-ref": "pocketdesk-daemon@0.11.0|bcrypt-pbkdf@1.0.2",
       "licenses": [
         {
           "license": {
@@ -610,7 +610,7 @@
       "type": "library",
       "name": "buildcheck",
       "version": "0.0.7",
-      "bom-ref": "pocketdesk-daemon@0.1.0|buildcheck@0.0.7",
+      "bom-ref": "pocketdesk-daemon@0.11.0|buildcheck@0.0.7",
       "scope": "optional",
       "purl": "pkg:npm/buildcheck@0.0.7",
       "externalReferences": [
@@ -637,7 +637,7 @@
       "type": "library",
       "name": "cpu-features",
       "version": "0.0.10",
-      "bom-ref": "pocketdesk-daemon@0.1.0|cpu-features@0.0.10",
+      "bom-ref": "pocketdesk-daemon@0.11.0|cpu-features@0.0.10",
       "scope": "optional",
       "purl": "pkg:npm/cpu-features@0.0.10",
       "externalReferences": [
@@ -664,7 +664,7 @@
       "type": "library",
       "name": "nan",
       "version": "2.29.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|nan@2.29.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|nan@2.29.0",
       "scope": "optional",
       "licenses": [
         {
@@ -698,7 +698,7 @@
       "type": "library",
       "name": "node-addon-api",
       "version": "7.1.1",
-      "bom-ref": "pocketdesk-daemon@0.1.0|node-addon-api@7.1.1",
+      "bom-ref": "pocketdesk-daemon@0.11.0|node-addon-api@7.1.1",
       "licenses": [
         {
           "license": {
@@ -731,7 +731,7 @@
       "type": "library",
       "name": "node-pty",
       "version": "1.1.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|node-pty@1.1.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|node-pty@1.1.0",
       "licenses": [
         {
           "license": {
@@ -764,7 +764,7 @@
       "type": "library",
       "name": "safer-buffer",
       "version": "2.1.2",
-      "bom-ref": "pocketdesk-daemon@0.1.0|safer-buffer@2.1.2",
+      "bom-ref": "pocketdesk-daemon@0.11.0|safer-buffer@2.1.2",
       "licenses": [
         {
           "license": {
@@ -797,7 +797,7 @@
       "type": "library",
       "name": "ssh2",
       "version": "1.17.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|ssh2@1.17.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|ssh2@1.17.0",
       "purl": "pkg:npm/ssh2@1.17.0",
       "externalReferences": [
         {
@@ -823,7 +823,7 @@
       "type": "library",
       "name": "tweetnacl",
       "version": "0.14.5",
-      "bom-ref": "pocketdesk-daemon@0.1.0|tweetnacl@0.14.5",
+      "bom-ref": "pocketdesk-daemon@0.11.0|tweetnacl@0.14.5",
       "licenses": [
         {
           "license": {
@@ -856,7 +856,7 @@
       "type": "library",
       "name": "ws",
       "version": "8.22.0",
-      "bom-ref": "pocketdesk-daemon@0.1.0|ws@8.22.0",
+      "bom-ref": "pocketdesk-daemon@0.11.0|ws@8.22.0",
       "licenses": [
         {
           "license": {
@@ -888,114 +888,114 @@
   ],
   "dependencies": [
     {
-      "ref": "pocketdesk-daemon@0.1.0",
+      "ref": "pocketdesk-daemon@0.11.0",
       "dependsOn": [
-        "pocketdesk-daemon@0.1.0|@number0/iroh@1.2.0",
-        "pocketdesk-daemon@0.1.0|node-pty@1.1.0",
-        "pocketdesk-daemon@0.1.0|ssh2@1.17.0",
-        "pocketdesk-daemon@0.1.0|ws@8.22.0"
+        "pocketdesk-daemon@0.11.0|@number0/iroh@1.2.0",
+        "pocketdesk-daemon@0.11.0|node-pty@1.1.0",
+        "pocketdesk-daemon@0.11.0|ssh2@1.17.0",
+        "pocketdesk-daemon@0.11.0|ws@8.22.0"
       ]
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm-eabi@1.2.0"
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh-android-arm-eabi@1.2.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm64@1.2.0"
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh-android-arm64@1.2.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-darwin-arm64@1.2.0"
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh-darwin-arm64@1.2.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-gnueabihf@1.2.0"
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm-gnueabihf@1.2.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-musleabihf@1.2.0"
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm-musleabihf@1.2.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-gnu@1.2.0"
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm64-gnu@1.2.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-musl@1.2.0"
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm64-musl@1.2.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-gnu@1.2.0"
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-x64-gnu@1.2.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-musl@1.2.0"
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh-linux-x64-musl@1.2.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-win32-arm64-msvc@1.2.0"
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh-win32-arm64-msvc@1.2.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-win32-x64-msvc@1.2.0"
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh-win32-x64-msvc@1.2.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh@1.2.0",
+      "ref": "pocketdesk-daemon@0.11.0|@number0/iroh@1.2.0",
       "dependsOn": [
-        "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm-eabi@1.2.0",
-        "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm64@1.2.0",
-        "pocketdesk-daemon@0.1.0|@number0/iroh-darwin-arm64@1.2.0",
-        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-gnueabihf@1.2.0",
-        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-musleabihf@1.2.0",
-        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-gnu@1.2.0",
-        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-musl@1.2.0",
-        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-gnu@1.2.0",
-        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-musl@1.2.0",
-        "pocketdesk-daemon@0.1.0|@number0/iroh-win32-arm64-msvc@1.2.0",
-        "pocketdesk-daemon@0.1.0|@number0/iroh-win32-x64-msvc@1.2.0"
+        "pocketdesk-daemon@0.11.0|@number0/iroh-android-arm-eabi@1.2.0",
+        "pocketdesk-daemon@0.11.0|@number0/iroh-android-arm64@1.2.0",
+        "pocketdesk-daemon@0.11.0|@number0/iroh-darwin-arm64@1.2.0",
+        "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm-gnueabihf@1.2.0",
+        "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm-musleabihf@1.2.0",
+        "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm64-gnu@1.2.0",
+        "pocketdesk-daemon@0.11.0|@number0/iroh-linux-arm64-musl@1.2.0",
+        "pocketdesk-daemon@0.11.0|@number0/iroh-linux-x64-gnu@1.2.0",
+        "pocketdesk-daemon@0.11.0|@number0/iroh-linux-x64-musl@1.2.0",
+        "pocketdesk-daemon@0.11.0|@number0/iroh-win32-arm64-msvc@1.2.0",
+        "pocketdesk-daemon@0.11.0|@number0/iroh-win32-x64-msvc@1.2.0"
       ]
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|asn1@0.2.6",
+      "ref": "pocketdesk-daemon@0.11.0|asn1@0.2.6",
       "dependsOn": [
-        "pocketdesk-daemon@0.1.0|safer-buffer@2.1.2"
+        "pocketdesk-daemon@0.11.0|safer-buffer@2.1.2"
       ]
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|bcrypt-pbkdf@1.0.2",
+      "ref": "pocketdesk-daemon@0.11.0|bcrypt-pbkdf@1.0.2",
       "dependsOn": [
-        "pocketdesk-daemon@0.1.0|tweetnacl@0.14.5"
+        "pocketdesk-daemon@0.11.0|tweetnacl@0.14.5"
       ]
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|buildcheck@0.0.7"
+      "ref": "pocketdesk-daemon@0.11.0|buildcheck@0.0.7"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|cpu-features@0.0.10",
+      "ref": "pocketdesk-daemon@0.11.0|cpu-features@0.0.10",
       "dependsOn": [
-        "pocketdesk-daemon@0.1.0|buildcheck@0.0.7",
-        "pocketdesk-daemon@0.1.0|nan@2.29.0"
+        "pocketdesk-daemon@0.11.0|buildcheck@0.0.7",
+        "pocketdesk-daemon@0.11.0|nan@2.29.0"
       ]
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|nan@2.29.0"
+      "ref": "pocketdesk-daemon@0.11.0|nan@2.29.0"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|node-addon-api@7.1.1"
+      "ref": "pocketdesk-daemon@0.11.0|node-addon-api@7.1.1"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|node-pty@1.1.0",
+      "ref": "pocketdesk-daemon@0.11.0|node-pty@1.1.0",
       "dependsOn": [
-        "pocketdesk-daemon@0.1.0|node-addon-api@7.1.1"
+        "pocketdesk-daemon@0.11.0|node-addon-api@7.1.1"
       ]
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|safer-buffer@2.1.2"
+      "ref": "pocketdesk-daemon@0.11.0|safer-buffer@2.1.2"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|ssh2@1.17.0",
+      "ref": "pocketdesk-daemon@0.11.0|ssh2@1.17.0",
       "dependsOn": [
-        "pocketdesk-daemon@0.1.0|asn1@0.2.6",
-        "pocketdesk-daemon@0.1.0|bcrypt-pbkdf@1.0.2",
-        "pocketdesk-daemon@0.1.0|cpu-features@0.0.10",
-        "pocketdesk-daemon@0.1.0|nan@2.29.0"
+        "pocketdesk-daemon@0.11.0|asn1@0.2.6",
+        "pocketdesk-daemon@0.11.0|bcrypt-pbkdf@1.0.2",
+        "pocketdesk-daemon@0.11.0|cpu-features@0.0.10",
+        "pocketdesk-daemon@0.11.0|nan@2.29.0"
       ]
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|tweetnacl@0.14.5"
+      "ref": "pocketdesk-daemon@0.11.0|tweetnacl@0.14.5"
     },
     {
-      "ref": "pocketdesk-daemon@0.1.0|ws@8.22.0"
+      "ref": "pocketdesk-daemon@0.11.0|ws@8.22.0"
     }
   ]
 }

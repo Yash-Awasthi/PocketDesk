@@ -1,5 +1,7 @@
 // Release identity: VERSION is the one number the daemon, the APK and the native helpers share.
+import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
@@ -88,4 +90,74 @@ check("pocketdesk --version prints only VERSION", printed.trim() === version, JS
 const mod = await import(pathToFileURL(path.join(REPO, "daemon/src/version.js")).href);
 check(`daemon/src/version.js exports VERSION (${mod.VERSION})`, mod.VERSION === version);
 
+// A release publishes checksums, and the tag must name the same version as every file that
+// carries one. The gate is the same script the release workflow runs, so a local run proves it.
+const pkgVersion = JSON.parse(fs.readFileSync(path.join(REPO, "daemon/package.json"), "utf8")).version;
+check(`daemon/package.json mirrors VERSION (${pkgVersion})`, pkgVersion === version);
+
+const releaseScript = path.join(REPO, "daemon/scripts/release.mjs");
+const runRelease = (...args) => {
+  try {
+    const out = execFileSync(process.execPath, [releaseScript, ...args], {
+      cwd: path.join(REPO, "daemon"),
+      encoding: "utf8",
+      timeout: 30_000,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { code: 0, out };
+  } catch (e) {
+    return { code: e.status ?? 1, out: `${e.stdout || ""}${e.stderr || ""}` };
+  }
+};
+
+const goodTag = runRelease("check", "--tag", `v${version}`);
+check(`the release gate accepts v${version} (${goodTag.code})`, goodTag.code === 0, goodTag.out.trim());
+
+const wrongTag = runRelease("check", "--tag", "v9.9.9");
+check(
+  "the release gate refuses a tag that names another version",
+  wrongTag.code === 1 && /v9\.9\.9/.test(wrongTag.out) && /VERSION/.test(wrongTag.out),
+  wrongTag.out.trim(),
+);
+
+const bareTag = runRelease("check", "--tag", version);
+check(
+  "the release gate wants the v prefix",
+  bareTag.code === 1 && /not vX\.Y\.Z/.test(bareTag.out),
+  bareTag.out.trim(),
+);
+
+const noTag = runRelease("check");
+check("the release gate needs a tag", noTag.code === 1 && /no tag/.test(noTag.out), noTag.out.trim());
+
+const dist = fs.mkdtempSync(path.join(os.tmpdir(), "pd-sums-"));
+fs.writeFileSync(path.join(dist, "b.bin"), "second\n");
+fs.writeFileSync(path.join(dist, "a.bin"), "first\n");
+const sumsFile = path.join(dist, "SHA256SUMS");
+const hash = (text) => crypto.createHash("sha256").update(text).digest("hex");
+const expected = `${hash("first\n")}  a.bin\n${hash("second\n")}  b.bin\n`;
+const sums = runRelease("sums", "--out", sumsFile, path.join(dist, "b.bin"), path.join(dist, "a.bin"));
+check(
+  `the sums command writes sha256sum lines in name order (${sums.code})`,
+  sums.code === 0 && fs.readFileSync(sumsFile, "utf8") === expected,
+  sums.out.trim(),
+);
+
+runRelease("sums", "--out", sumsFile, path.join(dist, "a.bin"), path.join(dist, "b.bin"));
+check("the same artefacts give byte-identical checksums", fs.readFileSync(sumsFile, "utf8") === expected);
+
+const missing = runRelease("sums", "--out", sumsFile, path.join(dist, "gone.bin"));
+check(
+  "a missing artefact fails the sums step",
+  missing.code === 1 && /no such file/.test(missing.out),
+  missing.out.trim(),
+);
+fs.rmSync(dist, { recursive: true, force: true });
+
+// The workflow is what runs the gate on a tag; it must point at this script and publish the sums.
+const workflow = fs.readFileSync(path.join(REPO, ".github/workflows/release.yml"), "utf8");
+check("the release workflow runs on v tags", /tags: \["v\*"\]/.test(workflow));
+check("the release workflow runs the version gate", /node scripts\/release\.mjs check/.test(workflow));
+check("the release workflow publishes SHA256SUMS", /release\.mjs sums --out dist\/SHA256SUMS/.test(workflow));
+check("the release workflow uploads the checksums", /upload-artifact/.test(workflow));
 finish();
