@@ -7,7 +7,8 @@ import path from "node:path";
 
 // This file lives in daemon/test; docs sits beside daemon/, so resolve ../../docs from here.
 const DOC_PATH = path.resolve(import.meta.dirname, "..", "..", "docs", "THREAT-MODEL.md");
-const doc = fs.readFileSync(DOC_PATH, "utf8");
+// The blob is stored CRLF while an archive extract writes it raw; parse one line ending.
+const doc = fs.readFileSync(DOC_PATH, "utf8").replace(/\r\n/g, "\n");
 
 const THREATS = [
   "lan attacker",
