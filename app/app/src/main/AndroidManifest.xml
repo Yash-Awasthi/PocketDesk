@@ -148,6 +148,11 @@
                 android:value="Keeps the user's remote terminal connection to their own PC open" />
         </service>
 
+        <!-- A session-end notification replies and dismisses here without opening the app. -->
+        <receiver
+            android:name=".NotifActions"
+            android:exported="false" />
+
         <activity
             android:name=".ShareConsentActivity"
             android:exported="false"

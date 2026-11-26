@@ -67,7 +67,7 @@ object Link {
         scope.launch {
             client.events.collect { ev ->
                 when {
-                    ev is RhEvent.Exit && !MainActivity.foreground -> Notifier.sessionEnded(app, ev.harnessId, ev.code)
+                    ev is RhEvent.Exit && !MainActivity.foreground -> Notifier.sessionEnded(app, ev.id, ev.harnessId, ev.code)
                     ev is RhEvent.ApprovalNeeded && !MainActivity.foreground -> Notifier.approval(app, ev.proposal)
                     ev is RhEvent.ApprovalGone -> Notifier.approvalGone(app, ev.id)
                     ev is RhEvent.Phone -> PhoneShare.onMessage(app, ev)
