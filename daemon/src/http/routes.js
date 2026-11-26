@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { VERSION } from "../version.js";
 import { isLoopback } from "./transport.js";
 
 /**
@@ -25,10 +26,19 @@ export function createRoutes(ctx) {
       handle(req, res) {
         res.writeHead(200, { "content-type": "application/json" });
         // Anyone on the network may probe liveness; only this machine learns what answers and how busy it is.
+        // No global error store exists yet; video.lastError is created after this table in server.js.
         res.end(
           JSON.stringify(
             isLoopback(req)
-              ? { status: "healthy", service: "pocketdesk", sessions: allSessions().length }
+              ? {
+                  status: "healthy",
+                  service: "pocketdesk",
+                  version: VERSION,
+                  uptimeMs: Math.round(process.uptime() * 1000),
+                  sessions: allSessions().length,
+                  lastError: null,
+                  lastErrorScope: null,
+                }
               : { status: "healthy" },
           ),
         );

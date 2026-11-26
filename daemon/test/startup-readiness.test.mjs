@@ -7,6 +7,7 @@
 // file that spawns the daemon must have a readiness signal (`waitForHealth` or `.ready`).
 // The third check runs `waitForHealth` itself both ways so the helper cannot rot silently.
 import fs from "node:fs";
+import http from "node:http";
 import net from "node:net";
 import path from "node:path";
 import {
@@ -106,6 +107,20 @@ async function freePort() {
   });
 }
 
+// The plaintext daemon binds 127.0.0.1 only, so there is no LAN address to dial from here. The loopback
+// gate also checks the Host header, and that half a request can flip, so this is the gated path a test can reach.
+function getWithHost(port, host) {
+  return new Promise((resolve, reject) => {
+    const req = http.get({ host: "127.0.0.1", port, path: "/health", headers: { host } }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => (body += c));
+      res.on("end", () => resolve({ status: res.statusCode, body }));
+    });
+    req.on("error", reject);
+  });
+}
+
 const port = await freePort();
 const cliPort = await freePort();
 const tmp = makeTmp("rh-readiness-");
@@ -118,6 +133,32 @@ try {
     health.status === "healthy" && health.service === "pocketdesk",
     JSON.stringify(health),
   );
+
+  const repoVersion = fs.readFileSync(path.join(REPO, "VERSION"), "utf8").trim();
+  check(
+    "loopback health reports the repo VERSION",
+    typeof health.version === "string" && health.version.length > 0 && health.version === repoVersion,
+    JSON.stringify(health.version),
+  );
+  check(
+    "loopback health reports uptimeMs",
+    Number.isFinite(health.uptimeMs) && health.uptimeMs >= 0,
+    String(health.uptimeMs),
+  );
+  check(
+    "loopback health reports sessions as a number",
+    typeof health.sessions === "number",
+    String(health.sessions),
+  );
+
+  const lanHost = `192.0.2.10:${port}`;
+  const gated = await getWithHost(port, lanHost);
+  check(
+    `a non-loopback Host still gets only liveness (${lanHost})`,
+    gated.status === 200 && gated.body === '{"status":"healthy"}',
+    gated.body,
+  );
+  console.log("loopback /health -> " + JSON.stringify(health));
 
   const dead = await freePort();
   const started = Date.now();
