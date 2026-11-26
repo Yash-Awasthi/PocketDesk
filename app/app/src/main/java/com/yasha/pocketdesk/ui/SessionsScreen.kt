@@ -8,19 +8,26 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -30,6 +37,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -39,16 +47,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.yasha.pocketdesk.FsEntry
 import com.yasha.pocketdesk.RhEvent
+import com.yasha.pocketdesk.SessionSummary
 import com.yasha.pocketdesk.ToolInfo
 import com.yasha.pocketdesk.WsClient
 import com.yasha.pocketdesk.childPath
 
 @Composable
-fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit) {
+fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit, foldAt: Dp? = null) {
     // A session is a PTY: a GUI application has no terminal to attach to.
     val installed = ws.tools.filter { it.installed == true && !it.manifest.isGui }
     var tool by remember { mutableStateOf<ToolInfo?>(null) }
@@ -71,75 +82,48 @@ fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit) {
         }
     }
 
-    LazyColumn(
-        Modifier.fillMaxSize().padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        item {
-            Text("New session", style = MaterialTheme.typography.titleLarge)
-        }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ToolPicker(installed, tool) { tool = it }
-                OutlinedTextField(
-                    value = cwd,
-                    onValueChange = { cwd = it },
-                    modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Project folder") },
-                    placeholder = { Text("blank = home directory") },
-                    singleLine = true,
-                )
-                WorktreeSwitch(worktree) { worktree = it }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { browsing = true }, enabled = tool != null) { Text("Browse") }
-                    Button(
-                        onClick = { ws.createSession(tool!!.manifest.id, cwd.trim(), worktree) },
-                        enabled = tool != null,
-                    ) { Text("Start session") }
-                }
-            }
-        }
-        item {
-            Text("Live sessions", style = MaterialTheme.typography.titleLarge)
-        }
-        if (ws.sessions.isEmpty()) {
-            item { Text("None", style = MaterialTheme.typography.bodySmall) }
-        }
-        items(ws.sessions, key = { it.id }) { s ->
-            Card(Modifier.fillMaxWidth()) {
-                Row(
-                    Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+    // The detail pane follows the list, so a session that ends stops being shown.
+    var selected by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(ws.sessions) {
+        if (ws.sessions.none { it.id == selected }) selected = ws.sessions.firstOrNull()?.id
+    }
+    val chosen = ws.sessions.firstOrNull { it.id == selected }
+    val startSession: () -> Unit = { ws.createSession(tool!!.manifest.id, cwd.trim(), worktree) }
+    val pick = { t: ToolInfo -> tool = t }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val layout = sessionsLayout(maxWidth, foldAt)
+        if (layout.twoPane) {
+            Row(Modifier.fillMaxSize()) {
+                LazyColumn(
+                    Modifier.testTag("sessions.list").width(layout.listWidth).fillMaxHeight().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(s.harnessId, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            s.cwd,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    TextButton(onClick = { openTerminal(s.id) }) { Text("Attach") }
-                    IconButton(onClick = { ws.kill(s.id) }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Kill")
-                    }
+                    item { Text("Live sessions", style = MaterialTheme.typography.titleLarge) }
+                    sessionItems(ws, openTerminal, selected, { selected = it })
+                    recordingItems(ws)
+                }
+                VerticalDivider(Modifier.fillMaxHeight())
+                LazyColumn(
+                    Modifier.testTag("sessions.detail").weight(1f).fillMaxHeight().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    item { Text("New session", style = MaterialTheme.typography.titleLarge) }
+                    item { SessionForm(installed, tool, pick, cwd, { cwd = it }, worktree, { worktree = it }, { browsing = true }, startSession) }
+                    item { Text("Session detail", style = MaterialTheme.typography.titleLarge) }
+                    item { SessionDetail(chosen, openTerminal) { ws.kill(it) } }
                 }
             }
-        }
-        item {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Recordings", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                TextButton(onClick = { ws.recordingsList() }) { Text("Refresh") }
-            }
-        }
-        if (ws.recordings.isEmpty()) {
-            item { Text("None. Turn on session recording from the PocketDesk tray icon on the PC.", style = MaterialTheme.typography.bodySmall) }
-        }
-        items(ws.recordings, key = { "rec:$it" }) { name ->
-            Card(Modifier.fillMaxWidth().clickable { ws.recordingGet(name) }) {
-                Text(name, Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+        } else {
+            LazyColumn(
+                Modifier.testTag("sessions.list").fillMaxSize().padding(start = layout.start).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                item { Text("New session", style = MaterialTheme.typography.titleLarge) }
+                item { SessionForm(installed, tool, pick, cwd, { cwd = it }, worktree, { worktree = it }, { browsing = true }, startSession) }
+                item { Text("Live sessions", style = MaterialTheme.typography.titleLarge) }
+                sessionItems(ws, openTerminal, null, null)
+                recordingItems(ws)
             }
         }
     }
@@ -158,6 +142,138 @@ fun SessionsScreen(ws: WsClient, openTerminal: (String) -> Unit) {
     }
 }
 
+/** The new-session controls, shared by the compact column and the detail pane. */
+@Composable
+private fun SessionForm(
+    installed: List<ToolInfo>,
+    tool: ToolInfo?,
+    onPick: (ToolInfo) -> Unit,
+    cwd: String,
+    onCwd: (String) -> Unit,
+    worktree: Boolean,
+    onWorktree: (Boolean) -> Unit,
+    onBrowse: () -> Unit,
+    onStart: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ToolPicker(installed, tool, onPick)
+        OutlinedTextField(
+            value = cwd,
+            onValueChange = onCwd,
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text("Project folder") },
+            placeholder = { Text("blank = home directory") },
+            singleLine = true,
+        )
+        WorktreeSwitch(worktree, onWorktree)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onBrowse, enabled = tool != null) { Text("Browse") }
+            Button(onClick = onStart, enabled = tool != null) { Text("Start session") }
+        }
+    }
+}
+
+/** The live-session rows, with a selection only where a detail pane can show it. */
+private fun LazyListScope.sessionItems(
+    ws: WsClient,
+    openTerminal: (String) -> Unit,
+    selectedId: String?,
+    select: ((String) -> Unit)?,
+) {
+    if (ws.sessions.isEmpty()) {
+        item { Text("None", style = MaterialTheme.typography.bodySmall) }
+        return
+    }
+    items(ws.sessions, key = { it.id }) { s ->
+        SessionCard(
+            s = s,
+            selected = s.id == selectedId,
+            onSelect = select?.let { pick -> { pick(s.id) } },
+            onAttach = { openTerminal(s.id) },
+            onKill = { ws.kill(s.id) },
+        )
+    }
+}
+
+@Composable
+private fun SessionCard(
+    s: SessionSummary,
+    selected: Boolean,
+    onSelect: (() -> Unit)?,
+    onAttach: () -> Unit,
+    onKill: () -> Unit,
+) {
+    val card = if (onSelect == null) Modifier.fillMaxWidth() else Modifier.fillMaxWidth().clickable(onClick = onSelect)
+    val colors =
+        if (selected) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+        else CardDefaults.cardColors()
+    Card(card, colors = colors) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 4.dp).heightIn(min = MinTouchTarget),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(s.harnessId, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    s.cwd,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            TextButton(onClick = onAttach, modifier = Modifier.sizeIn(minWidth = MinTouchTarget, minHeight = MinTouchTarget).testTag("sessions.attach")) { Text("Attach") }
+            IconButton(onClick = onKill, modifier = Modifier.sizeIn(minWidth = MinTouchTarget, minHeight = MinTouchTarget).testTag("sessions.kill")) {
+                Icon(Icons.Filled.Close, contentDescription = "Kill")
+            }
+        }
+    }
+}
+
+/** What the detail pane shows for the selected session, or that there is none. */
+@Composable
+private fun SessionDetail(s: SessionSummary?, openTerminal: (String) -> Unit, onKill: (String) -> Unit) {
+    if (s == null) {
+        Text("No session selected", style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(s.harnessId, style = MaterialTheme.typography.titleMedium)
+        Text(s.cwd, style = MaterialTheme.typography.bodyMedium)
+        Text(
+            "session ${s.id}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = { openTerminal(s.id) },
+                modifier = Modifier.sizeIn(minWidth = MinTouchTarget, minHeight = MinTouchTarget).testTag("sessions.detail.attach"),
+            ) { Text("Attach") }
+            OutlinedButton(
+                onClick = { onKill(s.id) },
+                modifier = Modifier.sizeIn(minWidth = MinTouchTarget, minHeight = MinTouchTarget).testTag("sessions.detail.kill"),
+            ) { Text("Kill session") }
+        }
+    }
+}
+
+private fun LazyListScope.recordingItems(ws: WsClient) {
+    item {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Recordings", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+            TextButton(onClick = { ws.recordingsList() }) { Text("Refresh") }
+        }
+    }
+    if (ws.recordings.isEmpty()) {
+        item { Text("None. Turn on session recording from the PocketDesk tray icon on the PC.", style = MaterialTheme.typography.bodySmall) }
+    }
+    items(ws.recordings, key = { "rec:$it" }) { name ->
+        Card(Modifier.fillMaxWidth().clickable { ws.recordingGet(name) }) {
+            Text(name, Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
 @Composable
 private fun ToolPicker(installed: List<ToolInfo>, selected: ToolInfo?, onPick: (ToolInfo) -> Unit) {
     var open by remember { mutableStateOf(false) }
