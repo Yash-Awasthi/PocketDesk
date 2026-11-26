@@ -317,7 +317,8 @@ transport docs describe a design that has moved.
   - [ ] Daemon cold start measured and budgeted (<400 ms on a mid PC); print the number in CI. `[F]`
   - [ ] Baseline Profile + Macrobenchmark for the Android app's first frame and chat scroll. `[F]`
 - **m3.3.2 Docs**
-  - [ ] Regenerate `docs/CONNECTIVITY-NOTES.md` and `docs/RELAY.md` from the current transport code; delete claims that no longer hold. `[F]`
+  - [x] Regenerate `docs/CONNECTIVITY-NOTES.md` and `docs/RELAY.md` from the current transport code; delete claims that no longer hold. `[F]`
+  verified-here: cd daemon && node --test test/relay-fallback.test.mjs -> 10 checks ALL PASS; node --test test/protocol-doc.test.mjs test/readme-protocol.test.mjs -> ALL PASS; every claim traced to daemon/src/iroh_link.js:33-192, daemon/src/server.js:224-284, 482-538, 1356-1415 and daemon/src/config.js:50-123, audited in C:/GITHUB/.fleet/evidence/PocketDesk/M3.3.2-docs.md
 
 ---
 
