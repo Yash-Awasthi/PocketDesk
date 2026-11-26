@@ -1,10 +1,12 @@
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.cyclonedx.gradle.CyclonedxDirectTask
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.cyclonedx)
 }
 
 val keystoreProps = Properties().apply {
@@ -123,6 +125,13 @@ dependencies {
     androidTestImplementation(libs.compose.ui.test.junit4)
     androidTestImplementation(platform(libs.okhttp.bom))
     androidTestImplementation(libs.okhttp.tls)
+}
+
+// SBOM for a release APK: only the runtime graph that ships, not test or debug jars.
+tasks.withType<CyclonedxDirectTask>().configureEach {
+    includeConfigs.set(listOf("releaseRuntimeClasspath"))
+    jsonOutput.set(layout.buildDirectory.file("reports/pocketdesk-apk-sbom.json"))
+    includeBomSerialNumber.set(false)
 }
 
 apply(from = rootDir.resolve("gradle/build-timings.gradle.kts"))

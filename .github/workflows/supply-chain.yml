@@ -62,3 +62,37 @@ jobs:
         run: chmod +x gradlew && ./gradlew --no-daemon help
       - name: The metadata is committed
         run: test -s app/gradle/verification-metadata.xml
+
+  sbom:
+    name: SBOM (daemon and APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: daemon/package-lock.json
+      # The lock file is the input, so the BOM lists exactly what a user installs.
+      - name: Daemon SBOM from the lock file
+        working-directory: daemon
+        run: >
+          npx --yes @cyclonedx/cyclonedx-npm@7.0.1 --package-lock-only --omit dev
+          --output-reproducible --output-format json --spec-version 1.5
+          --output-file sbom/daemon.cdx.json
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+      - uses: gradle/actions/setup-gradle@v6
+      # The release runtime graph only: what the APK ships, not test or debug jars.
+      - name: APK SBOM from the release runtime graph
+        working-directory: app
+        run: chmod +x gradlew && ./gradlew --no-daemon :app:cyclonedxDirectBom
+      - uses: actions/upload-artifact@v7
+        with:
+          name: sbom
+          path: |
+            daemon/sbom/daemon.cdx.json
+            app/app/build/reports/pocketdesk-apk-sbom.json
+          if-no-files-found: error

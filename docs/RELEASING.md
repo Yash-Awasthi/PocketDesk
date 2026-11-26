@@ -26,6 +26,22 @@ as `versionName`, and the native workspace takes its version from
 6. Commit, tag `vX.Y.Z`, and build every artifact (daemon, APK, native helpers)
    from that tag. A tag must never point at a tree whose `VERSION` differs.
 
+## SBOM
+
+Every push builds a CycloneDX BOM for each artefact and uploads both as the `sbom`
+workflow artefact:
+
+- `daemon/sbom/daemon.cdx.json` comes from `daemon/package-lock.json` with
+  `--omit dev`, so it lists exactly what a user installs. The committed copy is
+  checked against the lock file by `daemon/test/supply-chain.unit.test.mjs`;
+  regenerate it with the command in that workflow after a dependency bump.
+- `app/app/build/reports/pocketdesk-apk-sbom.json` comes from the Gradle
+  `releaseRuntimeClasspath`, so it lists the libraries the APK actually ships,
+  not test or debug jars.
+
+A release attaches those two files next to the binaries and the checksums it
+publishes.
+
 ## Source offer (GPL-3.0-or-later)
 
 PocketDesk is distributed under the GNU GPL, version 3 or later, so every binary

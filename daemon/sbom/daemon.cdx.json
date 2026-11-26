@@ -1,0 +1,1001 @@
+{
+  "$schema": "http://cyclonedx.org/schema/bom-1.5.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "version": 1,
+  "metadata": {
+    "tools": {
+      "components": [
+        {
+          "type": "application",
+          "name": "npm",
+          "version": "11.19.0"
+        },
+        {
+          "type": "library",
+          "name": "cyclonedx-library",
+          "group": "@cyclonedx",
+          "version": "10.5.1",
+          "author": "Jan Kowalleck",
+          "description": "Core functionality of CycloneDX for JavaScript (Node.js or WebBrowser).",
+          "licenses": [
+            {
+              "license": {
+                "id": "Apache-2.0"
+              }
+            }
+          ],
+          "externalReferences": [
+            {
+              "url": "https://github.com/CycloneDX/cyclonedx-javascript-library/issues",
+              "type": "issue-tracker",
+              "comment": "as detected from PackageJson property \"bugs.url\""
+            },
+            {
+              "url": "git+https://github.com/CycloneDX/cyclonedx-javascript-library.git",
+              "type": "vcs",
+              "comment": "as detected from PackageJson property \"repository.url\""
+            },
+            {
+              "url": "https://github.com/CycloneDX/cyclonedx-javascript-library#readme",
+              "type": "website",
+              "comment": "as detected from PackageJson property \"homepage\""
+            }
+          ],
+          "properties": [
+            {
+              "name": "cdx:npm:package:constraint:engine:node",
+              "value": ">=20.18.0"
+            }
+          ]
+        },
+        {
+          "type": "application",
+          "name": "cyclonedx-npm",
+          "group": "@cyclonedx",
+          "version": "7.0.1",
+          "author": "Jan Kowalleck",
+          "description": "Create CycloneDX Software Bill of Materials (SBOM) from NPM projects.",
+          "licenses": [
+            {
+              "license": {
+                "id": "Apache-2.0"
+              }
+            }
+          ],
+          "externalReferences": [
+            {
+              "url": "https://github.com/CycloneDX/cyclonedx-node-npm/issues",
+              "type": "issue-tracker",
+              "comment": "as detected from PackageJson property \"bugs.url\""
+            },
+            {
+              "url": "git+https://github.com/CycloneDX/cyclonedx-node-npm.git",
+              "type": "vcs",
+              "comment": "as detected from PackageJson property \"repository.url\""
+            },
+            {
+              "url": "https://github.com/CycloneDX/cyclonedx-node-npm#readme",
+              "type": "website",
+              "comment": "as detected from PackageJson property \"homepage\""
+            }
+          ],
+          "properties": [
+            {
+              "name": "cdx:npm:package:constraint:engine:node",
+              "value": ">=20.18.0"
+            },
+            {
+              "name": "cdx:npm:package:constraint:engine:npm",
+              "value": ">=9"
+            }
+          ]
+        }
+      ]
+    },
+    "component": {
+      "type": "application",
+      "name": "pocketdesk-daemon",
+      "version": "0.1.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0",
+      "purl": "pkg:npm/pocketdesk-daemon@0.1.0",
+      "properties": [
+        {
+          "name": "cdx:npm:package:constraint:engine:node",
+          "value": ">=26"
+        },
+        {
+          "name": "cdx:npm:package:path",
+          "value": ""
+        },
+        {
+          "name": "cdx:npm:package:private",
+          "value": "true"
+        }
+      ]
+    },
+    "properties": [
+      {
+        "name": "cdx:reproducible",
+        "value": "true"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "iroh-android-arm-eabi",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm-eabi@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh-android-arm-eabi@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh-android-arm-eabi/-/iroh-android-arm-eabi-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "4fc1e9e06d5ec21ffb01423c0c11e2e7de9196bf73659ccf0370a9379f17492401c541298aac6d66862611adf0e90815c35a39210ac48005312cdee8801b678a"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh-android-arm-eabi"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iroh-android-arm64",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm64@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh-android-arm64@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh-android-arm64/-/iroh-android-arm64-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "7ada15cebb283c08a3f97843f8110221224a6141ba796f974b8dc8e4fe120fe9ea00827a5e7313cbf06bc1acae8fc111a116852c294bf1b6fefafe7cf374dcac"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh-android-arm64"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iroh-darwin-arm64",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-darwin-arm64@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh-darwin-arm64@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh-darwin-arm64/-/iroh-darwin-arm64-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "f75a3198fad88829d4d003e9fcacb49a034ec5a22e9100c552fc6d877d930eadfcbc9b349435fda6902c5ab90203ee00fe426702dd6173b62120a708183df138"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh-darwin-arm64"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iroh-linux-arm-gnueabihf",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-gnueabihf@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh-linux-arm-gnueabihf@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh-linux-arm-gnueabihf/-/iroh-linux-arm-gnueabihf-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "3d38b9632c6390b96ecd579ce50d0d26a4546987154fbeac67449a335d071469709532278983bb0d85064cbb3e5dc072501704ecf879c64cafa0b981d66385e0"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh-linux-arm-gnueabihf"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iroh-linux-arm-musleabihf",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-musleabihf@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh-linux-arm-musleabihf@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh-linux-arm-musleabihf/-/iroh-linux-arm-musleabihf-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "23038fbd6384c97e993078dcb43699c96555da42525f1e7b0d1376979420fdc1108d8e7358ee08305be3c34ef920aad093e56953a46b10423efb6c3619c8b574"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh-linux-arm-musleabihf"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iroh-linux-arm64-gnu",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-gnu@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh-linux-arm64-gnu@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh-linux-arm64-gnu/-/iroh-linux-arm64-gnu-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "2c47a714430c58b9e5c85cbcfbe718abeb3bfe789b160173b359060e4ed6bc50f2c53dd4db3d16d3e86310dcc3892d620ad1fcfb37ac743745c6e42dc6324762"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh-linux-arm64-gnu"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iroh-linux-arm64-musl",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-musl@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh-linux-arm64-musl@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh-linux-arm64-musl/-/iroh-linux-arm64-musl-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "620096a73f3454e4c946d014b1328580b62d77bb5f5b0ad1083d2e937ff11b8cfe023898e5ce3db68783153249ff7485e50f2a9a35868e971493a075139e43e3"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh-linux-arm64-musl"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iroh-linux-x64-gnu",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-gnu@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh-linux-x64-gnu@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh-linux-x64-gnu/-/iroh-linux-x64-gnu-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "4a46547bf76abfb275918dc07f40aed3b95d7ddb2d1033b3e85df220ac0cc3f12969b85a1377ef7436e20d0a223316f080888932ca4284744c65e0bcf1377741"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh-linux-x64-gnu"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iroh-linux-x64-musl",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-musl@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh-linux-x64-musl@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh-linux-x64-musl/-/iroh-linux-x64-musl-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "5276474ad59d15983295fb665f620717e54a92b91b1212be6a690e7fb03d67724faea91b1797a6dd45b7bb20cadea7e171cf488dcde79d82b1ca6f8190e2cf8d"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh-linux-x64-musl"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iroh-win32-arm64-msvc",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-win32-arm64-msvc@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh-win32-arm64-msvc@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh-win32-arm64-msvc/-/iroh-win32-arm64-msvc-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "dacae7f4eaae45f7cb0f56d08820d12ebdd3d72c6673dc5cde4e282e010c594fa566768c38d452dabe3a7135cdd5bfdb1ac49cf364e31823bfbab6ae5d98d071"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh-win32-arm64-msvc"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iroh-win32-x64-msvc",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh-win32-x64-msvc@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh-win32-x64-msvc@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh-win32-x64-msvc/-/iroh-win32-x64-msvc-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "de5b4269da1a673ad133d3a63dc7f03e9ab017f0c15e5ce1c2c3885c84eda451057d121282f6eaca198c09a8ae9a9c97c457864c27e9c2f509e348beb04d2c55"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh-win32-x64-msvc"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "iroh",
+      "group": "@number0",
+      "version": "1.2.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|@number0/iroh@1.2.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "expression": "MIT OR Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/%40number0/iroh@1.2.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/@number0/iroh/-/iroh-1.2.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "a59a159cbfbc9cae03406de8c05e5443f2dc22383b9b651ed6878450484bb0db7d447b4417188048d48fa2939db117e3462989fdeeb38d0d24de2604e8dd6165"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/@number0/iroh"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "asn1",
+      "version": "0.2.6",
+      "bom-ref": "pocketdesk-daemon@0.1.0|asn1@0.2.6",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/asn1@0.2.6",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/asn1/-/asn1-0.2.6.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "8b1fc5c4f9f43038dec89ee2ff2a07185b7f117e8bc8d6f148484f3d73833cbf8a07454f93ce9461f2f494c772f8a0a7bfe7e6bc8cf24b068ae423b0a956d64d"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/asn1"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "bcrypt-pbkdf",
+      "version": "1.0.2",
+      "bom-ref": "pocketdesk-daemon@0.1.0|bcrypt-pbkdf@1.0.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "purl": "pkg:npm/bcrypt-pbkdf@1.0.2",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/bcrypt-pbkdf/-/bcrypt-pbkdf-1.0.2.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "a9e1485ed3f8312a22e8d2ea3b5d967ea011596b822a2d919fff6124b126b41e724cdafd0ea1569094427f6a92856ccf7803119ce802aead2c83f28bbf9112f7"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/bcrypt-pbkdf"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "buildcheck",
+      "version": "0.0.7",
+      "bom-ref": "pocketdesk-daemon@0.1.0|buildcheck@0.0.7",
+      "scope": "optional",
+      "purl": "pkg:npm/buildcheck@0.0.7",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/buildcheck/-/buildcheck-0.0.7.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "9476e5cf86a16a6c694e69ec93e30d4d15ac8d82aff7ae4cc0ead2272783e7cf2b47725cbbbb3013ed3037917e3db2f972382effd39b9217f310fba87c43302c"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/buildcheck"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "cpu-features",
+      "version": "0.0.10",
+      "bom-ref": "pocketdesk-daemon@0.1.0|cpu-features@0.0.10",
+      "scope": "optional",
+      "purl": "pkg:npm/cpu-features@0.0.10",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/cpu-features/-/cpu-features-0.0.10.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "f48918aad5f76073c2ce8560d4fcbea3dd39edade2d1fa7b4b9df4516a2409268555373b0b05cf4623a3463050435f1908d69fc7bf187e71be1c02f1b5598e18"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/cpu-features"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "nan",
+      "version": "2.29.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|nan@2.29.0",
+      "scope": "optional",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/nan@2.29.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/nan/-/nan-2.29.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "1a51a4dc722f8ad6efb3e2d3de0e9750fd64a62aca36f98317017f6e6a3a5cd5926ff79812cfcee1b7e0204217099fa520e4d2e713700ef486330e8525d021b4"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/nan"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "node-addon-api",
+      "version": "7.1.1",
+      "bom-ref": "pocketdesk-daemon@0.1.0|node-addon-api@7.1.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/node-addon-api@7.1.1",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/node-addon-api/-/node-addon-api-7.1.1.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "e66ddbb32ae3156135c5fee7cfb61774de2e76756d5caebf61f827e6a9da84be9b0a47f6c8ab789379ee4ca02d4f8af7206f09351da772c20c759b80cc98c741"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/node-addon-api"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "node-pty",
+      "version": "1.1.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|node-pty@1.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/node-pty@1.1.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/node-pty/-/node-pty-1.1.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "db426ab6eb58e893d74d49cbd228f5b9a77b41ed5b693e3a972a25876b1210d0dde2c4f3299e279801647800110cac2694b8cfc7a5ca465c11531c233b2fa552"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/node-pty"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "safer-buffer",
+      "version": "2.1.2",
+      "bom-ref": "pocketdesk-daemon@0.1.0|safer-buffer@2.1.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/safer-buffer@2.1.2",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/safer-buffer/-/safer-buffer-2.1.2.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "619a372bcd920fb462ca2d04d4440fa232f3ee4a5ea6749023d2323db1c78355d75debdbe5d248eeda72376003c467106c71bbbdcc911e4d1c6f0a9c42b894b6"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/safer-buffer"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ssh2",
+      "version": "1.17.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|ssh2@1.17.0",
+      "purl": "pkg:npm/ssh2@1.17.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/ssh2/-/ssh2-1.17.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "c0f95d0a4ddab226c08d0fe4ce259042dd568773e00c5a42d17a70725cca71d4f5bea97a29e6317f92c8b789e516451e47c5aea6160c2aa500e7a5f8ae36df81"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/ssh2"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "tweetnacl",
+      "version": "0.14.5",
+      "bom-ref": "pocketdesk-daemon@0.1.0|tweetnacl@0.14.5",
+      "licenses": [
+        {
+          "license": {
+            "id": "Unlicense"
+          }
+        }
+      ],
+      "purl": "pkg:npm/tweetnacl@0.14.5",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/tweetnacl/-/tweetnacl-0.14.5.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "2975c515d01b15763881e148c28c8d2be7f96756fbb307d70017cbec75c29a821630a5377664b6ebaef603811e42d0f32cacbb49799f06ee7526896f10ac2d18"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/tweetnacl"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "ws",
+      "version": "8.22.0",
+      "bom-ref": "pocketdesk-daemon@0.1.0|ws@8.22.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/ws@8.22.0",
+      "externalReferences": [
+        {
+          "url": "https://registry.npmjs.org/ws/-/ws-8.22.0.tgz",
+          "type": "distribution",
+          "hashes": [
+            {
+              "alg": "SHA-512",
+              "content": "61d82073df3bf913b40275ad67fed6abd16d36f72b2f56ff44ed2e77d9968d43e00ebb00030412179d6c9b6866d57a1f6d4ff88e4a4612c2c5b1967153ed433a"
+            }
+          ],
+          "comment": "as detected from npm-ls property \"resolved\" and property \"integrity\""
+        }
+      ],
+      "properties": [
+        {
+          "name": "cdx:npm:package:path",
+          "value": "node_modules/ws"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pocketdesk-daemon@0.1.0",
+      "dependsOn": [
+        "pocketdesk-daemon@0.1.0|@number0/iroh@1.2.0",
+        "pocketdesk-daemon@0.1.0|node-pty@1.1.0",
+        "pocketdesk-daemon@0.1.0|ssh2@1.17.0",
+        "pocketdesk-daemon@0.1.0|ws@8.22.0"
+      ]
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm-eabi@1.2.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm64@1.2.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-darwin-arm64@1.2.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-gnueabihf@1.2.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-musleabihf@1.2.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-gnu@1.2.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-musl@1.2.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-gnu@1.2.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-musl@1.2.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-win32-arm64-msvc@1.2.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh-win32-x64-msvc@1.2.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|@number0/iroh@1.2.0",
+      "dependsOn": [
+        "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm-eabi@1.2.0",
+        "pocketdesk-daemon@0.1.0|@number0/iroh-android-arm64@1.2.0",
+        "pocketdesk-daemon@0.1.0|@number0/iroh-darwin-arm64@1.2.0",
+        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-gnueabihf@1.2.0",
+        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm-musleabihf@1.2.0",
+        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-gnu@1.2.0",
+        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-arm64-musl@1.2.0",
+        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-gnu@1.2.0",
+        "pocketdesk-daemon@0.1.0|@number0/iroh-linux-x64-musl@1.2.0",
+        "pocketdesk-daemon@0.1.0|@number0/iroh-win32-arm64-msvc@1.2.0",
+        "pocketdesk-daemon@0.1.0|@number0/iroh-win32-x64-msvc@1.2.0"
+      ]
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|asn1@0.2.6",
+      "dependsOn": [
+        "pocketdesk-daemon@0.1.0|safer-buffer@2.1.2"
+      ]
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|bcrypt-pbkdf@1.0.2",
+      "dependsOn": [
+        "pocketdesk-daemon@0.1.0|tweetnacl@0.14.5"
+      ]
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|buildcheck@0.0.7"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|cpu-features@0.0.10",
+      "dependsOn": [
+        "pocketdesk-daemon@0.1.0|buildcheck@0.0.7",
+        "pocketdesk-daemon@0.1.0|nan@2.29.0"
+      ]
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|nan@2.29.0"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|node-addon-api@7.1.1"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|node-pty@1.1.0",
+      "dependsOn": [
+        "pocketdesk-daemon@0.1.0|node-addon-api@7.1.1"
+      ]
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|safer-buffer@2.1.2"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|ssh2@1.17.0",
+      "dependsOn": [
+        "pocketdesk-daemon@0.1.0|asn1@0.2.6",
+        "pocketdesk-daemon@0.1.0|bcrypt-pbkdf@1.0.2",
+        "pocketdesk-daemon@0.1.0|cpu-features@0.0.10",
+        "pocketdesk-daemon@0.1.0|nan@2.29.0"
+      ]
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|tweetnacl@0.14.5"
+    },
+    {
+      "ref": "pocketdesk-daemon@0.1.0|ws@8.22.0"
+    }
+  ]
+}
