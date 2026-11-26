@@ -335,7 +335,8 @@ transport docs describe a design that has moved.
 
 ### M4.2 Daemon and agents
 
-- [ ] Plugin SDK: documented lifecycle, a typed context, a test harness, and one example plugin that is not metrics. `[W]`
+- [x] Plugin SDK: documented lifecycle, a typed context, a test harness, and one example plugin that is not metrics. `[W]`
+  verified-here: `cd daemon && node test/plugins.test.mjs` -> 13 passing, 0 failing
 - [ ] Agent manifest registry: add a manifest by dropping JSON, with a validation command and a compatibility probe (`--version` parse) per agent. `[W]`
 - [ ] Stream adapter versioning: a per-agent fixture set captured from the installed CLI version; a mismatch warns instead of silently mis-parsing. `[W]`
 - [ ] Session recording: opt-in, local-only, replayable in the phone (as text, not video), with a retention cap. `[W]`
