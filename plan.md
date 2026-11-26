@@ -339,6 +339,7 @@ transport docs describe a design that has moved.
   parked: needs an unloaded mid-range machine; this host's own process spawn floor is 232 ms median (73 ms best), which leaves too little headroom to conclude anything about a mid-range desktop. The budget is untested here, not disproven.
   ci-gate: the CI cold-start step runs with continue-on-error so the numbers print and the job stays green; removing that flag is the last step of this row.
   - [ ] Baseline Profile + Macrobenchmark for the Android app's first frame and chat scroll. `[F]`
+  limits: the profile file and the two numbers need an attached arm64 device, so this change ships the module and the flow only: app/benchmark (StartupBenchmark, ScrollBenchmark, BaselineProfileGenerator), app/src/main/baseline-prof.txt as the generator's output path, docs/BASELINE-PROFILE.md.
 - **m3.3.2 Docs**
   - [x] Regenerate `docs/CONNECTIVITY-NOTES.md` and `docs/RELAY.md` from the current transport code; delete claims that no longer hold. `[F]`
   verified-here: cd daemon && node --test test/relay-fallback.test.mjs -> 10 checks ALL PASS; node --test test/protocol-doc.test.mjs test/readme-protocol.test.mjs -> ALL PASS; every claim traced to daemon/src/iroh_link.js:33-192, daemon/src/server.js:224-284, 482-538, 1356-1415 and daemon/src/config.js:50-123, audited in C:/GITHUB/.fleet/evidence/PocketDesk/M3.3.2-docs.md

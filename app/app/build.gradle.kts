@@ -7,6 +7,8 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.cyclonedx)
+    // Baseline profile: `:benchmark:generateBaselineProfile` records the hot paths on a device.
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 val keystoreProps = Properties().apply {
@@ -94,6 +96,9 @@ java {
 }
 
 dependencies {
+    // The device-only generator test that fills app/src/main/baseline-prof.txt.
+    baselineProfile(project(":benchmark"))
+
     implementation(platform(libs.compose.bom))
     implementation(libs.activity.compose)
     implementation(libs.compose.material3)
@@ -183,6 +188,14 @@ tasks.withType<CyclonedxDirectTask>().configureEach {
     includeConfigs.set(listOf("releaseRuntimeClasspath"))
     jsonOutput.set(layout.buildDirectory.file("reports/pocketdesk-apk-sbom.json"))
     includeBomSerialNumber.set(false)
+}
+
+// A source profile, not a build output: a regenerated file is a reviewable diff, and AGP applies
+// src/main/baseline-prof.txt to every variant, the benchmark one included. The plugin writes into
+// src/<variant>/, so the output dir climbs one level back to the main source set.
+baselineProfile {
+    saveInSrc = true
+    baselineProfileOutputDir = "../main"
 }
 
 apply(from = rootDir.resolve("gradle/build-timings.gradle.kts"))

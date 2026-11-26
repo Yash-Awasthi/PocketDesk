@@ -19,3 +19,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "PocketDesk"
 include(":app")
+include(":benchmark")
