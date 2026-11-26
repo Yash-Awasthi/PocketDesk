@@ -31,7 +31,12 @@ check("minSdk parsed from build.gradle.kts", Number.isInteger(minSdk) && minSdk 
 check("targetSdk parsed from build.gradle.kts", Number.isInteger(targetSdk) && targetSdk > 0);
 
 const apiMatch = ci.match(/api-level:\s*\[([^\]]+)\]/);
-const apiLevels = apiMatch ? apiMatch[1].split(",").map((s) => Number(s.trim())).filter(Number.isInteger) : [];
+const apiLevels = apiMatch
+  ? apiMatch[1]
+      .split(",")
+      .map((s) => Number(s.trim()))
+      .filter(Number.isInteger)
+  : [];
 check("ci.yml has an api-level matrix", apiLevels.length > 0);
 check(`emulator matrix contains minSdk ${minSdk}`, apiLevels.includes(minSdk));
 check(`emulator matrix contains targetSdk ${targetSdk}`, apiLevels.includes(targetSdk));
@@ -64,15 +69,26 @@ const windowsRow = findRow(/windows/i);
 const macRow = findRow(/macos/i);
 const linuxRow = findRow(/linux/i);
 const androidRow = findRow(/android/i);
-for (const [name, row] of [["Windows", windowsRow], ["macOS", macRow], ["Linux", linuxRow], ["Android", androidRow]]) {
+for (const [name, row] of [
+  ["Windows", windowsRow],
+  ["macOS", macRow],
+  ["Linux", linuxRow],
+  ["Android", androidRow],
+]) {
   check(`found ${name} platform row`, row.length > 0);
 }
 
 // 5. Android floor is API 30 and Android 8-10 are explicitly unsupported.
 const androidText = rowCells(androidRow).join(" ");
 check("Android row states API 30", /API\s*30/i.test(androidText));
-check("doc states Android 8-10 are not supported", /Android\s*8\s*-\s*10\b[^.]*\b(?:not|unsupported)/i.test(doc));
-check("doc does not claim Android 8+ is supported", !/Android\s*8\s*\+\s*(?:is\s+|are\s+)?supported/i.test(doc));
+check(
+  "doc states Android 8-10 are not supported",
+  /Android\s*8\s*-\s*10\b[^.]*\b(?:not|unsupported)/i.test(doc),
+);
+check(
+  "doc does not claim Android 8+ is supported",
+  !/Android\s*8\s*\+\s*(?:is\s+|are\s+)?supported/i.test(doc),
+);
 
 // 6. The native helpers are Windows only.
 const windowsText = rowCells(windowsRow).join(" ");

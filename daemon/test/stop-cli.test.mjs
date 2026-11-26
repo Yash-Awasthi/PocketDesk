@@ -8,25 +8,40 @@ import net from "node:net";
 import { spawn } from "node:child_process";
 import { REPO, check, finish, makeTmp, startDaemon, connect } from "./helpers.mjs";
 
-const PORT = 8836, CLI = 8837;
+const PORT = 8836,
+  CLI = 8837;
 const manifests = makeTmp("rh-stop-");
 const home = path.join(os.tmpdir(), "rh-home-stop-" + process.pid);
 fs.mkdirSync(path.join(home, "helpers"), { recursive: true });
 
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-const listening = (p) => new Promise((resolve) => {
-  const s = net.connect({ host: "127.0.0.1", port: p });
-  const done = (v) => { s.destroy(); resolve(v); };
-  s.setTimeout(500);
-  s.once("connect", () => done(true));
-  s.once("timeout", () => done(false));
-  s.once("error", () => done(false));
-});
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+const listening = (p) =>
+  new Promise((resolve) => {
+    const s = net.connect({ host: "127.0.0.1", port: p });
+    const done = (v) => {
+      s.destroy();
+      resolve(v);
+    };
+    s.setTimeout(500);
+    s.once("connect", () => done(true));
+    s.once("timeout", () => done(false));
+    s.once("error", () => done(false));
+  });
 
 // A process shaped like a capture helper: started from the data folder, not a child of the daemon.
 const helperPath = path.join(home, "helpers", "capture.ps1");
 fs.writeFileSync(helperPath, "");
-const helper = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)", helperPath], { detached: true, stdio: "ignore" });
+const helper = spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)", helperPath], {
+  detached: true,
+  stdio: "ignore",
+});
 
 const d = startDaemon(PORT, CLI, { home, manifests, dataDir: ".pocketdesk-test-" + PORT });
 try {
@@ -39,10 +54,16 @@ try {
   const dir = path.join(home, "term");
   fs.mkdirSync(dir, { recursive: true });
   const script = path.join(dir, "child.js");
-  fs.writeFileSync(script, "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1e6)'],{stdio:'ignore'});console.log('CHILD '+c.pid);setInterval(()=>{},1e6);");
+  fs.writeFileSync(
+    script,
+    "const c=require('child_process').spawn(process.execPath,['-e','setInterval(()=>{},1e6)'],{stdio:'ignore'});console.log('CHILD '+c.pid);setInterval(()=>{},1e6);",
+  );
   c.send({ type: "create", harness: "node", cwd: dir, args: [script] });
   const created = await c.next((m) => m.type === "created" || m.type === "error");
-  check(`a terminal session exists${created.message ? ": " + created.message : ""}`, created.type === "created");
+  check(
+    `a terminal session exists${created.message ? ": " + created.message : ""}`,
+    created.type === "created",
+  );
   let child = 0;
   c.send({ type: "attach", id: created.id });
   await c.next((m) => {
@@ -56,7 +77,13 @@ try {
   const daemonExit = new Promise((r) => d.on("exit", () => r(true)));
   const stopped = spawn(process.execPath, ["src/cli.js", "stop"], {
     cwd: path.join(REPO, "daemon"),
-    env: { ...process.env, RH_PORT: String(PORT), RH_CLI_PORT: String(CLI), RH_TOKEN: "testtoken", RH_HOME: home },
+    env: {
+      ...process.env,
+      RH_PORT: String(PORT),
+      RH_CLI_PORT: String(CLI),
+      RH_TOKEN: "testtoken",
+      RH_HOME: home,
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   let out = "";
@@ -79,9 +106,17 @@ try {
 } catch (e) {
   check(`no error (${e.message})`, false);
 } finally {
-  try { d.kill("SIGKILL"); } catch {}
-  try { process.kill(helper.pid); } catch {}
-  try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
-  try { fs.rmSync(manifests, { recursive: true, force: true }); } catch {}
+  try {
+    d.kill("SIGKILL");
+  } catch {}
+  try {
+    process.kill(helper.pid);
+  } catch {}
+  try {
+    fs.rmSync(home, { recursive: true, force: true });
+  } catch {}
+  try {
+    fs.rmSync(manifests, { recursive: true, force: true });
+  } catch {}
 }
 finish();

@@ -9,10 +9,21 @@
 import fs from "node:fs";
 import net from "node:net";
 import path from "node:path";
-import { REPO, check, finish, makeTmp, startDaemon, teardown, waitForHealth, waitForUrl } from "./helpers.mjs";
+import {
+  REPO,
+  check,
+  finish,
+  makeTmp,
+  startDaemon,
+  teardown,
+  waitForHealth,
+  waitForUrl,
+} from "./helpers.mjs";
 
 const dir = path.join(REPO, "daemon", "test");
-const files = fs.readdirSync(dir).filter((f) => f.endsWith(".test.mjs") && f !== "startup-readiness.test.mjs");
+const files = fs
+  .readdirSync(dir)
+  .filter((f) => f.endsWith(".test.mjs") && f !== "startup-readiness.test.mjs");
 
 const SPAWNS = /spawn\(process\.execPath, \["src\/index\.js"\]|startDaemon\(/;
 const CONNECTS = ["new WebSocket(", "openAndHello(", "connectRaw(", "connect("];
@@ -26,10 +37,12 @@ check(`there are daemon-spawning test files to check (${spawners.length})`, spaw
 const offenders = [];
 for (const f of spawners) {
   const text = fs.readFileSync(path.join(dir, f), "utf8");
-  const firstConnect = Math.min(...CONNECTS.map((s) => {
-    const i = text.indexOf(s);
-    return i < 0 ? Infinity : i;
-  }));
+  const firstConnect = Math.min(
+    ...CONNECTS.map((s) => {
+      const i = text.indexOf(s);
+      return i < 0 ? Infinity : i;
+    }),
+  );
   const head = Number.isFinite(firstConnect) ? text.slice(0, firstConnect) : text;
   const long = [...head.matchAll(SLEEP)].map((m) => Number(m[2])).filter((n) => n >= 1000);
   if (long.length) offenders.push(`${f} (${long.join(", ")} ms)`);
@@ -99,7 +112,11 @@ const daemon = startDaemon(port, cliPort, { token: "ready-token", manifests: tmp
 try {
   await daemon.ready;
   const health = await waitForHealth(port, 30_000);
-  check("waitForHealth returns the daemon's own health payload", health.status === "healthy" && health.service === "pocketdesk", JSON.stringify(health));
+  check(
+    "waitForHealth returns the daemon's own health payload",
+    health.status === "healthy" && health.service === "pocketdesk",
+    JSON.stringify(health),
+  );
 
   const dead = await freePort();
   const started = Date.now();
@@ -109,8 +126,16 @@ try {
   } catch (e) {
     refused = e;
   }
-  check(`waitForHealth gives up on a dead port (${Date.now() - started} ms)`, refused !== null && Date.now() - started >= 1_400, refused?.message);
-  check("and it says which port never answered", String(refused?.message || "").includes(String(dead)), refused?.message);
+  check(
+    `waitForHealth gives up on a dead port (${Date.now() - started} ms)`,
+    refused !== null && Date.now() - started >= 1_400,
+    refused?.message,
+  );
+  check(
+    "and it says which port never answered",
+    String(refused?.message || "").includes(String(dead)),
+    refused?.message,
+  );
 
   const page = await waitForUrl(`http://127.0.0.1:${port}/health`, (r) => r.ok, 5_000);
   check("waitForUrl works on its own too", page.status === 200);
@@ -126,8 +151,14 @@ try {
   } catch (e) {
     portError = e;
   }
-  check(`a squatted port is reported as such (${portError?.message ?? "no error"})`, /already in use/.test(String(portError?.message)), portError?.message);
-  try { dup.kill("SIGKILL"); } catch {}
+  check(
+    `a squatted port is reported as such (${portError?.message ?? "no error"})`,
+    /already in use/.test(String(portError?.message)),
+    portError?.message,
+  );
+  try {
+    dup.kill("SIGKILL");
+  } catch {}
   await new Promise((r) => blocker.close(r));
 } finally {
   await teardown(tmp);

@@ -34,21 +34,45 @@ fs.writeFileSync(path.join(srcDir, "b.txt"), "beta\n");
 const zips = [];
 for (const n of [1, 2]) {
   const z = path.join(tmp, `pack${n}.zip`);
-  execFileSync("powershell", ["-NoProfile", "-Command", `Compress-Archive -Path '${path.join(srcDir, "*")}' -DestinationPath '${z}' -Force`], { stdio: "ignore" });
+  execFileSync(
+    "powershell",
+    [
+      "-NoProfile",
+      "-Command",
+      `Compress-Archive -Path '${path.join(srcDir, "*")}' -DestinationPath '${z}' -Force`,
+    ],
+    { stdio: "ignore" },
+  );
   zips.push(z);
 }
 
 const h1 = run([zips[0]]);
 const h2 = run([zips[1]]);
 check("a real zip fingerprints cleanly", h1.code === 0 && /^[0-9a-f]{64}\s+\d+ entries/.test(h1.out), h1.out);
-check("two zips with the same content fingerprint the same", h1.out.split(/\s+/)[0] === h2.out.split(/\s+/)[0], `${h1.out} | ${h2.out}`);
+check(
+  "two zips with the same content fingerprint the same",
+  h1.out.split(/\s+/)[0] === h2.out.split(/\s+/)[0],
+  `${h1.out} | ${h2.out}`,
+);
 check("the entry count is reported, not implied", /2 entries/.test(h1.out), h1.out);
 
 // Changing one byte of content must change the fingerprint.
 fs.writeFileSync(path.join(srcDir, "a.txt"), "alpha!\n");
 const changed = path.join(tmp, "pack3.zip");
-execFileSync("powershell", ["-NoProfile", "-Command", `Compress-Archive -Path '${path.join(srcDir, "*")}' -DestinationPath '${changed}' -Force`], { stdio: "ignore" });
+execFileSync(
+  "powershell",
+  [
+    "-NoProfile",
+    "-Command",
+    `Compress-Archive -Path '${path.join(srcDir, "*")}' -DestinationPath '${changed}' -Force`,
+  ],
+  { stdio: "ignore" },
+);
 const h3 = run([changed]);
-check("a content change moves the fingerprint", h3.out.split(/\s+/)[0] !== h1.out.split(/\s+/)[0], `${h1.out} | ${h3.out}`);
+check(
+  "a content change moves the fingerprint",
+  h3.out.split(/\s+/)[0] !== h1.out.split(/\s+/)[0],
+  `${h1.out} | ${h3.out}`,
+);
 
 finish();

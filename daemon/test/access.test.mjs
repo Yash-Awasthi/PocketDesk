@@ -14,14 +14,18 @@ fs.rmSync(home, { recursive: true, force: true });
 
 const base = `http://127.0.0.1:${PORT}`;
 const status = () => fetch(`${base}/access?k=${TOKEN}`).then((r) => r.json());
-const post = (p, body) => fetch(`${base}${p}?k=${TOKEN}`, { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
+const post = (p, body) =>
+  fetch(`${base}${p}?k=${TOKEN}`, { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
 /** Resolve { welcome } on a completed handshake, or { code } on the close that refused it. */
-const attempt = (password, token = TOKEN) => new Promise((resolve) => {
-  const c = connect(PORT, token);
-  c.ws.on("open", () => c.send({ type: "hello", token, ...(password ? { password } : {}) }));
-  c.ws.on("close", (code) => resolve({ code }));
-  c.next((m) => m.type === "welcome", 8000).then(() => resolve({ welcome: true })).catch(() => {});
-});
+const attempt = (password, token = TOKEN) =>
+  new Promise((resolve) => {
+    const c = connect(PORT, token);
+    c.ws.on("open", () => c.send({ type: "hello", token, ...(password ? { password } : {}) }));
+    c.ws.on("close", (code) => resolve({ code }));
+    c.next((m) => m.type === "welcome", 8000)
+      .then(() => resolve({ welcome: true }))
+      .catch(() => {});
+  });
 
 const d = startDaemon(PORT, CLI_PORT, { token: TOKEN });
 await d.ready;
@@ -41,9 +45,15 @@ try {
   fs.rmSync(target, { force: true });
   paused.send({ type: "fwrite", path: target, data: "aGk=" });
   const refused = await paused.next((m) => m.type === "error" || m.type === "fwritten", 8000);
-  check("paused control refuses a file write", refused.type === "error" && /paused/.test(refused.message) && !fs.existsSync(target));
+  check(
+    "paused control refuses a file write",
+    refused.type === "error" && /paused/.test(refused.message) && !fs.existsSync(target),
+  );
   paused.send({ type: "fs" });
-  check("paused control still lists files", !(await paused.next((m) => m.type === "fs" || m.type === "error", 8000)).error);
+  check(
+    "paused control still lists files",
+    !(await paused.next((m) => m.type === "fs" || m.type === "error", 8000)).error,
+  );
   await paused.close();
   await post("/access/control", { allowed: true });
   check("control toggle restores", (await status()).controlAllowed === true);
@@ -53,7 +63,10 @@ try {
   check("right token, no password is refused", (await attempt()).code === 4012);
   check("right token, wrong password is refused", (await attempt("nope")).code === 4012);
   // Without the token, the close code must not reveal whether a guessed password was right.
-  check("wrong token, wrong password reads as bad token", (await attempt("nope", "wrongtoken1")).code === 4003);
+  check(
+    "wrong token, wrong password reads as bad token",
+    (await attempt("nope", "wrongtoken1")).code === 4003,
+  );
   check("right token and password connects", (await attempt("s3cret-pass")).welcome === true);
   await post("/access/password", { password: "" });
   check("password cleared", (await status()).hasPassword === false);
@@ -70,7 +83,9 @@ try {
   });
   check("a message before hello closes the socket", early === 4003);
 
-  const code = await fetch(`${base}/access`).then((r) => r.status).catch(() => 0);
+  const code = await fetch(`${base}/access`)
+    .then((r) => r.status)
+    .catch(() => 0);
   check("/access without the token is forbidden", code === 403);
 
   // A socket that is not watching the desktop cannot drive it: a stopped or never-started
@@ -86,24 +101,46 @@ try {
   // pairing token. The route list is read from server.js so a new /access route cannot ship unguarded.
   const src = fs.readFileSync(path.join(REPO, "daemon", "src", "server.js"), "utf8");
   const routes = [...new Set([...src.matchAll(/path0 === "(\/access[^"]*)"/g)].map((m) => m[1]))];
-  check("the /access route list comes from server.js", routes.length >= 13 && routes.includes("/access/totp/setup"));
-  const probe = (target, host) => new Promise((resolve, reject) => {
-    const req = http.request({ host: "127.0.0.1", port: PORT, path: target, method: "GET", headers: { host: host || `127.0.0.1:${PORT}` } }, (res) => {
-      res.resume(); res.on("end", () => resolve(res.statusCode));
+  check(
+    "the /access route list comes from server.js",
+    routes.length >= 13 && routes.includes("/access/totp/setup"),
+  );
+  const probe = (target, host) =>
+    new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port: PORT,
+          path: target,
+          method: "GET",
+          headers: { host: host || `127.0.0.1:${PORT}` },
+        },
+        (res) => {
+          res.resume();
+          res.on("end", () => resolve(res.statusCode));
+        },
+      );
+      req.on("error", reject);
+      req.end();
     });
-    req.on("error", reject); req.end();
-  });
   const unguarded = [];
   for (const r of routes) {
-    if (await probe(r) !== 403) unguarded.push("no key: " + r);
-    if (await probe(r + "?k=not-the-token") !== 403) unguarded.push("wrong key: " + r);
-    if (await probe(r + "?k=" + TOKEN, `evil.example:${PORT}`) !== 403) unguarded.push("non-loopback Host: " + r);
+    if ((await probe(r)) !== 403) unguarded.push("no key: " + r);
+    if ((await probe(r + "?k=not-the-token")) !== 403) unguarded.push("wrong key: " + r);
+    if ((await probe(r + "?k=" + TOKEN, `evil.example:${PORT}`)) !== 403)
+      unguarded.push("non-loopback Host: " + r);
   }
-  check("every /access route is 403 without the key, with a wrong key and under a non-loopback Host", unguarded.length === 0 && routes.length >= 13);
-  check("/access with the key and a loopback Host answers", await probe(`/access?k=${TOKEN}`) === 200);
-  check("/pair is 403 without the key", await probe("/pair") === 403);
-  check("/pair is 403 under a non-loopback Host even with the key", await probe(`/pair?k=${TOKEN}`, `evil.example:${PORT}`) === 403);
-  check("/pair redirects the PC own browser to the hub", await probe(`/pair?k=${TOKEN}`) === 302);
+  check(
+    "every /access route is 403 without the key, with a wrong key and under a non-loopback Host",
+    unguarded.length === 0 && routes.length >= 13,
+  );
+  check("/access with the key and a loopback Host answers", (await probe(`/access?k=${TOKEN}`)) === 200);
+  check("/pair is 403 without the key", (await probe("/pair")) === 403);
+  check(
+    "/pair is 403 under a non-loopback Host even with the key",
+    (await probe(`/pair?k=${TOKEN}`, `evil.example:${PORT}`)) === 403,
+  );
+  check("/pair redirects the PC own browser to the hub", (await probe(`/pair?k=${TOKEN}`)) === 302);
 } finally {
   await teardown(home);
 }

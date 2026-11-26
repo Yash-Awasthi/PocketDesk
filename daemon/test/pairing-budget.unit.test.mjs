@@ -32,7 +32,10 @@ test("the lock doubles from 1s and caps at 300s", () => {
     t = s.lockedUntil;
     budget.fail("ip", t);
   }
-  assert.deepEqual(delays, [1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 300000, 300000, 300000]);
+  assert.deepEqual(
+    delays,
+    [1000, 2000, 4000, 8000, 16000, 32000, 64000, 128000, 256000, 300000, 300000, 300000],
+  );
 });
 
 test("a correct token clears the count and the lock", () => {
@@ -77,8 +80,13 @@ test("the daemon closes wrong-token hellos and blocks the eleventh attempt", asy
 
   async function hello(token) {
     const c = connect(PORT, TOKEN);
-    await new Promise((res, rej) => { c.ws.on("open", res); c.ws.on("error", rej); });
-    const closed = new Promise((res) => c.ws.once("close", (code, reason) => res({ code, reason: String(reason) })));
+    await new Promise((res, rej) => {
+      c.ws.on("open", res);
+      c.ws.on("error", rej);
+    });
+    const closed = new Promise((res) =>
+      c.ws.once("close", (code, reason) => res({ code, reason: String(reason) })),
+    );
     c.send({ type: "hello", token });
     return closed;
   }

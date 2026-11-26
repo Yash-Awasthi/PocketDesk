@@ -12,17 +12,37 @@ const rows = matrix.split(/\r?\n/).filter((l) => l.startsWith("|"));
 // Message families that were removed from the daemon. None of these names exists in
 // daemon/src/handlers/, so a row cannot honestly claim one with a ✅.
 const DEAD_FAMILIES = [
-  "share_create", "share_join", "share_list", "share_revoke",
-  "wt_create", "wt_list", "wt_remove",
-  "record_asciicast", "record_start", "record_stop",
-  "lan_peers", "lan_send",
-  "vnc_start", "vnc_stop", "vnc_frame",
-  "notify_send", "notify_stats", "notify_bursts",
-  "mcp_start", "mcp_stop", "mcp_status",
-  "tunnel_create", "tunnel_close",
-  "relay_connect", "relay_disconnect", "relay_publish",
-  "render_digest", "digest_render", "digest_attach",
-  "quiet_set", "session_quiet",
+  "share_create",
+  "share_join",
+  "share_list",
+  "share_revoke",
+  "wt_create",
+  "wt_list",
+  "wt_remove",
+  "record_asciicast",
+  "record_start",
+  "record_stop",
+  "lan_peers",
+  "lan_send",
+  "vnc_start",
+  "vnc_stop",
+  "vnc_frame",
+  "notify_send",
+  "notify_stats",
+  "notify_bursts",
+  "mcp_start",
+  "mcp_stop",
+  "mcp_status",
+  "tunnel_create",
+  "tunnel_close",
+  "relay_connect",
+  "relay_disconnect",
+  "relay_publish",
+  "render_digest",
+  "digest_render",
+  "digest_attach",
+  "quiet_set",
+  "session_quiet",
 ];
 
 const lying = [];
@@ -40,10 +60,13 @@ check(
 
 // The names in DEAD_FAMILIES really are dead: if a handler comes back, this list is
 // wrong and the test should be relaxed rather than silently passing.
-const handlerText = fs.readdirSync(path.join(REPO, "daemon", "src", "handlers"))
+const handlerText = fs
+  .readdirSync(path.join(REPO, "daemon", "src", "handlers"))
   .map((f) => fs.readFileSync(path.join(REPO, "daemon", "src", "handlers", f), "utf8"))
   .join("\n");
-const resurrected = DEAD_FAMILIES.filter((f) => new RegExp(`^\\s{4}(?:async\\s+)?${f}\\s*\\(`, "m").test(handlerText));
+const resurrected = DEAD_FAMILIES.filter((f) =>
+  new RegExp(`^\\s{4}(?:async\\s+)?${f}\\s*\\(`, "m").test(handlerText),
+);
 check(
   resurrected.length === 0
     ? "the removed families still have no handler"
@@ -52,7 +75,10 @@ check(
 );
 
 // The old protocol summary is labelled historical, with the count it was checked against.
-check("the absorption-pass protocol section is labelled historical", /^## What one absorption pass claimed \(2026-09, historical\)$/m.test(matrix));
+check(
+  "the absorption-pass protocol section is labelled historical",
+  /^## What one absorption pass claimed \(2026-09, historical\)$/m.test(matrix),
+);
 check("the historical section carries the re-check note", /Re-checked 2026-11-24/.test(matrix));
 check("the historical section points at the live protocol", /README\.md#-protocol-v1/.test(matrix));
 

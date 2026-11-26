@@ -28,7 +28,16 @@ fs.writeFileSync(
 
 const daemon = spawn(process.execPath, ["src/index.js"], {
   cwd: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
-  env: { ...process.env, RH_PORT: String(PORT), RH_CLI_PORT: String(PORT + 1), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-test-" + PORT, RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT), RH_STOP_ON_STDIN_EOF: "1" },
+  env: {
+    ...process.env,
+    RH_PORT: String(PORT),
+    RH_CLI_PORT: String(PORT + 1),
+    RH_TOKEN: TOKEN,
+    RH_MANIFESTS: tmpMan,
+    POCKETDESK_DATA: ".pocketdesk-test-" + PORT,
+    RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT),
+    RH_STOP_ON_STDIN_EOF: "1",
+  },
   stdio: ["pipe", "pipe", "pipe"],
 });
 daemon.stderr.on("data", (d) => process.stderr.write("[daemon!] " + d));
@@ -58,19 +67,31 @@ function pump() {
     }
   });
 }
-function send(o) { ws.send(JSON.stringify(o)); }
+function send(o) {
+  ws.send(JSON.stringify(o));
+}
 
 const mb = (n) => Math.round(n / 1048576) + " MB";
 
 /** OS handles and worked set of the daemon process — a leak guard that can see past its own heap. */
 function procStats(pid) {
   if (process.platform === "win32") {
-    const [h, r] = execFileSync("powershell.exe", ["-NoProfile", "-Command",
-      `$p = Get-Process -Id ${pid}; "$($p.HandleCount) $($p.WorkingSet64)"`]).toString().trim().split(/\s+/).map(Number);
+    const [h, r] = execFileSync("powershell.exe", [
+      "-NoProfile",
+      "-Command",
+      `$p = Get-Process -Id ${pid}; "$($p.HandleCount) $($p.WorkingSet64)"`,
+    ])
+      .toString()
+      .trim()
+      .split(/\s+/)
+      .map(Number);
     return { handles: h, rss: r };
   }
   const st = fs.readFileSync(`/proc/${pid}/status`, "utf8");
-  return { handles: fs.readdirSync(`/proc/${pid}/fd`).length, rss: Number(/VmRSS:\s+(\d+)/.exec(st)[1]) * 1024 };
+  return {
+    handles: fs.readdirSync(`/proc/${pid}/fd`).length,
+    rss: Number(/VmRSS:\s+(\d+)/.exec(st)[1]) * 1024,
+  };
 }
 
 async function run() {
@@ -78,7 +99,10 @@ async function run() {
     // A cold cache needs seconds longer than a warm one; ask the server instead of guessing.
     await waitForHealth(PORT);
     ws = new WebSocket(`ws://localhost:${PORT}/ws`);
-    await new Promise((res, rej) => { ws.on("open", res); ws.on("error", rej); });
+    await new Promise((res, rej) => {
+      ws.on("open", res);
+      ws.on("error", rej);
+    });
     pump();
     send({ type: "hello", token: TOKEN });
     await next((m) => m.type === "welcome");
@@ -129,8 +153,14 @@ async function run() {
     // node-pty's Windows layer keeps one exit-callback thread handle per spawn until
     // process teardown (measured 3.55/cycle even with sockets, worker and GC forced).
     const HANDLE_FLOOR_PER_CYCLE = 6;
-    check(`90 further cycles keep the handle count at the platform floor (${warm.handles} -> ${after.handles}, <= ${HANDLE_FLOOR_PER_CYCLE}/cycle)`, after.handles - warm.handles <= 90 * HANDLE_FLOOR_PER_CYCLE);
-    check(`90 further cycles keep the working set flat (${mb(warm.rss)} -> ${mb(after.rss)})`, after.rss - warm.rss <= 200 * 1048576);
+    check(
+      `90 further cycles keep the handle count at the platform floor (${warm.handles} -> ${after.handles}, <= ${HANDLE_FLOOR_PER_CYCLE}/cycle)`,
+      after.handles - warm.handles <= 90 * HANDLE_FLOOR_PER_CYCLE,
+    );
+    check(
+      `90 further cycles keep the working set flat (${mb(warm.rss)} -> ${mb(after.rss)})`,
+      after.rss - warm.rss <= 200 * 1048576,
+    );
 
     // ── The phone path is a status read: with no adb installed it must answer from
     // its own state, in the documented shape, without spawning or retaining anything.
@@ -142,12 +172,16 @@ async function run() {
       send({ type: ADB_STATE });
       const st = await next((m) => m.type === ADB_STATE, 15000);
       tools = st.toolsReady;
-      if (typeof st.toolsReady === "boolean" && Array.isArray(st.devices) && Array.isArray(st.views)) answered++;
+      if (typeof st.toolsReady === "boolean" && Array.isArray(st.devices) && Array.isArray(st.views))
+        answered++;
     }
     const adbAfter = procStats(daemon.pid);
     const adbBound = tools ? 100 : 20; // a live adb means 40 execFile rounds, each with a pipe pair
     check("the phone-adb path answers 40 reads with the documented shape", answered === 40);
-    check(`the phone-adb path keeps no handles (${adbBase.handles} -> ${adbAfter.handles}, toolsReady=${tools})`, adbAfter.handles - adbBase.handles <= adbBound);
+    check(
+      `the phone-adb path keeps no handles (${adbBase.handles} -> ${adbAfter.handles}, toolsReady=${tools})`,
+      adbAfter.handles - adbBase.handles <= adbBound,
+    );
 
     // ── The desktop status path: 40 reads must be answered from state, not by
     // capturing the screen or starting a stream.
@@ -160,7 +194,10 @@ async function run() {
     }
     const deskAfter = procStats(daemon.pid);
     check("the desktop status path answers 40 reads with the documented shape", desk === 40);
-    check(`the desktop status path keeps no handles (${deskBase.handles} -> ${deskAfter.handles})`, deskAfter.handles - deskBase.handles <= 20);
+    check(
+      `the desktop status path keeps no handles (${deskBase.handles} -> ${deskAfter.handles})`,
+      deskAfter.handles - deskBase.handles <= 20,
+    );
 
     // ── DesktopVideo with ffmpeg disabled: start() must resolve null without ever
     // spawning, and 50 start/stop cycles must leave no process, timer or buffer behind.
@@ -176,7 +213,10 @@ async function run() {
     const res1 = process.getActiveResourcesInfo().length;
     check("50 desktop-video start/stop cycles leave nothing running", clean === 50);
     check(`the video cycles keep no active resources (${res0} -> ${res1})`, res1 - res0 <= 2);
-    check(`the video cycles keep the test process flat (${mb(rss0)} -> ${mb(process.memoryUsage().rss)})`, process.memoryUsage().rss - rss0 <= 200 * 1048576);
+    check(
+      `the video cycles keep the test process flat (${mb(rss0)} -> ${mb(process.memoryUsage().rss)})`,
+      process.memoryUsage().rss - rss0 <= 200 * 1048576,
+    );
 
     check("the daemon survived every cycle", daemon.exitCode === null);
     ws.close();

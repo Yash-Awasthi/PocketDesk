@@ -8,7 +8,8 @@ const CLI_PORT = 46846;
 const TOKEN = "rotationtoken";
 
 const base = `http://127.0.0.1:${PORT}`;
-const post = (p, key, body = {}) => fetch(`${base}${p}?k=${key}`, { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
+const post = (p, key, body = {}) =>
+  fetch(`${base}${p}?k=${key}`, { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
 
 /** The master token as the owner's own browser learns it: the loopback page meta. */
 async function masterToken() {
@@ -23,7 +24,9 @@ function hello(msg) {
   const closed = new Promise((res) => c.ws.once("close", (code) => res(code)));
   c.ws.on("open", () => c.send({ type: "hello", ...msg }));
   return new Promise((resolve) => {
-    Promise.race([c.next((m) => m.type === "welcome", 15000), closed]).then((first) => resolve({ c, first, closed }));
+    Promise.race([c.next((m) => m.type === "welcome", 15000), closed]).then((first) =>
+      resolve({ c, first, closed }),
+    );
   });
 }
 
@@ -42,7 +45,11 @@ function timeout(ms, what) {
 }
 
 async function main() {
-  const d = startDaemon(PORT, CLI_PORT, { token: TOKEN, manifests: tmp, dataDir: ".pocketdesk-tokenrotation" });
+  const d = startDaemon(PORT, CLI_PORT, {
+    token: TOKEN,
+    manifests: tmp,
+    dataDir: ".pocketdesk-tokenrotation",
+  });
   await d.ready;
 
   const m0 = await masterToken();
@@ -56,7 +63,10 @@ async function main() {
 
   // Revoke rotates the pairing token: the old master dies at the next hello.
   const revA = await post("/access/devices/revoke", m0, { clientId: idA });
-  check("revoke acks with a rotated pairing token", revA.ok === true && typeof revA.pairingToken === "string" && revA.pairingToken !== m0);
+  check(
+    "revoke acks with a rotated pairing token",
+    revA.ok === true && typeof revA.pairingToken === "string" && revA.pairingToken !== m0,
+  );
   const m1 = await masterToken();
   check("the page meta carries the rotated master token", m1 === revA.pairingToken && m1 !== m0);
   const oldMasterHello = await hello({ token: m0 });
@@ -93,10 +103,16 @@ async function main() {
   const m2 = await masterToken();
   check("the page meta follows the second rotation", m2 === revA2.pairingToken && m2 !== m1);
 
-  check("a revoked device's live socket is closed 4003", (await Promise.race([liveAClosed, timeout(8000, "revoked device close")])) === 4003);
+  check(
+    "a revoked device's live socket is closed 4003",
+    (await Promise.race([liveAClosed, timeout(8000, "revoked device close")])) === 4003,
+  );
 
   liveMaster.c.send({ type: "stats" });
-  check("a live socket holding the old master is closed 4003 on its next message", (await Promise.race([liveMasterClosed, timeout(8000, "stale master close")])) === 4003);
+  check(
+    "a live socket holding the old master is closed 4003 on its next message",
+    (await Promise.race([liveMasterClosed, timeout(8000, "stale master close")])) === 4003,
+  );
 
   liveB.c.send({ type: "stream_stats" });
   const stats = await liveB.c.next((m) => m.type === "stream_stats", 8000);

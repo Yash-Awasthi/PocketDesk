@@ -14,9 +14,17 @@ const HOME = path.join(os.tmpdir(), "rh-home-" + PORT);
 
 /** Runs `pocketdesk <args>` against the test daemon; resolves stdout. */
 function cli(...args) {
-  return new Promise((resolve, reject) => execFile(process.execPath, [path.join(REPO, "daemon", "src", "index.js"), ...args],
-    { env: { ...process.env, RH_CLI_PORT: String(CLI_PORT), RH_TOKEN: TOKEN, RH_HOME: HOME }, timeout: 15000 },
-    (e, out, err) => (e ? reject(new Error(err || e.message)) : resolve(out))));
+  return new Promise((resolve, reject) =>
+    execFile(
+      process.execPath,
+      [path.join(REPO, "daemon", "src", "index.js"), ...args],
+      {
+        env: { ...process.env, RH_CLI_PORT: String(CLI_PORT), RH_TOKEN: TOKEN, RH_HOME: HOME },
+        timeout: 15000,
+      },
+      (e, out, err) => (e ? reject(new Error(err || e.message)) : resolve(out)),
+    ),
+  );
 }
 
 async function screenHas(id, text, ms = 15000) {
@@ -32,14 +40,20 @@ try {
   await d.ready;
   // Pairing from a bare TTY: the QR is drawn in the terminal, with the link for when it does not fit.
   const pair = await cli("pair");
-  check("pair prints the link and a terminal QR", /pocketdesk:\/\/pair#[\w-]+/.test(pair) && /[█▀▄]{8}/.test(pair));
+  check(
+    "pair prints the link and a terminal QR",
+    /pocketdesk:\/\/pair#[\w-]+/.test(pair) && /[█▀▄]{8}/.test(pair),
+  );
   await cli("record", "on");
   const flag = path.join(HOME, "record-sessions");
   const on = fs.existsSync(flag);
   await cli("record", "off");
   check("record on/off flips the recording flag", on && !fs.existsSync(flag));
   const phone = connect(PORT, TOKEN);
-  await new Promise((res, rej) => { phone.ws.on("open", res); phone.ws.on("error", rej); });
+  await new Promise((res, rej) => {
+    phone.ws.on("open", res);
+    phone.ws.on("error", rej);
+  });
   phone.send({ type: "hello", token: TOKEN, platform: "android", name: "test phone" });
   await phone.next((m) => m.type === "welcome");
 
@@ -54,7 +68,9 @@ try {
   await cli("send", id, "echo pocket-42", "Enter");
   const screen = await screenHas(id, "pocket-42");
   check("send types into the shell and read shows the rendered screen", screen.includes("pocket-42"));
-  const seen = await phone.next((m) => m.type === "out" && m.id === id && Buffer.from(m.data, "base64").toString().includes("pocket-42"));
+  const seen = await phone.next(
+    (m) => m.type === "out" && m.id === id && Buffer.from(m.data, "base64").toString().includes("pocket-42"),
+  );
   check("the phone watching the same terminal sees the output", !!seen);
 
   await cli("resize", id, "90", "25");

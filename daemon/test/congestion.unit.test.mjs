@@ -22,7 +22,10 @@ function parseRate(text) {
 const RATE = Object.fromEntries(LADDER.map((name) => [name, parseRate(PRESETS[name].maxrate)]));
 
 test("the preset ladder is monotonic in bitrate", () => {
-  assert.deepEqual(LADDER.map((n) => RATE[n]), [600_000, 1_500_000, 6_000_000, 12_000_000]);
+  assert.deepEqual(
+    LADDER.map((n) => RATE[n]),
+    [600_000, 1_500_000, 6_000_000, 12_000_000],
+  );
   for (let i = 1; i < LADDER.length; i++) {
     assert.ok(RATE[LADDER[i - 1]] < RATE[LADDER[i]], `${LADDER[i - 1]} < ${LADDER[i]}`);
   }
@@ -33,9 +36,18 @@ function makeSim(requested = "quality") {
   const video = new DesktopVideo();
   video.setPreset(requested);
   return {
-    video, t: 0, queue: 0, nextFrameAt: 0, gop: 0, gopPreset: null,
-    latencies: [], arrivals: [], drops: [], steps: [],
-    lastDropAt: -Infinity, nextUpAt: UP_EVERY_MS,
+    video,
+    t: 0,
+    queue: 0,
+    nextFrameAt: 0,
+    gop: 0,
+    gopPreset: null,
+    latencies: [],
+    arrivals: [],
+    drops: [],
+    steps: [],
+    lastDropAt: -Infinity,
+    nextUpAt: UP_EVERY_MS,
   };
 }
 
@@ -56,10 +68,13 @@ function congested(sim, now) {
 function sendFrame(sim, g, now) {
   const name = sim.video.preset;
   const p = PRESETS[name];
-  if (sim.gopPreset !== name) { sim.gopPreset = name; sim.gop = 0; }
+  if (sim.gopPreset !== name) {
+    sim.gopPreset = name;
+    sim.gop = 0;
+  }
   const key = sim.gop === 0;
   sim.gop = (sim.gop + 1) % p.fps;
-  const bytes = ((RATE[name] / 8) / p.fps) * (key ? 3 : 1);
+  const bytes = (RATE[name] / 8 / p.fps) * (key ? 3 : 1);
   const queueMs = ((sim.queue + bytes) / g) * 1000;
   if (queueMs > QUEUE_CAP_MS) {
     sim.drops.push(now);
@@ -114,7 +129,10 @@ test("a 1 Mbps link settles at low with bounded latency and no stall", () => {
   assert.equal(sim.video.preset, "low");
   assert.ok(RATE[sim.video.preset] <= 1_000_000, "the settled preset carries under 1 Mbps");
   // The 30 s window here sits inside the server's 30 s recovery delay, so any up step is a bug.
-  assert.deepEqual(sim.steps.filter((s) => s.dir === "up"), []);
+  assert.deepEqual(
+    sim.steps.filter((s) => s.dir === "up"),
+    [],
+  );
 
   const from = settle.t + 6000; // let the backlog from the last overshoot drain
   const late = sim.latencies.filter((l) => l.t >= from).map((l) => l.ms);
@@ -136,8 +154,14 @@ test("raising the link to 20 Mbps steps back up to the requested preset", () => 
   advance(sim, 20_000_000, 120_000);
 
   const up = sim.steps.filter((s) => s.dir === "up");
-  assert.deepEqual(up.map((s) => s.to), ["saver", "balanced", "quality"]);
-  assert.ok(up.every((s) => s.t > 30_000), "no up step while the link was at 1 Mbps");
+  assert.deepEqual(
+    up.map((s) => s.to),
+    ["saver", "balanced", "quality"],
+  );
+  assert.ok(
+    up.every((s) => s.t > 30_000),
+    "no up step while the link was at 1 Mbps",
+  );
   assert.equal(sim.video.preset, "quality");
   assert.equal(sim.drops.length, dropsAt1Mbps, "20 Mbps carries the top preset");
 });
@@ -149,7 +173,10 @@ test("recovery stops at the preset the viewer asked for", () => {
   advance(sim, 20_000_000, 120_000);
 
   assert.equal(sim.video.preset, "saver");
-  assert.deepEqual(sim.steps.filter((s) => s.dir === "up").map((s) => s.to), ["saver"]);
+  assert.deepEqual(
+    sim.steps.filter((s) => s.dir === "up").map((s) => s.to),
+    ["saver"],
+  );
   assert.ok(!sim.steps.some((s) => LADDER.indexOf(s.to) > LADDER.indexOf("saver")));
 });
 

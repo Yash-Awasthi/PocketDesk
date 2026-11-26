@@ -27,7 +27,9 @@ fs.copyFileSync(path.join(here, "fixtures", "claude-session.jsonl"), path.join(p
 const REPLY = "The file still says: hello from a.txt";
 const argvLog = path.join(tmp, "argv.jsonl");
 const agentJs = path.join(tmp, "fakeagent.cjs");
-fs.writeFileSync(agentJs, `"use strict";
+fs.writeFileSync(
+  agentJs,
+  `"use strict";
 const fs = require("node:fs");
 let input = "";
 process.stdin.on("data", (d) => (input += d));
@@ -37,7 +39,8 @@ process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify({ type: "assistant", session_id: "s", message: { role: "assistant", content: [{ type: "text", text: reply }] } }) + "\\n");
   process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, session_id: "s", result: reply, usage: { input_tokens: 9, output_tokens: 12 } }) + "\\n");
 });
-`);
+`,
+);
 
 const agentHistory = await import("../src/agent_history.js");
 const chat = await import("../src/chat.js");
@@ -50,21 +53,31 @@ const tally = (items) => {
   return m;
 };
 const consecutiveAssistantDupes = (items) =>
-  items.some((it, i) => i > 0 && it.role === "assistant" && items[i - 1].role === "assistant" && it.text === items[i - 1].text);
+  items.some(
+    (it, i) =>
+      i > 0 && it.role === "assistant" && items[i - 1].role === "assistant" && it.text === items[i - 1].text,
+  );
 
 /** One user message through a live attach, until the chat leaves "running". */
 function turn(c, text, timeoutMs = 20_000) {
   return new Promise((resolve) => {
     let ws;
-    const timer = setTimeout(() => { chat.detach(ws, c.id); resolve("timeout"); }, timeoutMs);
-    ws = { readyState: 1, _subs: new Set(), send(raw) {
-      const m = JSON.parse(raw);
-      if (m.type === "chatstate" && m.state !== "running") {
-        clearTimeout(timer);
-        chat.detach(ws, c.id);
-        resolve(m.state);
-      }
-    } };
+    const timer = setTimeout(() => {
+      chat.detach(ws, c.id);
+      resolve("timeout");
+    }, timeoutMs);
+    ws = {
+      readyState: 1,
+      _subs: new Set(),
+      send(raw) {
+        const m = JSON.parse(raw);
+        if (m.type === "chatstate" && m.state !== "running") {
+          clearTimeout(timer);
+          chat.detach(ws, c.id);
+          resolve(m.state);
+        }
+      },
+    };
     chat.attach(c.id, ws);
     chat.sendUserMessage(c, text);
   });
@@ -76,16 +89,41 @@ try {
   check("history: the captured session is found", Boolean(h) && h.resumable === true);
   const items = h?.items ?? [];
   check("history: the ai-title line names it, not a transcript item", h?.title === "Reading a.txt");
-  check("history: roles are user, assistant, tool, assistant", items.map((i) => i.role).join(",") === "user,assistant,tool,assistant");
-  check("history: the user prompt appears exactly once", count(items, (i) => i.role === "user" && i.text === "Read a.txt and tell me what it says.") === 1);
-  check("history: the tool result line is not a user message", !items.some((i) => typeof i.text === "string" && i.text.includes("hello from a.txt") && i.role === "user"));
-  check("history: the Read call appears exactly once", count(items, (i) => i.role === "tool" && i.name === "Read") === 1);
-  check("history: each assistant text appears exactly once", count(items, (i) => i.role === "assistant") === 2 && items[1].text === "I'll read the file first.");
+  check(
+    "history: roles are user, assistant, tool, assistant",
+    items.map((i) => i.role).join(",") === "user,assistant,tool,assistant",
+  );
+  check(
+    "history: the user prompt appears exactly once",
+    count(items, (i) => i.role === "user" && i.text === "Read a.txt and tell me what it says.") === 1,
+  );
+  check(
+    "history: the tool result line is not a user message",
+    !items.some(
+      (i) => typeof i.text === "string" && i.text.includes("hello from a.txt") && i.role === "user",
+    ),
+  );
+  check(
+    "history: the Read call appears exactly once",
+    count(items, (i) => i.role === "tool" && i.name === "Read") === 1,
+  );
+  check(
+    "history: each assistant text appears exactly once",
+    count(items, (i) => i.role === "assistant") === 2 && items[1].text === "I'll read the file first.",
+  );
 
   // 2. Seed a chat the way history_resume does.
-  const transcript = items.map((it) => (it.role === "tool" ? { role: "tool", name: it.name, detail: it.detail } : { role: it.role, text: it.text }));
+  const transcript = items.map((it) =>
+    it.role === "tool"
+      ? { role: "tool", name: it.name, detail: it.detail }
+      : { role: it.role, text: it.text },
+  );
   const { id } = chat.create({
-    manifest: { id: "claude", bin: "node", chat: { args: [agentJs], resumeIdArgs: [agentJs, "--resume", "{id}"], format: "claude-stream-json" } },
+    manifest: {
+      id: "claude",
+      bin: "node",
+      chat: { args: [agentJs], resumeIdArgs: [agentJs, "--resume", "{id}"], format: "claude-stream-json" },
+    },
     cwd: tmp,
     resumeFirst: true,
     cliSession: "s",
@@ -99,14 +137,33 @@ try {
   // 3. One new message, resuming by session id.
   const state = await turn(c, "And now?");
   check("resume: the turn ends idle", state === "idle");
-  check("resume: the CLI was called with --resume s", fs.readFileSync(argvLog, "utf8").trim().split("\n").some((l) => JSON.parse(l).join(" ").includes("--resume s")));
+  check(
+    "resume: the CLI was called with --resume s",
+    fs
+      .readFileSync(argvLog, "utf8")
+      .trim()
+      .split("\n")
+      .some((l) => JSON.parse(l).join(" ").includes("--resume s")),
+  );
 
   // 4. The saved turns are byte-identical; the reply is one new message.
   const prefix = JSON.parse(JSON.stringify(c.transcript.slice(0, seeded.length)));
-  check("resume: the seeded transcript is unchanged by the new turn", JSON.stringify(prefix) === JSON.stringify(seeded));
-  check("resume: the new user message is appended", c.transcript.at(-2)?.role === "user" && c.transcript.at(-2)?.text === "And now?");
-  check("resume: the new reply appears exactly once", count(c.transcript, (i) => i.role === "assistant" && i.text === REPLY) === 1);
-  check("resume: the new reply is its own message", c.transcript.at(-1)?.role === "assistant" && c.transcript.at(-1)?.text === REPLY);
+  check(
+    "resume: the seeded transcript is unchanged by the new turn",
+    JSON.stringify(prefix) === JSON.stringify(seeded),
+  );
+  check(
+    "resume: the new user message is appended",
+    c.transcript.at(-2)?.role === "user" && c.transcript.at(-2)?.text === "And now?",
+  );
+  check(
+    "resume: the new reply appears exactly once",
+    count(c.transcript, (i) => i.role === "assistant" && i.text === REPLY) === 1,
+  );
+  check(
+    "resume: the new reply is its own message",
+    c.transcript.at(-1)?.role === "assistant" && c.transcript.at(-1)?.text === REPLY,
+  );
   check("resume: no consecutive duplicate assistant messages", !consecutiveAssistantDupes(c.transcript));
 
   // 5. The saved history file holds every message exactly once.
@@ -114,12 +171,23 @@ try {
   check("saved history: one file for the chat", files.length === 1);
   const saved = JSON.parse(fs.readFileSync(path.join(dataDir, "chat-history", files[0]), "utf8")).transcript;
   const savedTally = tally(saved);
-  check("saved history: every seeded message appears exactly once", [...seededTally].every(([k, n]) => savedTally.get(k) === n && n === 1));
-  check("saved history: the new reply appears exactly once", count(saved, (i) => i.role === "assistant" && i.text === REPLY) === 1);
-  check("saved history: no message is stored twice", [...savedTally.values()].every((n) => n === 1));
+  check(
+    "saved history: every seeded message appears exactly once",
+    [...seededTally].every(([k, n]) => savedTally.get(k) === n && n === 1),
+  );
+  check(
+    "saved history: the new reply appears exactly once",
+    count(saved, (i) => i.role === "assistant" && i.text === REPLY) === 1,
+  );
+  check(
+    "saved history: no message is stored twice",
+    [...savedTally.values()].every((n) => n === 1),
+  );
   check("saved history: no consecutive duplicate assistant messages", !consecutiveAssistantDupes(saved));
 } finally {
-  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  } catch {}
 }
 
 if (failureCount()) {

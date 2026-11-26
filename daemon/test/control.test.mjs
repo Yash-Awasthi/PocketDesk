@@ -14,7 +14,13 @@ function hello(extra) {
     const c = connect(PORT, TOKEN);
     c.ws.on("open", () => c.send({ type: "hello", token: TOKEN, ...extra }));
     c.ws.on("close", (code) => resolve(code));
-    c.next((m) => m.type === "welcome").then(() => { resolve("welcome"); c.close(); }, () => {});
+    c.next((m) => m.type === "welcome").then(
+      () => {
+        resolve("welcome");
+        c.close();
+      },
+      () => {},
+    );
   });
 }
 
@@ -29,14 +35,27 @@ try {
   c.send({ type: "pc_power", action: "format-disk" });
   check("unknown power actions are refused", !(await c.next((m) => m.type === "pc_power")).ok);
 
-  const post = (p, body = {}) => fetch(`http://127.0.0.1:${PORT}/access/totp/${p}?k=${TOKEN}`, { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
-  check("two-factor setup needs the settings key", (await fetch(`http://127.0.0.1:${PORT}/access/totp/setup`, { method: "POST" })).status === 403);
+  const post = (p, body = {}) =>
+    fetch(`http://127.0.0.1:${PORT}/access/totp/${p}?k=${TOKEN}`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }).then((r) => r.json());
+  check(
+    "two-factor setup needs the settings key",
+    (await fetch(`http://127.0.0.1:${PORT}/access/totp/setup`, { method: "POST" })).status === 403,
+  );
   const { secret } = await post("setup");
   check("two-factor refuses a wrong code", (await post("enable", { code: "000000" })).ok === false);
-  check("two-factor turns on with a valid code", (await post("enable", { code: code(secret, step() - 1) })).totpEnabled === true);
+  check(
+    "two-factor turns on with a valid code",
+    (await post("enable", { code: code(secret, step() - 1) })).totpEnabled === true,
+  );
   check("pairing with the master token alone is refused with 4011", (await hello({})) === 4011);
   check("pairing with a code is accepted", (await hello({ totp: code(secret, step()) })) === "welcome");
-  check("two-factor turns off with a code", (await post("disable", { code: code(secret, step() + 1) })).totpEnabled === false);
+  check(
+    "two-factor turns off with a code",
+    (await post("disable", { code: code(secret, step() + 1) })).totpEnabled === false,
+  );
   await c.close();
 } catch (e) {
   check("control flow: " + e.message, false);

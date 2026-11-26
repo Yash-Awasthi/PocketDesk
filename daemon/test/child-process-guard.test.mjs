@@ -38,13 +38,19 @@ for (const file of files) {
     // A bare `exec(` here declares a method (`async exec(sessionId, command)`), it does not call out.
     const isMethod = /^(async\s+)?exec\s*\(\s*\w+\s*,/.test(code);
     if (/(?<![\w.])execSync?\s*\(/.test(line) && !isMethod) offenders.push(`${at} ${code.slice(0, 100)}`);
-    if (/^import\b.*\bexecSync?\b.*from\s*["'](?:node:)?child_process["']/.test(code)) offenders.push(`${at} ${code.slice(0, 100)}`);
-    if (/require\s*\(\s*["'](?:node:)?child_process["']\s*\)/.test(line)) offenders.push(`${at} ${code.slice(0, 100)}`);
-    if (/(?<![\w.])(execFile|execFileSync|spawn|spawnSync)\s*\(/.test(line)) argvCalls.set(rel, (argvCalls.get(rel) || 0) + 1);
+    if (/^import\b.*\bexecSync?\b.*from\s*["'](?:node:)?child_process["']/.test(code))
+      offenders.push(`${at} ${code.slice(0, 100)}`);
+    if (/require\s*\(\s*["'](?:node:)?child_process["']\s*\)/.test(line))
+      offenders.push(`${at} ${code.slice(0, 100)}`);
+    if (/(?<![\w.])(execFile|execFileSync|spawn|spawnSync)\s*\(/.test(line))
+      argvCalls.set(rel, (argvCalls.get(rel) || 0) + 1);
   });
 }
 
-check(`no daemon/src file imports or calls exec/execSync${offenders.length ? ": " + offenders.join(" | ") : ""}`, offenders.length === 0);
+check(
+  `no daemon/src file imports or calls exec/execSync${offenders.length ? ": " + offenders.join(" | ") : ""}`,
+  offenders.length === 0,
+);
 
 for (const rel of CHANGED) {
   const n = argvCalls.get(rel) || 0;

@@ -21,7 +21,10 @@ const serverText = fs.readFileSync(path.join(REPO, "daemon", "src", "server.js")
 for (const m of serverText.matchAll(/handlers\.([a-z][a-z0-9_]*)\s*=/g)) names.add(m[1]);
 
 check(`handler modules expose message types (${names.size} found)`, names.size > 100);
-check("a known handler is present", names.has("chatsession") && names.has("fs_op") && names.has("display_extend"));
+check(
+  "a known handler is present",
+  names.has("chatsession") && names.has("fs_op") && names.has("display_extend"),
+);
 
 const readme = fs.readFileSync(path.join(REPO, "README.md"), "utf8");
 const from = readme.indexOf("**Client → Server:**");
@@ -34,11 +37,13 @@ const chapterStart = readme.lastIndexOf("## ", from);
 const chapterEnd = readme.indexOf("\n## ", from);
 const chapter = readme.slice(chapterStart, chapterEnd);
 
-const backticked = (text) => [...new Set(
-  [...text.matchAll(/`([^`]+)`/g)]
-    .map((m) => m[1].split(/[\s{]/)[0].replace(/[^a-z0-9_]/gi, ""))
-    .filter((n) => n.length > 1),
-)];
+const backticked = (text) => [
+  ...new Set(
+    [...text.matchAll(/`([^`]+)`/g)]
+      .map((m) => m[1].split(/[\s{]/)[0].replace(/[^a-z0-9_]/gi, ""))
+      .filter((n) => n.length > 1),
+  ),
+];
 const documented = backticked(block);
 const documentedAnywhere = backticked(chapter);
 check(`the README documents client message types (${documented.length} found)`, documented.length > 40);
@@ -70,8 +75,14 @@ check(
 );
 
 // And the specific claim that had drifted: TOTP is an HTTP endpoint, not a WS message.
-check("the README does not list TOTP as a WebSocket message", !/`totp_(status|setup|enable|disable)`/.test(readme));
+check(
+  "the README does not list TOTP as a WebSocket message",
+  !/`totp_(status|setup|enable|disable)`/.test(readme),
+);
 const serverRoutes = ["/access/totp/setup", "/access/totp/enable", "/access/totp/disable"];
-check("the TOTP endpoints the README names exist in server.js", serverRoutes.every((r) => serverText.includes(r)));
+check(
+  "the TOTP endpoints the README names exist in server.js",
+  serverRoutes.every((r) => serverText.includes(r)),
+);
 
 finish();

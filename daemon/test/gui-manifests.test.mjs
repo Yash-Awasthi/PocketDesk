@@ -11,7 +11,16 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { check, failureCount, failureNames, makeTmp, openAndHello, REPO, startDaemon, teardown } from "./helpers.mjs";
+import {
+  check,
+  failureCount,
+  failureNames,
+  makeTmp,
+  openAndHello,
+  REPO,
+  startDaemon,
+  teardown,
+} from "./helpers.mjs";
 
 const tmp = makeTmp("rh-gui-");
 const MANIFESTS_SRC = path.join(REPO, "daemon", "manifests");
@@ -73,7 +82,10 @@ async function main() {
       .filter(Boolean)
       .every((p) => (guiPath({ paths: { [process.platform]: p } }) || "").length > 0),
   );
-  check("no gui manifest advertises a package install", guiShipped.every((m) => !m.install));
+  check(
+    "no gui manifest advertises a package install",
+    guiShipped.every((m) => !m.install),
+  );
   check(
     "every gui manifest has an id and a name",
     guiShipped.every((m) => typeof m.id === "string" && m.id && typeof m.name === "string" && m.name),
@@ -99,10 +111,7 @@ async function main() {
   await scanAll(() => {});
   check("launchGui refuses an unknown id", launchGui("nope-not-real").ok === false);
   const cli = launchGui("cli-agent");
-  check(
-    "launchGui refuses a terminal harness",
-    cli.ok === false && cli.reason === "not a gui app",
-  );
+  check("launchGui refuses a terminal harness", cli.ok === false && cli.reason === "not a gui app");
   const r = launchGui("absent-ide");
   check("launchGui refuses an app that is not installed", r.ok === false && r.reason === "not installed");
 
@@ -147,7 +156,10 @@ async function main() {
   }
   const [argv, cwdSeen] = fs.readFileSync(argvMarker, "utf8").split("||");
   check("the project folder is the app's last argument", argv.split("|").pop() === projectDir);
-  check("the project folder is the app's working directory", fs.realpathSync(cwdSeen) === fs.realpathSync(projectDir));
+  check(
+    "the project folder is the app's working directory",
+    fs.realpathSync(cwdSeen) === fs.realpathSync(projectDir),
+  );
   check(
     "launchGui refuses a folder that does not exist",
     launchGui("folder-ide", path.join(tmp, "no-such-project")).reason === "no such folder",
@@ -158,10 +170,16 @@ async function main() {
   const { discover, find, search } = await import("../src/app_discovery.js");
   const found = discover();
   check("discovery finds applications on this machine", found.length > 0);
-  check("every discovered app names a path and a kind", found.every((a) => a.path && (a.kind === "gui" || a.kind === "cli")));
+  check(
+    "every discovered app names a path and a kind",
+    found.every((a) => a.path && (a.kind === "gui" || a.kind === "cli")),
+  );
   check("find round-trips a discovered path", find(found[0].path)?.path === found[0].path);
   check("find rejects a path discovery never reported", find(path.join(tmp, "not-an-app.exe")) === null);
-  check("search filters by name", search(found[0].name).some((a) => a.path === found[0].path));
+  check(
+    "search filters by name",
+    search(found[0].name).some((a) => a.path === found[0].path),
+  );
   check("search caps its result", search("", 5).length <= 5);
 
   // The phone must be told the outcome: the window opens where it cannot see.
@@ -179,13 +197,22 @@ async function main() {
   const bogus = path.join(tmp, "not-an-app.exe");
   c.send({ type: "gui_open", path: bogus });
   const rejected = await c.next((m) => m.type === "gui_opened", 30000);
-  check("gui_open refuses a path discovery never reported", rejected.ok === false && rejected.reason === "not a discovered app");
+  check(
+    "gui_open refuses a path discovery never reported",
+    rejected.ok === false && rejected.reason === "not a discovered app",
+  );
   c.send({ type: "apps_discover", q: found[0].name });
   const apps = await c.next((m) => m.type === "apps");
-  check("apps_discover answers with matching applications", apps.items.some((a) => a.path === found[0].path));
+  check(
+    "apps_discover answers with matching applications",
+    apps.items.some((a) => a.path === found[0].path),
+  );
   c.send({ type: "create", path: bogus });
   const createErr = await c.next((m) => m.type === "error");
-  check("create refuses a path discovery never reported", createErr.message.startsWith("not a discovered tool"));
+  check(
+    "create refuses a path discovery never reported",
+    createErr.message.startsWith("not a discovered tool"),
+  );
   await c.close();
   await teardown(tmp);
 

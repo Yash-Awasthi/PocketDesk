@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { check, finish } from "./helpers.mjs";
-import { listDir, fileOp, searchFiles, readFileChunk, writeFileChunk, resolvePath } from "../src/fs_ops.js";
+import { listDir, fileOp, searchFiles, readFileChunk, writeFileChunk } from "../src/fs_ops.js";
 import { zipFolder, thumbnail, dispose } from "../src/file_extras.js";
 import { execFileSync } from "node:child_process";
 
@@ -20,8 +20,14 @@ try {
 
   let l = listDir(tmp);
   check("listing hides dotfiles by default", !l.items.some((i) => i.name === ".hidden"));
-  check("listing carries size and mtime", l.items.find((i) => i.name === "a.txt")?.size === 5 && l.items[0].mtime > 0);
-  check("listing shows dotfiles on request", listDir(tmp, true).items.some((i) => i.name === ".hidden"));
+  check(
+    "listing carries size and mtime",
+    l.items.find((i) => i.name === "a.txt")?.size === 5 && l.items[0].mtime > 0,
+  );
+  check(
+    "listing shows dotfiles on request",
+    listDir(tmp, true).items.some((i) => i.name === ".hidden"),
+  );
 
   let r = await fileOp({ op: "mkdir", path: at("sub", "deep") });
   check("mkdir creates nested folders", r.ok && fs.statSync(at("sub", "deep")).isDirectory());
@@ -35,7 +41,10 @@ try {
   check("rename moves a file", r.ok && fs.existsSync(at("sub", "moved.txt")) && !fs.existsSync(at("a.txt")));
 
   r = await searchFiles(tmp, "MOVED");
-  check("search is case-insensitive and recursive", r.items.length === 1 && r.items[0].path === at("sub", "moved.txt"));
+  check(
+    "search is case-insensitive and recursive",
+    r.items.length === 1 && r.items[0].path === at("sub", "moved.txt"),
+  );
   r = await searchFiles(tmp, "");
   check("empty search returns nothing", r.items.length === 0);
 
@@ -44,7 +53,10 @@ try {
   fs.writeFileSync(at("real", "keep.txt"), "k");
   fs.symlinkSync(at("real"), at("link"), "junction");
   r = await fileOp({ op: "delete", path: at("link") });
-  check("deleting a link keeps its target", r.ok && !fs.existsSync(at("link")) && fs.existsSync(at("real", "keep.txt")));
+  check(
+    "deleting a link keeps its target",
+    r.ok && !fs.existsSync(at("link")) && fs.existsSync(at("real", "keep.txt")),
+  );
 
   r = await fileOp({ op: "delete", path: at("sub") });
   check("delete removes a folder", r.ok && !fs.existsSync(at("sub")));
@@ -57,7 +69,10 @@ try {
 
   // Traversal and path-shape hardening.
   r = await fileOp({ op: "delete", path: at("sub") + path.sep + ".." + path.sep + ".." });
-  check("traversal: final .. component is refused", !r.ok && /traversal/i.test(r.error) && fs.existsSync(tmp) && fs.existsSync(at("b.txt")));
+  check(
+    "traversal: final .. component is refused",
+    !r.ok && /traversal/i.test(r.error) && fs.existsSync(tmp) && fs.existsSync(at("b.txt")),
+  );
 
   // A path escaping through mid-path ".." must land outside both allowed roots.
   const outsideBase = process.platform === "win32" ? path.join("C:\\", "Users", "Public") : "/var/tmp";
@@ -66,14 +81,24 @@ try {
   try {
     const midEscape = at("sub") + path.sep + ".." + path.sep + path.relative(tmp, sentinel);
     r = await fileOp({ op: "delete", path: midEscape });
-    check("traversal: mid-path .. escape is refused", !r.ok && /traversal/i.test(r.error) && fs.existsSync(sentinel));
+    check(
+      "traversal: mid-path .. escape is refused",
+      !r.ok && /traversal/i.test(r.error) && fs.existsSync(sentinel),
+    );
   } finally {
     fs.rmSync(sentinel, { recursive: true, force: true });
   }
 
   fs.mkdirSync(at("sub"), { recursive: true });
-  r = await fileOp({ op: "rename", path: at("sub") + path.sep + ".." + path.sep + "b.txt", to: at("b2.txt") });
-  check("traversal: benign .. inside tmp still works", r.ok && fs.existsSync(at("b2.txt")) && !fs.existsSync(at("b.txt")));
+  r = await fileOp({
+    op: "rename",
+    path: at("sub") + path.sep + ".." + path.sep + "b.txt",
+    to: at("b2.txt"),
+  });
+  check(
+    "traversal: benign .. inside tmp still works",
+    r.ok && fs.existsSync(at("b2.txt")) && !fs.existsSync(at("b.txt")),
+  );
   r = await fileOp({ op: "rename", path: at("b2.txt"), to: at("b.txt") });
   check("traversal: renaming the file back works", r.ok);
 
@@ -91,10 +116,16 @@ try {
     check("symlink escape: deleting outside is refused", !e.ok && /traversal/i.test(String(e.error || "")));
     e = await fileOp({ op: "rename", path: at("escape", escapeFile), to: at("escape", "renamed.ini") });
     check("symlink escape: renaming outside is refused", !e.ok && /traversal/i.test(String(e.error || "")));
-    check("symlink escape: target untouched and no probe written",
-      fs.existsSync(path.join(escapeTarget, escapeFile)) && !fs.existsSync(path.join(escapeTarget, probe)));
+    check(
+      "symlink escape: target untouched and no probe written",
+      fs.existsSync(path.join(escapeTarget, escapeFile)) && !fs.existsSync(path.join(escapeTarget, probe)),
+    );
   } finally {
-    try { fs.rmSync(at("escape"), { force: true }); } catch { fs.unlinkSync(at("escape")); }
+    try {
+      fs.rmSync(at("escape"), { force: true });
+    } catch {
+      fs.unlinkSync(at("escape"));
+    }
   }
 
   if (process.platform === "win32") {
@@ -110,27 +141,49 @@ try {
 
     for (const name of ["CON", "NUL.txt", "COM1", "LPT9.log", "CLOCK$"]) {
       const m = await fileOp({ op: "mkdir", path: at(name) });
-      check("reserved device name refused: " + name, !m.ok && /reserved/i.test(String(m.error || "")) && !fs.existsSync(at(name)));
+      check(
+        "reserved device name refused: " + name,
+        !m.ok && /reserved/i.test(String(m.error || "")) && !fs.existsSync(at(name)),
+      );
     }
   }
 
   const rt = writeFileChunk({ path: at("roundtrip.txt"), data: Buffer.from("roundtrip").toString("base64") });
   const rtb = readFileChunk(at("roundtrip.txt"), 0);
-  check("round-trip: plain write and read inside tmp still works",
-    !rt.error && Buffer.from(rtb.data || "", "base64").toString("utf8") === "roundtrip");
+  check(
+    "round-trip: plain write and read inside tmp still works",
+    !rt.error && Buffer.from(rtb.data || "", "base64").toString("utf8") === "roundtrip",
+  );
 
   fs.mkdirSync(at("pack", "sub"), { recursive: true });
   fs.writeFileSync(at("pack", "sub", "x.txt"), "zip me");
   const z = await zipFolder(at("pack"));
-  check("a folder zips into a readable archive", z.ok && z.size > 0 && fs.readFileSync(z.zip).subarray(0, 2).toString() === "PK");
+  check(
+    "a folder zips into a readable archive",
+    z.ok && z.size > 0 && fs.readFileSync(z.zip).subarray(0, 2).toString() === "PK",
+  );
   if (z.zip) fs.rmSync(z.zip, { force: true });
   check("zipping a file is refused", !(await zipFolder(at("b.txt"))).ok);
   if (process.platform === "win32") {
     const png = at("pic.png");
-    execFileSync("powershell.exe", ["-NoProfile", "-Command", `Add-Type -A System.Drawing; (New-Object System.Drawing.Bitmap 640,480).Save('${png}')`]);
+    execFileSync("powershell.exe", [
+      "-NoProfile",
+      "-Command",
+      `Add-Type -A System.Drawing; (New-Object System.Drawing.Bitmap 640,480).Save('${png}')`,
+    ]);
     const t = await thumbnail(png, 100);
     check("an image gets a JPEG thumbnail", t.ok && Buffer.from(t.jpeg, "base64")[0] === 0xff);
-    check("the image is not left locked", (() => { try { fs.rmSync(png); return true; } catch { return false; } })());
+    check(
+      "the image is not left locked",
+      (() => {
+        try {
+          fs.rmSync(png);
+          return true;
+        } catch {
+          return false;
+        }
+      })(),
+    );
     check("non-images get no thumbnail", !(await thumbnail(at("b.txt"))).ok);
     dispose();
   }

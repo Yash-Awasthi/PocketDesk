@@ -20,7 +20,10 @@ try {
 
   pc.send({ type: "recordings_list" });
   const list = await pc.next((m) => m.type === "recordings_list");
-  check("terminal recordings are listed, the audit log is not", list.items.length === 1 && list.items[0].name === "shell-1.cast" && list.items[0].size === cast.length);
+  check(
+    "terminal recordings are listed, the audit log is not",
+    list.items.length === 1 && list.items[0].name === "shell-1.cast" && list.items[0].size === cast.length,
+  );
 
   pc.send({ type: "recording_get", name: "shell-1.cast" });
   const got = await pc.next((m) => m.type === "recording_get");

@@ -18,7 +18,12 @@ const // Phrases that only appear when a document is selling evasion.
   ];
 
 // Files whose job is to *name* the forbidden patterns, and this test itself.
-const ALLOWED = new Set(["docs/INTEGRITY.md", "plan.md", "CONTRIBUTING.md", "daemon/test/no-evasion.test.mjs"]);
+const ALLOWED = new Set([
+  "docs/INTEGRITY.md",
+  "plan.md",
+  "CONTRIBUTING.md",
+  "daemon/test/no-evasion.test.mjs",
+]);
 const SKIP_DIRS = new Set(["node_modules", ".git", ".gradle", "build", "screenshots", ".freebuff"]);
 const SCANNED = [".md", ".js", ".mjs", ".cs", ".ps1", ".kt"];
 
@@ -45,13 +50,19 @@ for (const file of files) {
     for (const re of BANNED) if (re.test(line)) hits.push(`${rel}:${i + 1} ${line.trim().slice(0, 120)}`);
   });
 }
-check(`no doc or comment claims PocketDesk evades detection${hits.length ? ": " + hits.join(" | ") : ""}`, hits.length === 0);
+check(
+  `no doc or comment claims PocketDesk evades detection${hits.length ? ": " + hits.join(" | ") : ""}`,
+  hits.length === 0,
+);
 
 // The rule has to be findable where a contributor reads it.
 const contributing = fs.readFileSync(path.join(REPO, "CONTRIBUTING.md"), "utf8");
 check("CONTRIBUTING.md links docs/INTEGRITY.md", /docs\/INTEGRITY\.md/.test(contributing));
 check("CONTRIBUTING.md states the no-evasion rule", /detection-evasion/i.test(contributing));
-check("CONTRIBUTING.md carries the grep-able banned-pattern check", /no-evasion\.test\.mjs/.test(contributing));
+check(
+  "CONTRIBUTING.md carries the grep-able banned-pattern check",
+  /no-evasion\.test\.mjs/.test(contributing),
+);
 
 const readme = fs.readFileSync(path.join(REPO, "README.md"), "utf8");
 check("README has a Responsible use section", /^### Responsible use$/m.test(readme));

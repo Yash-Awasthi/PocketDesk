@@ -95,7 +95,8 @@ check("log has a dated entry", dateHeads.length > 0);
 for (const m of dateHeads) {
   const [whole, y, mo, d] = m;
   const dt = new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
-  const real = dt.getUTCFullYear() === Number(y) && dt.getUTCMonth() === Number(mo) - 1 && dt.getUTCDate() === Number(d);
+  const real =
+    dt.getUTCFullYear() === Number(y) && dt.getUTCMonth() === Number(mo) - 1 && dt.getUTCDate() === Number(d);
   check(`log date ${y}-${mo}-${d} is a real calendar date`, real);
   const start = m.index + whole.length;
   const nextHead = log.slice(start).search(/^## /m);

@@ -8,12 +8,23 @@ import { waitForHealth } from "./helpers.mjs";
 const PORT = 8799;
 const TOKEN = "smoketoken";
 const tmpMan = fs.mkdtempSync(path.join(os.tmpdir(), "rh-manifests-"));
-fs.writeFileSync(path.join(tmpMan, "node.json"), JSON.stringify({ id: "node", name: "Node REPL", adapter: "terminal", bin: "node", install: {} }));
+fs.writeFileSync(
+  path.join(tmpMan, "node.json"),
+  JSON.stringify({ id: "node", name: "Node REPL", adapter: "terminal", bin: "node", install: {} }),
+);
 
 const daemon = spawn(process.execPath, ["src/index.js"], {
   cwd: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
   // Test-only state: never the real ~/.pocketdesk.
-  env: { ...process.env, RH_PORT: String(PORT), RH_CLI_PORT: String(PORT + 1), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-smoketest", RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT) },
+  env: {
+    ...process.env,
+    RH_PORT: String(PORT),
+    RH_CLI_PORT: String(PORT + 1),
+    RH_TOKEN: TOKEN,
+    RH_MANIFESTS: tmpMan,
+    POCKETDESK_DATA: ".pocketdesk-smoketest",
+    RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT),
+  },
   stdio: ["ignore", "pipe", "pipe"],
 });
 daemon.stdout.on("data", (d) => process.stdout.write("[daemon] " + d));
@@ -53,81 +64,95 @@ async function run() {
     // Wait for the server that answers, not for a fixed number of milliseconds: a cold cache
     // needs seconds longer than a warm one. See waitForHealth in helpers.mjs.
     await waitForHealth(PORT);
-  ws = new WebSocket(`ws://localhost:${PORT}/ws`);
-  await new Promise((res, rej) => {
-    ws.on("open", res);
-    ws.on("error", rej);
-  });
-  pump();
+    ws = new WebSocket(`ws://localhost:${PORT}/ws`);
+    await new Promise((res, rej) => {
+      ws.on("open", res);
+      ws.on("error", rej);
+    });
+    pump();
 
-  ws.send("null");
-  await new Promise((res) => setTimeout(res, 300));
-  check("pre-auth JSON null does not crash the daemon", daemon.exitCode === null);
+    ws.send("null");
+    await new Promise((res) => setTimeout(res, 300));
+    check("pre-auth JSON null does not crash the daemon", daemon.exitCode === null);
 
-  send({ type: "hello", token: "wrong" });
-  const badEnd = await new Promise((res) => ws.once("close", (c) => res(c)));
-  check(`bad token rejected (close ${badEnd})`, badEnd === 4003);
+    send({ type: "hello", token: "wrong" });
+    const badEnd = await new Promise((res) => ws.once("close", (c) => res(c)));
+    check(`bad token rejected (close ${badEnd})`, badEnd === 4003);
 
-  ws = new WebSocket(`ws://localhost:${PORT}/ws`);
-  await new Promise((res) => ws.on("open", res));
-  pump();
-  send({ type: "hello", token: TOKEN });
-  const welcome = await next((m) => m.type === "welcome");
-  check("welcome received", welcome.type === "welcome");
-  check("welcome lists sessions+manifests", Array.isArray(welcome.manifests) && Array.isArray(welcome.sessions));
+    ws = new WebSocket(`ws://localhost:${PORT}/ws`);
+    await new Promise((res) => ws.on("open", res));
+    pump();
+    send({ type: "hello", token: TOKEN });
+    const welcome = await next((m) => m.type === "welcome");
+    check("welcome received", welcome.type === "welcome");
+    check(
+      "welcome lists sessions+manifests",
+      Array.isArray(welcome.manifests) && Array.isArray(welcome.sessions),
+    );
 
-  send({ type: "detect" });
-  const mans = await next((m) => m.type === "manifests", 20000);
-  check("manifests broadcast after detect", mans.items.some((i) => i.manifest.id === "node"));
-  const node = mans.items.find((i) => i.manifest.id === "node");
-  check("node detected installed", node.installed === true && /v\d/.test(node.version || ""));
+    send({ type: "detect" });
+    const mans = await next((m) => m.type === "manifests", 20000);
+    check(
+      "manifests broadcast after detect",
+      mans.items.some((i) => i.manifest.id === "node"),
+    );
+    const node = mans.items.find((i) => i.manifest.id === "node");
+    check("node detected installed", node.installed === true && /v\d/.test(node.version || ""));
 
-  send({ type: "fs", path: "" });
-  const fsMsg = await next((m) => m.type === "fs");
-  check("fs listing works", Array.isArray(fsMsg.items));
+    send({ type: "fs", path: "" });
+    const fsMsg = await next((m) => m.type === "fs");
+    check("fs listing works", Array.isArray(fsMsg.items));
 
-  const payload = Buffer.from("pocketdesk-file-transfer-check").toString("base64");
-  send({ type: "fwrite", path: path.join(os.tmpdir(), "rh-smoke.bin"), data: payload });
-  const fw = await next((m) => m.type === "fwritten" || m.type === "error");
-  check("fwrite stores file", fw.type === "fwritten" && !fw.error && fw.size === Buffer.from(payload, "base64").length);
-  send({ type: "fread", path: fw.path, offset: 0 });
-  const fr = await next((m) => m.type === "fchunk" || m.type === "error");
-  check("fread returns identical bytes", fr.data === payload && fr.eof === true);
-  send({ type: "fread", path: fw.path, offset: 5 });
-  const fr2 = await next((m) => m.type === "fchunk");
-  check("fread honors offset", fr2.offset === 5 && fr2.eof === true);
+    const payload = Buffer.from("pocketdesk-file-transfer-check").toString("base64");
+    send({ type: "fwrite", path: path.join(os.tmpdir(), "rh-smoke.bin"), data: payload });
+    const fw = await next((m) => m.type === "fwritten" || m.type === "error");
+    check(
+      "fwrite stores file",
+      fw.type === "fwritten" && !fw.error && fw.size === Buffer.from(payload, "base64").length,
+    );
+    send({ type: "fread", path: fw.path, offset: 0 });
+    const fr = await next((m) => m.type === "fchunk" || m.type === "error");
+    check("fread returns identical bytes", fr.data === payload && fr.eof === true);
+    send({ type: "fread", path: fw.path, offset: 5 });
+    const fr2 = await next((m) => m.type === "fchunk");
+    check("fread honors offset", fr2.offset === 5 && fr2.eof === true);
 
-  send({ type: "create", harness: "node", cwd: os.tmpdir() });
-  const created = await next((m) => m.type === "created" || m.type === "error");
-  check("session created", created.type === "created");
-  if (created.type !== "created") throw new Error(created.message);
+    send({ type: "create", harness: "node", cwd: os.tmpdir() });
+    const created = await next((m) => m.type === "created" || m.type === "error");
+    check("session created", created.type === "created");
+    if (created.type !== "created") throw new Error(created.message);
 
-  send({ type: "attach", id: created.id });
-  const replay = await next((m) => m.type === "replay");
-  check("attach replays scrollback", replay.id === created.id);
+    send({ type: "attach", id: created.id });
+    const replay = await next((m) => m.type === "replay");
+    check("attach replays scrollback", replay.id === created.id);
 
-  send({ type: "in", id: created.id, data: Buffer.from('console.log("smoke-" + (40 + 2))\r').toString("base64") });
-  let got = "", exited = null;
-  while (!got.includes("smoke-42") && exited === null) {
-    const m = await next((x) => x.type === "out" || x.type === "exit" || x.type === "error", 15000);
-    if (m.type === "out") got += Buffer.from(m.data, "base64").toString("utf8");
-    if (m.type === "exit") exited = m.code;
-    if (m.type === "error") throw new Error(m.message);
+    send({
+      type: "in",
+      id: created.id,
+      data: Buffer.from('console.log("smoke-" + (40 + 2))\r').toString("base64"),
+    });
+    let got = "",
+      exited = null;
+    while (!got.includes("smoke-42") && exited === null) {
+      const m = await next((x) => x.type === "out" || x.type === "exit" || x.type === "error", 15000);
+      if (m.type === "out") got += Buffer.from(m.data, "base64").toString("utf8");
+      if (m.type === "exit") exited = m.code;
+      if (m.type === "error") throw new Error(m.message);
+    }
+    check("input reaches PTY and output streams back", got.includes("smoke-42"));
+
+    send({ type: "resize", id: created.id, cols: 120, rows: 40 });
+    send({ type: "kill", id: created.id });
+    const exit = await next((m) => m.type === "exit", 10000);
+    check("kill produces exit event", exit.id === created.id);
+
+    ws.close();
+  } catch (e) {
+    console.error("SMOKE ERROR:", e.message);
+    failures.push(e.message);
+  } finally {
+    daemon.kill();
   }
-  check("input reaches PTY and output streams back", got.includes("smoke-42"));
-
-  send({ type: "resize", id: created.id, cols: 120, rows: 40 });
-  send({ type: "kill", id: created.id });
-  const exit = await next((m) => m.type === "exit", 10000);
-  check("kill produces exit event", exit.id === created.id);
-
-  ws.close();
-} catch (e) {
-  console.error("SMOKE ERROR:", e.message);
-  failures.push(e.message);
-} finally {
-  daemon.kill();
-}
 }
 await run();
 console.log(failures.length ? `\n${failures.length} FAILURE(S)` : "\nALL PASS");

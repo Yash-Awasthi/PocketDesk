@@ -4,17 +4,35 @@ import assert from "node:assert/strict";
 import { AdtsReader, rawInput, pulseMonitorSource } from "../src/desktop_audio.js";
 
 test("the pulse capture source is the default sink's monitor, falling back to default", () => {
-  assert.equal(pulseMonitorSource(() => "alsa_output.pci-0000_00_1f.3.analog-stereo\n"), "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor");
-  assert.equal(pulseMonitorSource(() => { throw new Error("pactl missing"); }), "default");
+  assert.equal(
+    pulseMonitorSource(() => "alsa_output.pci-0000_00_1f.3.analog-stereo\n"),
+    "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor",
+  );
+  assert.equal(
+    pulseMonitorSource(() => {
+      throw new Error("pactl missing");
+    }),
+    "default",
+  );
 });
 
 function adts(payload) {
   const len = payload.length + 7;
-  return Buffer.from([0xff, 0xf1, 0x4c, 0x80 | ((len >> 11) & 3), (len >> 3) & 0xff, ((len & 7) << 5) | 0x1f, 0xfc, ...payload]);
+  return Buffer.from([
+    0xff,
+    0xf1,
+    0x4c,
+    0x80 | ((len >> 11) & 3),
+    (len >> 3) & 0xff,
+    ((len & 7) << 5) | 0x1f,
+    0xfc,
+    ...payload,
+  ]);
 }
 
 test("ADTS frames come out whole however the bytes are split", () => {
-  const a = adts(Buffer.from([1, 2, 3])), b = adts(Buffer.from([4, 5]));
+  const a = adts(Buffer.from([1, 2, 3])),
+    b = adts(Buffer.from([4, 5]));
   const r = new AdtsReader();
   const out = [];
   for (const byte of Buffer.concat([a, b])) out.push(...r.push(Buffer.from([byte])));
@@ -39,7 +57,16 @@ test("a half frame waits for the rest instead of being emitted", () => {
 });
 
 test("raw loopback input names ffmpeg's sample format from the helper's header", () => {
-  assert.deepEqual(rawInput({ float: true, rate: 48000, channels: 2 }), ["-f", "f32le", "-ar", "48000", "-ac", "2", "-i", "pipe:0"]);
+  assert.deepEqual(rawInput({ float: true, rate: 48000, channels: 2 }), [
+    "-f",
+    "f32le",
+    "-ar",
+    "48000",
+    "-ac",
+    "2",
+    "-i",
+    "pipe:0",
+  ]);
   assert.equal(rawInput({ float: false, bits: 16, rate: 44100, channels: 2 })[1], "s16le");
   assert.equal(rawInput({ float: false, bits: 24, rate: 48000, channels: 2 })[1], "s24le");
 });

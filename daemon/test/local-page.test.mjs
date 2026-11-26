@@ -17,7 +17,9 @@ const d = spawn(process.execPath, ["src/index.js"], {
 });
 try {
   await new Promise((resolve, reject) => {
-    d.stdout.on("data", (x) => { if (/websocket/.test(String(x))) resolve(); });
+    d.stdout.on("data", (x) => {
+      if (/websocket/.test(String(x))) resolve();
+    });
     setTimeout(() => reject(new Error("daemon did not start")), 30000);
   });
   await new Promise((r) => setTimeout(r, 500));
@@ -27,13 +29,20 @@ try {
   const { token, tls } = JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8"));
   check("the daemon made its own certificate", tls.enabled === true);
 
-  const page = await fetch(`http://127.0.0.1:${PORT + 10}/`).then((r) => r.text()).catch((e) => e.message);
+  const page = await fetch(`http://127.0.0.1:${PORT + 10}/`)
+    .then((r) => r.text())
+    .catch((e) => e.message);
   check("the browser page is served over loopback HTTP", /PocketDesk/.test(page));
 
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT + 10}/ws`, { headers: { origin: `http://localhost:${PORT + 10}` } });
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT + 10}/ws`, {
+    headers: { origin: `http://localhost:${PORT + 10}` },
+  });
   const welcome = await new Promise((resolve) => {
     ws.on("open", () => ws.send(JSON.stringify({ type: "hello", token, name: "PC browser" })));
-    ws.on("message", (m) => { const o = JSON.parse(m); if (o.type === "welcome") resolve(o); });
+    ws.on("message", (m) => {
+      const o = JSON.parse(m);
+      if (o.type === "welcome") resolve(o);
+    });
     ws.on("error", () => resolve(null));
     setTimeout(() => resolve(null), 8000);
   });
@@ -41,9 +50,14 @@ try {
   ws.close();
 
   const proof = await fetch(`http://127.0.0.1:${PORT + 10}/prove?n=abc`).then((r) => r.text());
-  check("the page port proves it holds the token", proof === crypto.createHmac("sha256", token).update("abc").digest("hex"));
+  check(
+    "the page port proves it holds the token",
+    proof === crypto.createHmac("sha256", token).update("abc").digest("hex"),
+  );
 
-  const plain = await fetch(`http://127.0.0.1:${PORT}/`).then(() => "answered").catch(() => "refused");
+  const plain = await fetch(`http://127.0.0.1:${PORT}/`)
+    .then(() => "answered")
+    .catch(() => "refused");
   check("the phone port stays TLS-only", plain === "refused");
 } catch (e) {
   check("local page flow: " + e.message, false);

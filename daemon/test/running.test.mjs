@@ -9,24 +9,48 @@ const pkg = JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.ur
 // ── the pure half, no daemon ──
 const empty = snapshot({ version: "1.2.3", now: 0 });
 check("no sessions by default", empty.sessions.count === 0 && empty.sessions.items.length === 0);
-check("no streams by default", empty.streams.video === 0 && empty.streams.desktop === 0 && empty.streams.audio === 0 && empty.streams.remote === 0);
-check("every policy switch off by default", Object.values(empty.policy).every((v) => v === false));
+check(
+  "no streams by default",
+  empty.streams.video === 0 &&
+    empty.streams.desktop === 0 &&
+    empty.streams.audio === 0 &&
+    empty.streams.remote === 0,
+);
+check(
+  "every policy switch off by default",
+  Object.values(empty.policy).every((v) => v === false),
+);
 check("a missing version reads unknown", snapshot({}).version.daemon === "unknown");
 check("the time is ISO", empty.at === "1970-01-01T00:00:00.000Z");
 
 const built = snapshot({
   version: "9.9.9",
   ports: { daemon: "8941", page: 8951, cli: "abc", usb: undefined },
-  sessions: [{ id: "0123456789abcdef", harnessId: "node", state: "running" }, { id: 7, harnessId: null }],
+  sessions: [
+    { id: "0123456789abcdef", harnessId: "node", state: "running" },
+    { id: 7, harnessId: null },
+  ],
   streams: { video: "2", desktop: 1, audio: 0, remote: 2 },
   policy: { control: true, remote: 1, password: 0, totp: true, recording: false },
   now: 0,
 });
-check("ports are numbers, never NaN", [built.ports.daemon, built.ports.page, built.ports.cli, built.ports.usb].every((n) => Number.isFinite(n)));
+check(
+  "ports are numbers, never NaN",
+  [built.ports.daemon, built.ports.page, built.ports.cli, built.ports.usb].every((n) => Number.isFinite(n)),
+);
 check("a port given as text becomes its number", built.ports.daemon === 8941 && built.ports.cli === 0);
-check("sessions are normalised", built.sessions.count === 2 && built.sessions.items[0].kind === "terminal" && built.sessions.items[1].cwd === "" && built.sessions.items[1].harnessId === "");
+check(
+  "sessions are normalised",
+  built.sessions.count === 2 &&
+    built.sessions.items[0].kind === "terminal" &&
+    built.sessions.items[1].cwd === "" &&
+    built.sessions.items[1].harnessId === "",
+);
 check("streams are counted", built.streams.video === 2 && built.streams.remote === 2);
-check("policy flags are booleans", built.policy.control === true && built.policy.password === false && built.policy.recording === false);
+check(
+  "policy flags are booleans",
+  built.policy.control === true && built.policy.password === false && built.policy.recording === false,
+);
 check("the snapshot carries no credential words", !/token|secret/.test(JSON.stringify(built)));
 check("daemonVersion reads package.json", daemonVersion() === pkg.version);
 
@@ -43,7 +67,10 @@ try {
   c.send({ type: "running_state" });
   const first = await c.next((m) => m.type === "running_state");
   check("daemon version matches package.json", first.version.daemon === pkg.version);
-  check("the live daemon and CLI ports are reported", first.ports.daemon === PORT && first.ports.cli === CLI_PORT);
+  check(
+    "the live daemon and CLI ports are reported",
+    first.ports.daemon === PORT && first.ports.cli === CLI_PORT,
+  );
   check("starts with no sessions", first.sessions.count === 0);
   check("starts with no video streams", first.streams.video === 0);
   check("control is allowed", first.policy.control === true);
@@ -52,7 +79,10 @@ try {
   await c.next((m) => m.type === "created");
   c.send({ type: "running_state" });
   const live = await c.next((m) => m.type === "running_state");
-  check("a live session is listed", live.sessions.count >= 1 && live.sessions.items.some((it) => it.harnessId === "node"));
+  check(
+    "a live session is listed",
+    live.sessions.count >= 1 && live.sessions.items.some((it) => it.harnessId === "node"),
+  );
 
   const script = await fetch(`http://127.0.0.1:${PORT}/ui/running.js`);
   check("the page's script is served", script.status === 200);

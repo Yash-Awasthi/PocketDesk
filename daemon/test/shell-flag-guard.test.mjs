@@ -25,9 +25,11 @@ function scan(dir) {
   const found = [];
   for (const file of walk(dir)) {
     const rel = path.relative(REPO, file).replace(/\\/g, "/");
-    fs.readFileSync(file, "utf8").split("\n").forEach((line, i) => {
-      if (NEEDLE.test(line)) found.push(`${rel}:${i + 1}`);
-    });
+    fs.readFileSync(file, "utf8")
+      .split("\n")
+      .forEach((line, i) => {
+        if (NEEDLE.test(line)) found.push(`${rel}:${i + 1}`);
+      });
   }
   return found;
 }
@@ -36,11 +38,19 @@ const guarded = [...walk(path.join(REPO, "daemon/src")), ...walk(path.join(REPO,
 check(`walked daemon/src and daemon/test (${guarded.length} files)`, guarded.length > 40);
 
 const offenders = scan(path.join(REPO, "daemon/src")).concat(scan(path.join(REPO, "daemon/test")));
-check(`no ${FLAG} outside daemon/scripts/${offenders.length ? " — hit " + offenders.join(" | ") : ""}`, offenders.length === 0);
+check(
+  `no ${FLAG} outside daemon/scripts/${offenders.length ? " — hit " + offenders.join(" | ") : ""}`,
+  offenders.length === 0,
+);
 
 // Explicit exemption: daemon/scripts/ is scanned and counted, never failed on.
 const exempt = scan(path.join(REPO, "daemon/scripts"));
-console.log(`note  daemon/scripts/ exempt area: ${exempt.length} hit(s)${exempt.length ? " — " + exempt.join(", ") : ""}`);
-check("daemon/scripts/ exists and is scanned as the exempt area", fs.existsSync(path.join(REPO, "daemon/scripts")) && Array.isArray(exempt));
+console.log(
+  `note  daemon/scripts/ exempt area: ${exempt.length} hit(s)${exempt.length ? " — " + exempt.join(", ") : ""}`,
+);
+check(
+  "daemon/scripts/ exists and is scanned as the exempt area",
+  fs.existsSync(path.join(REPO, "daemon/scripts")) && Array.isArray(exempt),
+);
 
 finish();

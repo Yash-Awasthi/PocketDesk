@@ -5,7 +5,8 @@ import path from "node:path";
 // Daemons under test keep data in ~/.pocketdesk-<name>test*; every run starts and ends clean.
 function wipeTestData() {
   for (const d of fs.readdirSync(os.homedir())) {
-    if (/^\.pocketdesk-.*test/.test(d)) fs.rmSync(path.join(os.homedir(), d), { recursive: true, force: true });
+    if (/^\.pocketdesk-.*test/.test(d))
+      fs.rmSync(path.join(os.homedir(), d), { recursive: true, force: true });
   }
 }
 

@@ -18,11 +18,17 @@ async function main() {
 
   c.send({ type: "git_status", cwd: REPO });
   const st = await c.next((m) => m.type === "git_status", 20000);
-  check("git_status reports a branch", st.ok === true && typeof st.branch === "string" && Array.isArray(st.files));
+  check(
+    "git_status reports a branch",
+    st.ok === true && typeof st.branch === "string" && Array.isArray(st.files),
+  );
 
   c.send({ type: "git_log", cwd: REPO, limit: 5 });
   const lg = await c.next((m) => m.type === "git_log");
-  check("git_log returns parsed commits", lg.ok === true && lg.commits.length === 5 && !!lg.commits[0].hash && !!lg.commits[0].subject);
+  check(
+    "git_log returns parsed commits",
+    lg.ok === true && lg.commits.length === 5 && !!lg.commits[0].hash && !!lg.commits[0].subject,
+  );
 
   c.send({ type: "git_branches", cwd: REPO });
   const br = await c.next((m) => m.type === "git_branches");
@@ -39,8 +45,12 @@ async function main() {
 
   c.send({ type: "doctor" });
   const doc = await c.next((m) => m.type === "doctor_report", 30000);
-  check("doctor returns named checks", Array.isArray(doc.checks) && doc.checks.length > 0
-    && doc.checks.every((x) => typeof x.name === "string" && typeof x.ok === "boolean"));
+  check(
+    "doctor returns named checks",
+    Array.isArray(doc.checks) &&
+      doc.checks.length > 0 &&
+      doc.checks.every((x) => typeof x.name === "string" && typeof x.ok === "boolean"),
+  );
   if (process.platform === "win32") {
     // Optional console endpoint: absent here (CI has no task), so it reports ok.
     const ce = doc.checks.find((x) => x.name === "console_endpoint");
@@ -49,19 +59,37 @@ async function main() {
 
   c.send({ type: "apps_discover", q: "" });
   const apps = await c.next((m) => m.type === "apps", 60000);
-  check("apps_discover returns entries the panel can act on", apps.items.length > 0
-    && apps.items.every((a) => a.name && a.path && (a.kind === "gui" || a.kind === "cli")));
+  check(
+    "apps_discover returns entries the panel can act on",
+    apps.items.length > 0 &&
+      apps.items.every((a) => a.name && a.path && (a.kind === "gui" || a.kind === "cli")),
+  );
   c.send({ type: "apps_discover", q: "", kind: "gui" });
   const gui = await c.next((m) => m.type === "apps", 60000);
-  check("the app drawer gets every windowed app, none crowded out by PATH tools",
-    gui.items.every((a) => a.kind === "gui") && gui.items.length >= apps.items.filter((a) => a.kind === "gui").length);
+  check(
+    "the app drawer gets every windowed app, none crowded out by PATH tools",
+    gui.items.every((a) => a.kind === "gui") &&
+      gui.items.length >= apps.items.filter((a) => a.kind === "gui").length,
+  );
   // Windows Server (the CI runner) ships no Store apps, so compare against what Windows lists.
-  const storeName = process.platform === "win32" && execFileSync("powershell.exe", ["-NoProfile", "-Command",
-    "(Get-StartApps | Where-Object AppID -like '*!*' | Select-Object -First 1).Name"], { encoding: "utf8" }).trim();
+  const storeName =
+    process.platform === "win32" &&
+    execFileSync(
+      "powershell.exe",
+      [
+        "-NoProfile",
+        "-Command",
+        "(Get-StartApps | Where-Object AppID -like '*!*' | Select-Object -First 1).Name",
+      ],
+      { encoding: "utf8" },
+    ).trim();
   if (storeName) {
     c.send({ type: "apps_discover", q: storeName });
     const store = await c.next((m) => m.type === "apps", 60000);
-    check("Store apps are discovered", store.items.some((a) => a.path.startsWith("shell:AppsFolder\\")));
+    check(
+      "Store apps are discovered",
+      store.items.some((a) => a.path.startsWith("shell:AppsFolder\\")),
+    );
   }
 
   // Only a discovered path may be launched — the panel never invents one.
@@ -75,4 +103,7 @@ async function main() {
   finish();
 }
 
-main().catch((err) => { console.error("TEST ERROR:", err); process.exit(1); });
+main().catch((err) => {
+  console.error("TEST ERROR:", err);
+  process.exit(1);
+});

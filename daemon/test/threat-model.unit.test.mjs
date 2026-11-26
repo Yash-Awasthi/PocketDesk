@@ -46,9 +46,19 @@ function threatSections(text) {
 const sections = threatSections(doc);
 
 test("the seven threat headings exist in the required order", () => {
-  assert.equal(sections.length, THREATS.length, `expected ${THREATS.length} numbered threat sections, found ${sections.length}`);
-  assert.deepEqual(sections.map((s) => s.name.toLowerCase()), THREATS);
-  assert.deepEqual(sections.map((s) => s.number), [1, 2, 3, 4, 5, 6, 7]);
+  assert.equal(
+    sections.length,
+    THREATS.length,
+    `expected ${THREATS.length} numbered threat sections, found ${sections.length}`,
+  );
+  assert.deepEqual(
+    sections.map((s) => s.name.toLowerCase()),
+    THREATS,
+  );
+  assert.deepEqual(
+    sections.map((s) => s.number),
+    [1, 2, 3, 4, 5, 6, 7],
+  );
 });
 
 test("every threat section has exactly Capability today, Control and Residual risk", () => {
