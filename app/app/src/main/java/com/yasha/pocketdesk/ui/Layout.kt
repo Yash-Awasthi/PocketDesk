@@ -12,6 +12,18 @@ internal val MinPaneWidth = 280.dp
 /** Every tappable row action clears this in both directions, at every width. */
 internal val MinTouchTarget = 48.dp
 
+/** The three window width classes, in dp, that decide how every wide screen arranges itself. */
+enum class WidthClass { Compact, Medium, Expanded }
+
+/** 600 dp is where two panes start to fit; 840 dp is where a window holds three. */
+internal val ExpandedMinWidth = 840.dp
+
+fun widthClass(width: Dp): WidthClass = when {
+    width < TwoPaneMinWidth -> WidthClass.Compact
+    width < ExpandedMinWidth -> WidthClass.Medium
+    else -> WidthClass.Expanded
+}
+
 /** How the sessions screen divides its window. */
 enum class SessionPanes {
     /** One column across the whole window. */
@@ -49,9 +61,13 @@ fun sessionsLayout(width: Dp, foldAt: Dp? = null): SessionLayout {
         return if (right > foldAt) SessionLayout(SessionPanes.Confined, foldAt, right, null)
         else SessionLayout(SessionPanes.Confined, 0.dp, foldAt, null)
     }
-    if (width < TwoPaneMinWidth) return SessionLayout(SessionPanes.Single, 0.dp, width, null)
-    val list = (width * 0.4f).coerceIn(MinPaneWidth, 420.dp)
-    return SessionLayout(SessionPanes.SideBySide, 0.dp, list, list)
+    return when (widthClass(width)) {
+        WidthClass.Compact -> SessionLayout(SessionPanes.Single, 0.dp, width, null)
+        else -> {
+            val list = (width * 0.4f).coerceIn(MinPaneWidth, 420.dp)
+            SessionLayout(SessionPanes.SideBySide, 0.dp, list, list)
+        }
+    }
 }
 
 /** At or above this width a tablet can hold the terminal and a key column side by side. */
@@ -105,7 +121,7 @@ fun keysPerRow(keysWidth: Dp): Int = (keysWidth / 56.dp).toInt().coerceAtLeast(1
  */
 fun terminalLayout(width: Dp, foldAt: Dp? = null): TerminalLayout {
     if (foldAt == null) {
-        if (width < TerminalTwoPaneMinWidth) {
+        if (widthClass(width) == WidthClass.Compact || width < TerminalTwoPaneMinWidth) {
             return TerminalLayout(TerminalPanes.Single, 0.dp, width, 0.dp, width, 0.dp, 0.dp, null)
         }
         return TerminalLayout(
@@ -130,5 +146,73 @@ fun terminalLayout(width: Dp, foldAt: Dp? = null): TerminalLayout {
         TerminalLayout(TerminalPanes.Confined, foldAt, right, foldAt, right, foldAt, 0.dp, null)
     } else {
         TerminalLayout(TerminalPanes.Confined, 0.dp, left, 0.dp, left, 0.dp, 0.dp, null)
+    }
+}
+
+/** The control rail beside a tablet desktop: two 48 dp buttons a line with their padding. */
+internal val DesktopRailWidth = 112.dp
+
+/** Below this the desktop picture is too narrow to aim at, so the controls go under it. */
+internal val DesktopMinPictureWidth = 320.dp
+
+/** How the desktop viewer divides its window. */
+enum class DesktopPanes {
+    /** One column: picture on top, controls under it. */
+    Single,
+
+    /** The picture and a control rail, a divider on the boundary between them. */
+    SideBySide,
+
+    /** A hinge too close to an edge leaves one usable side: one column, starting after it. */
+    Confined,
+}
+
+/**
+ * The geometry of a desktop viewer [width] dp wide.
+ *
+ * [railWidth] is 0 when the controls sit under the picture. With a hinge the divider sits on the
+ * fold, so the rail and the picture never straddle it.
+ */
+data class DesktopLayout(
+    val panes: DesktopPanes,
+    val start: Dp,
+    val width: Dp,
+    val pictureStart: Dp,
+    val pictureWidth: Dp,
+    val railStart: Dp,
+    val railWidth: Dp,
+    val boundary: Dp?,
+) {
+    val controlsBeside: Boolean get() = railWidth > 0.dp
+}
+
+fun desktopLayout(width: Dp, foldAt: Dp? = null): DesktopLayout {
+    if (foldAt == null) {
+        if (widthClass(width) == WidthClass.Compact) {
+            return DesktopLayout(DesktopPanes.Single, 0.dp, width, 0.dp, width, 0.dp, 0.dp, null)
+        }
+        val rail = minOf(DesktopRailWidth, width)
+        return DesktopLayout(
+            DesktopPanes.SideBySide, 0.dp, width,
+            0.dp, width - rail,
+            width - rail, rail,
+            width - rail,
+        )
+    }
+    val left = foldAt
+    val right = width - foldAt
+    // The rail takes the right pane when the picture still fits on the left.
+    if (left >= DesktopMinPictureWidth && right >= DesktopRailWidth) {
+        return DesktopLayout(DesktopPanes.SideBySide, 0.dp, width, 0.dp, left, foldAt, DesktopRailWidth, foldAt)
+    }
+    // The rail takes the left pane when it is wide enough and the picture fits on the right.
+    if (right >= DesktopMinPictureWidth && left >= DesktopRailWidth) {
+        val rail = minOf(DesktopRailWidth, left)
+        return DesktopLayout(DesktopPanes.SideBySide, 0.dp, width, foldAt, right, left - rail, rail, foldAt)
+    }
+    return if (right > left) {
+        DesktopLayout(DesktopPanes.Confined, foldAt, right, foldAt, right, foldAt, 0.dp, null)
+    } else {
+        DesktopLayout(DesktopPanes.Confined, 0.dp, left, 0.dp, left, 0.dp, 0.dp, null)
     }
 }
