@@ -5,6 +5,7 @@ local.properties
 *.jks
 *.keystore
 keystore.properties
+pocketdesk.ini
 .cxx/
 .kotlin/
 

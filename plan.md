@@ -260,7 +260,8 @@ commit is byte-identical.
 - [ ] SBOM for the daemon (`cyclonedx`) and the APK; attach to the release. `[P]`
 - [ ] `SHA256SUMS` and a signed tag per release; the release workflow asserts the tag matches `package.json` and `versionName`. `[P]`
 - [ ] GPL compliance check: every released artefact has a source offer and the corresponding source tag. `[P]`
-- [ ] Secret scan (`gitleaks`) plus a test that `keystore.properties`, `*.keystore`, `pocketdesk.ini` never appear in `git ls-files`. `[P]`
+- [x] Secret scan (`gitleaks`) plus a test that `keystore.properties`, `*.keystore`, `pocketdesk.ini` never appear in `git ls-files`. `[P]`
+  verified-here: `cd daemon && node --test test/secrets.unit.test.mjs` -> ALL PASS (12 checks, 431 tracked files); staging a dummy `daemon/test/proof-only.keystore` -> FAILED 1 naming it, staging `daemon/pocketdesk.ini` -> FAILED 1 naming it, both removed -> ALL PASS again. The gitleaks half could not run on this box: `go install github.com/gitleaks/gitleaks/v8` and `npm view` both die on the stopped local proxy (curl exit 7), so the scan is wired in `.github/workflows/secrets.yml` (full history) and the test fails if that workflow or its full-history checkout disappears.
 
 ### M2.4 Browser client tests
 
