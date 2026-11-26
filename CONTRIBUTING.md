@@ -203,14 +203,15 @@ grep -rniE 'invisible to anti-?cheat|invisible to antivirus|RAT heuristics|\bAMS
 ```
 
 Expected output: exactly these five restored lines, in these four files, and
-nothing else -- anything else is a bug:
+nothing else -- anything else is a bug. `grep` prefixes each hit with `:<line>:`, so
+the numbers move as a file grows; the five texts below do not:
 
 ```
-./daemon/src/desktop/capture.js:1564:      // 40-69 = 75%, below = 50%. In-memory JPEG keeps AMSI calm — the
-./daemon/src/desktop_capture.js:8: * Windows AMSI blocks any single script combining SendInput P/Invoke WITH
-./docs/EXCLUSIVE-FULLSCREEN.md:27:must stay invisible to anti-cheat and antivirus (its capture helpers are already written to avoid the
-./docs/EXCLUSIVE-FULLSCREEN.md:28:RAT heuristics AMSI flags). Every other route is the OS saying no.
-./docs/FEATURE-MATRIX.md:112:| **Real desktop control (capture + input)** | rustdesk, anydesk | ✅ `desktop_start/stop/frame/mouse/key/type/quality/status` — Windows PowerShell helpers (warm ~3 fps JPEG capture in-memory to dodge AMSI RAT heuristics + warm SendInput input helper), canvas viewer in the browser tab (click/right-click/wheel/keyboard), watcher-scoped frame feed (no broadcast fan-out), capture loop stops at zero viewers; browser 🖨️ Desktop tab + relay status pill + 🔔 Test-push button |
+./daemon/src/desktop/capture.js:      // 40-69 = 75%, below = 50%. In-memory JPEG keeps AMSI calm — the
+./daemon/src/desktop_capture.js: * Windows AMSI blocks any single script combining SendInput P/Invoke WITH
+./docs/EXCLUSIVE-FULLSCREEN.md:must stay invisible to anti-cheat and antivirus (its capture helpers are already written to avoid the
+./docs/EXCLUSIVE-FULLSCREEN.md:RAT heuristics AMSI flags). Every other route is the OS saying no.
+./docs/FEATURE-MATRIX.md:| **Real desktop control (capture + input)** | rustdesk, anydesk | ✅ `desktop_start/stop/frame/mouse/key/type/quality/status` — Windows PowerShell helpers (warm ~3 fps JPEG capture in-memory to dodge AMSI RAT heuristics + warm SendInput input helper), canvas viewer in the browser tab (click/right-click/wheel/keyboard), watcher-scoped frame feed (no broadcast fan-out), capture loop stops at zero viewers; browser 🖨️ Desktop tab + relay status pill + 🔔 Test-push button |
 ```
 
 `plan.md`, `docs/INTEGRITY.md` and this file are exempt because naming the
