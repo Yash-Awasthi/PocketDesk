@@ -241,6 +241,8 @@ fun DesktopScreen(
     val transfer = remember { DesktopTransfer() }
     DesktopClipboardSync(ws, transfer)
     val sendFiles = rememberSendFiles(ws, transfer)
+    // clippy state (running, data folder, recent Ctrl+C captures) for the menu.
+    LaunchedEffect(ws.targetOs) { if (ws.targetOs == "win32") ws.clippyStatus() }
 
     // A keyboard attached to the phone types straight into the PC, with keys held as long as they are held here.
     val keyFocus = remember { FocusRequester() }
@@ -280,6 +282,7 @@ fun DesktopScreen(
                 }
                 var more by remember { mutableStateOf(false) }
                 var power by remember { mutableStateOf<String?>(null) }
+                var clippyOpen by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { more = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
                     androidx.compose.material3.DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
@@ -313,11 +316,22 @@ fun DesktopScreen(
                                 calNote = "Pointer calibration removed for this screen."
                             }
                         }
+                        if (ws.targetOs == "win32") {
+                            androidx.compose.material3.HorizontalDivider()
+                            // clippy recovers Ctrl+C text from games that keep their own clipboard.
+                            Item(if (ws.clippy.running) "Clippy: recording (stop)" else "Clippy: off (start)") {
+                                if (ws.clippy.running) ws.clippyStop() else ws.clippyStart()
+                            }
+                            Item(if (ws.clippy.installed) "Clippy captures (${ws.clippy.history.size})" else "Clippy: install recorder…") {
+                                if (ws.clippy.installed) { clippyOpen = true; ws.clippyStatus(); ws.clippyLatest() } else ws.clippyInstall()
+                            }
+                        }
                         androidx.compose.material3.HorizontalDivider()
                         POWER_ACTIONS.forEach { (a, l) -> Item(l) { power = a } }
                     }
                 }
                 power?.let { PowerConfirmDialog(ws, it) { power = null } }
+                if (clippyOpen) ClippyDialog(ws) { clippyOpen = false }
             }
         }
         // Fullscreen is the picture alone: no bars, notices or keyboard, only the two overlay buttons.
@@ -817,4 +831,51 @@ private fun ShortcutBar(ws: WsClient) {
             }
         }
     }
+}
+
+/**
+ * Recent clippy captures, newest first. A game's Ctrl+C never reaches Windows, so the
+ * typed buffer is what gets pasted; the system clipboard is only the fallback.
+ */
+@Composable
+private fun ClippyDialog(ws: WsClient, onClose: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Clippy captures") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    if (ws.clippy.running) "Recording Ctrl+C. Folder: ${ws.clippy.dir}"
+                    else "Not recording. Start it here, then press Ctrl+C in the game.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (ws.clippy.history.isEmpty()) {
+                    Text("No captures yet. Typed text in the game is kept even when its copy stays in the game.",
+                        style = MaterialTheme.typography.bodySmall)
+                } else {
+                    LazyColumn(Modifier.heightIn(max = 340.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(ws.clippy.history.reversed()) { cap ->
+                            val body = cap.body
+                            Column {
+                                Text(
+                                    (cap.window.ifBlank { "PC" }) + " · " + cap.body.length + " chars",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    maxLines = 1,
+                                )
+                                Text(body.take(160) + if (body.length > 160) "…" else "",
+                                    style = MaterialTheme.typography.bodySmall, maxLines = 3)
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    TextButton(onClick = { ws.clippyPaste(false, cap.at) }) { Text("To PC clipboard") }
+                                    TextButton(onClick = { ws.clippyPaste(true, cap.at) }) { Text("Paste") }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Close") } },
+        dismissButton = { TextButton(onClick = { ws.clippyStatus() }) { Text("Refresh") } },
+    )
 }

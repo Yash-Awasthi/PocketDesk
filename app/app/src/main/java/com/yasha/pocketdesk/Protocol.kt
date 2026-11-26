@@ -134,6 +134,20 @@ data class PcClip(val kind: String, val text: String?, val png: String?, val fil
 /** A screen the PC can show: itself, a phone on it, another PC, or one of that PC's own (id "pc:<id>/adb:<serial>"). */
 data class DesktopSource(val id: String, val name: String, val os: String?, val kind: String, val online: Boolean)
 
+/** One Ctrl+C seen by clippy: what was typed since the last capture, and the system clipboard. */
+data class ClippyCapture(val window: String, val text: String, val typed: String, val at: String) {
+    /** The text worth pasting: the typed buffer first, because a game's copy may never reach Windows. */
+    val body: String get() = typed.ifBlank { text }
+}
+
+/** clippy state as the daemon reports it. */
+data class ClippyState(
+    val running: Boolean = false,
+    val installed: Boolean = false,
+    val dir: String = "",
+    val history: List<ClippyCapture> = emptyList(),
+)
+
 /** The PC pointer in picture pixels; [shape] is a CSS cursor name such as "arrow" or "text". */
 data class DesktopCursor(val x: Int, val y: Int, val shape: String, val fx: Double? = null, val fy: Double? = null)
 
@@ -304,6 +318,16 @@ object Proto {
         if (press != null) put("press", press)
     }
     fun desktopType(text: String) = obj { put("type", "desktop_type"); put("text", text) }
+    // clippy: Ctrl+C capture from apps whose copy never reaches the Windows clipboard.
+    fun clippyStart() = obj { put("type", "clippy_start") }
+    fun clippyStop() = obj { put("type", "clippy_stop") }
+    fun clippyStatus() = obj { put("type", "clippy_status") }
+    fun clippyInstall() = obj { put("type", "clippy_install") }
+    fun clippySetDir(dir: String) = obj { put("type", "clippy_setdir"); put("dir", dir) }
+    fun clippyLatest() = obj { put("type", "clippy_latest") }
+    fun clippyPaste(paste: Boolean, at: String? = null) = obj {
+        put("type", "clippy_paste"); if (paste) put("paste", true); if (at != null) put("at", at)
+    }
     fun remoteMove(dx: Float, dy: Float) = obj { put("type", "remote_input"); put("kind", "move"); put("dx", dx); put("dy", dy) }
     fun remoteClick(button: String) = obj { put("type", "remote_input"); put("kind", "click"); put("button", button) }
     fun remotePress(button: String, down: Boolean) = obj { put("type", "remote_input"); put("kind", "press"); put("button", button); put("press", if (down) "down" else "up") }
