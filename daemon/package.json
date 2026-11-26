@@ -11,6 +11,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "cold-start": "node scripts/cold-start.mjs",
     "setup-tls": "node scripts/gen-cert.js",
     "lint": "eslint .",
     "format:check": "prettier --check .",
