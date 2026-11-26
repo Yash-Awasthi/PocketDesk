@@ -32,6 +32,8 @@ median is printed next to it for context. If runner variance ever makes the wors
 documented fallback is to gate on the median at the same 400 ms and keep printing the worst; that
 is a deliberate change to make in one place (`main` in `scripts/measure-startup.mjs`), not a
 silent retry.
+The gate is advisory until row 311 ticks: the CI step runs with `continue-on-error`, so the
+numbers print and the job stays green, and removing that flag is the last step of that row.
 
 ## Where the time goes
 
