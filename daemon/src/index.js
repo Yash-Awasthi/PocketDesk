@@ -12,6 +12,7 @@ const COMMANDS = new Set([
   "stop",
   "status",
   "doctor",
+  "policy",
   "--status",
   "version",
   "--version",

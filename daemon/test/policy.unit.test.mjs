@@ -184,6 +184,105 @@ try {
       lines.some((l) => l.startsWith("AllowWebcam: on")),
     );
   }
+  // 11. `pocketdesk policy`: inspect writes nothing, set/reset per key, and the admin gate.
+  const { runPolicy, USAGE } = await import("../src/policy_cli.js");
+  regDeleteAll();
+  fs.rmSync(json, { force: true });
+  {
+    const r = runPolicy([], { admin: false });
+    check(
+      "policy prints one line per key",
+      r.code === 0 &&
+        r.out.length === policy.POLICY_KEYS.length &&
+        policy.POLICY_KEYS.every((k) => r.out.some((l) => l.startsWith(k + ":"))),
+    );
+    check("policy inspect creates no policy.json", !fs.existsSync(json));
+  }
+  {
+    const r = runPolicy(["set", "AllowWebcam", 0], { admin: false });
+    const text = r.out.join(" ");
+    check("a non-admin set is refused with the reason", r.code === 1 && /administrator/.test(text));
+    check(
+      "the refused set wrote nothing",
+      !fs.existsSync(json) && policy.registryValues().AllowWebcam === undefined,
+    );
+    const rr = runPolicy(["reset", "all"], { admin: false });
+    check("a non-admin reset is refused too", rr.code === 1 && /nothing was written/.test(rr.out.join(" ")));
+  }
+  for (const name of policy.POLICY_KEYS) {
+    const set = runPolicy(["set", name, "0"], { admin: true });
+    check(
+      `policy set ${name} 0 writes both stores`,
+      set.code === 0 &&
+        policy.currentPolicy({ fresh: true })[name].allowed === false &&
+        policy.jsonValues()[name] === 0 &&
+        policy.registryValues()[name] === 0,
+    );
+    const reset = runPolicy(["reset", name], { admin: true });
+    check(
+      `policy reset ${name} turns it back on`,
+      reset.code === 0 &&
+        policy.currentPolicy({ fresh: true })[name].allowed === true &&
+        !(name in policy.jsonValues()) &&
+        policy.registryValues()[name] === undefined,
+    );
+  }
+  runPolicy(["set", "AllowWebcam", "0"], { admin: true });
+  runPolicy(["set", "AllowClipboard", "0"], { admin: true });
+  {
+    const r = runPolicy(["reset", "all"], { admin: true });
+    check(
+      "policy reset all clears every key",
+      r.code === 0 &&
+        policy.POLICY_KEYS.every((k) => policy.currentPolicy({ fresh: true })[k].allowed) &&
+        Object.keys(policy.jsonValues()).length === 0,
+    );
+  }
+  {
+    const bad = runPolicy(["set", "AllowEverything", "0"], { admin: true });
+    check("policy set refuses an unknown key", bad.code === 1 && /not a policy key/.test(bad.out.join(" ")));
+    const seven = runPolicy(["set", "AllowWebcam", "7"], { admin: true });
+    check(
+      "policy set refuses a value other than 0 or 1",
+      seven.code === 1 && /must be 0 or 1/.test(seven.out.join(" ")),
+    );
+    const usage = runPolicy(["frobnicate"], { admin: true });
+    check("policy names its usage", usage.code === 1 && usage.out.includes(USAGE));
+  }
+  // The real entrypoint: index.js routes "policy", and a non-elevated shell is refused end to end.
+  regDeleteAll();
+  fs.rmSync(json, { force: true });
+  {
+    const daemonDir = path.resolve(import.meta.dirname, "..");
+    const run = (args) => {
+      try {
+        return {
+          code: 0,
+          out: execFileSync(process.execPath, ["src/index.js", ...args], {
+            cwd: daemonDir,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+          }),
+        };
+      } catch (e) {
+        return { code: e.status ?? -1, out: `${e.stdout || ""}${e.stderr || ""}` };
+      }
+    };
+    const inspect = run(["policy"]);
+    check(
+      "the real CLI prints the policy and exits 0",
+      inspect.code === 0 && policy.POLICY_KEYS.every((k) => inspect.out.includes(k + ":")),
+    );
+    if (policy.isAdmin()) {
+      console.log("note: this shell is elevated, so the end-to-end refusal cannot be shown here");
+    } else {
+      const refused = run(["policy", "set", "AllowWebcam", "0"]);
+      check(
+        "the real CLI refuses set without admin",
+        refused.code === 1 && /administrator/.test(refused.out) && !fs.existsSync(json),
+      );
+    }
+  }
 } finally {
   cleanup();
 }

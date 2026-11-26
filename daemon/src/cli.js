@@ -1,5 +1,5 @@
 // pocketdesk list | new [--cwd DIR] [tool] | attach ID | send ID KEYS... | read ID | resize ID COLS ROWS | kill ID
-//            pair | record on|off | stop
+//            pair | record on|off | stop | policy [set KEY 0|1 | reset [KEY|all]]
 // Talks to the daemon on 127.0.0.1; the terminals are the same ones the phone and the browser watch.
 import fs from "node:fs";
 import os from "node:os";
@@ -339,6 +339,11 @@ if (cmd === "--version" || cmd === "version") {
   console.log(`expected: ${c.expected}`);
   console.log(`compat: ${c.installed ? (c.ok ? "ok" : "mismatch") : "unknown"}`);
   process.exit(c.installed && c.ok ? 0 : 1);
+} else if (cmd === "policy") {
+  const { runPolicy } = await import("./policy_cli.js");
+  const r = runPolicy([id, ...rest]);
+  for (const line of r.out) console.log(line);
+  process.exit(r.code);
 } else if (cmd === "stop") {
   await stop();
 } else if (cmd === "record") {

@@ -446,7 +446,8 @@ re-shoot.
 - [x] Policy store: `HKLM\SOFTWARE\PocketDesk\Policy` plus `C:\ProgramData\PocketDesk\policy.json`, keys `AllowRemoteControl`, `AllowWebcam`, `AllowPhoneControl`, `AllowClipboard`. `[E]`
   verified-here: `cd daemon && node --test test/policy.unit.test.mjs` -> 55 checks ALL PASS; the store reads a real HKCU key through reg query plus a policy.json, both stores set to 1 leave a key on, and either store set to 0 turns it off with the source named
 - [ ] Enforce before any remote sense starts; refuse with a visible `disabled_by_policy` reason naming the key, and log the refusal. `[E]`
-- [ ] `pocketdesk policy` to set, inspect and reset, admin-only, with a test per key. `[E]`
+- [x] `pocketdesk policy` to set, inspect and reset, admin-only, with a test per key. `[E]`
+  verified-here: cd daemon && node --test test/policy.unit.test.mjs -> ALL PASS. New checks: inspect prints four lines and creates no policy.json; a non-admin set or reset is refused with the administrator reason and writes nothing; set and reset work for each of the four keys through both stores; reset all clears them; an unknown key and a value of 7 are refused; and `node src/index.js policy` prints the four keys and refuses `set` in a non-elevated shell. A `git archive HEAD` extract with the new files runs the same suite against HEAD's policy.js, so the command does not depend on any uncommitted store change.
 - [ ] Lab recipe in `docs/`: set policy, verify with `--status`, hand the machine to a candidate. `[E]`
 - [ ] Marked remote senses: virtual webcam off by default, watermark with phone name and UTC clock; phone-control notification non-dismissible while attached. `[E]`
 - [ ] Decide the console endpoint's fate (drop from public builds, or admin-only with an audit line per input event) — see Appendix A. `[E]`
