@@ -445,8 +445,8 @@ transport docs describe a design that has moved.
 
 - [x] Connection surface for all seven agent CLIs: all seven installed, versions and help captured, one real qwen turn through Groq parsed by the existing parser. `[D]`
   verified-here: docs/transcripts/manifest.json is the versions table (claude-code 2.1.332, codex 0.172.0, gemini 0.71.1, qwen 0.28.6, opencode 1.19.6, copilot 1.0.116, cline 3.0.76); the 21 files at docs/transcripts/<agent>/{version,help,print}.txt; docs/transcripts/qwen/real-turn.jsonl holds a real thinking block, a real tool_use glob {"pattern":"*.md"} and its tool_result; node daemon/test/transcripts.test.mjs -> ALL PASS
-- [ ] Real assistant turns per agent: one genuine turn captured for each of the remaining six. `[D]`
-  limits: only qwen has a provider key (Groq); claude/codex/gemini/opencode/copilot/cline each need their own provider key and none is available.
+- [ ] Real assistant turns per agent, parked: Claude Code, Codex, Gemini, OpenCode, Copilot and Cline each need their own provider credentials, and none will be supplied. `[D]`
+  limits: qwen is the only real turn captured, through a Groq key, and it is committed at docs/transcripts/qwen/real-turn.jsonl with its second turn failing upstream; the other six CLIs are installed and their version/help captures are parse-tested, but no assistant turn exists for them by design, not by oversight.
 - [x] Unknown-field tolerance: a new field in a stream must not break parsing; test with a synthetic augmented transcript. `[D]`
   verified-here: cd daemon && node --test test/stream-unknown-fields.test.mjs -> ALL PASS (27 checks); unknown fields survive in raw, typed output and stats unchanged
 - [x] Tool-call correlation: assert start/result pairing under interleaved and cancelled turns. `[D]`
