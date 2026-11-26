@@ -714,15 +714,17 @@ endpoint's architecture, and the manual checks that never ran.
 ### Console (SYSTEM / secure-desktop) endpoint — architecture
 
 - Purpose: reach the lock screen, a UAC prompt and the pre-login desktop from the phone.
-- Shape: a C# launcher (`daemon/scripts/console/PocketDeskConsole.cs`, 207 lines) installed as
+- Shape: a C# launcher (`daemon/scripts/console/PocketDeskConsole.cs`) installed as
   the scheduled task `PocketDeskConsole`, running as SYSTEM on port **8766**; the ordinary
   user daemon stays on **8765** and still cannot approve UAC.
 - Env: `RH_CONSOLE` (console mode), `RH_LABEL` (the second pairing entry's name), `RH_HOME`.
   `IS_CONSOLE` is read at module load, so tests must drive it through a subprocess.
 - Wiring that exists: `install-service.ps1 -Console` (elevated), `uninstall-service.ps1`,
   root `install.ps1`, and a `doctor` check that reports the task registered/daemon down.
-- Docs still to write: a "Console access" section in `docs/SETUP-PC.md` and the console module
-  in `CONTEXT.md` (new module, ports 8765/8766, the three envs, the scheduled-task launcher).
+- Docs: `docs/SETUP-PC.md` "Console access" (line 59) carries the elevated install, port 8766,
+  the token path, `console-audit.log` and the full-system-rights trade-off; `CONTEXT.md` (lines
+  55-56, 61-65) carries the console module, ports 8765/8766 and the `RH_CONSOLE`/`RH_LABEL`/`RH_HOME`
+  table.
 
 ### Manual checks that have never run (needs one elevated session on real hardware)
 
