@@ -42,6 +42,8 @@ jobs:
         run: for f in $(git ls-files 'src/*.js' 'scripts/*.js' 'scripts/*.mjs'); do node --check "$f" || exit 1; done
       - name: Lint and format check
         run: npm run check
+      - name: Type check (JSDoc)
+        run: npm run typecheck
       - name: Compile the Windows launchers
         if: runner.os == 'Windows'
         shell: pwsh
