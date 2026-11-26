@@ -349,6 +349,7 @@ transport docs describe a design that has moved.
   verified-here: node test/manifest-platform.unit.test.mjs -> 10 pass, 0 fail; node src/cli.js agent compat claude -> installed: yes, compat: ok
 - [x] Stream adapter versioning: a per-agent fixture set captured from the installed CLI version; a mismatch warns instead of silently mis-parsing. `[W]`
   verified-here: cd daemon && node test/chat-adapters.unit.test.mjs -> ALL PASS, 0 failures; streamVersionStatus demo -> warn 0.56.0, refuse 3.0.0, unknown nightly; eslint + prettier --check clean
+  also: the seven fixtures are synthetic (produced: synthetic, one note per file) - none of the agent CLIs is installed on this machine, so the versions are the parser's target versions, not captured runs; the warn/refuse path is proven with the synthetic set
 - [x] Session recording: opt-in, local-only, replayable in the phone (as text, not video), with a retention cap. `[W]`
   verified-here: `cd daemon && node test/recordings.test.mjs` -> ALL PASS, 0 failing; demo prints replay text and prune before/after; eslint + prettier --check clean
 - [ ] Git panel: stage, commit, branch, diff view with the same proposal/approval gate as agent actions. `[W]`
