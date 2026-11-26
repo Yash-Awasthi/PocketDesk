@@ -246,7 +246,7 @@ commit is byte-identical.
 ### M2.2 Lint and format for JavaScript
 
 - [x] The daemon has no linter; add ESLint (flat config) + Prettier, blocking, with `node --check` kept as the cheap first gate. `[P]`
-  verified-here: `cd daemon && npx eslint .` -> exit 0 with no disable comments; `npx prettier --check .` -> All matched files use Prettier code style!; `node --check` on 101 src+scripts files -> 0 failed; `npm run lint && npm run format:check` -> both exit 0.
+  verified-here: `cd daemon && npx eslint .` -> exit 0 with no disable comments; `npx prettier --check .` -> All matched files use Prettier code style!; `node --check` on 101 src+scripts files -> 0 failed; `npm run lint && npm run format:check` -> both exit 0. The generated daemon/README.md stays out of Prettier: its protocol table is produced by scripts/gen-protocol-doc.mjs and table padding would desync protocol-doc.test.mjs.
 - [ ] Add `--experimental-strip-types`-free JSDoc types and `tsc --checkJs --noEmit` on `src/` with a per-file allowlist that shrinks. `[P]`
 - [x] Ban `child_process.exec` with interpolated strings; allow only `execFile`/spawn with an argv array. `[P]`
   verified-here: cd daemon && node --test test/child-process-guard.test.mjs -> ALL PASS (7 checks); reintroducing execSync(`echo ${x}`) FAILs naming the file
