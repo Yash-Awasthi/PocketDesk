@@ -49,7 +49,13 @@ async function main() {
 
   // Must be set before the registry module is evaluated.
   process.env.RH_MANIFESTS = tmp;
-  const { guiPath, launchGui, list, scanAll } = await import("../src/registry.js");
+  const { guiPath, launchGui, list, scanAll, validateManifest } = await import("../src/registry.js");
+
+  const validDrop = validateManifest(
+    JSON.parse(fs.readFileSync(path.join(tmp, "fake-ide.json"), "utf8")),
+    "fake-ide.json",
+  );
+  check("a dropped-in manifest validates with no errors", validDrop.errors.length === 0);
 
   await scanAll(() => {});
   const byId = Object.fromEntries(list().map((r) => [r.manifest.id, r]));
@@ -214,6 +220,13 @@ async function main() {
     createErr.message.startsWith("not a discovered tool"),
   );
   await c.close();
+
+  // A bad drop-in must be reported by name, not silently skipped.
+  const badDrop = path.join(tmp, "bad-dropin.json");
+  fs.writeFileSync(badDrop, JSON.stringify({ name: "No Id", adapter: "terminal", bin: "x" }));
+  const badResult = validateManifest(JSON.parse(fs.readFileSync(badDrop, "utf8")), "bad-dropin.json");
+  check("a bad drop-in names the missing id", badResult.errors.includes("bad-dropin.json: id: required"));
+
   await teardown(tmp);
 
   if (failureCount()) {

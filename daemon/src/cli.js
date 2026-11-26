@@ -278,6 +278,67 @@ if (cmd === "--version" || cmd === "version") {
     );
   }
   process.exit(report.ok ? 0 : 1);
+} else if (cmd === "manifests") {
+  if (id !== "validate") fail("manifests: say validate [file|dir]");
+  const { validateManifest, builtinDir } = await import("./registry.js");
+  const target = rest[0] || builtinDir;
+  if (!fs.existsSync(target)) fail(`manifests validate: no such file or directory: ${target}`);
+  const files = fs.statSync(target).isDirectory()
+    ? fs
+        .readdirSync(target)
+        .filter((f) => f.endsWith(".json"))
+        .sort()
+        .map((f) => path.join(target, f))
+    : [target];
+  let bad = 0;
+  for (const file of files) {
+    const name = path.basename(file);
+    let m;
+    try {
+      m = JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch (e) {
+      console.error(`${name}: json: ${e.message}`);
+      bad++;
+      continue;
+    }
+    const r = validateManifest(m, name);
+    // A warning never fails the run; an error does.
+    for (const w of r.warnings) console.error(w);
+    for (const e of r.errors) console.error(e);
+    if (!r.ok) bad++;
+  }
+  if (bad) {
+    console.error(`manifests validate: ${bad} manifest(s) with problems`);
+    process.exit(1);
+  }
+  console.log(`ok: ${files.length} manifest(s)`);
+} else if (cmd === "agent") {
+  if (id !== "compat") fail("agent: say compat <id>");
+  const agentId = need(rest[0], "agent id");
+  const { loadManifests, registry, versionProbe, checkCompat, guiPath } = await import("./registry.js");
+  loadManifests();
+  const m = registry.get(agentId);
+  if (!m) fail(`agent compat: unknown agent: ${agentId}`);
+  console.log(`agent: ${agentId}`);
+  if (m.adapter === "gui") {
+    const p = guiPath(m);
+    const exists = Boolean(p && fs.existsSync(p));
+    console.log(`installed: ${exists ? "yes" : "no"}`);
+    console.log("version: not installed");
+    if (p) console.log(`path: ${p}`);
+    console.log(`found: ${exists ? p : "none"}`);
+    console.log(`expected: ${m.compat?.minVersion || "any"}`);
+    console.log("compat: unknown");
+    process.exit(exists ? 0 : 1);
+  }
+  const probe = await versionProbe(m);
+  const c = checkCompat(m, probe.code === 0 ? probe.out : "");
+  console.log(`installed: ${c.installed ? "yes" : "no"}`);
+  console.log(`version: ${c.version}`);
+  console.log(`found: ${c.found}`);
+  console.log(`expected: ${c.expected}`);
+  console.log(`compat: ${c.installed ? (c.ok ? "ok" : "mismatch") : "unknown"}`);
+  process.exit(c.installed && c.ok ? 0 : 1);
 } else if (cmd === "stop") {
   await stop();
 } else if (cmd === "record") {

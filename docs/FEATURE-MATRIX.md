@@ -299,6 +299,15 @@ error payload that the old assertion could not tell from an empty result. Tests:
 gui-manifests.test.mjs (19 checks incl. a real detached launch and the `gui_open` round
 trip) + ProtocolTest.kt (6); full daemon suite 326 PASS, Gradle 20 tests / 0 failures.
 
+Manifest registry tooling (2026-11-26): an entry is added by dropping JSON into
+`daemon/manifests`, `$RH_MANIFESTS`, or `~/.pocketdesk/manifests`; a user file overrides a
+built-in with the same id. `pocketdesk manifests validate [file|dir]` checks the built-in set
+or a given file/folder and prints one line per problem as `<file>: <field>: <message>`; unknown
+top-level keys are warnings and do not fail the exit. `pocketdesk agent compat <id>` runs that
+entry's `bin --version` once and prints `agent`, `installed`, `version`, `found`, `expected`
+and `compat: ok|mismatch|unknown`; a version below `compat.minVersion` is a mismatch, and GUI
+entries report the expanded path because they have no version probe.
+
 Transports made real (2026-09-22): the six surfaces that were in-memory
 bookkeeping now carry real traffic, and each one's test asserts the real
 behaviour rather than the simulation.
