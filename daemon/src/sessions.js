@@ -26,6 +26,8 @@ const IS_WIN = process.platform === "win32";
 
 const SCROLLBACK = 100_000;
 const MAX_SESSIONS = 50; // guard against unbounded session growth
+const MAX_PENDING_INPUT = 8; // inputs held for a session that is coming back, oldest dropped first
+const DEAD_SESSION_TTL_MS = 5 * 60_000; // keep dead sessions for 5 min for replay and their queue
 const REAP_INTERVAL_MS = 60_000; // sweep dead sessions every 60s
 const MAX_CHUNKS = 2_000; // per-session chunk ring for missed-output backfill
 // Live sessions idle longer than this are killed (minutes; 0/env RH_IDLE_KILL_MINUTES disables).
@@ -51,7 +53,6 @@ function startReaper() {
 
 function _reap() {
   const now = Date.now();
-  const DEAD_SESSION_TTL_MS = 5 * 60_000; // keep dead sessions for 5 min for replay
   let reaped = 0;
   for (const [id, s] of sessions) {
     if (s.exitCode !== null && s.endedAt && now - s.endedAt > DEAD_SESSION_TTL_MS) {
@@ -125,27 +126,42 @@ export function create({ harnessId, bin, cwd, args = [] }, broadcast) {
   // directly (node-pty cannot run cmd.exe there).
   if (harnessId === "claude") args = [...args, ...toolApproval.claudeArgs()];
   const env = harnessId === "claude" ? { ...process.env, ...toolApproval.env(id) } : process.env;
-  const proc = IS_WIN
-    ? pty.spawn("cmd.exe", ["/c", bin, ...args], { name: "xterm-256color", ...pcSize, cwd: dir, env })
-    : pty.spawn(bin, args, { name: "xterm-256color", ...pcSize, cwd: dir, env });
   const s = {
     id,
     harnessId,
     cwd: dir,
+    bin,
+    args,
+    env,
     ...pcSize,
-    pty: proc,
+    pty: null,
     decoder: new StringDecoder("utf8"),
     scrollback: "",
     chunks: [],
     seq: 0,
     bytes: 0,
     subs: new Set(),
+    pending: [],
     exitCode: null,
     lastActivity: Date.now(),
   };
+  spawnPty(s, broadcast);
   sessions.set(id, s);
   sessionEvents.emit("create", { id, harnessId: s.harnessId, cwd: dir });
-  proc.onData((data) => {
+  return { id, harnessId, cwd: dir };
+}
+
+/** Spawns the session's command and wires its output; resume() calls it again for the same session. */
+function spawnPty(s, broadcast) {
+  const { cols, rows, cwd, env, bin, args } = s;
+  s.pty = IS_WIN
+    ? pty.spawn("cmd.exe", ["/c", bin, ...args], { name: "xterm-256color", cols, rows, cwd, env })
+    : pty.spawn(bin, args, { name: "xterm-256color", cols, rows, cwd, env });
+  s.decoder = new StringDecoder("utf8");
+  s.exitCode = null;
+  delete s.endedAt;
+  s.lastActivity = Date.now();
+  s.pty.onData((data) => {
     s.bytes += Buffer.byteLength(data);
     const text = s.decoder.write(Buffer.from(data));
     if (!text) return;
@@ -154,18 +170,38 @@ export function create({ harnessId, bin, cwd, args = [] }, broadcast) {
     s.seq++;
     s.chunks.push({ seq: s.seq, text });
     if (s.chunks.length > MAX_CHUNKS) s.chunks.shift();
-    sessionEvents.emit("output", { id, text });
-    for (const ws of s.subs) send(ws, { type: "out", id, seq: s.seq, data: b64(text) });
+    sessionEvents.emit("output", { id: s.id, text });
+    for (const ws of s.subs) send(ws, { type: "out", id: s.id, seq: s.seq, data: b64(text) });
   });
-  proc.onExit(({ exitCode }) => {
+  s.pty.onExit(({ exitCode }) => {
     s.exitCode = exitCode;
     s.endedAt = Date.now();
     s.decoder.end();
-    sessionEvents.emit("exit", { id, code: exitCode });
-    broadcast({ type: "exit", id, code: exitCode });
+    sessionEvents.emit("exit", { id: s.id, code: exitCode });
+    broadcast({ type: "exit", id: s.id, code: exitCode });
     s.subs.clear();
   });
-  return { id, harnessId, cwd: dir };
+  // Whatever a reply queued while the session was down goes in as soon as a process exists.
+  for (const text of s.pending.splice(0)) s.pty.write(text);
+}
+
+/**
+ * Puts a recently exited session's command back on a fresh PTY under the same id, then
+ * delivers the inputs queued while it was down. Nothing in the ws protocol calls this yet:
+ * the queue is here so a reply that lands just after the agent exits is kept instead of
+ * thrown away, for the resume that follows.
+ */
+export function resume(id, broadcast = () => {}) {
+  const s = sessions.get(id);
+  if (!s || s.exitCode === null) return false;
+  if (Date.now() - (s.endedAt ?? 0) > DEAD_SESSION_TTL_MS) return false;
+  try {
+    spawnPty(s, broadcast);
+  } catch {
+    return false;
+  }
+  sessionEvents.emit("resumed", { id });
+  return true;
 }
 
 export function get(id) {
@@ -215,7 +251,15 @@ export function detach(ws, id) {
 
 export function write(id, text) {
   const s = sessions.get(id);
-  if (!s || s.exitCode !== null) return false;
+  if (!s) return false;
+  if (s.exitCode !== null) {
+    // A reply can land just after the PTY exits. Hold it, bounded, until resume() puts a
+    // process back; a session past the reaper's TTL takes nothing.
+    if (Date.now() - (s.endedAt ?? 0) > DEAD_SESSION_TTL_MS) return false;
+    s.pending.push(text);
+    if (s.pending.length > MAX_PENDING_INPUT) s.pending.shift();
+    return true;
+  }
   s.lastActivity = Date.now();
   s.pty.write(text);
   return true;
