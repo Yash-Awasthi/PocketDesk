@@ -15,6 +15,7 @@ import {
   check,
   finish,
   makeTmp,
+  openAndHello,
   startDaemon,
   teardown,
   waitForHealth,
@@ -124,7 +125,11 @@ function getWithHost(port, host) {
 const port = await freePort();
 const cliPort = await freePort();
 const tmp = makeTmp("rh-readiness-");
-const daemon = startDaemon(port, cliPort, { token: "ready-token", manifests: tmp });
+const daemon = startDaemon(port, cliPort, {
+  token: "ready-token",
+  manifests: tmp,
+  env: { RH_TEST_THROW: "1" },
+});
 try {
   await daemon.ready;
   const health = await waitForHealth(port, 30_000);
@@ -159,6 +164,48 @@ try {
     gated.body,
   );
   console.log("loopback /health -> " + JSON.stringify(health));
+
+  // A clean start names no error. Then a handler that throws on purpose, through the env-gated hook,
+  // must reach /health scrubbed of the token it carried.
+  check(
+    "a clean start reports no last error",
+    health.lastError === null && health.lastErrorScope === null,
+    JSON.stringify({ lastError: health.lastError, lastErrorScope: health.lastErrorScope }),
+  );
+  const SECRET = "s3cr3t-abc123";
+  const client = await openAndHello(port, "ready-token");
+  client.send({ type: "__throw", message: "handler blew up, token=" + SECRET });
+  const reply = await client.next((m) => m.type === "error");
+  check(
+    "a throwing handler answers with an error frame",
+    reply.type === "error" && /^handler error: /.test(String(reply.message)),
+    String(reply.message),
+  );
+  const afterThrow = await waitForHealth(port, 5_000);
+  check(
+    "loopback health names the last handler error and its scope",
+    afterThrow.lastErrorScope === "daemon" && String(afterThrow.lastError ?? "").includes("handler blew up"),
+    JSON.stringify(afterThrow),
+  );
+  check(
+    "the stored error is scrubbed of the token it carried",
+    String(afterThrow.lastError ?? "").includes("token=<redacted>") &&
+      !String(afterThrow.lastError ?? "").includes(SECRET),
+    String(afterThrow.lastError ?? ""),
+  );
+
+  client.send({ type: "__throw", message: "second failure " + "x".repeat(400) });
+  await client.next((m) => m.type === "error");
+  const afterLong = await waitForHealth(port, 5_000);
+  check(
+    "a newer error replaces the older one, cut to 200 chars",
+    String(afterLong.lastError ?? "").startsWith("second failure ") &&
+      String(afterLong.lastError ?? "").length === 200 &&
+      !String(afterLong.lastError ?? "").includes("handler blew up"),
+    String(afterLong.lastError ?? ""),
+  );
+  console.log("loopback /health after a throw -> " + JSON.stringify(afterLong));
+  await client.close();
 
   const dead = await freePort();
   const started = Date.now();

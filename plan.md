@@ -485,8 +485,8 @@ re-shoot.
 - [x] Logging: one structured format, one file location, rotation and a size cap; no token or path leakage in logs (test). `[E]`
   verified-here: cd daemon && node --test test/logging.test.mjs -> ALL PASS (16 checks: one JSONL shape, token and home-folder redaction, 240-byte cap keeping 3 files, the logger writes logs/)
   deviation: the console endpoint's audit trail (console-audit.log) stays its own file; it is an audit record, not a debugging log.
-- [ ] Health surface for the hub: version, uptime, active sessions, last error. `[E]`
-  limits: version, uptimeMs and sessions are real on the loopback /health; lastError is null with a null lastErrorScope because no error store is reachable from routes.js (video.lastError is created below createRoutes in server.js), so the row stays open until a shared store exists.
+- [x] Health surface for the hub: version, uptime, active sessions, last error. `[E]`
+  verified-here: cd daemon && node --test test/startup-readiness.test.mjs -> ALL PASS (a clean start has lastError and lastErrorScope null; a throwing handler answers {type:error,message:"handler error: ..."} and /health carries that message with lastErrorScope daemon; token=s3cr3t-abc123 arrives as token=<redacted>; a newer 415-char message replaces it cut to 200 chars); the test prints the loopback JSON with version 0.11.0, uptimeMs and sessions.
 - [x] Support matrix (Windows 10/11, macOS 12+, Linux X11, Android 8+) enforced by CI where possible and stated where not. `[E]`
   verified-here: cd daemon && node --test test/support-matrix.unit.test.mjs -> ALL PASS; docs/SUPPORT-MATRIX.md rows match ci.yml (windows-latest, ubuntu-latest, macos-latest; emulator API 30 and 37) and minSdk 30, so Android 11+ is supported and Android 8-10 is stated as not supported
 

@@ -54,6 +54,7 @@ import { configDir, configPath } from "./config.js";
 import { createTransport, guardRequest, isLoopback, tlsEnabled } from "./http/transport.js";
 import { createStatic, withPcMetas } from "./http/static.js";
 import { createRoutes } from "./http/routes.js";
+import { lastError, recordLastError } from "./last_error.js";
 
 const HELLO_TIMEOUT = 10_000;
 const pluginDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "plugins");
@@ -441,6 +442,8 @@ export function start(config, { onTokenRotated } = {}) {
     bootstrap,
     localSettings,
     token: () => token,
+    lastError,
+    videoLastError: () => video.lastError || null,
   });
 
   const requestHandler = (req, res) => {
@@ -506,6 +509,8 @@ export function start(config, { onTokenRotated } = {}) {
       detachClient(ws);
       plugins.callHook("onDisconnect", ws);
     });
+    // An errored socket must record why before it can take the process down.
+    ws.on("error", (e) => recordLastError("socket", e?.message || String(e)));
     ws.on("message", (raw, isBinary) => {
       // A hello is tiny; anything big before auth is only there to burn memory and CPU.
       if (!ws._authed && raw.length > 16 << 10) return ws.close(1009, "hello too large");
@@ -571,8 +576,10 @@ export function start(config, { onTokenRotated } = {}) {
           // F1: any throw inside a handler becomes an unhandled rejection and
           // kills the daemon on modern Node — surface it to the client instead.
           handle(ws, msg).catch((e) => {
+            const message = e?.message || String(e);
+            recordLastError("daemon", message);
             try {
-              send(ws, { type: "error", message: `handler error: ${e?.message || e}` });
+              send(ws, { type: "error", message: `handler error: ${message}` });
             } catch {}
           });
         })
@@ -1246,6 +1253,12 @@ export function start(config, { onTokenRotated } = {}) {
     },
     ctx,
   );
+  // Every real handler catches its own errors, so the global catch above is only reachable from a
+  // handler that throws on purpose; this is that handler, off unless the test env asks for it.
+  if (process.env.RH_TEST_THROW === "1")
+    handlers.__throw = async (_ws, msg) => {
+      throw new Error(String(msg?.message ?? "test throw"));
+    };
   // The phone's storage as a drive in File Explorer: requests go through the same handlers the Phone files page uses.
   const dav = new PhoneDav(
     (msg) =>

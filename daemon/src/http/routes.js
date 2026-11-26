@@ -10,6 +10,7 @@ import { isLoopback } from "./transport.js";
  */
 export function createRoutes(ctx) {
   const { staticFiles, pageForPc, allSessions, bootstrap, localSettings, token } = ctx;
+  const { lastError, videoLastError } = ctx;
 
   /** The `?k=` key is the pairing token itself, compared in constant time. */
   function keyOk(req) {
@@ -25,23 +26,23 @@ export function createRoutes(ctx) {
       match: (req) => req.url === "/health",
       handle(req, res) {
         res.writeHead(200, { "content-type": "application/json" });
-        // Anyone on the network may probe liveness; only this machine learns what answers and how busy it is.
-        // No global error store exists yet; video.lastError is created after this table in server.js.
-        res.end(
-          JSON.stringify(
-            isLoopback(req)
-              ? {
-                  status: "healthy",
-                  service: "pocketdesk",
-                  version: VERSION,
-                  uptimeMs: Math.round(process.uptime() * 1000),
-                  sessions: allSessions().length,
-                  lastError: null,
-                  lastErrorScope: null,
-                }
-              : { status: "healthy" },
-          ),
-        );
+        // Anyone on the network may probe liveness; only this machine learns what answers, how busy it is,
+        // and which error came last.
+        let body;
+        if (isLoopback(req)) {
+          const stored = lastError?.() ?? null;
+          const videoError = stored ? null : (videoLastError?.() ?? null);
+          body = {
+            status: "healthy",
+            service: "pocketdesk",
+            version: VERSION,
+            uptimeMs: Math.round(process.uptime() * 1000),
+            sessions: allSessions().length,
+            lastError: stored?.message ?? videoError ?? null,
+            lastErrorScope: stored?.scope ?? (videoError ? "video" : null),
+          };
+        } else body = { status: "healthy" };
+        res.end(JSON.stringify(body));
         setImmediate(bootstrap);
       },
     },
