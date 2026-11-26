@@ -49,7 +49,8 @@ if ($Protect) {
     Set-Content -Path (Join-Path $Protect "PocketDesk.ini") -Value (Join-Path $Protect "daemon")
 
     # Autostart at logon, registered here where we are already elevated. RunLevel Highest starts the
-    # elevated daemon with no per-logon UAC prompt; RestartCount brings it back if it crashes.
+    # elevated daemon with no per-logon UAC prompt, while RestartCount restarts the task only on failure
+    # (a crash or a non-zero exit) - an explicit stop is a success, so it stays down.
     $exe      = Join-Path $Protect "PocketDeskLauncher.exe"
     $me       = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $action   = if ($sac) {
@@ -237,10 +238,10 @@ $action = if ($sac) {
 } else { New-ScheduledTaskAction -Execute $exe -Argument "--supervise" }
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
 $prin = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
-# No RestartCount: a stop is a stop. Ending the task (Task Manager, `schtasks /End`) leaves the
-# daemon down until you start it again — the next logon, or the Start-menu entry.
+# RestartCount restarts the task only on failure (a crash or a non-zero exit), while an explicit stop -
+# Task Manager, `schtasks /End`, `Stop-ScheduledTask` - is a success, so the task stays down until you start it.
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-                -ExecutionTimeLimit ([TimeSpan]::Zero)
+                -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskName "PocketDesk" -Action $action -Trigger $trigger -Principal $prin -Settings $settings -Force | Out-Null
 
 # Start Menu only: a click starts the daemon if needed and opens the pairing and settings page.

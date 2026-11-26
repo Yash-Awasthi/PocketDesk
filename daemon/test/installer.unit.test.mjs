@@ -33,9 +33,30 @@ check(
   "the default install never asks for elevation",
   !/-Verb RunAs/.test(DEFAULT) && !/-RunLevel Highest/.test(DEFAULT),
 );
+// A crash may restart the task; a deliberate stop ends the task with a success code, so it is
+// not a failure and the task stays down until the user starts it again.
+const settingsOf = (region) =>
+  region.match(/[$]settings\s*=\s*New-ScheduledTaskSettingsSet[^\r\n]*(?:\r?\n\s+-\w[^\r\n]*)*/g) || [];
+const defaultSettings = settingsOf(DEFAULT);
+const defaultCode = DEFAULT.replace(/^\s*#.*$/gm, "");
 check(
-  "a stop stays stopped: the default task does not restart itself",
-  !/-RestartCount/.test(DEFAULT) && !/RestartInterval/.test(DEFAULT),
+  "a crash restarts the default task: the failure-only restart policy is registered",
+  defaultSettings.length === 1 &&
+    defaultSettings[0].includes("-RestartCount 3") &&
+    defaultSettings[0].includes("-RestartInterval (New-TimeSpan -Minutes 1)"),
+);
+check(
+  "the default task arms no explicit-stop restart: no idle or boot restart, no restart on a stop path",
+  !/RestartOnIdle|RestartOnBoot/i.test(install) &&
+    !/-RestartCount/.test(DEFAULT.replace(defaultSettings[0], "")) &&
+    !/(Stop-ScheduledTask|schtasks \/End)[\s\S]{0,300}?-RestartCount/.test(defaultCode),
+);
+check(
+  "the registered settings restart on failure only (RestartOnFailure), never on idle or at boot",
+  settingsOf(install).length === 3 &&
+    settingsOf(install).every(
+      (s) => s.includes("-RestartCount 3") && s.includes("-RestartInterval (New-TimeSpan -Minutes 1)"),
+    ),
 );
 check(
   "the protected install warns that it cannot be stopped by ordinary programs",

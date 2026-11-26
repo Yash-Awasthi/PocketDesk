@@ -1,7 +1,8 @@
 // The regression oracle for "be closeable": a native lockdown / remote-management client enumerates
 // PocketDesk, kills every process it owns with ordinary unelevated rights, and requires that nothing
-// is left and nothing comes back. Against an install whose task runs Highest with RestartCount 3 this
-// fails, because the killed daemon is back within a minute.
+// is left and nothing comes back. An elevated task beats an unelevated kill outright, and a task that
+// restarts a failed run puts a killed daemon back within a minute, so this also pins the autostart
+// policy: unelevated, and restarted on failure only, never on an explicit stop.
 import fs from "node:fs";
 import os from "node:os";
 import net from "node:net";
@@ -77,8 +78,8 @@ const installer = fs.readFileSync(path.join(REPO, "daemon", "scripts", "install-
 const DEFAULT = installer.slice(installer.indexOf("# Default install:"));
 check("the default autostart runs at the user's own level", DEFAULT.includes("-RunLevel Limited"));
 check(
-  "the default autostart has no restart policy, so a kill is final",
-  !/-RestartCount/.test(DEFAULT) && !/RestartInterval/.test(DEFAULT),
+  "the default autostart restarts only a failed run, so a deliberate stop is final",
+  /-RestartCount 3/.test(DEFAULT) && /-RestartInterval \(New-TimeSpan -Minutes 1\)/.test(DEFAULT),
 );
 
 // A process shaped like a capture helper: started from the data folder, not a child of the daemon.

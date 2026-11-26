@@ -84,8 +84,8 @@ the front page.
 ### M1.2 Be closeable
 
 **Why:** `install.ps1` re-runs `install-service.ps1 -Protect` under UAC and
-registers `-RunLevel Highest` with `RestartCount 3`; an elevated, self-restarting
-daemon is the one control a native integrity client cannot beat.
+registers `-RunLevel Highest`; an elevated daemon is the one control a native
+integrity client cannot beat, and both tasks restart only on a failed run.
 **Done when:** the default install can be stopped by the machine owner and stays
 stopped.
 
@@ -93,14 +93,14 @@ stopped.
   verified-here: `cd daemon && node --test test/installer.unit.test.mjs` → 24 checks ALL PASS (default task `-RunLevel Limited`, no `-Verb RunAs` in the default region); `powershell -NoProfile -Command '[Parser]::ParseFile(...)'` → PARSE OK on `install.ps1`, `install-service.ps1`, `uninstall.ps1`; `csc -target:winexe daemon\scripts\PocketDeskLauncher.cs` → CSC OK
   deviation: data stays in `%USERPROFILE%\.pocketdesk` — already per-user and user-writable; moving it would orphan every paired phone and token with no migration path (§11 rollback = restart). The security property the item asks for (no elevation, folder the user owns) holds.
   deviation: the default install no longer adds the `PocketDesk (daemon)` firewall rule (`New-NetFirewallRule` needs admin); Windows asks once on first listen and the answer is the user's. `-Protected` keeps the rule.
-- [x] Remove `RestartCount` from the default task; a stop is a stop, and the next start is a user action. `[C]`
-  verified-here: `cd daemon && node --test test/installer.unit.test.mjs` → 25 checks ALL PASS, including "a stop stays stopped: the default task does not restart itself"; `powershell -Command '[Parser]::ParseFile(...)'` → PARSE OK
-  deviation: the `-Protected` task keeps `-RestartCount 3` (that path is the explicit "uncloseable" opt-in, and its removal is Appendix A question 2 — an owner decision, not an agent's).
+- [x] Crash-only restart on both tasks: the default task carries the same `-RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)` as `-Protected`, so a crash or a non-zero exit restarts it while an explicit stop (Task Manager, `schtasks /End`, `Stop-ScheduledTask`) is a success termination and stays down. `[C]`
+  verified-here: `cd daemon && node --test test/installer.unit.test.mjs test/lockdown-client.test.mjs` -> installer 41 PASS, lockdown 9 PASS, ALL PASS; bit by dropping the default task's `-RestartCount 3 -RestartInterval` -> `FAIL a crash restarts the default task: the failure-only restart policy is registered` and `FAIL the registered settings restart on failure only (RestartOnFailure), never on idle or at boot`, restored -> ALL PASS; `[System.Management.Automation.Language.Parser]::ParseFile(<install-service.ps1>, ...)` -> PARSE OK; `npm run typecheck` -> 0
+  reason: the owner ruled crash-only restart on both tasks - a crash may restart, a deliberate stop must stay dead - with `-Protected` staying opt-in and off by default; that answers Appendix A question 2.
 - [x] `pocketdesk stop` terminates the PowerShell, ffmpeg and helper children, and asserts nothing re-arms capture or input. `[C]`
   verified-here: `cd daemon && node --test test/stop-cli.test.mjs` → 11 PASS / ALL PASS (daemon, terminal child and a helper-shaped process from `<RH_HOME>\helpers` all gone; both ports closed; still closed 3 s later). Before: `node /tmp/old-cli.js stop` → `pocketdesk: unknown command: stop`, exit 1
   needs-verify: the ffmpeg child and the real PowerShell capture/input helpers need a live desktop session on Windows hardware; the sweep matches any process whose command line names `<RH_HOME>\helpers`, which is where `desktop_capture.js:474` writes them.
 - [x] Test in `daemon/test`: a simulated lockdown client enumerates processes, reads the scheduled task, kills every PocketDesk process, then asserts nothing is left and nothing returns. The same test against the current build must fail — that is the regression oracle. `[C]`
-  verified-here: `cd daemon && node --test test/lockdown-client.test.mjs` → 9 PASS / ALL PASS. Oracle: the same two task assertions against `git show 25969a6:daemon/scripts/install-service.ps1` → `Limited: false | Highest: true | RestartCount: true`, i.e. the pre-fix installer fails them
+  verified-here: `cd daemon && node --test test/lockdown-client.test.mjs` -> 9 PASS / ALL PASS. Oracle: the same two task assertions against `git show 25969a6:daemon/scripts/install-service.ps1` -> `Limited: false | Highest: true | RestartCount: true`, i.e. the pre-fix installer fails the unelevated assertion; the restart half now demands the failure-only policy on both tasks
   needs-verify: the live half registers no real scheduled task (that would modify the machine), so "nothing returns" is proven for processes and ports, not for Task Scheduler itself; that needs one install + kill on the owner's hardware.
 - [x] `pocketdesk --status` prints elevated (yes/no), auto-start, restart policy, ports and data folder, one line each. `[C]`
   verified-here: `cd daemon && node --test test/status-cli.test.mjs` → 10 PASS / ALL PASS; on this machine `RH_HOME=$TEMP/pd-status-test RH_PORT=8865 node src/cli.js --status` → `elevated: yes — ordinary programs cannot stop the daemon` / `auto-start: yes — scheduled task 'PocketDesk' (HighestAvailable)` / `restart policy: 3 restarts, 1 min apart`, read from the live task XML, not hard-coded
@@ -655,7 +655,7 @@ From `docs/INTEGRITY.md` §6, these decide Phase 1.2 and Phase 6.1 and cannot be
 guessed:
 
 1. Unelevated default install, elevation opt-in — yes/no?
-2. No silent auto-restart — yes/no?
+2. No silent auto-restart — answered: crash-only on both tasks, so a crash may restart and a deliberate stop stays dead.
 3. Visible tray plus logon notice — yes/no?
 4. Console (SYSTEM / secure desktop) endpoint: drop from public builds, or keep admin-only?
 5. Virtual webcam: default off + watermark, or watermark only?
