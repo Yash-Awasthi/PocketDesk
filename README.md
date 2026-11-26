@@ -591,6 +591,10 @@ JSON frames; binary payloads are base64.
 `profile_connect {id, protocol, password?, passphrase?}` — real SSH/SFTP/VNC connect ·
 
 `stats` — host CPU/mem/uptime · `git_status` · `git_diff` · `git_log` · `git_branches` — read-only repo inspection ·
+`running_state` — version, ports, sessions, streams and policy for the Running page ·
+`diagnostic_bundle` — logs, status, versions and known-secret names, with every secret stripped ·
+`desktop_monitor_rename {index, name}` — label a screen in the picker; an empty name clears it ·
+`desktop_monitor_order {order: [index...]}` — reorder the picker; capture indices and streams keep their order ·
 `activity_list` — per-session activity states
 </details>
 
