@@ -9,6 +9,7 @@
 import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import {
   REPO,
@@ -21,6 +22,7 @@ import {
   waitForHealth,
   waitForUrl,
 } from "./helpers.mjs";
+import { MAX_CHARS, recordLastError } from "../src/last_error.js";
 import { medianLine, medianOf, measureOnce, runLine } from "../scripts/measure-startup.mjs";
 
 const dir = path.join(REPO, "daemon", "test");
@@ -205,6 +207,35 @@ try {
     String(afterLong.lastError ?? ""),
   );
   console.log("loopback /health after a throw -> " + JSON.stringify(afterLong));
+
+  // Redacting after the cut would leak whatever pattern crosses char 200; the module must
+  // scrub the full text first, then cut, so no secret value survives.
+  const tokenMsg = String(
+    recordLastError("daemon", "f".repeat(190) + " token=s3cr3t-abc123 tail")?.message ?? "",
+  );
+  check(
+    "a token straddling char 200 leaves no fragment of its value",
+    !tokenMsg.includes("s3c") &&
+      !tokenMsg.includes("s3cr") &&
+      !tokenMsg.includes("abc123") &&
+      !tokenMsg.includes("s3cr3t-abc123") &&
+      tokenMsg.length <= MAX_CHARS,
+    tokenMsg,
+  );
+
+  // Same order protects the home path: a cut first would leave "C:\Us" behind, so redact
+  // must see the whole path before truncation.
+  const home = os.homedir();
+  const homeMsg = String(recordLastError("daemon", "g".repeat(195) + home + "/secret/thing")?.message ?? "");
+  check(
+    "a home path straddling char 200 leaves no fragment of it",
+    !homeMsg.includes(home) &&
+      !homeMsg.includes(home.slice(0, 5)) &&
+      homeMsg.includes("~") &&
+      homeMsg.length <= MAX_CHARS,
+    homeMsg,
+  );
+
   await client.close();
 
   const dead = await freePort();
