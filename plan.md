@@ -430,7 +430,8 @@ transport docs describe a design that has moved.
   verified-here: cd daemon && node --test test/congestion.unit.test.mjs -> ALL PASS (5 tests; settles at low, p95 under 2 s, zero stalls, recovers to the requested preset)
 - [x] Codec negotiation: assert AV1 → HEVC → H.264 fallback order works when the phone reports no decoder, with a synthetic capability matrix test. `[D]`
   verified-here: cd daemon && node --test test/codec-negotiation.unit.test.mjs -> ALL PASS (5 tests, 8-row capability matrix and 6 working-encoder sets)
-- [ ] Frame pacing: measure dropped frames under load and publish the number per encoder. `[D]`
+- [x] Frame pacing: measure dropped frames under load and publish the number per encoder. `[D]`
+  verified-here: `node daemon/scripts/frame-pacing.mjs --seconds 6 --warmup 4 --loads idle,full --repeat 3` -> table "Frame pacing under load" in docs/TRANSPORT-BENCH.md: all 10 win32 encoders probed, 4 usable (3 NVENC + libx264), 6 unavailable (qsv MFX session -9, amf missing amfrt64.dll); 2560x1440 ddagrab 30 fps on i7-13650HX 14C/20T; idle medians 180/176/178/149 of 180 frames, 20-spinner load 165/173/169/154 of 180, worst gaps 69-156 ms
 
 ### M5.2 Security depth
 

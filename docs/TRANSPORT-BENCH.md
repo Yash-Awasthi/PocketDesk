@@ -77,6 +77,55 @@ Connecting took 32–37 ms direct and about 315 ms through the local relay (ws: 
    against about 2% for ws. Most of that is the Node binding copying bytes through JS arrays.
    A Rust sidecar would remove it if CPU ever matters.
 
+## Frame pacing under load
+
+Measured 2026-11-27 on the same PC (i7-13650HX, 14 cores / 20 threads, RTX 4060 Laptop,
+2560x1440 at 144 Hz) with `daemon/scripts/frame-pacing.mjs`. The script walks
+`ENCODER_ORDER.win32` and applies `ENCODERS` from `daemon/src/desktop_video.js`, so every run uses
+the flags the daemon would start with, at the Balanced preset (30 fps, 1:1 pixels, 6 Mbit/s cap).
+Source: ddagrab on output 0, the daemon's own Windows graph, 2560x1440 at 30 fps with duplicated
+frames. A frame counts only when its FLV tag arrives on ffmpeg's stdout inside the window; a frame
+that would arrive later is a drop for a live viewer, because the daemon's CFR output would fill
+that slot with a duplicate instead. Each figure is the median of three 6-second windows after a
+4-second warmup, and idle and loaded runs alternate inside a repeat, so both meet the same
+background load. Load is one spinning Node process per logical CPU, 20 in all.
+
+The box was shared with other sessions compiling in the same tree. Over the first five minutes of
+the sweep, total CPU had a median of 100% and 51 of 69 samples at or above 80%, so the "idle"
+column is a machine already busy with other work; it only means this script added no load. Drops
+inside one condition therefore differ by tens of frames; the per-run column shows that spread and
+is the honest resolution of this measurement.
+
+| encoder | codec | load | fps | frames | expected | dropped | dropped per run | max gap ms | note |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| av1_nvenc | av1 | idle | 30.0 | 180 | 180 | 0 | 0/48/0 | 121 |  |
+| av1_nvenc | av1 | full (20 spin) | 27.5 | 165 | 180 | 15 | 15/2/15 | 94 |  |
+| av1_qsv | av1 | - | - | - | - | - | - | - | Error creating a MFX session: -9 |
+| av1_amf | av1 | - | - | - | - | - | - | - | DLL amfrt64.dll failed to open |
+| hevc_nvenc | hevc | idle | 29.3 | 176 | 180 | 4 | 4/25/0 | 156 |  |
+| hevc_nvenc | hevc | full (20 spin) | 28.8 | 173 | 180 | 7 | 5/9/7 | 123 |  |
+| hevc_qsv | hevc | - | - | - | - | - | - | - | Error creating a MFX session: -9 |
+| hevc_amf | hevc | - | - | - | - | - | - | - | DLL amfrt64.dll failed to open |
+| h264_nvenc | h264 | idle | 29.7 | 178 | 180 | 2 | 4/2/1 | 69 |  |
+| h264_nvenc | h264 | full (20 spin) | 28.2 | 169 | 180 | 11 | 11/8/14 | 106 |  |
+| h264_qsv | h264 | - | - | - | - | - | - | - | Error creating a MFX session: -9 |
+| h264_amf | h264 | - | - | - | - | - | - | - | DLL amfrt64.dll failed to open |
+| libx264 | h264 | idle | 24.8 | 149 | 180 | 31 | 31/33/14 | 76 |  |
+| libx264 | h264 | full (20 spin) | 25.7 | 154 | 180 | 26 | 30/26/17 | 135 |  |
+
+What the numbers say:
+
+- Four of the ten encoders the daemon offers on Windows can run here: AV1, HEVC and H.264 on
+  NVENC, plus libx264. QSV fails to create an MFX session and AMF cannot load `amfrt64.dll`;
+  VA-API and VideoToolbox are not in the Windows order.
+- Drops arrive as short stalls, not as a lower average rate: worst gaps are 69-156 ms, which a
+  viewer sees as an occasional hitch while the average stays near 30 fps.
+- Adding 20 spinners raised NVENC drops from 0/4/2 to 15/7/11 frames per 180. libx264 was already
+  short of the rate at 149-154 of 180 with only the other sessions' work on the machine, so the
+  extra load changed it little.
+- No encoder here is unusable for 1440p30: the worst median is 154 of 180 frames (25.7 fps) on a
+  machine that was already saturated, and the software encoder is the one that gets there.
+
 ## Decisions
 
 - iroh viewers use stream-per-GOP with a 1-second GOP (gop30 at 30 fps), which bounded latency
@@ -91,3 +140,8 @@ Connecting took 32–37 ms direct and about 315 ms through the local relay (ws: 
 - A real NAT-to-NAT direct path, and a phone on mobile data. These need the Android app on a real
   network; `hello-iroh-ffi` and n0 report about 90% direct connections.
 - Decode and display time on the phone.
+- Frame pacing at the Quality preset (60 fps): an early run at that preset reached 55-59 fps on
+  NVENC and 49 fps on libx264 before any synthetic load, so 60 fps on this desktop measures the
+  capture path rather than the encoder.
+- Pacing on a machine with nothing else running: no quiet window existed while other sessions
+  built in the same tree, so the per-run column carries that noise.
