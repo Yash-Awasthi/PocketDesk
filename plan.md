@@ -334,7 +334,8 @@ transport docs describe a design that has moved.
 - [ ] Stream adapter versioning: a per-agent fixture set captured from the installed CLI version; a mismatch warns instead of silently mis-parsing. `[W]`
 - [ ] Session recording: opt-in, local-only, replayable in the phone (as text, not video), with a retention cap. `[W]`
 - [ ] Git panel: stage, commit, branch, diff view with the same proposal/approval gate as agent actions. `[W]`
-- [ ] `pocketdesk doctor --json` for scripting: every probe, its result and the fix. `[W]`
+- [x] `pocketdesk doctor --json` for scripting: every probe, its result and the fix. `[W]`
+  verified-here: cd daemon && node --test test/doctor-cli.unit.test.mjs -> ALL PASS; the report carries ok, problems and every check as name/ok/detail/fix, no failing probe is without a fix, and the exit code is 0 only when all probes pass
 
 ### M4.3 Web hub
 

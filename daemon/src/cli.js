@@ -12,14 +12,20 @@ import { VERSION } from "./version.js";
 const port = Number(process.env.RH_CLI_PORT) || 4679;
 const home = process.env.RH_HOME || path.join(os.homedir(), ".pocketdesk");
 const config = (() => {
-  try { return JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8")); } catch { return {}; }
+  try {
+    return JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8"));
+  } catch {
+    return {};
+  }
 })();
 const token = process.env.RH_TOKEN || config.token || "";
 const daemonPort = Number(process.env.RH_PORT) || Number(config.port) || 8765;
 
 async function call(method, route, body) {
   const r = await fetch(`http://127.0.0.1:${port}${route}`, {
-    method, headers: { authorization: `Bearer ${token}` }, body: body && JSON.stringify(body),
+    method,
+    headers: { authorization: `Bearer ${token}` },
+    body: body && JSON.stringify(body),
   }).catch(() => fail(`PocketDesk is not running on this PC (no answer on port ${port})`));
   if (!r.ok) fail((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
   return r;
@@ -32,12 +38,33 @@ function fail(msg) {
 
 // tmux send-keys names; any other argument is typed as is.
 const KEYS = {
-  Enter: "\r", Tab: "\t", Escape: "\x1b", Esc: "\x1b", BSpace: "\x7f", Space: " ",
-  Up: "\x1b[A", Down: "\x1b[B", Right: "\x1b[C", Left: "\x1b[D", Home: "\x1b[H", End: "\x1b[F",
-  PageUp: "\x1b[5~", PageDown: "\x1b[6~", PgUp: "\x1b[5~", PgDn: "\x1b[6~", Delete: "\x1b[3~", DC: "\x1b[3~",
+  Enter: "\r",
+  Tab: "\t",
+  Escape: "\x1b",
+  Esc: "\x1b",
+  BSpace: "\x7f",
+  Space: " ",
+  Up: "\x1b[A",
+  Down: "\x1b[B",
+  Right: "\x1b[C",
+  Left: "\x1b[D",
+  Home: "\x1b[H",
+  End: "\x1b[F",
+  PageUp: "\x1b[5~",
+  PageDown: "\x1b[6~",
+  PgUp: "\x1b[5~",
+  PgDn: "\x1b[6~",
+  Delete: "\x1b[3~",
+  DC: "\x1b[3~",
 };
 function keys(args) {
-  return args.map((a) => KEYS[a] ?? (/^C-[a-zA-Z@[\]\\^_]$/.test(a) ? String.fromCharCode(a[2].toUpperCase().charCodeAt(0) & 31) : a)).join("");
+  return args
+    .map(
+      (a) =>
+        KEYS[a] ??
+        (/^C-[a-zA-Z@[\]\\^_]$/.test(a) ? String.fromCharCode(a[2].toUpperCase().charCodeAt(0) & 31) : a),
+    )
+    .join("");
 }
 
 /**
@@ -46,12 +73,20 @@ function keys(args) {
  */
 async function pageUrl() {
   let cfg = {};
-  try { cfg = JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8")); } catch {}
-  const main = Number(cfg.port) || 8765, local = main + 10, nonce = crypto.randomBytes(16).toString("hex");
+  try {
+    cfg = JSON.parse(fs.readFileSync(path.join(home, "config.json"), "utf8"));
+  } catch {}
+  const main = Number(cfg.port) || 8765,
+    local = main + 10,
+    nonce = crypto.randomBytes(16).toString("hex");
   const want = crypto.createHmac("sha256", token).update(nonce).digest("hex");
-  const got = await fetch(`http://127.0.0.1:${local}/prove?n=${nonce}`, { signal: AbortSignal.timeout(3000) }).then((r) => r.text()).catch(() => "");
+  const got = await fetch(`http://127.0.0.1:${local}/prove?n=${nonce}`, { signal: AbortSignal.timeout(3000) })
+    .then((r) => r.text())
+    .catch(() => "");
   const k = encodeURIComponent(token);
-  return got === want ? `http://localhost:${local}/pair?k=${k}` : `${cfg.tls?.enabled ? "https" : "http"}://localhost:${main}/pair?k=${k}`;
+  return got === want
+    ? `http://localhost:${local}/pair?k=${k}`
+    : `${cfg.tls?.enabled ? "https" : "http"}://localhost:${main}/pair?k=${k}`;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -60,7 +95,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function listening(p) {
   return new Promise((resolve) => {
     const s = net.connect({ host: "127.0.0.1", port: p });
-    const done = (v) => { s.destroy(); resolve(v); };
+    const done = (v) => {
+      s.destroy();
+      resolve(v);
+    };
     s.setTimeout(500);
     s.once("connect", () => done(true));
     s.once("timeout", () => done(false));
@@ -71,7 +109,11 @@ function listening(p) {
 /** Runs one PowerShell line; resolves whatever happens (a missing Windows tool is not a stop failure). */
 function powershell(script) {
   return new Promise((resolve) => {
-    const p = spawn("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script], { stdio: "ignore", windowsHide: true });
+    const p = spawn(
+      "powershell",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { stdio: "ignore", windowsHide: true },
+    );
     p.on("exit", () => resolve());
     p.on("error", () => resolve());
   });
@@ -91,26 +133,35 @@ async function stop() {
 
   if (process.platform === "win32") {
     // End the autostart task first, then take the whole process tree: helpers and ffmpeg are its children.
-    const holders = ports.map((p) => `Get-NetTCPConnection -State Listen -LocalPort ${p} -ErrorAction SilentlyContinue`).join(";");
+    const holders = ports
+      .map((p) => `Get-NetTCPConnection -State Listen -LocalPort ${p} -ErrorAction SilentlyContinue`)
+      .join(";");
     await powershell(
       `schtasks /End /TN PocketDesk 2>$null | Out-Null;` +
-      `${holders} | ForEach-Object { taskkill /T /F /PID $_.OwningProcess 2>$null | Out-Null };` +
-      // The PowerShell capture/input helpers run from the data folder, not from the daemon's process tree.
-      `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf('${path.join(home, "helpers")}', [StringComparison]::OrdinalIgnoreCase) -ge 0 } |` +
-      ` ForEach-Object { taskkill /T /F /PID $_.ProcessId 2>$null | Out-Null }`);
+        `${holders} | ForEach-Object { taskkill /T /F /PID $_.OwningProcess 2>$null | Out-Null };` +
+        // The PowerShell capture/input helpers run from the data folder, not from the daemon's process tree.
+        `Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf('${path.join(home, "helpers")}', [StringComparison]::OrdinalIgnoreCase) -ge 0 } |` +
+        ` ForEach-Object { taskkill /T /F /PID $_.ProcessId 2>$null | Out-Null }`,
+    );
     for (let i = 0; i < 40 && (await Promise.all(ports.map(listening))).some(Boolean); i++) await sleep(250);
   }
 
-  const live = async () => (await Promise.all(ports.map(listening))).map((v, i) => (v ? ports[i] : 0)).filter(Boolean);
+  const live = async () =>
+    (await Promise.all(ports.map(listening))).map((v, i) => (v ? ports[i] : 0)).filter(Boolean);
   const still = await live();
   if (still.length) fail(`still listening on ${still.join(", ")} — PocketDesk did not stop`);
   // A stop that something re-arms within seconds is not a stop.
   await sleep(3000);
   const again = await live();
-  if (again.length) fail(`PocketDesk came back on ${again.join(", ")} — the scheduled task 'PocketDesk' restarted it (schtasks /End /TN PocketDesk)`);
-  console.log(was
-    ? "stopped: daemon and helpers gone, nothing listening, nothing restarted"
-    : "PocketDesk was not running; nothing is listening");
+  if (again.length)
+    fail(
+      `PocketDesk came back on ${again.join(", ")} — the scheduled task 'PocketDesk' restarted it (schtasks /End /TN PocketDesk)`,
+    );
+  console.log(
+    was
+      ? "stopped: daemon and helpers gone, nothing listening, nothing restarted"
+      : "PocketDesk was not running; nothing is listening",
+  );
 }
 
 const [cmd, id, ...rest] = process.argv.slice(2);
@@ -119,7 +170,8 @@ const need = (v, what) => v || fail(`${cmd}: missing ${what}`);
 if (cmd === "--version" || cmd === "version") {
   console.log(VERSION);
 } else if (cmd === "list") {
-  for (const s of await (await call("GET", "/term")).json()) console.log(`${s.id}\t${s.harnessId}\t${s.cols}x${s.rows}\t${s.cwd}`);
+  for (const s of await (await call("GET", "/term")).json())
+    console.log(`${s.id}\t${s.harnessId}\t${s.cols}x${s.rows}\t${s.cwd}`);
 } else if (cmd === "new") {
   const args = process.argv.slice(3);
   const at = args.indexOf("--cwd");
@@ -130,14 +182,18 @@ if (cmd === "--version" || cmd === "version") {
 } else if (cmd === "read") {
   process.stdout.write(await (await call("GET", `/term/${need(id, "terminal id")}/screen`)).text());
 } else if (cmd === "resize") {
-  await call("POST", `/term/${need(id, "terminal id")}/resize`, { cols: Number(rest[0]), rows: Number(rest[1]) });
+  await call("POST", `/term/${need(id, "terminal id")}/resize`, {
+    cols: Number(rest[0]),
+    rows: Number(rest[1]),
+  });
 } else if (cmd === "kill") {
   await call("POST", `/term/${need(id, "terminal id")}/kill`);
 } else if (cmd === "attach") {
   need(id, "terminal id");
   if (!process.stdin.isTTY) fail("attach needs a terminal; use send and read from scripts");
   // This window is the PC side, so the terminal takes its size.
-  const size = () => call("POST", `/term/${id}/resize`, { cols: process.stdout.columns, rows: process.stdout.rows });
+  const size = () =>
+    call("POST", `/term/${id}/resize`, { cols: process.stdout.columns, rows: process.stdout.rows });
   await size();
   process.stdout.on("resize", size);
   const stream = (await call("GET", `/term/${id}/stream`)).body;
@@ -152,7 +208,11 @@ if (cmd === "--version" || cmd === "version") {
     done("detached");
   });
   // Modes the shell switched on in this window (win32 input, focus reports) must not outlive it.
-  const done = (why) => { process.stdin.setRawMode(false); process.stdout.write(`\x1b[?9001l\x1b[?1004l\r\n[pocketdesk: ${why}]\r\n`); process.exit(0); };
+  const done = (why) => {
+    process.stdin.setRawMode(false);
+    process.stdout.write(`\x1b[?9001l\x1b[?1004l\r\n[pocketdesk: ${why}]\r\n`);
+    process.exit(0);
+  };
   process.stdout.write("\x1b[2J\x1b[H");
   for await (const chunk of stream) process.stdout.write(chunk);
   done("terminal ended");
@@ -162,27 +222,57 @@ if (cmd === "--version" || cmd === "version") {
   if (!link) fail("the daemon has no pairing link yet; try again in a few seconds");
   // The page vendor copy is CommonJS inside an ESM package, so it is run as a plain script here.
   const mod = { exports: {} };
-  new Function("module", "exports", fs.readFileSync(new URL("../public/vendor/qrcode.min.js", import.meta.url), "utf8"))(mod, mod.exports);
+  new Function(
+    "module",
+    "exports",
+    fs.readFileSync(new URL("../public/vendor/qrcode.min.js", import.meta.url), "utf8"),
+  )(mod, mod.exports);
   const qr = mod.exports(0, "L");
   qr.addData(link);
   qr.make();
   // Light modules are drawn, two rows per line, so the code scans on the usual dark terminal.
-  const n = qr.getModuleCount(), quiet = 2;
+  const n = qr.getModuleCount(),
+    quiet = 2;
   const light = (r, c) => r < 0 || c < 0 || r >= n || c >= n || !qr.isDark(r, c);
   for (let r = -quiet; r < n + quiet; r += 2) {
     let line = "";
-    for (let c = -quiet; c < n + quiet; c++) line += [" ", "▄", "▀", "█"][(light(r, c) ? 2 : 0) + (light(r + 1, c) ? 1 : 0)];
+    for (let c = -quiet; c < n + quiet; c++)
+      line += [" ", "▄", "▀", "█"][(light(r, c) ? 2 : 0) + (light(r + 1, c) ? 1 : 0)];
     console.log(line);
   }
-  console.log(`\nScan with the PocketDesk app. If the code does not fit, widen the terminal or open this on the phone:\n${link}`);
+  console.log(
+    `\nScan with the PocketDesk app. If the code does not fit, widen the terminal or open this on the phone:\n${link}`,
+  );
   // A desktop session also gets the settings page. Windows has its launcher for that.
-  if (process.platform === "darwin" || (process.platform === "linux" && (process.env.DISPLAY || process.env.WAYLAND_DISPLAY))) {
+  if (
+    process.platform === "darwin" ||
+    (process.platform === "linux" && (process.env.DISPLAY || process.env.WAYLAND_DISPLAY))
+  ) {
     const url = await pageUrl();
-    spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { detached: true, stdio: "ignore" }).on("error", () => {}).unref();
+    spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { detached: true, stdio: "ignore" })
+      .on("error", () => {})
+      .unref();
   }
 } else if (cmd === "--status" || cmd === "status") {
   const { statusLines } = await import("./status.js");
   for (const line of await statusLines()) console.log(line);
+} else if (cmd === "doctor") {
+  // Every probe prints with its result and the fix, so a script reads the same report a human does.
+  const { diagnose } = await import("./doctor.js");
+  const report = await diagnose({ tls: config.tls });
+  const checks = report.checks.map((c) => ({ name: c.name, ok: c.ok, detail: c.detail, fix: c.hint ?? null }));
+  if (id === "--json" || rest.includes("--json")) {
+    console.log(JSON.stringify({ ok: report.ok, problems: report.problems, checks }, null, 2));
+  } else {
+    for (const c of checks)
+      console.log(`${c.ok ? "ok  " : "FAIL"} ${c.name}: ${c.detail}${c.fix ? ` (fix: ${c.fix})` : ""}`);
+    console.log(
+      report.ok
+        ? "doctor: all probes passed"
+        : `doctor: ${report.problems.length} problem(s): ${report.problems.join(", ")}`,
+    );
+  }
+  process.exit(report.ok ? 0 : 1);
 } else if (cmd === "stop") {
   await stop();
 } else if (cmd === "record") {
@@ -190,7 +280,9 @@ if (cmd === "--version" || cmd === "version") {
   if (id === "on") fs.writeFileSync(flag, "");
   else if (id === "off") fs.rmSync(flag, { force: true });
   else fail("record: say on or off");
-  console.log(`session recording ${fs.existsSync(flag) ? "on" : "off"}: terminals are saved to ${path.join(home, "recordings")}`);
+  console.log(
+    `session recording ${fs.existsSync(flag) ? "on" : "off"}: terminals are saved to ${path.join(home, "recordings")}`,
+  );
 } else {
   fail(`unknown command: ${cmd}`);
 }
