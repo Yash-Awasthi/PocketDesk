@@ -24,7 +24,40 @@ const MIME = {
 const WELCOME = { type: "welcome", os: "win32", deviceToken: TOKEN, protocol: 1 };
 const TOTP_SECRET = "JBSWY3DPEHPK3PXP";
 
+// One item per phone list, so a page that loads has something to show.
+const SMS_THREADS = [
+  {
+    id: "t1",
+    address: "+15550100",
+    name: "Ada",
+    date: Date.UTC(2026, 10, 26, 9, 0),
+    snippet: "see you at six",
+    unread: 1,
+  },
+];
+const CALL_LOG = [
+  { number: "+15550100", name: "Ada", kind: 1, date: Date.UTC(2026, 10, 26, 8, 0), duration: 120 },
+];
+const PHOTOS = [{ id: "p1", name: "IMG_0001.jpg", date: Date.UTC(2026, 10, 25, 12, 0) }];
+const NOTIFS = [
+  {
+    key: "n1",
+    appName: "Messages",
+    title: "Ada",
+    text: "see you at six",
+    when: Date.UTC(2026, 10, 26, 9, 0),
+  },
+];
+
+// A test steers a key to ok, empty, error or hold; hold queues the reply until the mode changes.
+const modes = new Map();
+const held = new Map();
+const keyOf = (m) => (m.type === "phone_req" ? `${m.svc}.${m.op}` : m.type);
+const queue = (key) => held.get(key) || held.set(key, []).get(key);
+
 export async function startFakeDaemon(options = {}) {
+  modes.clear();
+  held.clear();
   const access = {
     remoteOn: true,
     controlAllowed: true,
@@ -213,7 +246,28 @@ export async function startFakeDaemon(options = {}) {
       }
       messages.push(m);
       const reply = (body) => ws.send(JSON.stringify(body));
-      if (m.type === "phone_hub") reply({ type: "phone_hub", online: false, name: null, last: {} });
+      const answer = (m, build) => {
+        const key = keyOf(m);
+        const fire = (mode) => {
+          const body = build(mode);
+          if (body) ws.send(JSON.stringify(body));
+        };
+        const mode = modes.get(key) || "ok";
+        if (mode === "hold") return queue(key).push(() => fire(modes.get(key) || "ok"));
+        fire(mode);
+      };
+      if (m.type === "phone_hub") reply({ type: "phone_hub", online: true, name: "Pixel 9", last: {} });
+      if (m.type === "phone_req") {
+        const { rid } = m;
+        const res = (mode, dict, field) =>
+          mode === "error"
+            ? { type: "phone_res", rid, ok: false, error: "the phone refused" }
+            : { type: "phone_res", rid, ok: true, [field]: mode === "empty" ? [] : dict };
+        if (m.svc === "sms" && m.op === "threads") answer(m, (mode) => res(mode, SMS_THREADS, "threads"));
+        if (m.svc === "calls" && m.op === "log") answer(m, (mode) => res(mode, CALL_LOG, "calls"));
+        if (m.svc === "photos" && m.op === "list") answer(m, (mode) => res(mode, PHOTOS, "items"));
+        if (m.svc === "notif" && m.op === "list") answer(m, (mode) => res(mode, NOTIFS, "items"));
+      }
       if (m.type === "adb_state") reply({ type: "adb_state", toolsReady: true, devices: [], serial: null });
       if (m.type === "clippy_status") reply({ type: "clippy_status", running: false, installed: false });
       if (m.type === "clippy_latest") reply({ type: "clippy_latest", ok: false });
@@ -228,16 +282,26 @@ export async function startFakeDaemon(options = {}) {
         });
       if (m.type === "pc_list") reply({ type: "pc_list", items: [] });
       if (m.type === "sources_list") reply({ type: "sources_list", items: [] });
-      if (m.type === "history_list") reply({ type: "history", items: history });
+      if (m.type === "history_list")
+        answer(m, (mode) =>
+          mode === "error"
+            ? { type: "error", message: "history failed" }
+            : { type: "history", items: mode === "empty" ? [] : history },
+        );
       if (m.type === "running_state") {
-        reply({
-          type: "running_state",
-          version: { daemon: "0.11.0", protocol: 1, node: "26.8.1" },
-          ports: { daemon: 8765, page: 8765, cli: 8766, usb: 8767 },
-          sessions: { count: sessions.length, items: sessions },
-          streams: { video: 0, desktop: 0, audio: 0, remote: 0 },
-          policy: { control: true, remote: true, password: false, totp: false, recording: false },
-        });
+        answer(m, (mode) =>
+          mode === "error"
+            ? { type: "error", message: "running failed" }
+            : {
+                type: "running_state",
+                version: { daemon: "0.11.0", protocol: 1, node: "26.8.1" },
+                ports: { daemon: 8765, page: 8765, cli: 8766, usb: 8767 },
+                sessions:
+                  mode === "empty" ? { count: 0, items: [] } : { count: sessions.length, items: sessions },
+                streams: { video: 0, desktop: 0, audio: 0, remote: 0 },
+                policy: { control: true, remote: true, password: false, totp: false, recording: false },
+              },
+        );
       }
     });
   });
@@ -256,6 +320,14 @@ export async function startFakeDaemon(options = {}) {
       down = v;
       if (down) for (const client of wss.clients) client.terminate();
     },
+    setMode(key, mode) {
+      modes.set(key, mode);
+      if (mode === "hold") return;
+      const q = held.get(key) || [];
+      held.delete(key);
+      for (const f of q) f();
+    },
+    requests: (key) => messages.filter((m) => keyOf(m) === key).length,
     async close() {
       for (const client of wss.clients) client.terminate();
       await new Promise((resolve) => wss.close(resolve));

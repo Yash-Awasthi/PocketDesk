@@ -12,6 +12,14 @@ const row = (label, value) => h("div", { className: "row" },
   h("b", { textContent: String(value) }));
 const card = (title, ...rows) => h("div", { className: "card col" }, h("h3", { textContent: title }), ...rows);
 const onOff = (v) => (v ? "on" : "off");
+let box, pending = false;
+
+function ask() {
+  if (!PD.up()) return box?.show("error");
+  box?.show("loading");
+  pending = true;
+  PD.send({ type: "running_state" });
+}
 
 PD.page("running", {
   title: "Running",
@@ -20,13 +28,14 @@ PD.page("running", {
     const body = h("div", { className: "col" });
     sec.append(
       h("div", { className: "bar" },
-        btn("Refresh", () => PD.send({ type: "running_state" })),
+        btn("Refresh", () => ask()),
         h("button", {
           textContent: "Support bundle",
           title: "Download logs, status and versions for support (no secrets)",
           onclick: () => PD.send({ type: "diagnostic_bundle" }),
         })),
       body);
+    box = PD.stateBox(body, { retry: () => ask() });
     const draw = (m) => {
       const v = m.version || {};
       const p = m.ports || {};
@@ -62,7 +71,16 @@ PD.page("running", {
           row("Two-factor", onOff(po.totp)),
           row("Screen recording", onOff(po.recording))));
     };
-    PD.on("running_state", draw);
+    PD.on("running_state", (m) => {
+      pending = false;
+      box.clear();
+      draw(m);
+    });
+    PD.on("error", (m) => {
+      if (!pending) return;
+      pending = false;
+      box.show("error", m.message);
+    });
     // The bar's second button asks for a bundle; save it beside the phone's other downloads.
     PD.on("diagnostic_bundle", (m) => {
       const blob = new Blob([JSON.stringify(m, null, 2)], { type: "application/json" });
@@ -72,9 +90,9 @@ PD.page("running", {
       PD.toast("Diagnostic bundle saved");
     });
   },
-  show() { PD.send({ type: "running_state" }); },
+  show() { ask(); },
 });
 
 // Only while the page is in front: a background hub tab should not keep asking the daemon.
-setInterval(() => { if (PD.current === "running") PD.send({ type: "running_state" }); }, 5000);
+setInterval(() => { if (PD.current === "running" && PD.up()) ask(); }, 5000);
 })();

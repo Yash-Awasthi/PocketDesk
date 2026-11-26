@@ -22,6 +22,50 @@ PD.h = (tag, props = {}, ...kids) => {
   return el;
 };
 
+// ── list state: loading, empty, error, and one retry that survives a re-render ──
+// The click listener is on the container, never on the note or the button: a state paint replaces
+// those children, and a listener attached to a replaced node dies with it.
+const STATE = { loading: "Loading…", error: "Could not load this." };
+const boxes = new WeakMap();
+PD.up = () => PD.connState === "up";
+PD.stateBox = (el, opts = {}) => {
+  let box = boxes.get(el);
+  if (!box) {
+    el.addEventListener("click", (e) => {
+      const hit = e.target.closest?.('[data-action="retry"]');
+      if (!hit || !el.contains(hit) || !PD.up()) return;
+      boxes.get(el).opts.retry?.();
+    });
+    box = { el, opts: {} };
+    boxes.set(el, box);
+    PD.on("conn", () => {
+      const hit = el.querySelector('[data-action="retry"]');
+      if (hit) hit.disabled = !PD.up();
+    });
+    box.show = (state, detail) => {
+      if (!state) return void delete el.dataset.state;
+      el.dataset.state = state;
+      const text =
+        state === "empty"
+          ? box.opts.empty
+          : state === "error"
+            ? `${STATE.error}${detail ? ` ${detail}` : ""}`
+            : STATE.loading;
+      const kids = [PD.h("div", { className: "empty", textContent: text, role: state === "error" ? "alert" : "status" })];
+      if (state !== "loading") {
+        // `dataset` is a read-only accessor, so the attribute goes on after the element exists.
+        const again = PD.h("button", { textContent: "Retry", disabled: !PD.up() });
+        again.dataset.action = "retry";
+        kids.push(again);
+      }
+      el.replaceChildren(...kids);
+    };
+    box.clear = () => { delete el.dataset.state; };
+  }
+  Object.assign(box.opts, opts);
+  return box;
+};
+
 PD.toast = (text, bad) => {
   const box = PD.$("#toasts");
   const t = PD.h("div", { className: `toast${bad ? " bad" : ""}`, textContent: text });
@@ -69,6 +113,7 @@ const CONN = { up: "Connected", retry: "Reconnecting...", down: "Offline" };
 // the indicator do not vanish on a blip, and drops only when no retry is scheduled.
 let reconnectTimer, reconnectDelay = 1000, pairCode, live = false;
 function setConn(state, note) {
+  PD.connState = state;
   if (state === "up") live = true;
   if (state === "down") live = false;
   const pill = PD.$("#conn");
@@ -82,6 +127,7 @@ function setConn(state, note) {
   reason.textContent = note || "";
   reason.hidden = !note;
   document.body.classList.toggle("online", live);
+  PD.emit("conn", state);
 }
 PD.connect = () => {
   if (PD.ws) { PD.ws.onclose = null; PD.ws.close(); }

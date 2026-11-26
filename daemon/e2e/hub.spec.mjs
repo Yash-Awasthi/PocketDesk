@@ -24,6 +24,8 @@ async function open(page, id) {
   await expect(page.locator(`#page-${id}`)).toBeVisible();
 }
 
+const retry = (page, sel) => page.locator(sel).getByRole("button", { name: "Retry" });
+
 test("the pairing card shows the token and a QR for both scanners", async ({ page }) => {
   await open(page, "thispc");
   const card = page.locator("#page-thispc .card").filter({ hasText: "Pair a phone" });
@@ -313,4 +315,208 @@ test("one connection indicator: the same words on every page and no flap on a dr
   daemon.setDown(false);
   await expect(pill).toHaveText("Connected", { timeout: 30_000 });
   await expect(page.locator("body")).toHaveClass(/online/);
+});
+
+test("the messages card loads, empties, fails and retries after a re-render", async ({ page }) => {
+  test.setTimeout(90_000);
+  daemon.setMode("sms.threads", "hold");
+  await page.goto(`${daemon.url}/#go=messages`);
+  await expect(page.locator("body")).toHaveClass(/online/);
+  const list = page.locator("#smsList");
+  await expect(list, "messages loading").toHaveAttribute("data-state", "loading");
+  await expect(list.locator(".empty"), "messages loading wording").toHaveText("Loading…");
+  daemon.setMode("sms.threads", "ok");
+  await expect(list.locator(".item")).toHaveCount(1);
+  expect(await list.getAttribute("data-state")).toBeNull();
+
+  daemon.setMode("sms.threads", "empty");
+  await page.locator("#page-messages").getByRole("button", { name: "Refresh" }).click();
+  await expect(list, "messages empty").toHaveAttribute("data-state", "empty");
+  await expect(list.locator(".empty"), "messages empty wording").toHaveText("No conversations on the phone.");
+  await expect(retry(page, "#smsList")).toBeVisible();
+
+  daemon.setMode("sms.threads", "error");
+  await page.locator("#page-messages").getByRole("button", { name: "Refresh" }).click();
+  await expect(list, "messages error").toHaveAttribute("data-state", "error");
+  await expect(list.locator(".empty"), "messages error wording").toContainText("Could not load this.");
+  await expect(retry(page, "#smsList")).toBeEnabled();
+
+  // A second error paint replaces the note and the button: the retry handler must not go with them.
+  await page.locator("#page-messages").getByRole("button", { name: "Refresh" }).click();
+  await expect(list, "messages error again").toHaveAttribute("data-state", "error");
+  const stale = await retry(page, "#smsList").elementHandle();
+  const before = daemon.requests("sms.threads");
+  daemon.setMode("sms.threads", "ok");
+  await retry(page, "#smsList").click();
+  await expect
+    .poll(() => daemon.requests("sms.threads"), {
+      message: "the messages retry did not re-issue sms.threads",
+    })
+    .toBeGreaterThan(before);
+  await expect(list.locator(".item"), "the list did not render after the retry").toHaveCount(1);
+  expect(await list.getAttribute("data-state")).toBeNull();
+  expect(
+    await stale.evaluate((el) => el.isConnected),
+    "the clicked Retry node should have been replaced",
+  ).toBe(false);
+});
+
+test("the calls card empties, fails and retries", async ({ page }) => {
+  await open(page, "calls");
+  const list = page.locator("#callLog");
+  await expect(list.locator(".item")).toHaveCount(1);
+
+  daemon.setMode("calls.log", "empty");
+  await page.locator("#page-calls").getByRole("button", { name: "Refresh" }).click();
+  await expect(list, "calls empty").toHaveAttribute("data-state", "empty");
+  await expect(list.locator(".empty"), "calls empty wording").toHaveText("No calls on the phone.");
+
+  daemon.setMode("calls.log", "error");
+  await retry(page, "#callLog").click();
+  await expect(list, "calls error").toHaveAttribute("data-state", "error");
+  await expect(list.locator(".empty"), "calls error wording").toContainText("Could not load this.");
+
+  const before = daemon.requests("calls.log");
+  daemon.setMode("calls.log", "ok");
+  await retry(page, "#callLog").click();
+  await expect.poll(() => daemon.requests("calls.log")).toBeGreaterThan(before);
+  await expect(list.locator(".item"), "the list did not render after the retry").toHaveCount(1);
+  expect(await list.getAttribute("data-state")).toBeNull();
+});
+
+test("the photos grid empties, fails and retries", async ({ page }) => {
+  await open(page, "photos");
+  const grid = page.locator("#photoGrid");
+  await expect(grid.locator(".photo")).toHaveCount(1);
+
+  daemon.setMode("photos.list", "empty");
+  await page.locator("#page-photos").getByRole("button", { name: "Refresh" }).click();
+  await expect(grid, "photos empty").toHaveAttribute("data-state", "empty");
+  await expect(grid.locator(".empty"), "photos empty wording").toHaveText("No photos on the phone.");
+
+  daemon.setMode("photos.list", "error");
+  await retry(page, "#photoGrid").click();
+  await expect(grid, "photos error").toHaveAttribute("data-state", "error");
+  await expect(grid.locator(".empty"), "photos error wording").toContainText("Could not load this.");
+
+  const before = daemon.requests("photos.list");
+  daemon.setMode("photos.list", "ok");
+  await retry(page, "#photoGrid").click();
+  await expect.poll(() => daemon.requests("photos.list")).toBeGreaterThan(before);
+  await expect(grid.locator(".photo"), "the grid did not render after the retry").toHaveCount(1);
+  expect(await grid.getAttribute("data-state")).toBeNull();
+});
+
+test("the notifications card empties, fails and retries", async ({ page }) => {
+  await open(page, "notifications");
+  const list = page.locator("#notifList");
+  await expect(list.locator(".notif")).toHaveCount(1);
+
+  daemon.setMode("notif.list", "empty");
+  await page.locator("#page-notifications").getByRole("button", { name: "Refresh" }).click();
+  await expect(list, "notifications empty").toHaveAttribute("data-state", "empty");
+  await expect(list.locator(".empty"), "notifications empty wording").toHaveText(
+    "No notifications on the phone.",
+  );
+
+  daemon.setMode("notif.list", "error");
+  await retry(page, "#notifList").click();
+  await expect(list, "notifications error").toHaveAttribute("data-state", "error");
+  await expect(list.locator(".empty"), "notifications error wording").toContainText("Could not load this.");
+
+  const before = daemon.requests("notif.list");
+  daemon.setMode("notif.list", "ok");
+  await retry(page, "#notifList").click();
+  await expect.poll(() => daemon.requests("notif.list")).toBeGreaterThan(before);
+  await expect(list.locator(".notif"), "the list did not render after the retry").toHaveCount(1);
+  expect(await list.getAttribute("data-state")).toBeNull();
+});
+
+test("the sessions page shows loading, empty and error, and Retry asks again", async ({ page }) => {
+  test.setTimeout(90_000);
+  daemon.setMode("history_list", "hold");
+  await open(page, "sessions");
+  const list = page.locator("#page-sessions .list");
+  await expect(list, "sessions loading").toHaveAttribute("data-state", "loading");
+
+  daemon.setMode("history_list", "ok");
+  await expect(list.locator(".item")).toHaveCount(3);
+
+  daemon.setMode("history_list", "empty");
+  await page.locator("#nav a[data-page='sessions']").click();
+  await expect(list, "sessions empty").toHaveAttribute("data-state", "empty");
+  await expect(list.locator(".empty"), "sessions empty wording").toHaveText(
+    "No saved conversations on this PC yet.",
+  );
+
+  daemon.setMode("history_list", "error");
+  await page.locator("#nav a[data-page='sessions']").click();
+  await expect(list, "sessions error").toHaveAttribute("data-state", "error");
+  await expect(list.locator(".empty"), "sessions error wording").toContainText("history failed");
+
+  daemon.setMode("history_list", "ok");
+  const before = daemon.requests("history_list");
+  await retry(page, "#page-sessions .list").click();
+  await expect
+    .poll(() => daemon.requests("history_list"), { message: "the sessions retry did not ask again" })
+    .toBeGreaterThan(before);
+  await expect(list.locator(".item")).toHaveCount(3);
+  expect(await list.getAttribute("data-state")).toBeNull();
+});
+
+test("the running page shows loading and error, and its empty session list", async ({ page }) => {
+  test.setTimeout(90_000);
+  daemon.setMode("running_state", "hold");
+  await open(page, "running");
+  const col = page.locator("#page-running .col").first();
+  await expect(col, "running loading").toHaveAttribute("data-state", "loading");
+
+  daemon.setMode("running_state", "ok");
+  const panel = page.locator("#page-running");
+  await expect(panel).not.toHaveText(/Nothing is running/);
+  await expect(panel.getByText("claude")).toBeVisible();
+
+  daemon.setMode("running_state", "error");
+  await panel.getByRole("button", { name: "Refresh" }).click();
+  await expect(col, "running error").toHaveAttribute("data-state", "error");
+
+  daemon.setMode("running_state", "ok");
+  const before = daemon.requests("running_state");
+  await retry(page, "#page-running .col").click();
+  await expect
+    .poll(() => daemon.requests("running_state"), { message: "the running retry did not ask again" })
+    .toBeGreaterThan(before);
+  await expect(col).not.toHaveAttribute("data-state", "error");
+  expect(await col.getAttribute("data-state")).toBeNull();
+
+  daemon.setMode("running_state", "empty");
+  await panel.getByRole("button", { name: "Refresh" }).click();
+  await expect(panel.getByText("Nothing is running.")).toBeVisible();
+  expect(await col.getAttribute("data-state")).toBeNull();
+});
+
+test("a page keeps the shared connection words, disables retry while down and re-fetches on reconnect", async ({
+  page,
+}) => {
+  test.setTimeout(120_000);
+  await open(page, "messages");
+  const list = page.locator("#smsList");
+  await expect(list.locator(".item")).toHaveCount(1);
+
+  daemon.setMode("sms.threads", "error");
+  await page.locator("#page-messages").getByRole("button", { name: "Refresh" }).click();
+  await expect(list, "messages error").toHaveAttribute("data-state", "error");
+  await expect(retry(page, "#smsList")).toBeEnabled();
+
+  daemon.setDown(true);
+  await expect(page.locator("#conn")).toHaveText("Reconnecting...", { timeout: 15_000 });
+  await expect(retry(page, "#smsList"), "the retry must be off while the socket is down").toBeDisabled();
+  const text = await page.locator("#page-messages").innerText();
+  expect(text, "messages printed its own connection words").not.toMatch(/reconnecting|offline|disconnected/i);
+
+  daemon.setMode("sms.threads", "ok");
+  daemon.setDown(false);
+  await expect(page.locator("#conn")).toHaveText("Connected", { timeout: 30_000 });
+  await expect(list.locator(".item")).toHaveCount(1);
+  expect(await list.getAttribute("data-state")).toBeNull();
 });

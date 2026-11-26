@@ -9,6 +9,7 @@ const { h } = PD;
 const btn = (label, onclick, cls = "") => h("button", { className: cls, textContent: label, onclick });
 
 const S = { items: [], q: "", agent: "", project: "", from: "", to: "" };
+let box, pending = false;
 
 // A project is the last folder of the working directory; the platform's separators both count.
 const projectOf = (cwd) => {
@@ -56,6 +57,7 @@ PD.page("sessions", {
       count,
       list,
     );
+    box = PD.stateBox(list, { retry: () => PD.send({ type: "history_list" }), empty: "No saved conversations on this PC yet." });
 
     function read() {
       S.q = q.value.trim().toLowerCase();
@@ -122,12 +124,28 @@ PD.page("sessions", {
     }
 
     PD.on("history", (m) => {
+      pending = false;
       S.items = Array.isArray(m.items) ? m.items : [];
       fillOptions();
+      if (!S.items.length) {
+        count.textContent = "";
+        box.show("empty");
+        return;
+      }
+      box.clear();
       draw();
     });
-    draw();
+    PD.on("error", (m) => {
+      if (!pending) return;
+      pending = false;
+      box.show("error", m.message);
+    });
   },
-  show() { PD.send({ type: "history_list" }); },
+  show() {
+    if (!PD.up()) return box?.show("error");
+    box?.show("loading");
+    pending = true;
+    PD.send({ type: "history_list" });
+  },
 });
 })();
