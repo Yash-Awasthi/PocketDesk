@@ -1,0 +1,49 @@
+{
+  "_fixture": {
+    "format": "gemini-json",
+    "cli": "gemini",
+    "version": "0.17.0",
+    "produced": "synthetic",
+    "note": "The gemini CLI is not installed on this machine. The stream below is synthetic and pinned to 0.17.0 as the target version."
+  },
+  "events": [
+    {
+      "type": "init",
+      "session_id": "gm-uuid-1",
+      "model": "auto"
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": "read a.txt"
+    },
+    {
+      "type": "tool_use",
+      "tool_name": "read_file",
+      "tool_id": "t1",
+      "parameters": {
+        "file_path": "a.txt"
+      }
+    },
+    {
+      "type": "tool_result",
+      "tool_id": "t1",
+      "status": "success",
+      "output": "x"
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": "x",
+      "delta": true
+    },
+    {
+      "type": "result",
+      "status": "success",
+      "stats": {
+        "input_tokens": 5,
+        "output_tokens": 1
+      }
+    }
+  ]
+}

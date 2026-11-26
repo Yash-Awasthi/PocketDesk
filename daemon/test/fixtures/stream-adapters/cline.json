@@ -1,0 +1,63 @@
+{
+  "_fixture": {
+    "format": "cline-json",
+    "cli": "cline",
+    "version": "3.0.0",
+    "produced": "synthetic",
+    "note": "cline is not installed on this machine, so this 3.0.0 fixture is synthetic: events copied from the inline adapter corpus, never captured."
+  },
+  "events": [
+    {
+      "type": "agent_event",
+      "event": {
+        "type": "content_start",
+        "contentType": "tool",
+        "toolName": "read_files",
+        "input": {
+          "files": [
+            {
+              "path": "a.txt"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "agent_event",
+      "event": {
+        "type": "content_end",
+        "contentType": "tool",
+        "toolName": "read_files",
+        "output": [
+          {
+            "result": "x"
+          }
+        ]
+      }
+    },
+    {
+      "type": "agent_event",
+      "event": {
+        "type": "content_start",
+        "contentType": "text",
+        "text": "x"
+      }
+    },
+    {
+      "type": "agent_event",
+      "event": {
+        "type": "content_end",
+        "contentType": "text",
+        "text": "x"
+      }
+    },
+    {
+      "type": "run_result",
+      "finishReason": "completed",
+      "usage": {
+        "inputTokens": 5,
+        "outputTokens": 1
+      }
+    }
+  ]
+}

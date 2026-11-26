@@ -12,6 +12,8 @@ import { writeFileAtomic } from "./atomic_write.js";
 import { configDir } from "./config.js";
 import { listCommands as pocketdeskCommands } from "./slash-commands.js";
 import * as agentPanel from "./agent_panel.js";
+import { list as registryList } from "./registry.js";
+import { streamVersionStatus } from "./stream_versions.js";
 
 // Chat lifecycle events (state transitions) — consumed by the activity monitor.
 export const chatEvents = new EventEmitter();
@@ -119,7 +121,7 @@ function lastAssistantPreview(c) {
   return "";
 }
 
-export function create({ manifest, cwd, resumeFirst = false, cliSession = null, transcript = [] }) {
+export function create({ manifest, cwd, resumeFirst = false, cliSession = null, transcript = [], version }) {
   const id = "c" + nextId++;
   const dir =
     cwd && String(cwd).trim()
@@ -154,6 +156,14 @@ export function create({ manifest, cwd, resumeFirst = false, cliSession = null, 
     subs: new Set(),
   };
   chats.set(id, c);
+  const detected =
+    version !== undefined
+      ? version
+      : (registryList().find((x) => x.manifest.id === manifest.id)?.version ?? null);
+  const status = streamVersionStatus(c.format, detected);
+  // A mismatch is shown once at chat start; the parse path is unchanged, so a false alarm cannot break a chat.
+  if (status.level === "warn" || status.level === "refuse" || status.level === "unknown")
+    appendSystem(c, status.message);
   return { id, harnessId: c.harnessId, cwd: c.cwd, kind: "chat" };
 }
 

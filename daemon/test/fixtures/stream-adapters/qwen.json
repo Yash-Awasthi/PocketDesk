@@ -1,0 +1,10 @@
+{
+  "_fixture": {
+    "format": "text",
+    "cli": "qwen",
+    "version": "0.11.0",
+    "produced": "synthetic",
+    "note": "qwen is not installed on this machine; the text adapter only passes lines through, so this synthetic 0.11.0 fixture is two plain output lines."
+  },
+  "events": ["reading the manifest\n", "done: 2 files checked\n"]
+}

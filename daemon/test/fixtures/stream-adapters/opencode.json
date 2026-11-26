@@ -1,0 +1,53 @@
+{
+  "_fixture": {
+    "format": "opencode-json",
+    "cli": "opencode",
+    "version": "1.0.0",
+    "produced": "synthetic",
+    "note": "Fixture is synthetic: the opencode CLI is not installed on this machine, and 1.0.0 is the version the parser targets."
+  },
+  "events": [
+    {
+      "type": "step_start",
+      "sessionID": "ses_oc1",
+      "part": {
+        "type": "step-start"
+      }
+    },
+    {
+      "type": "tool_use",
+      "sessionID": "ses_oc1",
+      "part": {
+        "type": "tool",
+        "tool": "read",
+        "state": {
+          "status": "completed",
+          "input": {
+            "filePath": "a.txt"
+          }
+        }
+      }
+    },
+    {
+      "type": "text",
+      "sessionID": "ses_oc1",
+      "part": {
+        "type": "text",
+        "text": "x"
+      }
+    },
+    {
+      "type": "step_finish",
+      "sessionID": "ses_oc1",
+      "part": {
+        "type": "step-finish",
+        "reason": "stop",
+        "tokens": {
+          "input": 5,
+          "output": 1
+        },
+        "cost": 0
+      }
+    }
+  ]
+}

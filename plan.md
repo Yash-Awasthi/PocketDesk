@@ -345,7 +345,8 @@ transport docs describe a design that has moved.
   verified-here: `cd daemon && node test/plugins.test.mjs` -> 13 passing, 0 failing
 - [x] Agent manifest registry: add a manifest by dropping JSON, with a validation command and a compatibility probe (`--version` parse) per agent. `[W]`
   verified-here: node test/manifest-platform.unit.test.mjs -> 10 pass, 0 fail; node src/cli.js agent compat claude -> installed: yes, compat: ok
-- [ ] Stream adapter versioning: a per-agent fixture set captured from the installed CLI version; a mismatch warns instead of silently mis-parsing. `[W]`
+- [x] Stream adapter versioning: a per-agent fixture set captured from the installed CLI version; a mismatch warns instead of silently mis-parsing. `[W]`
+  verified-here: cd daemon && node test/chat-adapters.unit.test.mjs -> ALL PASS, 0 failures; streamVersionStatus demo -> warn 0.56.0, refuse 3.0.0, unknown nightly; eslint + prettier --check clean
 - [ ] Session recording: opt-in, local-only, replayable in the phone (as text, not video), with a retention cap. `[W]`
 - [ ] Git panel: stage, commit, branch, diff view with the same proposal/approval gate as agent actions. `[W]`
 - [x] `pocketdesk doctor --json` for scripting: every probe, its result and the fix. `[W]`

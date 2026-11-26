@@ -1,117 +1,21 @@
-// Chat adapters: each CLI's JSON stream (trimmed from real runs) must yield the
-// reply text and a finished turn, and the next turn must resume that CLI's own
-// session by id.
+// Chat adapters: each CLI's stream must yield the reply text and a finished turn,
+// and the next turn must resume that CLI's own session by id. The streams are
+// synthetic fixtures in test/fixtures/stream-adapters/, pinned to a target CLI version.
 import fs from "node:fs";
 import path from "node:path";
 import { check, failureCount, failureNames, makeTmp } from "./helpers.mjs";
+import { FIXTURE_VERSIONS, streamVersionStatus } from "../src/stream_versions.js";
 
 const tmp = makeTmp("rh-adapters-");
 process.env.HOME = tmp;
 process.env.USERPROFILE = tmp;
 const IS_WIN = process.platform === "win32";
 
-const FIXTURES = {
-  // --include-partial-messages: text and tool starts stream first, then the whole message repeats them.
-  claude: [
-    {
-      type: "system",
-      subtype: "init",
-      session_id: "cl-1",
-      model: "m",
-      permissionMode: "default",
-      slash_commands: ["review"],
-    },
-    { type: "stream_event", event: { type: "message_start" } },
-    {
-      type: "stream_event",
-      event: { type: "content_block_delta", delta: { type: "text_delta", text: "x" } },
-    },
-    {
-      type: "stream_event",
-      event: { type: "content_block_start", content_block: { type: "tool_use", id: "tu1", name: "Read" } },
-    },
-    {
-      type: "assistant",
-      session_id: "cl-1",
-      message: {
-        content: [
-          { type: "text", text: "x" },
-          { type: "tool_use", id: "tu1", name: "Read", input: { file_path: "a.txt" } },
-        ],
-      },
-    },
-    { type: "result", session_id: "cl-1", result: "x", usage: { input_tokens: 5, output_tokens: 1 } },
-  ],
-  codex: [
-    { type: "thread.started", thread_id: "cx-thread-1" },
-    { type: "turn.started" },
-    {
-      type: "item.started",
-      item: { id: "item_0", type: "command_execution", command: "cat a.txt", status: "in_progress" },
-    },
-    {
-      type: "item.completed",
-      item: {
-        id: "item_0",
-        type: "command_execution",
-        command: "cat a.txt",
-        aggregated_output: "x\n",
-        exit_code: 0,
-      },
-    },
-    { type: "item.completed", item: { id: "item_1", type: "agent_message", text: "x" } },
-    { type: "turn.completed", usage: { input_tokens: 10, output_tokens: 1 } },
-  ],
-  opencode: [
-    { type: "step_start", sessionID: "ses_oc1", part: { type: "step-start" } },
-    {
-      type: "tool_use",
-      sessionID: "ses_oc1",
-      part: { type: "tool", tool: "read", state: { status: "completed", input: { filePath: "a.txt" } } },
-    },
-    { type: "text", sessionID: "ses_oc1", part: { type: "text", text: "x" } },
-    {
-      type: "step_finish",
-      sessionID: "ses_oc1",
-      part: { type: "step-finish", reason: "stop", tokens: { input: 5, output: 1 }, cost: 0 },
-    },
-  ],
-  gemini: [
-    { type: "init", session_id: "gm-uuid-1", model: "auto" },
-    { type: "message", role: "user", content: "read a.txt" },
-    { type: "tool_use", tool_name: "read_file", tool_id: "t1", parameters: { file_path: "a.txt" } },
-    { type: "tool_result", tool_id: "t1", status: "success", output: "x" },
-    { type: "message", role: "assistant", content: "x", delta: true },
-    { type: "result", status: "success", stats: { input_tokens: 5, output_tokens: 1 } },
-  ],
-  copilot: [
-    { type: "user.message", data: { content: "read a.txt" } },
-    { type: "assistant.message", data: { content: "", toolRequests: [{ name: "view" }] } },
-    { type: "tool.execution_start", data: { toolName: "view", arguments: { path: "a.txt" } } },
-    { type: "tool.execution_complete", data: { success: true, result: { content: "x\n" } } },
-    { type: "assistant.message_delta", data: { deltaContent: "x" } },
-    { type: "assistant.message", data: { content: "x", toolRequests: [] } },
-    { type: "result", sessionId: "cp-uuid-1", exitCode: 0, usage: { premiumRequests: 1 } },
-  ],
-  cline: [
-    {
-      type: "agent_event",
-      event: {
-        type: "content_start",
-        contentType: "tool",
-        toolName: "read_files",
-        input: { files: [{ path: "a.txt" }] },
-      },
-    },
-    {
-      type: "agent_event",
-      event: { type: "content_end", contentType: "tool", toolName: "read_files", output: [{ result: "x" }] },
-    },
-    { type: "agent_event", event: { type: "content_start", contentType: "text", text: "x" } },
-    { type: "agent_event", event: { type: "content_end", contentType: "text", text: "x" } },
-    { type: "run_result", finishReason: "completed", usage: { inputTokens: 5, outputTokens: 1 } },
-  ],
-};
+const FIXTURE_NAMES = ["claude", "codex", "opencode", "gemini", "copilot", "cline", "qwen"];
+const loadFixture = (name) =>
+  JSON.parse(fs.readFileSync(new URL(`./fixtures/stream-adapters/${name}.json`, import.meta.url), "utf8"));
+const FIXTURE_FILES = Object.fromEntries(FIXTURE_NAMES.map((name) => [name, loadFixture(name)]));
+const FIXTURES = Object.fromEntries(FIXTURE_NAMES.map((name) => [name, FIXTURE_FILES[name].events]));
 
 const calls = path.join(tmp, "calls.jsonl");
 const agentJs = path.join(tmp, "fakeagent.js");
@@ -124,7 +28,7 @@ let input = "";
 process.stdin.on("data", (d) => (input += d));
 process.stdin.on("end", () => {
   fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify({ kind, argv: rest, stdin: input }) + "\\n");
-  for (const ev of ${JSON.stringify(FIXTURES)}[kind]) process.stdout.write(JSON.stringify(ev) + "\\n");
+  for (const ev of ${JSON.stringify(FIXTURES)}[kind]) process.stdout.write(typeof ev === "string" ? ev : JSON.stringify(ev) + "\\n");
 });
 `,
 );
@@ -286,6 +190,112 @@ for (const [kind, m] of Object.entries(manifests)) {
   check("listModels offers custom names", chat.listModels(id).custom === true);
   await turn(c, "hi");
   check("custom model reaches the CLI", lastCall().argv.join(" ").includes("-m gemini-9-pro"));
+}
+
+// Qwen has no JSON stream: the text adapter passes its lines through unchanged.
+{
+  const { id } = chat.create({
+    manifest: { id: "qwen", bin: "node", chat: { args: [agentJs, "qwen"], format: "text" } },
+    cwd: workdir,
+  });
+  const c = chat.get(id);
+  const state = await turn(c, "list files");
+  const assistant = c.transcript
+    .filter((t) => t.role === "assistant")
+    .map((t) => t.text)
+    .join("");
+  check("qwen: turn ends idle", state === "idle");
+  check("qwen: text passthrough parsed", assistant.trim() === "reading the manifest\ndone: 2 files checked");
+  check("qwen: prompt reaches the CLI verbatim", lastCall().stdin.trim() === "list files");
+}
+
+// The fixture files and FIXTURE_VERSIONS are two sources of truth; they must agree.
+for (const name of FIXTURE_NAMES) {
+  const f = FIXTURE_FILES[name]._fixture;
+  check(`${name}: fixture version matches FIXTURE_VERSIONS`, f.version === FIXTURE_VERSIONS[f.format]);
+  check(
+    `${name}: fixture is synthetic and says the CLI was absent`,
+    f.produced === "synthetic" && f.note.includes("not installed"),
+  );
+}
+
+const streamEntries = (c) => c.transcript.filter((t) => t.role === "system" && t.text.includes("[stream]"));
+const chatWith = (kind, version) =>
+  chat.get(
+    chat.create({ manifest: { id: kind, bin: "node", chat: manifests[kind] }, cwd: workdir, version }).id,
+  );
+
+// Same version: quiet. Not detected: quiet.
+{
+  const ok = streamVersionStatus("codex-json", "0.55.0");
+  check("same version is ok", ok.level === "ok" && ok.ok === true && ok.message === "");
+  const same = chatWith("claude", FIXTURE_VERSIONS["claude-stream-json"]);
+  check("same major emits no stream notice", streamEntries(same).length === 0);
+  const none = streamVersionStatus("codex-json", null);
+  check("not detected is quiet", none.level === "none" && none.ok === true && none.message === "");
+  check("not detected chat stays quiet", streamEntries(chatWith("gemini", null)).length === 0);
+  check("empty version chat stays quiet", streamEntries(chatWith("gemini", "")).length === 0);
+}
+
+// Minor drift warns by name, once, at chat start.
+{
+  const st = streamVersionStatus("codex-json", "0.56.0");
+  check(
+    "minor drift warns and names format and both versions",
+    st.level === "warn" &&
+      st.ok === false &&
+      st.message.startsWith("[stream] ") &&
+      st.message.includes("codex-json") &&
+      st.message.includes("0.55.0") &&
+      st.message.includes("0.56.0"),
+  );
+  const c = chatWith("codex", "0.56.0");
+  const notices = streamEntries(c);
+  check("minor drift warns in the transcript once", notices.length === 1 && notices[0].text === st.message);
+}
+
+// Major mismatch refuses; the chat still parses because the parser itself is unchanged.
+{
+  const st = streamVersionStatus("claude-stream-json", "3.0.0");
+  check(
+    "major mismatch refuses and names format and both versions",
+    st.level === "refuse" &&
+      st.ok === false &&
+      st.message.includes("claude-stream-json") &&
+      st.message.includes("2.0.14") &&
+      st.message.includes("3.0.0") &&
+      st.message.includes("not trusted"),
+  );
+  const c = chatWith("claude", "3.0.0");
+  const notices = streamEntries(c);
+  check("major mismatch lands in the transcript", notices.length === 1 && notices[0].text.includes("3.0.0"));
+  const state = await turn(c, "hi");
+  const assistant = c.transcript
+    .filter((t) => t.role === "assistant")
+    .map((t) => t.text)
+    .join("");
+  check("a refused version still parses the turn", state === "idle" && assistant.trim() === "x");
+}
+
+// An unparseable version cannot be compared: unknown, and visible.
+{
+  const st = streamVersionStatus("cline-json", "nightly");
+  check(
+    "unparseable version is unknown and names the raw string",
+    st.level === "unknown" && st.ok === false && st.message.includes("nightly"),
+  );
+  check(
+    "unknown version warns in the transcript once",
+    streamEntries(chatWith("cline", "nightly")).length === 1,
+  );
+}
+
+// One notice per chat start, not per message.
+{
+  const c = chatWith("copilot", "0.1.0");
+  await turn(c, "hi");
+  await turn(c, "again");
+  check("the stream notice is emitted once, not per message", streamEntries(c).length === 1);
 }
 
 if (failureCount()) {
