@@ -86,6 +86,14 @@ JNA is LGPL-2.1-or-later, which the GPL permits for a dynamically linked library
 | `okhttp-tls` | `com.squareup.okhttp3:okhttp-tls` | 5.5.0 | The Apache Software License, Version 2.0 |
 | `compose-ui-test-junit4` | `androidx.compose.ui:ui-test-junit4` | 1.13.0 | The Apache Software License, Version 2.0 |
 | `compose-ui-test-manifest` | `androidx.compose.ui:ui-test-manifest` | 1.13.0 | The Apache Software License, Version 2.0 |
+| `junit4` | `junit:junit` | 4.13.2 | Eclipse Public License 1.0 |
+| `junit-vintage-engine` | `org.junit.vintage:junit-vintage-engine` | 6.1.3 | Eclipse Public License v2.0 |
+| `robolectric` | `org.robolectric:robolectric` | 4.18.1 | The MIT License |
+| `roborazzi` | `io.github.takahirom.roborazzi:roborazzi` | 1.79.0 | Apache-2.0 |
+| `roborazzi-compose` | `io.github.takahirom.roborazzi:roborazzi-compose` | 1.79.0 | Apache-2.0 |
+| `benchmark-macro-junit4` | `androidx.benchmark:benchmark-macro-junit4` | 1.5.0 | The Apache Software License, Version 2.0 |
+| `benchmark-junit4` | `androidx.benchmark:benchmark-junit4` | 1.5.0 | The Apache Software License, Version 2.0 |
+| `uiautomator` | `androidx.test.uiautomator:uiautomator` | 2.4.1 | The Apache Software License, Version 2.0 |
 
 ## Bundled and adapted third-party work
 

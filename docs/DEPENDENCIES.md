@@ -41,6 +41,8 @@ Cargo resolves on build.
 | globals | daemon/package.json (devDependencies) | ^17.14.0 |
 | prettier | daemon/package.json (devDependencies) | ^3.10.1 |
 | typescript | daemon/package.json (devDependencies) | ^5.9.3 |
+| @playwright/test | daemon/package.json (devDependencies) | ^1.65.1 |
+| @axe-core/playwright | daemon/package.json (devDependencies) | ^4.14.1 |
 
 The resolved tree is recorded in daemon/package-lock.json. node-pty is a native
 module and is allow-listed for its install script in daemon/package.json.
@@ -93,6 +95,13 @@ Every version alias in the `[versions]` block of app/gradle/libs.versions.toml.
 | junit | app/gradle/libs.versions.toml | 6.1.3 |
 | androidxTestJunit | app/gradle/libs.versions.toml | 1.3.0 |
 | androidxTestRunner | app/gradle/libs.versions.toml | 1.7.0 |
+| junit4 | app/gradle/libs.versions.toml | 4.13.2 |
+| cyclonedx | app/gradle/libs.versions.toml | 3.6.1 |
+| robolectric | app/gradle/libs.versions.toml | 4.18.1 |
+| roborazzi | app/gradle/libs.versions.toml | 1.79.0 |
+| macrobenchmark | app/gradle/libs.versions.toml | 1.5.0 |
+| baselineprofile | app/gradle/libs.versions.toml | 1.5.0 |
+| uiautomator | app/gradle/libs.versions.toml | 2.4.1 |
 
 The catalog only carries stable lines; a pre-release entry must carry a
 `# prerelease:` note on its line, as the comment at the top of the file says.

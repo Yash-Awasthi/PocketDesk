@@ -151,15 +151,17 @@ async function run() {
     check("result flips state to idle", Boolean(doneEv));
 
     send({ type: "attach", id });
-    // a first, empty chatreplay went out at session creation — wait for the
-    // populated replay that this attach triggers
-    const replay = await next((m) => m.type === "chatreplay" && m.id === id && m.items.length > 0);
-    check(
-      "attach replays full transcript",
-      replay.id === id &&
-        replay.items.some((i) => i.role === "user") &&
-        replay.items.some((i) => i.role === "tool"),
+    // Session creation already sends a chatreplay, and it now carries the spawn's
+    // system line, so "not empty" no longer distinguishes it from this one. Match
+    // the replay that actually holds the turn instead.
+    const replay = await next(
+      (m) =>
+        m.type === "chatreplay" &&
+        m.id === id &&
+        m.items.some((i) => i.role === "user") &&
+        m.items.some((i) => i.role === "tool"),
     );
+    check("attach replays full transcript", replay.id === id && replay.items.length >= 4);
 
     send({ type: "chatmsg", id, text: "second turn" });
     const resumedDelta = await next(
