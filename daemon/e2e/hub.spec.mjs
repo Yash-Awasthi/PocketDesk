@@ -244,3 +244,73 @@ test("every hub page has a baseline screenshot", async () => {
   const pngs = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".png")) : [];
   expect(pngs.length, `baseline PNG count in ${dir}`).toBe(ids.length);
 });
+
+test("one connection indicator: the same words on every page and no flap on a drop", async ({ page }) => {
+  test.setTimeout(120_000);
+  const VOCAB = ["Connected", "Reconnecting...", "Offline"];
+  await open(page, "home");
+  const pill = page.locator("header #conn");
+  await expect(pill).toBeVisible();
+  await expect(pill).toHaveText("Connected");
+
+  await page.getByRole("button", { name: "This PC's screen" }).click();
+  const winStatus = page.locator("#pwins .pwin-status");
+  await expect(winStatus).toBeVisible();
+  const winBefore = ((await winStatus.textContent()) || "").trim();
+
+  await page.evaluate(() => {
+    const el = globalThis.document.querySelector("#conn");
+    globalThis.__connWords = [];
+    new globalThis.MutationObserver(() => globalThis.__connWords.push(el.textContent)).observe(el, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  });
+
+  daemon.setDown(true);
+  await expect(pill).toHaveText("Reconnecting...", { timeout: 15_000 });
+  const words = await page.evaluate(() => globalThis.__connWords.slice());
+  console.log("conn words after the drop:", JSON.stringify(words));
+  expect(
+    words.filter((w) => w !== "Reconnecting..."),
+    `conn words after the drop: ${words.join(" | ")}`,
+  ).toEqual([]);
+
+  await expect
+    .poll(async () => ((await winStatus.textContent()) || "").trim(), {
+      timeout: 15_000,
+      message: "the desktop window status did not change when the daemon went down",
+    })
+    .not.toBe(winBefore);
+  const shown = ((await winStatus.textContent()) || "").trim();
+  expect(VOCAB, `desktop window status "${shown}" is not one of ${VOCAB.join(", ")}`).toContain(shown);
+
+  for (const id of ["home", "thispc", "sessions", "running"]) {
+    await page.locator(`#nav a[data-page="${id}"]`).click();
+    await expect(page.locator(`#page-${id}`)).toBeVisible();
+    await expect(pill).toHaveText("Reconnecting...");
+    const bare = await page.evaluate(() => {
+      const rx =
+        /^(?:[A-Za-z][A-Za-z ]{0,12}:\s*)?(connected|offline|disconnected|online|reconnecting)[.!]{0,3}$/i;
+      const out = [];
+      for (const el of globalThis.document.querySelectorAll("#pages *")) {
+        if (el.children.length) continue;
+        if (el.closest("[hidden]")) continue;
+        const box = el.getBoundingClientRect();
+        if (!box.width && !box.height) continue;
+        const text = (el.textContent || "").trim();
+        if (rx.test(text)) out.push(text);
+      }
+      return out;
+    });
+    expect(bare, `${id}: ${bare.join("; ")}`).toEqual([]);
+    const joined = await page.locator(`#page-${id}`).innerText();
+    const m = joined.match(/\b(?:app|page|desktop):\s*(?:connected|offline)\b/i);
+    expect(m ? m[0] : "", `${id}: ${m ? m[0] : ""}`).toBe("");
+  }
+
+  daemon.setDown(false);
+  await expect(pill).toHaveText("Connected", { timeout: 30_000 });
+  await expect(page.locator("body")).toHaveClass(/online/);
+});

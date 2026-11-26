@@ -205,7 +205,7 @@ function openWin(s) {
     send({ type: "desktop_monitors" });
   };
   ws.onopen = () => send({ type: "hello", token: $("#token").value.trim(), name: `PC browser (${s.name})` });
-  ws.onclose = () => { if (C.wins.has(w)) { status.hidden = false; status.textContent = "Disconnected"; } };
+  ws.onclose = () => { if (C.wins.has(w)) { status.hidden = false; status.textContent = "Offline"; status.dataset.state = "down"; } };
   ws.onmessage = (ev) => {
     if (typeof ev.data !== "string") return packet(w, new Uint8Array(ev.data), fit);
     const m = JSON.parse(ev.data);

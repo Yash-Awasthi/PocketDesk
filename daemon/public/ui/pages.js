@@ -71,7 +71,7 @@ function drawPhoneCard() {
   box.replaceChildren(
     h("div", { className: "row" }, h("div", { className: "phone-ico", innerHTML: I.screen }),
       h("div", { className: "grow" }, h("div", { className: "big", textContent: name }),
-        h("div", { className: "dim", textContent: [a?.serial ? `Control: ${a.via === "usb" ? "USB cable" : "wireless debugging"}` : "Control: not set up", hub.online ? "App: connected" : "App: offline", bat ? `Battery ${bat.level}%${bat.charging ? " charging" : ""}` : ""].filter(Boolean).join(" · ") }))),
+        h("div", { className: "dim", textContent: [a?.serial ? `Control: ${a.via === "usb" ? "USB cable" : "wireless debugging"}` : "Control: not set up", bat ? `Battery ${bat.level}%${bat.charging ? " charging" : ""}` : ""].filter(Boolean).join(" · ") }))),
     h("div", { className: "actions" },
       a?.serial ? [btn("Show screen", () => PD.adb.open("screen"), "primary"), btn("Apps", () => PD.go("apps")), btn("Camera", () => PD.go("camera"))]
         : btn("Set up phone control", () => PD.go("connect"), "primary"),

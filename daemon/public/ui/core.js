@@ -64,12 +64,24 @@ PD.buildNav = () => {
 };
 
 // ── connection: the token comes from #t= in the link, this browser's last login, or the box ──
-let reconnectTimer, reconnectDelay = 1000, pairCode;
-function setUp(up, text) {
-  document.body.classList.toggle("online", up);
-  PD.$("#loginStatus").textContent = text || (up ? "connected" : "disconnected");
-  PD.$("#conn").textContent = up ? "Connected" : "Offline";
-  PD.$("#conn").className = up ? "pill ok" : "pill";
+const CONN = { up: "Connected", retry: "Reconnecting...", down: "Offline" };
+// body.online follows live, not each socket: it stays on through a scheduled retry so the shell and
+// the indicator do not vanish on a blip, and drops only when no retry is scheduled.
+let reconnectTimer, reconnectDelay = 1000, pairCode, live = false;
+function setConn(state, note) {
+  if (state === "up") live = true;
+  if (state === "down") live = false;
+  const pill = PD.$("#conn");
+  pill.textContent = CONN[state];
+  pill.dataset.state = state;
+  pill.classList.toggle("ok", state === "up");
+  pill.classList.toggle("wait", state === "retry");
+  const slot = live ? PD.$("#connSlot") : PD.$("#login .conn-row");
+  if (pill.parentElement !== slot) slot.append(pill);
+  const reason = PD.$("#loginStatus");
+  reason.textContent = note || "";
+  reason.hidden = !note;
+  document.body.classList.toggle("online", live);
 }
 PD.connect = () => {
   if (PD.ws) { PD.ws.onclose = null; PD.ws.close(); }
@@ -82,15 +94,19 @@ PD.connect = () => {
     pairCode = undefined;
   };
   ws.onclose = (ev) => {
-    setUp(false);
     PD.emit("offline");
-    if (ev.code === 4011) { pairCode = prompt("Two-factor code from your authenticator app") || undefined; if (pairCode) PD.connect(); return; }
+    if (ev.code === 4011) {
+      pairCode = prompt("Two-factor code from your authenticator app") || undefined;
+      if (pairCode) { setConn("retry"); PD.connect(); } else setConn("down");
+      return;
+    }
     // 4xxx is a refusal (wrong token, locked out, switched off): retrying only burns login attempts.
     if (ev.code >= 4000) {
       if (ev.code === 4003) { try { localStorage.removeItem("pd_token"); } catch {} }
-      setUp(false, ev.code === 4029 ? "too many attempts: wait 10 minutes" : ev.reason || `refused (${ev.code})`);
+      setConn("down", ev.code === 4029 ? "too many attempts: wait 10 minutes" : ev.reason || `refused (${ev.code})`);
       return;
     }
+    setConn("retry");
     reconnectTimer = setTimeout(PD.connect, (reconnectDelay = Math.min(reconnectDelay * 2, 30000)));
   };
   ws.onmessage = (ev) => {
@@ -104,7 +120,7 @@ PD.connect = () => {
       PD.os = m.os;
       if (m.deviceToken) PD.$("#token").value = m.deviceToken;
       try { localStorage.setItem("pd_token", PD.$("#token").value); } catch {}
-      setUp(true);
+      setConn("up");
       // PD.start() shows the first page before the socket opens, so its show() asked for data nobody
       // heard. Ask again now that the welcome arrived; otherwise Home stays empty until a page switch.
       pages.get(PD.current)?.show?.(PD.$(`#page-${PD.current}`));

@@ -91,6 +91,7 @@ export async function startFakeDaemon(options = {}) {
   ];
   const calls = [];
   const messages = [];
+  let down = false;
 
   // server.js injects these metas only into loopback responses; this page is always loopback.
   const index = fs
@@ -201,6 +202,7 @@ export async function startFakeDaemon(options = {}) {
 
   const wss = new WebSocketServer({ server, path: "/ws" });
   wss.on("connection", (ws) => {
+    if (down) return ws.terminate();
     ws.send(JSON.stringify(WELCOME));
     ws.on("message", (raw) => {
       let m;
@@ -250,6 +252,10 @@ export async function startFakeDaemon(options = {}) {
     messages,
     access,
     devices,
+    setDown(v) {
+      down = v;
+      if (down) for (const client of wss.clients) client.terminate();
+    },
     async close() {
       for (const client of wss.clients) client.terminate();
       await new Promise((resolve) => wss.close(resolve));

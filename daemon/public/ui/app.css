@@ -106,6 +106,7 @@ svg { width: 18px;height: 18px;fill: none;stroke: currentColor;stroke-width: 1.6
 .bar { display: flex;gap: var(--space-4);align-items: center;flex-wrap: wrap;margin-bottom: var(--space-5); }
 .pill { font-size: var(--text-2);padding: var(--space-1) var(--space-5);border-radius: var(--radius-pill);background: var(--panel2);color: var(--dim); }
 .pill.ok { background: color-mix(in srgb, var(--ok) 18%, transparent);color: var(--ok); }
+.pill.wait { background: color-mix(in srgb, var(--accent) 14%, transparent);color: var(--link); }
 .empty { color: var(--dim);padding: var(--space-9) var(--space-2); }
 .card { background: var(--panel);border: 1px solid var(--line);border-radius: var(--radius-5);padding: var(--space-7) var(--space-8);margin-bottom: var(--space-7); }
 .grid2 { display: grid;grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));gap: var(--space-7); }
@@ -115,6 +116,7 @@ svg { width: 18px;height: 18px;fill: none;stroke: currentColor;stroke-width: 1.6
 
 #login { display: flex;height: 100%;align-items: center;justify-content: center; }
 .login-card { display: flex;flex-direction: column;gap: var(--space-5);width: min(460px, 100% - 32px);background: var(--panel);border: 1px solid var(--line);border-radius: var(--radius-6);padding: var(--space-12); }
+.conn-row { display: flex;align-items: center;gap: var(--space-5); }
 .brand { font-weight: 700;font-size: var(--text-7);letter-spacing: .2px; }
 body.online #login { display: none; }
 #shell { display: none;height: 100%; }

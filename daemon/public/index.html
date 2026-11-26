@@ -16,7 +16,7 @@
     <div class="dim">Your phone and this PC, in one place</div>
     <input id="token" placeholder="Token from %USERPROFILE%\.pocketdesk\config.json" />
     <button class="primary">Connect</button>
-    <div id="loginStatus" class="dim">disconnected</div>
+    <div class="conn-row"><span id="conn" class="pill" data-state="down" role="status">Offline</span><div id="loginStatus" class="dim small" hidden></div></div>
   </div>
 </div>
 
@@ -29,7 +29,7 @@
     <header>
       <h1 id="pageTitle"></h1>
       <span class="gap"></span>
-      <span id="conn" class="pill">Offline</span>
+      <span id="connSlot"></span>
       <button id="themeBtn" class="ic" title="Light, dark or system theme" aria-label="Theme"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="6"/><path d="M10 4a6 6 0 0 0 0 12z" fill="currentColor"/></svg></button>
     </header>
     <div id="pages"></div>
