@@ -352,7 +352,8 @@ transport docs describe a design that has moved.
 
 ### M4.1 Phone app
 
-- [ ] Tablet and foldable layouts for the session list, terminal and desktop viewers. `[W]`
+- [x] Tablet and foldable layouts for the session list, terminal and desktop viewers. `[W]`
+  verified-here: `cd app && .\gradlew.bat :app:testDebugUnitTest --rerun-tasks` -> BUILD SUCCESSFUL in 4m 26s, 147 tests, 0 failures; new DesktopLayoutTest (9), FoldTest (6) and DesktopLayoutScreenTest (3) pin the width classes, the desktop rail and the hinge, and the sessions/terminal layout tests plus every golden stay green (no PNG changed)
   verified-here: `./gradlew :app:testDebugUnitTest --tests '*SessionsLayoutTest*'` -> 5/5 green twice (second with --rerun-tasks); `:app:verifyGoldens` -> green including the five originals plus sessions-tablet.png and sessions-foldable.png; bite: threshold at 2000dp -> tablet test red "800dp is a tablet width expected:<SideBySide> but was:<Single>", restored; terminal half: `./gradlew :app:testDebugUnitTest --tests '*TerminalLayout*'` -> 7/7 named cases green (412dp compact, 800dp keys beside the text, 673dp hinge empty, 700dp sliver confined, saved font size, tablet golden, foldable golden); `:app:recordGoldens -Pgolden.record=true` wrote docs/screenshots/golden/terminal-tablet.png and terminal-foldable.png and left every other golden byte-identical; `:app:verifyGoldens` twice -> BUILD SUCCESSFUL, all twelve PNGs sha256-unchanged; `:app:recordGoldens` without the flag -> refused "recordGoldens rewrites checked-in PNGs; pass -Pgolden.record=true to opt in"
   limits: the desktop-viewer third has no tablet or foldable test or golden yet (the clippy app trio landed in 117f3c6), so that half stays unproven; feeding the real hinge position still needs wiring in MainActivity, which is clean at HEAD but does not yet pass a fold position down
 - [x] Notification actions on session end: open, reply, dismiss, all without opening the app. `[W]`

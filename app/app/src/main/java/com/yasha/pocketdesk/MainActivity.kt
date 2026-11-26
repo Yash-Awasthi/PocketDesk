@@ -49,6 +49,8 @@ import com.yasha.pocketdesk.ui.SessionsScreen
 import com.yasha.pocketdesk.ui.SshScreen
 import com.yasha.pocketdesk.ui.TerminalScreen
 import com.yasha.pocketdesk.ui.ToolsScreen
+import com.yasha.pocketdesk.ui.foldAtDp
+import com.yasha.pocketdesk.ui.toHinge
 import androidx.savedstate.serialization.SavedStateConfiguration
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -194,6 +196,15 @@ class MainActivity : ComponentActivity() {
         fun back() = if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) else showTab(Screen.Sessions)
         var desktopFullscreen by rememberSaveable { mutableStateOf(false) }
         var desktopKeys by rememberSaveable { mutableStateOf(false) }
+        // A foldable's hinge, so a wide screen puts its divide on the fold instead of across it.
+        var foldAt by remember { mutableStateOf<androidx.compose.ui.unit.Dp?>(null) }
+        LaunchedEffect(Unit) {
+            androidx.window.layout.WindowInfoTracker.getOrCreate(this@MainActivity)
+                .windowLayoutInfo(this@MainActivity)
+                .collect { info ->
+                    foldAt = foldAtDp(info.displayFeatures.mapNotNull { it.toHinge() }, resources.displayMetrics.density)
+                }
+        }
         // Fullscreen and the desktop keyboard are per visit: the Desktop tab opens with neither.
         LaunchedEffect(screen) { if (screen != Screen.Desktop) { desktopFullscreen = false; desktopKeys = false } }
         com.yasha.pocketdesk.ui.DesktopFullscreenEffect(desktopFullscreen)
@@ -315,7 +326,7 @@ class MainActivity : ComponentActivity() {
                                 lock = lock,
                             )
                         }
-                        entry<Screen.Sessions> { SessionsScreen(client, openTerminal = { open(Screen.Terminal(it)) }) }
+                        entry<Screen.Sessions> { SessionsScreen(client, openTerminal = { open(Screen.Terminal(it)) }, foldAt = foldAt) }
                         entry<Screen.Chats> { ChatScreen(client, openTerminal = { open(Screen.Terminal(it)) }) }
                         entry<Screen.Files> { FilesScreen(client) }
                         entry<Screen.Freebuff> { FreebuffScreen(client, openDesktop = { open(Screen.Desktop) }) }
@@ -327,6 +338,7 @@ class MainActivity : ComponentActivity() {
                                 onFullscreen = { desktopFullscreen = it },
                                 showKeys = desktopKeys,
                                 onShowKeys = { desktopKeys = it },
+                                foldAt = foldAt,
                             )
                         }
                         entry<Screen.Ssh> { SshScreen(client, onClose = { back() }) }
@@ -334,7 +346,7 @@ class MainActivity : ComponentActivity() {
                         entry<Screen.Remote> { com.yasha.pocketdesk.ui.RemoteScreen(client, onClose = { back() }) }
                         entry<Screen.Gamepad> { com.yasha.pocketdesk.ui.GamepadScreen(client, onClose = { back() }) }
                         entry<Screen.Agent> { AgentScreen(client, it.id, onClose = { back() }, openChats = { showTab(Screen.Chats) }) }
-                        entry<Screen.Terminal> { TerminalScreen(client, it.sessionId, onClose = { back() }) }
+                        entry<Screen.Terminal> { TerminalScreen(client, it.sessionId, onClose = { back() }, foldAt = foldAt) }
                     },
                 )
                 if (client.status != Status.Disconnected) {
