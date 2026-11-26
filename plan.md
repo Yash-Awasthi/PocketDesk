@@ -289,7 +289,9 @@ version set that will age badly, and the Android app is on a Kotlin beta.
   verified-here: node -v; node -e "console.log(require('./daemon/package.json').engines.node)"; cd daemon; npm test -> v26.8.1, >=26, tests 120 pass 118 fail 2 (protocol-contract, readme-truth; both pre-existing)
   - [ ] `node-pty` and `@number0/iroh` to current; re-run the terminal and remote-link suites. `[F]`
 - **m3.1.2 Android build**
-  - [ ] Gradle: configuration cache + isolated projects, JDK 25 pinned, build-time report; target a 30% faster CI job. `[F]`
+  - [x] Gradle: configuration cache + isolated projects, JDK 25 pinned, build-time report; target a 30% faster CI job. `[F]`
+  verified-here: `cd app && ./gradlew lintDebug testDebugUnitTest assembleDebug --no-daemon --console=plain` -> BUILD SUCCESSFUL with isolated projects on and "Reusing configuration cache." on the second run; `./gradlew :app:compileDebugKotlin --rerun --info` shows jdkHome = C:\Users\Yash\.gradle\jdks\eclipse_adoptium-25-amd64-windows.2 (Temurin 25.0.4.1 auto-provisioned by foojay in settings.gradle.kts); the build prints "build timings: lintDebug+testDebugUnitTest+assembleDebug took Xs"; warm wall 36s -> 25s
+  parked: the 30% faster CI job is not measurable here (different runner, cold cache, network), so no CI speedup number is claimed
 
 ### M3.2 Split the two monoliths
 

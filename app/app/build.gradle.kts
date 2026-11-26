@@ -8,7 +8,7 @@ plugins {
 }
 
 val keystoreProps = Properties().apply {
-    val f = rootProject.file("keystore.properties")
+    val f = rootDir.resolve("keystore.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
@@ -34,7 +34,7 @@ android {
     signingConfigs {
         if (keystoreProps.isNotEmpty()) {
             create("release") {
-                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storeFile = rootDir.resolve(keystoreProps.getProperty("storeFile"))
                 storePassword = keystoreProps.getProperty("storePassword")
                 keyAlias = keystoreProps.getProperty("keyAlias")
                 keyPassword = keystoreProps.getProperty("keyPassword")
@@ -82,6 +82,13 @@ kotlin {
     }
 }
 
+// JDK 25 compiles; bytecode stays 21 (compileOptions and Kotlin jvmTarget above).
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
 dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.activity.compose)
@@ -117,3 +124,5 @@ dependencies {
     androidTestImplementation(platform(libs.okhttp.bom))
     androidTestImplementation(libs.okhttp.tls)
 }
+
+apply(from = rootDir.resolve("gradle/build-timings.gradle.kts"))
