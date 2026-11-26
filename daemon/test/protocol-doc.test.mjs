@@ -65,4 +65,61 @@ check(
   missingFiles.length === 0,
 );
 
+// The compatibility rule in docs/adr/0001-protocol-changes.md: an addition is free, a removal or a
+// changed field list needs a version bump and a note. The checker is table-driven over the README
+// and the generated table, so this runs it and confirms the baseline it read is the documented one.
+const compatScript = path.join(REPO, "daemon", "scripts", "gen-protocol-compat.mjs");
+const baselinePath = path.join(REPO, "daemon", "protocol", "compat.json");
+check("the compatibility checker exists", fs.existsSync(compatScript));
+check("the compatibility baseline exists", fs.existsSync(baselinePath));
+
+let compatOut;
+let compatCode = 0;
+try {
+  compatOut = execFileSync(process.execPath, [compatScript, "--check"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+} catch (e) {
+  compatCode = e.status ?? 1;
+  compatOut = `${e.stdout || ""}${e.stderr || ""}`;
+}
+check(
+  compatCode === 0
+    ? "the compatibility baseline is current"
+    : `the compatibility baseline is current (${compatOut.trim().split("\n").pop()})`,
+  compatCode === 0,
+);
+check(
+  "the check names the version and the message count",
+  /protocol v\d+/.test(compatOut) && /\d+ messages/.test(compatOut),
+);
+
+const baseline = JSON.parse(fs.readFileSync(baselinePath, "utf8"));
+const rootReadme = fs.readFileSync(path.join(REPO, "README.md"), "utf8");
+check(
+  `the baseline version matches the README heading (v${baseline.protocolVersion})`,
+  new RegExp(`Protocol \\(v${baseline.protocolVersion}\\)`).test(rootReadme),
+);
+check(
+  `every message in the generated table is in the baseline (${types.length})`,
+  types.every((type) => Object.hasOwn(baseline.messages, type)),
+);
+check(
+  `the baseline records no message the table dropped (${Object.keys(baseline.messages).length})`,
+  Object.keys(baseline.messages).length === types.length,
+);
+
+const adr = fs.readFileSync(path.join(REPO, "docs", "adr", "0001-protocol-changes.md"), "utf8");
+check("the ADR says an addition is additive", /additive/i.test(adr));
+check("the ADR requires a version bump for a removal or change", /version bump/i.test(adr));
+check(
+  "the ADR keeps a compatibility note log",
+  /^## Compatibility notes/m.test(adr) && /^- v\d+: /m.test(adr),
+);
+check(
+  "the README protocol section states the same rule",
+  /adding a message is additive/.test(rootReadme) && /removing, renaming or changing/i.test(rootReadme),
+);
+
 finish();

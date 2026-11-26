@@ -275,7 +275,8 @@ commit is byte-identical.
 ### M2.5 Upgrade and compatibility
 
 - [ ] Protocol version in the hello message plus a mismatch message on both ends, tested. `[P]`
-- [ ] Doc + test: adding a message is additive; changing one needs a version bump and a compatibility note. `[P]`
+- [x] Doc + test: adding a message is additive; changing one needs a version bump and a compatibility note. `[P]`
+  verified-here: cd daemon && node --test test/protocol-doc.test.mjs -> ALL PASS, 22 checks; node scripts/gen-protocol-compat.mjs --check -> "compatibility baseline is current (226 messages, protocol v1)". Perturbations: renaming the detach handler -> "1 message(s) removed or changed without a version bump" exit 1; adding zzz_probe -> additive notice only, regenerating accepts it at v1 with no bump; changing attach to {since, tab} -> fails for the missing bump and note, still fails on the heading alone, passes only after v2 plus a v2 note; every file restored byte-identical and --check exits 0
 - [x] Android `versionCode` monotonic check in CI and a changelog entry per release. `[P]`
   verified-here: cd daemon && node --test test/android-ci.unit.test.mjs -> ALL PASS, 22 checks; versionCode is read from all 27 commits that touched build.gradle.kts and never goes backwards (2..26), and the newest CHANGELOG.md section must equal versionName. Perturbing the file to versionCode 25 / versionName 0.12.0 -> FAILED: 2, naming both checks; restored, diff empty
 
