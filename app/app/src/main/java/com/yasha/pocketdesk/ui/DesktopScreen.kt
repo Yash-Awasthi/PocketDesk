@@ -283,6 +283,7 @@ fun DesktopScreen(
                 var more by remember { mutableStateOf(false) }
                 var power by remember { mutableStateOf<String?>(null) }
                 var clippyOpen by remember { mutableStateOf(false) }
+                var captureOpen by remember { mutableStateOf(false) }
                 Box {
                     IconButton(onClick = { more = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
                     androidx.compose.material3.DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
@@ -318,6 +319,11 @@ fun DesktopScreen(
                         }
                         if (ws.targetOs == "win32") {
                             androidx.compose.material3.HorizontalDivider()
+                            // A window that hides itself from recorders: choose how the PC reads it.
+                            Item("Game capture: " + ws.captureChoice.ifEmpty { "automatic" } + " (choose method)") {
+                                ws.captureModes()
+                                captureOpen = true
+                            }
                             // clippy recovers Ctrl+C text from games that keep their own clipboard.
                             Item(if (ws.clippy.running) "Clippy: recording (stop)" else "Clippy: off (start)") {
                                 if (ws.clippy.running) ws.clippyStop() else ws.clippyStart()
@@ -332,6 +338,7 @@ fun DesktopScreen(
                 }
                 power?.let { PowerConfirmDialog(ws, it) { power = null } }
                 if (clippyOpen) ClippyDialog(ws) { clippyOpen = false }
+                if (captureOpen) CaptureDialog(ws) { captureOpen = false }
             }
         }
         // Fullscreen is the picture alone: no bars, notices or keyboard, only the two overlay buttons.
@@ -831,6 +838,42 @@ private fun ShortcutBar(ws: WsClient) {
             }
         }
     }
+}
+
+/** The measured capture methods, plus the check that proves the gate made the difference. */
+@Composable
+private fun CaptureDialog(ws: WsClient, onClose: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Game capture") },
+        confirmButton = { TextButton(onClick = onClose) { Text("Done") } },
+        dismissButton = { TextButton(onClick = { ws.captureCheck() }) { Text("Check this window") } },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Automatic tries the methods in order and stops at the first that reads the window. " +
+                        "Pick one to make a working method repeatable.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (ws.captureChoices.isEmpty()) {
+                    Text("Asking the PC for its methods...", style = MaterialTheme.typography.bodySmall)
+                }
+                ws.captureChoices.forEach { c ->
+                    TextButton(onClick = { ws.captureUse(c.id); ws.captureModes() }) {
+                        Text(
+                            (if (c.current) "[on] " else "") + c.label +
+                                (if (c.note.isNotEmpty()) " - " + c.note else ""),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+                if (ws.captureNote.isNotEmpty()) {
+                    Text(ws.captureNote, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        },
+    )
 }
 
 /**

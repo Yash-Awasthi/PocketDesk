@@ -125,6 +125,9 @@ data class FbConfig(val name: String, val size: Long, val mtime: String)
 /** One captured desktop frame: base64 JPEG, full virtual-screen geometry. */
 data class DesktopFrame(val base64: String, val width: Int, val height: Int)
 
+/** One capture method the PC measured, as it advertises it; only proven methods are listed. */
+data class CaptureChoice(val id: String, val label: String, val note: String, val current: Boolean)
+
 /** A file or folder on the PC clipboard. */
 data class PcFile(val path: String, val name: String, val size: Long?, val dir: Boolean)
 

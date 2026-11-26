@@ -186,6 +186,14 @@ class WsClient(
     /** Monitor names in the daemon's order; the video shows [desktopMonitor]. */
     var desktopMonitors by mutableStateOf<List<String>>(emptyList())
         private set
+    /** Capture methods the PC advertises for a window that hides itself; empty until asked. */
+    var captureChoices by mutableStateOf<List<CaptureChoice>>(emptyList())
+        private set
+    var captureChoice by mutableStateOf("")
+        private set
+    /** The last attempt's line: which method worked, or the named cause and the next step. */
+    var captureNote by mutableStateOf("")
+        private set
     var desktopMonitor by mutableStateOf(0)
     /** What the viewer shows: "local" (this PC), "adb:<serial>" (a phone on it) or "pc:<id>[/…]" (another PC). */
     var desktopSource by mutableStateOf("local")
@@ -695,6 +703,18 @@ class WsClient(
     fun uploadBacklog(): Long = irohLink.get()?.uploadBacklog?.get() ?: socket.get()?.queueSize() ?: 0L
 
     fun desktopStop() { desktopStreaming = false; desktopResume = null; send(Proto.desktopStop()) }
+    /** Asks the PC for the capture methods it measured; the answer also carries the current one. */
+    fun captureModes() = send(Proto.desktopCapture())
+    /** Runs one method against the window the PC picked. */
+    fun captureUse(mode: String) = send(Proto.desktopCapture(mode))
+    /** Runs the control/gate/reverse comparison and reports the numbers. */
+    fun captureCheck() = send(Proto.desktopCaptureCheck())
+    /** A refusal has to name its cause and the next step, not say "failed". */
+    private fun captureCause(m: JsonObject): String {
+        val c = m["cause"] as? JsonObject
+        return listOfNotNull(c?.let { str(it, "say") } ?: str(m, "error"), c?.let { str(it, "next") })
+            .joinToString(" ")
+    }
     fun sourcesRefresh() = send(Proto.sourcesList())
     /** Shows another device in the viewer; the stream restarts on it. */
     fun pickSource(id: String) {
@@ -733,8 +753,7 @@ class WsClient(
     fun desktopHWheel(delta: Int) = control(Proto.desktopMouse(null, null, null, null, hwheel = delta))
     fun desktopType(text: String) = control(Proto.desktopType(text))
     // ── clippy: Ctrl+C from apps with their own clipboard ──
-    fun clippyStart() = send(Proto.clippyStart())
-    fun clippyStop() = send(Proto.clippyStop())
+    fun clippyStart() = send(Proto.clippyStart())    fun clippyStop() = send(Proto.clippyStop())
     fun clippyStatus() = send(Proto.clippyStatus())
     fun clippyInstall() = send(Proto.clippyInstall())
     fun clippySetDir(dir: String) = send(Proto.clippySetDir(dir))
@@ -1298,8 +1317,7 @@ class WsClient(
                 val pic = if (fx != null && fy != null) desktopCalibration?.toPicture(fx, fy) ?: (fx to fy) else null
                 desktopCursor = DesktopCursor(x, y, str(m, "shape") ?: "arrow", pic?.first, pic?.second)
             }
-            "desktop_monitors" -> if (bool(m, "ok") == true) {
-                desktopMonitors = (m["monitors"] as? JsonArray)?.mapIndexed { i, e ->
+            "desktop_monitors" -> if (bool(m, "ok") == true) {                desktopMonitors = (m["monitors"] as? JsonArray)?.mapIndexed { i, e ->
                     val o = e as? JsonObject
                     val w = (o?.get("w") as? JsonPrimitive)?.intOrNull
                     val h = (o?.get("h") as? JsonPrimitive)?.intOrNull
@@ -1307,6 +1325,28 @@ class WsClient(
                         (if (o?.let { bool(it, "primary") } == true) " · main" else "")
                 } ?: emptyList()
                 pendingExtend?.let { pendingExtend = null; android.os.Handler(android.os.Looper.getMainLooper()).post(it) }
+            }
+            "desktop_capture" -> {
+                captureChoice = str(m, "current") ?: captureChoice
+                (m["modes"] as? JsonArray)?.let { arr ->
+                    captureChoices = arr.mapNotNull { e ->
+                        val o = e as? JsonObject ?: return@mapNotNull null
+                        val id = str(o, "id") ?: return@mapNotNull null
+                        CaptureChoice(id, str(o, "label") ?: id, str(o, "note") ?: "", bool(o, "current") == true)
+                    }
+                }
+                captureNote = if (bool(m, "ok") == true) {
+                    val f = m["frame"] as? JsonObject
+                    val w = (f?.get("w") as? JsonPrimitive)?.intOrNull
+                    val h = (f?.get("h") as? JsonPrimitive)?.intOrNull
+                    if (f == null) "" else "Captured with " + (str(m, "mode") ?: "the last method") +
+                        (if (w != null && h != null) " at ${w}x$h" else "")
+                } else captureCause(m)
+            }
+            "desktop_capture_check" -> {
+                val v = m["verdict"] as? JsonObject
+                val line = v?.let { str(it, "line") }
+                captureNote = line ?: captureCause(m)
             }
             "clipboard", "clipboard_changed" ->
                 if (type == "clipboard_changed" || bool(m, "ok") == true) {
