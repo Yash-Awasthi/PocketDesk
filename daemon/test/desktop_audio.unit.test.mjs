@@ -2,6 +2,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { AdtsReader, rawInput, pulseMonitorSource } from "../src/desktop_audio.js";
+import remoteHandlers from "../src/handlers/remote.js";
 
 test("the pulse capture source is the default sink's monitor, falling back to default", () => {
   assert.equal(
@@ -69,4 +70,71 @@ test("raw loopback input names ffmpeg's sample format from the helper's header",
   ]);
   assert.equal(rawInput({ float: false, bits: 16, rate: 44100, channels: 2 })[1], "s16le");
   assert.equal(rawInput({ float: false, bits: 24, rate: 48000, channels: 2 })[1], "s24le");
+});
+
+test("audio-only is a negotiated mode that starts no video and keeps the sound", async () => {
+  const sent = [];
+  const audioListeners = new Set();
+  const videoWatchers = new Set();
+  const started = [];
+  const video = {
+    running: false,
+    capKbps: 0,
+    monitor: null,
+    setPreset() {},
+    setCodecs() {},
+    setCap() {
+      return 0;
+    },
+    async start() {
+      started.push("video");
+      return "libx264";
+    },
+    async restart() {
+      started.push("video");
+      return "libx264";
+    },
+    stop() {},
+  };
+  const desktop = {
+    monitorList: [],
+    watchCursor() {},
+    watchClipboard() {},
+    watchProtected() {},
+    setCaptureAllowed() {},
+    stopFrameStream() {
+      return { ok: true };
+    },
+  };
+  let synced = 0;
+  const h = remoteHandlers({
+    send: (_ws, m) => sent.push(m),
+    desktop,
+    clippy: {},
+    desktopWatchers: new Set(),
+    video,
+    videoWatchers,
+    recorder: { log() {}, screenWatched() {}, recordingScreen: false },
+    access: { controlAllowed: true, remoteOn: true },
+    syncAudio() {
+      synced++;
+    },
+    audioListeners,
+    monitorRefresh() {},
+  });
+  const ws = { bufferedAmount: 0, once() {}, _codecs: [] };
+  await h.desktop_start(ws, { mode: "audio" });
+  assert.equal(sent.at(-1).mode, "audio");
+  assert.equal(sent.at(-1).ok, true);
+  assert.equal(sent.at(-1).audio, true);
+  assert.equal(sent.at(-1).maxKbps, 0);
+  assert.equal(audioListeners.has(ws), true, "the socket joins the audio-only listeners");
+  assert.equal(videoWatchers.size, 0, "no video viewer was added");
+  assert.deepEqual(started, [], "no encoder started");
+  assert.equal(ws._audio, true);
+  assert.ok(synced >= 1, "sound capture is synced on");
+
+  await h.desktop_stop(ws, {});
+  assert.equal(audioListeners.has(ws), false, "stopping releases the audio-only listener");
+  assert.equal(videoWatchers.size, 0);
 });

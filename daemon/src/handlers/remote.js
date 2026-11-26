@@ -112,6 +112,35 @@ export default function remoteHandlers(ctx) {
         ? msg.codecs.filter((c) => ["av1", "hevc", "h264"].includes(c))
         : [];
       ws._audio = !!msg.audio;
+      // Audio-only for a poor link: no encoder and no still frames, just the PC's sound.
+      if (msg.audioOnly === true || msg.mode === "audio") {
+        ws._audio = true;
+        if (videoWatchers.delete(ws)) {
+          applyCap();
+          if (!videoWatchers.size) video.stop();
+        }
+        desktopWatchers.delete(ws);
+        desktop.stopFrameStream(ws._clientId || "anon");
+        audioListeners.add(ws);
+        if (!ws._audioHooked) {
+          ws._audioHooked = true;
+          ws.once?.("close", () => {
+            audioListeners.delete(ws);
+            syncAudio();
+          });
+        }
+        syncAudio();
+        syncCursor();
+        return send(ws, {
+          type: "desktop_started",
+          ok: true,
+          mode: "audio",
+          audio: true,
+          maxKbps: 0,
+          viewOnly: ws._viewOnly,
+          recording: recorder.recordingScreen,
+        });
+      }
       // A viewer may ask for less than the machine's ceiling; 0 means "whatever the preset does".
       const asked = Number(msg.stream?.maxKbps);
       ws._capKbps = Number.isFinite(asked) && asked > 0 ? Math.min(asked, 50_000) : 0;
@@ -285,6 +314,7 @@ export default function remoteHandlers(ctx) {
     async desktop_stop(ws, _msg) {
       release(ws);
       ws._audio = false;
+      if (audioListeners.delete(ws)) syncAudio();
       if (videoWatchers.delete(ws)) applyCap();
       if (!videoWatchers.size) video.stop();
       desktopWatchers.delete(ws);
