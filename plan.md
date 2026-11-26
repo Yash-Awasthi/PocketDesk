@@ -430,7 +430,9 @@ re-shoot.
 
 ### M6.2 Publication and third parties
 
-- [ ] `docs/for-proctoring-vendors.md`: process names, task name, service keys, install path, ports, data folder, the capture marker, how to verify and how to block, plus a contact. `[E]`
+- [x] `docs/for-proctoring-vendors.md`: process names, task name, service keys, install path, ports, data folder, the capture marker, how to verify and how to block, plus a contact. `[E]`
+  verified-here: `cd daemon && RH_HOME=$(mktemp -d) node src/cli.js --status` -> ports: 8765 daemon, 8775 loopback page, 4679 cli; data: /tmp/tmp.lUWAArDFBn; running: no; no-invention 75 code spans, 0 missing
+  limits: no Windows service; CI does not exercise desktop capture, input or tray; policy-key enforcement open (plan M6.1)
 - [x] `ALPHA-CAPTURE.md` gets the "do not use in proctoring, exam or DRM windows" warning. `[E]`
   verified-here: grep -n -i "proctoring|exam|DRM" docs/ALPHA-CAPTURE.md -> 2 hits; cd daemon && node --test test/no-evasion.test.mjs -> ALL PASS
 - [x] `SECURITY.md`: disclosure path, supported versions, response time. `[E]`
