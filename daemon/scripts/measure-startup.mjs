@@ -1,27 +1,34 @@
-// Cold-start measurement for the daemon: how long from spawn to the listening banner, and from
-// there to the first /health answer. Both must stay well under the budget, because the registry
-// scan (about 60 `cmd.exe /c <bin> --version` probes) blocks the Windows event loop for seconds.
+﻿// Cold-start measurement for the daemon: how long from spawn to the listening banner, and from
+// there to the first /health answer. The budget is 400 ms on a mid-range PC: the registry scan
+// (about 60 `cmd.exe /c <bin> --version` probes) blocks the Windows event loop for seconds, so
+// the port and the health answer must not wait for it.
 //
-//   node scripts/measure-startup.mjs
+//   node scripts/measure-startup.mjs            # five cold starts, one fresh compile cache dir
+//   node scripts/measure-startup.mjs --runs=3
 //
-// Prints one line per run and a median line:
-//   cold start run 1/3: start->listen 1843 ms, listen->first health 27 ms
-//   cold start median: start->listen 1800 ms, listen->first health 24 ms (3 runs, budget 400 ms)
+// A cold start is a fresh process. The compile cache directory is shared by the runs and its state
+// is printed per run (fresh or reused), because cached bytecode changes what a "cold" run pays.
+// PD_COMPILE_CACHE points the runs at an existing directory; PD_NO_LOAD=1 skips the host snapshot.
 //
-// Exit 0 when all runs answered; exit 1 when a daemon never answered (its stderr tail is shown).
+// Prints one line per run, then the median and the worst, then the gate. Exit 1 when the worst
+// start->listen is at or over the budget; a median gate is a deliberate, documented choice, not
+// something this script silently switches to.
+//
+// On Windows each run is preceded by a host load snapshot: the CPU load percentage and the top CPU
+// consumers over a 500 ms sample, so a measurement on a busy box cannot be read as an idle baseline.
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 export const daemonDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const BUDGET_MS = 400;
 const HEALTH_POLL_MS = 12;
 const ANSWER_DEADLINE_MS = 60_000;
-// Long enough for the deferred scan to finish and print its banner, short enough to keep a 3-run
-// measurement under a minute: this is what makes "health before scan" a real ordering, not a race.
+// Long enough for the deferred scan to finish and print its banner, short enough to keep the five
+// runs under a minute: this is what makes "health before scan" a real ordering, not a race.
 const SCAN_DEADLINE_MS = 20_000;
 
 function freePort() {
@@ -37,11 +44,52 @@ function freePort() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// One PowerShell call: load percentage, then CPU seconds each process spent in a 500 ms window.
+const LOAD_SCRIPT = [
+  "$before=@{}",
+  "Get-Process | ForEach-Object { if ($null -ne $_.CPU) { $before[$_.Id]=$_.CPU } }",
+  "Start-Sleep -Milliseconds 500",
+  "Write-Output ('load ' + (Get-CimInstance Win32_Processor).LoadPercentage)",
+  "Get-Process | Where-Object { $before.ContainsKey($_.Id) -and $null -ne $_.CPU } | ForEach-Object { [pscustomobject]@{ n=$_.ProcessName; i=$_.Id; d=[math]::Round($_.CPU-$before[$_.Id],2) } } | Sort-Object d -Descending | Select-Object -First 3 | ForEach-Object { Write-Output ('top ' + $_.n + ' ' + $_.i + ' ' + $_.d) }",
+].join("; ");
+
+/** Windows-only host snapshot, or null where it does not apply. Never fails the measurement. */
+export function hostLoad() {
+  if (process.platform !== "win32") return null;
+  let out = null;
+  try {
+    const r = spawnSync("powershell.exe", ["-NoProfile", "-Command", LOAD_SCRIPT], {
+      encoding: "utf8",
+      timeout: 20_000,
+    });
+    if (r.status === 0) out = r.stdout;
+  } catch {
+    return null;
+  }
+  const lines = String(out || "")
+    .trim()
+    .split(/\r?\n/);
+  const load = /^load (\d+)/.exec(lines[0] || "");
+  if (!load) return null;
+  const top = [];
+  for (const line of lines.slice(1)) {
+    const m = /^top (\S+) (\d+) ([\d.]+)/.exec(line);
+    if (m) top.push({ name: m[1], pid: Number(m[2]), cpuSec: Number(m[3]) });
+  }
+  return { load: Number(load[1]), top };
+}
+
+export function loadLine(i, snapshot) {
+  if (!snapshot) return `host load before run ${i}: unavailable`;
+  const top = snapshot.top.map((p) => `${p.name}(${p.pid}) ${p.cpuSec}s`).join(", ");
+  return `host load before run ${i}: ${snapshot.load}%; top CPU over 500 ms: ${top || "none"}`;
+}
+
 /**
  * One cold start on free ports and a fresh tmp state dir.
  * Resolves { listenMs, healthMs, healthBeforeScan, scanMs } or throws with the daemon's stderr.
  */
-export async function measureOnce() {
+export async function measureOnce({ compileCache } = {}) {
   const port = await freePort();
   const cliPort = await freePort();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "pd-coldstart-"));
@@ -56,6 +104,9 @@ export async function measureOnce() {
     RH_MANIFESTS: tmp,
     POCKETDESK_DATA: path.join(tmp, "data"),
   };
+  // The daemon sets no compile cache of its own; only this script asks for one, so say so.
+  if (compileCache) env.NODE_COMPILE_CACHE = compileCache;
+  else delete env.NODE_COMPILE_CACHE;
   const started = performance.now();
   const child = spawn(process.execPath, ["src/index.js"], {
     cwd: daemonDir,
@@ -131,23 +182,62 @@ export function medianOf(runs) {
   };
 }
 
-export function runLine(i, total, r) {
-  return `cold start run ${i}/${total}: start->listen ${r.listenMs} ms, listen->first health ${r.healthMs} ms`;
+export function worstOf(runs) {
+  return {
+    listenMs: Math.max(...runs.map((r) => r.listenMs)),
+    healthMs: Math.max(...runs.map((r) => r.healthMs)),
+  };
+}
+
+export function runLine(i, total, r, cache) {
+  const note = cache ? `, compile cache ${cache}` : "";
+  return `cold start run ${i}/${total}: start->listen ${r.listenMs} ms, listen->first health ${r.healthMs} ms${note}`;
 }
 
 export function medianLine(m, total) {
   return `cold start median: start->listen ${m.listenMs} ms, listen->first health ${m.healthMs} ms (${total} runs, budget ${BUDGET_MS} ms)`;
 }
 
+export function worstLine(w, total) {
+  return `cold start worst: start->listen ${w.listenMs} ms, listen->first health ${w.healthMs} ms (${total} runs, budget ${BUDGET_MS} ms)`;
+}
+
 async function main() {
-  const total = 3;
-  const runs = [];
-  for (let i = 1; i <= total; i++) {
-    const r = await measureOnce();
-    runs.push(r);
-    console.log(runLine(i, total, r));
+  const arg = process.argv.find((a) => a.startsWith("--runs="));
+  const total = arg ? Math.max(1, Number(arg.split("=")[1]) || 0) : 5;
+  let cacheDir = process.env.PD_COMPILE_CACHE || "";
+  let ownsCache = false;
+  if (!cacheDir) {
+    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), "pd-compile-cache-"));
+    ownsCache = true;
+  } else {
+    fs.mkdirSync(cacheDir, { recursive: true });
   }
-  console.log(medianLine(medianOf(runs), total));
+  console.log(
+    `cold start: ${total} fresh processes, compile cache dir ${cacheDir}` +
+      (ownsCache ? " (created fresh for this run)" : " (given by PD_COMPILE_CACHE)"),
+  );
+  const runs = [];
+  try {
+    for (let i = 1; i <= total; i++) {
+      if (process.env.PD_NO_LOAD !== "1") console.log(loadLine(i, hostLoad()));
+      const fresh = fs.readdirSync(cacheDir).length === 0;
+      const r = await measureOnce({ compileCache: cacheDir });
+      runs.push(r);
+      console.log(runLine(i, total, r, fresh ? "fresh" : "reused"));
+    }
+  } finally {
+    if (ownsCache) fs.rmSync(cacheDir, { recursive: true, force: true });
+  }
+  const m = medianOf(runs);
+  const w = worstOf(runs);
+  console.log(medianLine(m, total));
+  console.log(worstLine(w, total));
+  const failed = w.listenMs >= BUDGET_MS;
+  console.log(
+    `cold start gate: worst start->listen ${w.listenMs} ms ${failed ? ">=" : "<"} ${BUDGET_MS} ms budget -> ${failed ? "FAIL" : "PASS"}`,
+  );
+  if (failed) process.exitCode = 1;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

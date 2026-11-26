@@ -22,9 +22,6 @@ import { wakeTargets } from "./wake.js";
 import { Recorder, RECORD_FLAG } from "./recorder.js";
 import { DesktopVideo } from "./desktop_video.js";
 import { DesktopAudio } from "./desktop_audio.js";
-import { AdvancedSSHServerManager } from "./advanced_ssh_server.js";
-import { SSHBastion } from "./ssh_bastion.js";
-import { MultiProtocolClient } from "./ssh_vnc_client.js";
 import * as promptQueue from "./prompt_queue.js";
 import * as agentTodos from "./agent_todos.js";
 import * as scheduler from "./scheduler.js";
@@ -702,7 +699,10 @@ export function start(config, { onTokenRotated } = {}) {
   }
 
   async function handle(ws, msg) {
-    const h = Object.hasOwn(handlers, msg.type) ? handlers[msg.type] : null;
+    // Loaded on first use: the SSH handlers and their ssh2 imports stay out of a start that never
+    // uses them. The memoized promise means two SSH messages in flight share one set of managers.
+    let h = Object.hasOwn(handlers, msg.type) ? handlers[msg.type] : null;
+    if (!h && SSH_TYPES.has(msg.type)) h = (await loadSsh()).handlers[msg.type];
     if (!h) return send(ws, { type: "error", message: `unknown type: ${msg.type}` });
     // The machine owner's kill switch runs before a sense starts or any input moves.
     const refusal = refusalFor(msg.type);
@@ -1117,44 +1117,67 @@ export function start(config, { onTokenRotated } = {}) {
     }
   }, 10_000).unref();
 
-  // ── SSH bastion (sshportal/bifroest/cardea: jump-host access control) ───
-  const bastion = new SSHBastion();
-  for (const evt of [
-    "user:registered",
-    "host:registered",
-    "access:created",
-    "session:started",
-    "session:ended",
-  ]) {
-    bastion.on(evt, ({ client, credentials, ...payload }) =>
-      broadcast({ type: "bastion_event", bastionEvent: evt.split(":")[1], ...payload }),
-    );
-  }
-
-  // ── Advanced SSH server (bifroest/sshwifty: auth + command control) ─────
-  const sshSrv = new AdvancedSSHServerManager();
-  for (const evt of ["user:registered", "session:created", "command:executed", "session:ended"]) {
-    sshSrv.on(evt, ({ client, pty, ...payload }) =>
-      broadcast({ type: "sshserver_event", sshEvent: evt.split(":")[1], ...payload }),
-    );
-  }
-
-  // ── Multi-protocol client (haven-ssh-client: profiles, host-key TOFU, keys)
-  const mpc = new MultiProtocolClient();
-  for (const evt of [
-    "ssh:connected",
-    "ssh:disconnected",
-    "terminal:opened",
-    "vnc:connected",
-    "vnc:disconnected",
-    "sftp:connected",
-    "sftp:readdir",
-    "sftp:upload",
-    "sftp:download",
-    "hostkey:new",
-    "hostkey:changed",
-  ]) {
-    mpc.on(evt, (payload) => broadcast({ type: "mproto_event", mprotoEvent: evt.split(":")[1], ...payload }));
+  // SSH surface: bastion, advanced server and multi-protocol client. ssh2 is the heaviest part of
+  // the import graph and a normal start never opens an SSH panel, so the three managers and their
+  // wiring are created on the first SSH message, once per process.
+  const SSH_TYPES = new Set(Object.keys(sshHandlers({})));
+  let sshPromise = null;
+  function loadSsh() {
+    if (!sshPromise)
+      sshPromise = (async () => {
+        const [{ SSHBastion }, { AdvancedSSHServerManager }, { MultiProtocolClient }] = await Promise.all([
+          import("./ssh_bastion.js"),
+          import("./advanced_ssh_server.js"),
+          import("./ssh_vnc_client.js"),
+        ]);
+        // Bastion (sshportal/bifroest/cardea: jump-host access control).
+        const bastion = new SSHBastion();
+        for (const evt of [
+          "user:registered",
+          "host:registered",
+          "access:created",
+          "session:started",
+          "session:ended",
+        ]) {
+          bastion.on(evt, ({ client, credentials, ...payload }) =>
+            broadcast({ type: "bastion_event", bastionEvent: evt.split(":")[1], ...payload }),
+          );
+        }
+        // Advanced SSH server (bifroest/sshwifty: auth + command control).
+        const sshSrv = new AdvancedSSHServerManager();
+        for (const evt of ["user:registered", "session:created", "command:executed", "session:ended"]) {
+          sshSrv.on(evt, ({ client, pty, ...payload }) =>
+            broadcast({ type: "sshserver_event", sshEvent: evt.split(":")[1], ...payload }),
+          );
+        }
+        // Multi-protocol client (haven-ssh-client: profiles, host-key TOFU, keys).
+        const mpc = new MultiProtocolClient();
+        for (const evt of [
+          "ssh:connected",
+          "ssh:disconnected",
+          "terminal:opened",
+          "vnc:connected",
+          "vnc:disconnected",
+          "sftp:connected",
+          "sftp:readdir",
+          "sftp:upload",
+          "sftp:download",
+          "hostkey:new",
+          "hostkey:changed",
+        ]) {
+          mpc.on(evt, (payload) =>
+            broadcast({ type: "mproto_event", mprotoEvent: evt.split(":")[1], ...payload }),
+          );
+        }
+        process.on("exit", () => {
+          mpc.dispose();
+          sshSrv.stop();
+          bastion.stop();
+        });
+        console.log("  ssh loaded on first use");
+        return { bastion, sshSrv, mpc, handlers: sshHandlers({ ...ctx, bastion, sshSrv, mpc }) };
+      })();
+    return sshPromise;
   }
 
   // ── Run scheduler (codeman/codex-bee/kagora: auto-continue loops) ────────
@@ -1180,9 +1203,6 @@ export function start(config, { onTokenRotated } = {}) {
     desktop.dispose();
     clippy.dispose();
     recorder.dispose();
-    mpc.dispose();
-    sshSrv.stop();
-    bastion.stop();
     devices.persist();
   });
 
@@ -1242,9 +1262,6 @@ export function start(config, { onTokenRotated } = {}) {
     videoWatchers,
     recorder,
     access,
-    bastion,
-    sshSrv,
-    mpc,
     streamParser,
     monitorRefresh,
     activity,
@@ -1261,7 +1278,6 @@ export function start(config, { onTokenRotated } = {}) {
       ...agentsHandlers(ctx),
       ...filesHandlers(ctx),
       ...remoteHandlers(ctx),
-      ...sshHandlers(ctx),
       ...systemHandlers(ctx),
       ...phoneHandlers(ctx),
       ...phoneAdbHandlers(ctx),

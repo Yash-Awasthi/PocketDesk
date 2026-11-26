@@ -60,6 +60,10 @@ jobs:
           }
       - name: Run test suite
         run: npm test
+      # Row 311: print the number on an ordinary runner with nothing warmed up. The script
+      # gates on the worst of five starts (median is printed too); see docs/COLD-START.md.
+      - name: Cold start (five runs, worst under 400 ms)
+        run: node scripts/measure-startup.mjs
 
   web-ui:
     name: Hub pages (Playwright)
