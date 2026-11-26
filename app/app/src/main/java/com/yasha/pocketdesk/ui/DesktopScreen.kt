@@ -28,18 +28,22 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.MoreVert
@@ -52,6 +56,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
@@ -87,6 +92,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -114,6 +121,7 @@ fun DesktopScreen(
     onFullscreen: (Boolean) -> Unit,
     showKeys: Boolean,
     onShowKeys: (Boolean) -> Unit,
+    foldAt: Dp? = null,
 ) {
     // Swap is exclusive: while the PC views this phone, the phone does not view the PC.
     if (com.yasha.pocketdesk.PhoneShare.sharing) { PhoneSharedPanel(); return }
@@ -247,116 +255,9 @@ fun DesktopScreen(
     // A keyboard attached to the phone types straight into the PC, with keys held as long as they are held here.
     val keyFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) { keyFocus.requestFocus() }
-    Column(Modifier.fillMaxSize().background(Color(0xFF0D1117)).focusRequester(keyFocus).focusable().onKeyEvent { e ->
-        val native = e.nativeKeyEvent
-        if (native.device?.isVirtual != false) return@onKeyEvent false
-        val vk = androidKeyToVk(native.keyCode) ?: return@onKeyEvent false
-        when (e.type) {
-            KeyEventType.KeyDown -> ws.desktopKeyPress(vk, true)
-            KeyEventType.KeyUp -> ws.desktopKeyPress(vk, false)
-            else -> return@onKeyEvent false
-        }
-        true
-    }) {
-        if (!fullscreen) {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-                // Only the title and two controls share the row; everything else lives in the menu,
-                // so the title never gets squeezed on a narrow phone.
-                Column(Modifier.weight(1f)) {
-                    Text("Desktop", style = MaterialTheme.typography.titleMedium, maxLines = 1, softWrap = false)
-                    Text(
-                        listOfNotNull(
-                            "● REC".takeIf { ws.desktopRecording && ws.desktopStreaming },
-                            if (!ws.desktopStreaming) "paused" else rate.takeIf { video && it.isNotEmpty() } ?: "live",
-                            ws.route.takeIf { it.isNotEmpty() },
-                        ).joinToString(" · "),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                    )
-                }
-                TextButton(onClick = { ws.desktopViewOnly = !ws.desktopViewOnly; ws.desktopStartVideo() }) {
-                    Text(if (ws.desktopViewOnly) "View only" else "Control", maxLines = 1, softWrap = false)
-                }
-                var more by remember { mutableStateOf(false) }
-                var power by remember { mutableStateOf<String?>(null) }
-                var clippyOpen by remember { mutableStateOf(false) }
-                var captureOpen by remember { mutableStateOf(false) }
-                Box {
-                    IconButton(onClick = { more = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
-                    androidx.compose.material3.DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
-                        @Composable
-                        fun Item(label: String, onClick: () -> Unit) =
-                            androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { more = false; onClick() })
-                        if (video) Item("Quality: " + ws.desktopPreset.replaceFirstChar { it.uppercase() } + " (switch)") {
-                            ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
-                            prefs.edit().putString("desktop_preset", ws.desktopPreset).apply()
-                            ws.desktopStartVideo()
-                        }
-                        if (video) Item(if (ws.desktopAudio) "PC sound: on (mute)" else "PC sound: off (play)") {
-                            ws.desktopAudio = !ws.desktopAudio
-                            prefs.edit().putBoolean("desktop_audio", ws.desktopAudio).apply()
-                            ws.desktopStartVideo()
-                        }
-                        Item(if (touchpad) "Input: Touchpad (switch to direct tap)" else "Input: Direct tap (switch to touchpad)") {
-                            touchpad = !touchpad
-                            prefs.edit().putBoolean("desktop_touchpad", touchpad).apply()
-                        }
-                        Item(if (shortcuts) "Hide the shortcut bar" else "Show the shortcut bar") {
-                            shortcuts = !shortcuts
-                            prefs.edit().putBoolean("desktop_shortcuts", shortcuts).apply()
-                        }
-                        if (!ws.desktopViewOnly) {
-                            Item("Send files to the PC", sendFiles)
-                            Item("Calibrate pointer") { startCalibration() }
-                            if (prefs.contains(calKey)) Item("Reset pointer calibration") {
-                                prefs.edit().remove(calKey).apply()
-                                ws.desktopCalibration = null
-                                calNote = "Pointer calibration removed for this screen."
-                            }
-                        }
-                        if (ws.targetOs == "win32") {
-                            androidx.compose.material3.HorizontalDivider()
-                            // A window that hides itself from recorders: choose how the PC reads it.
-                            Item("Game capture: " + ws.captureChoice.ifEmpty { "automatic" } + " (choose method)") {
-                                ws.captureModes()
-                                captureOpen = true
-                            }
-                            // clippy recovers Ctrl+C text from games that keep their own clipboard.
-                            Item(if (ws.clippy.running) "Clippy: recording (stop)" else "Clippy: off (start)") {
-                                if (ws.clippy.running) ws.clippyStop() else ws.clippyStart()
-                            }
-                            Item(if (ws.clippy.installed) "Clippy captures (${ws.clippy.history.size})" else "Clippy: install recorder…") {
-                                if (ws.clippy.installed) { clippyOpen = true; ws.clippyStatus(); ws.clippyLatest() } else ws.clippyInstall()
-                            }
-                        }
-                        androidx.compose.material3.HorizontalDivider()
-                        POWER_ACTIONS.forEach { (a, l) -> Item(l) { power = a } }
-                    }
-                }
-                power?.let { PowerConfirmDialog(ws, it) { power = null } }
-                if (clippyOpen) ClippyDialog(ws) { clippyOpen = false }
-                if (captureOpen) CaptureDialog(ws) { captureOpen = false }
-            }
-        }
-        // Fullscreen is the picture alone: no bars, notices or keyboard, only the two overlay buttons.
-        if (!fullscreen) DesktopTransferBar(ws, transfer)
-        if (!fullscreen && ws.desktopNotice.isNotEmpty()) {
-            Text(ws.desktopNotice, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp))
-        }
-        if (!fullscreen && desktopError.isNotEmpty()) {
-            Text(desktopError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(horizontal = 12.dp))
-        }
-        if (!fullscreen && calNote.isNotEmpty()) {
-            Text(calNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp))
-        }
-
-        Box(Modifier.fillMaxWidth().weight(1f).onSizeChanged { boxSize = it }) {
+    @Composable
+    fun Picture(mod: Modifier) {
+        Box(mod.onSizeChanged { boxSize = it }) {
             if (video) {
                 AndroidView(
                     factory = { ctx -> videoView(ctx, ws, onPlayer = { videoPlayer = it }) { videoSize = it } },
@@ -634,49 +535,203 @@ fun DesktopScreen(
                 }
             }
         }
+    }
 
-        // The keyboard bar has its own Esc, Tab and clipboard keys, and the picture needs the room.
-        if (!fullscreen && !showKeys && shortcuts && !ws.desktopViewOnly && !phone) ShortcutBar(ws)
-        if (!fullscreen && phone) Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            val pad = PaddingValues(horizontal = 4.dp)
-            for ((label, key) in listOf("◁" to "back", "○" to "home", "▢" to "recents", "🔔" to "notifications")) {
-                FilledTonalButton(onClick = { ws.desktopNav(key) }, modifier = Modifier.weight(2f).fillMaxHeight(), contentPadding = pad) { Text(label) }
-            }
-            val keysButton: @Composable (Modifier) -> Unit = { m ->
-                if (showKeys) FilledTonalButton(onClick = { onShowKeys(false) }, modifier = m, contentPadding = pad) { Text("⌨") }
-                else OutlinedButton(onClick = { onShowKeys(true) }, modifier = m, contentPadding = pad) { Text("⌨") }
-            }
-            keysButton(Modifier.weight(1f).fillMaxHeight())
-            OutlinedButton(onClick = { onFullscreen(!fullscreen) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("⛶") }
+    @Composable
+    fun PcControls(mod: Modifier, vertical: Boolean) {
+        val left: () -> Unit = { cursor?.let { leftClick(it) } }
+        val right: () -> Unit = { here()?.let { ws.desktopClick(it.first, it.second, "right") } }
+        val drag: () -> Unit = {
+            here()?.let { ws.desktopPress(it.first, it.second, !dragLock) }
+            dragLock = !dragLock
         }
-        if (!fullscreen && !phone) Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            val pad = PaddingValues(horizontal = 4.dp)
-            FilledTonalButton(onClick = { cursor?.let { leftClick(it) } },
-                modifier = Modifier.weight(2f).fillMaxHeight(), contentPadding = pad) { Text("L") }
-            FilledTonalButton(onClick = { here()?.let { ws.desktopClick(it.first, it.second, "right") } },
-                modifier = Modifier.weight(2f).fillMaxHeight(), contentPadding = pad) { Text("R") }
-            val dragButton: @Composable (Modifier) -> Unit = { m ->
-                val toggle = {
-                    here()?.let { ws.desktopPress(it.first, it.second, !dragLock) }
-                    dragLock = !dragLock
+        val toggleKeys: () -> Unit = { onShowKeys(!showKeys) }
+        val ctx = LocalContext.current
+        if (vertical) {
+            Column(
+                mod.testTag("desktop.controls").verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                val m = Modifier.fillMaxWidth().height(48.dp)
+                PcButton(m, "L", filled = true, onClick = left)
+                PcButton(m, "R", filled = true, onClick = right)
+                PcButton(m, if (dragLock) "Drop" else "Drag", filled = dragLock, onClick = drag)
+                PcButton(m, "▲", onClick = { ws.desktopScroll(false) })
+                PcButton(m, "▼", onClick = { ws.desktopScroll(true) })
+                PcButton(m, "⌨", filled = showKeys, onClick = toggleKeys)
+                PcButton(m, "▦", onClick = { showApps = true })
+                PcButton(m, "⛶", onClick = { onFullscreen(!fullscreen) })
+                PcButton(m, "⇄", onClick = { com.yasha.pocketdesk.PhoneShare.ask(ctx) })
+            }
+        } else {
+            Row(mod.testTag("desktop.controls"), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                PcButton(Modifier.weight(2f).fillMaxHeight(), "L", filled = true, onClick = left)
+                PcButton(Modifier.weight(2f).fillMaxHeight(), "R", filled = true, onClick = right)
+                PcButton(Modifier.weight(2f).fillMaxHeight(), if (dragLock) "Drop" else "Drag", filled = dragLock, onClick = drag)
+                PcButton(Modifier.weight(1f).fillMaxHeight(), "▲", onClick = { ws.desktopScroll(false) })
+                PcButton(Modifier.weight(1f).fillMaxHeight(), "▼", onClick = { ws.desktopScroll(true) })
+                PcButton(Modifier.weight(1f).fillMaxHeight(), "⌨", filled = showKeys, onClick = toggleKeys)
+                PcButton(Modifier.weight(1f).fillMaxHeight(), "▦", onClick = { showApps = true })
+                PcButton(Modifier.weight(1f).fillMaxHeight(), "⛶", onClick = { onFullscreen(!fullscreen) })
+                PcButton(Modifier.weight(1f).fillMaxHeight(), "⇄", onClick = { com.yasha.pocketdesk.PhoneShare.ask(ctx) })
+            }
+        }
+    }
+
+    @Composable
+    fun Rail(mod: Modifier) {
+        Box(mod.testTag("desktop.rail")) { PcControls(Modifier.fillMaxSize(), vertical = true) }
+    }
+
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val layout = desktopLayout(maxWidth, foldAt)
+        Column(Modifier.fillMaxSize().background(Color(0xFF0D1117)).focusRequester(keyFocus).focusable().onKeyEvent { e ->
+            val native = e.nativeKeyEvent
+            if (native.device?.isVirtual != false) return@onKeyEvent false
+            val vk = androidKeyToVk(native.keyCode) ?: return@onKeyEvent false
+            when (e.type) {
+                KeyEventType.KeyDown -> ws.desktopKeyPress(vk, true)
+                KeyEventType.KeyUp -> ws.desktopKeyPress(vk, false)
+                else -> return@onKeyEvent false
+            }
+            true
+        }) {
+            if (!fullscreen) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+                    // Only the title and two controls share the row; everything else lives in the menu,
+                    // so the title never gets squeezed on a narrow phone.
+                    Column(Modifier.weight(1f)) {
+                        Text("Desktop", style = MaterialTheme.typography.titleMedium, maxLines = 1, softWrap = false)
+                        Text(
+                            listOfNotNull(
+                                "● REC".takeIf { ws.desktopRecording && ws.desktopStreaming },
+                                if (!ws.desktopStreaming) "paused" else rate.takeIf { video && it.isNotEmpty() } ?: "live",
+                                ws.route.takeIf { it.isNotEmpty() },
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                    }
+                    TextButton(onClick = { ws.desktopViewOnly = !ws.desktopViewOnly; ws.desktopStartVideo() }) {
+                        Text(if (ws.desktopViewOnly) "View only" else "Control", maxLines = 1, softWrap = false)
+                    }
+                    var more by remember { mutableStateOf(false) }
+                    var power by remember { mutableStateOf<String?>(null) }
+                    var clippyOpen by remember { mutableStateOf(false) }
+                    var captureOpen by remember { mutableStateOf(false) }
+                    Box {
+                        IconButton(onClick = { more = true }) { Icon(Icons.Filled.MoreVert, contentDescription = "More") }
+                        androidx.compose.material3.DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
+                            @Composable
+                            fun Item(label: String, onClick: () -> Unit) =
+                                androidx.compose.material3.DropdownMenuItem(text = { Text(label) }, onClick = { more = false; onClick() })
+                            if (video) Item("Quality: " + ws.desktopPreset.replaceFirstChar { it.uppercase() } + " (switch)") {
+                                ws.desktopPreset = PRESETS[(PRESETS.indexOf(ws.desktopPreset) + 1) % PRESETS.size]
+                                prefs.edit().putString("desktop_preset", ws.desktopPreset).apply()
+                                ws.desktopStartVideo()
+                            }
+                            if (video) Item(if (ws.desktopAudio) "PC sound: on (mute)" else "PC sound: off (play)") {
+                                ws.desktopAudio = !ws.desktopAudio
+                                prefs.edit().putBoolean("desktop_audio", ws.desktopAudio).apply()
+                                ws.desktopStartVideo()
+                            }
+                            Item(if (touchpad) "Input: Touchpad (switch to direct tap)" else "Input: Direct tap (switch to touchpad)") {
+                                touchpad = !touchpad
+                                prefs.edit().putBoolean("desktop_touchpad", touchpad).apply()
+                            }
+                            Item(if (shortcuts) "Hide the shortcut bar" else "Show the shortcut bar") {
+                                shortcuts = !shortcuts
+                                prefs.edit().putBoolean("desktop_shortcuts", shortcuts).apply()
+                            }
+                            if (!ws.desktopViewOnly) {
+                                Item("Send files to the PC", sendFiles)
+                                Item("Calibrate pointer") { startCalibration() }
+                                if (prefs.contains(calKey)) Item("Reset pointer calibration") {
+                                    prefs.edit().remove(calKey).apply()
+                                    ws.desktopCalibration = null
+                                    calNote = "Pointer calibration removed for this screen."
+                                }
+                            }
+                            if (ws.targetOs == "win32") {
+                                androidx.compose.material3.HorizontalDivider()
+                                // A window that hides itself from recorders: choose how the PC reads it.
+                                Item("Game capture: " + ws.captureChoice.ifEmpty { "automatic" } + " (choose method)") {
+                                    ws.captureModes()
+                                    captureOpen = true
+                                }
+                                // clippy recovers Ctrl+C text from games that keep their own clipboard.
+                                Item(if (ws.clippy.running) "Clippy: recording (stop)" else "Clippy: off (start)") {
+                                    if (ws.clippy.running) ws.clippyStop() else ws.clippyStart()
+                                }
+                                Item(if (ws.clippy.installed) "Clippy captures (${ws.clippy.history.size})" else "Clippy: install recorder…") {
+                                    if (ws.clippy.installed) { clippyOpen = true; ws.clippyStatus(); ws.clippyLatest() } else ws.clippyInstall()
+                                }
+                            }
+                            androidx.compose.material3.HorizontalDivider()
+                            POWER_ACTIONS.forEach { (a, l) -> Item(l) { power = a } }
+                        }
+                    }
+                    power?.let { PowerConfirmDialog(ws, it) { power = null } }
+                    if (clippyOpen) ClippyDialog(ws) { clippyOpen = false }
+                    if (captureOpen) CaptureDialog(ws) { captureOpen = false }
                 }
-                if (dragLock) FilledTonalButton(onClick = toggle, modifier = m, contentPadding = pad) { Text("Drop") }
-                else OutlinedButton(onClick = toggle, modifier = m, contentPadding = pad) { Text("Drag") }
             }
-            dragButton(Modifier.weight(2f).fillMaxHeight())
-            OutlinedButton(onClick = { ws.desktopScroll(false) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("▲") }
-            OutlinedButton(onClick = { ws.desktopScroll(true) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("▼") }
-            val keysButton: @Composable (Modifier) -> Unit = { m ->
-                if (showKeys) FilledTonalButton(onClick = { onShowKeys(false) }, modifier = m, contentPadding = pad) { Text("⌨") }
-                else OutlinedButton(onClick = { onShowKeys(true) }, modifier = m, contentPadding = pad) { Text("⌨") }
+            // Fullscreen is the picture alone: no bars, notices or keyboard, only the two overlay buttons.
+            if (!fullscreen) DesktopTransferBar(ws, transfer)
+            if (!fullscreen && ws.desktopNotice.isNotEmpty()) {
+                Text(ws.desktopNotice, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp))
             }
-            keysButton(Modifier.weight(1f).fillMaxHeight())
-            OutlinedButton(onClick = { showApps = true }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("▦") }
-            OutlinedButton(onClick = { onFullscreen(!fullscreen) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("⛶") }
-            val ctx = LocalContext.current
-            OutlinedButton(onClick = { com.yasha.pocketdesk.PhoneShare.ask(ctx) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("⇄") }
+            if (!fullscreen && desktopError.isNotEmpty()) {
+                Text(desktopError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(horizontal = 12.dp))
+            }
+            if (!fullscreen && calNote.isNotEmpty()) {
+                Text(calNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp))
+            }
+
+            // Wide windows put the controls in a rail beside the picture; a hinge is never drawn across.
+            Box(Modifier.fillMaxWidth().weight(1f)) {
+                if (layout.controlsBeside && !fullscreen && !phone) {
+                    Row(Modifier.fillMaxSize().padding(start = layout.start)) {
+                        if (layout.railStart < layout.pictureStart) {
+                            Spacer(Modifier.width(layout.railStart - layout.start))
+                            Rail(Modifier.width(layout.railWidth - 1.dp).fillMaxHeight())
+                            VerticalDivider(Modifier.fillMaxHeight())
+                            Picture(Modifier.width(layout.pictureWidth).fillMaxHeight().testTag("desktop.picture"))
+                        } else {
+                            Picture(Modifier.width(layout.pictureWidth).fillMaxHeight().testTag("desktop.picture"))
+                            VerticalDivider(Modifier.fillMaxHeight())
+                            Rail(Modifier.width(layout.railWidth - 1.dp).fillMaxHeight())
+                        }
+                        Spacer(Modifier.weight(1f))
+                    }
+                } else {
+                    Picture(Modifier.fillMaxSize().padding(start = layout.start).testTag("desktop.picture"))
+                }
+            }
+
+            // The keyboard bar has its own Esc, Tab and clipboard keys, and the picture needs the room.
+            if (!fullscreen && !showKeys && shortcuts && !ws.desktopViewOnly && !phone) ShortcutBar(ws)
+            if (!fullscreen && phone) Row(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                val pad = PaddingValues(horizontal = 4.dp)
+                for ((label, key) in listOf("◁" to "back", "○" to "home", "▢" to "recents", "🔔" to "notifications")) {
+                    FilledTonalButton(onClick = { ws.desktopNav(key) }, modifier = Modifier.weight(2f).fillMaxHeight(), contentPadding = pad) { Text(label) }
+                }
+                val keysButton: @Composable (Modifier) -> Unit = { m ->
+                    if (showKeys) FilledTonalButton(onClick = { onShowKeys(false) }, modifier = m, contentPadding = pad) { Text("⌨") }
+                    else OutlinedButton(onClick = { onShowKeys(true) }, modifier = m, contentPadding = pad) { Text("⌨") }
+                }
+                keysButton(Modifier.weight(1f).fillMaxHeight())
+                OutlinedButton(onClick = { onFullscreen(!fullscreen) }, modifier = Modifier.weight(1f).fillMaxHeight(), contentPadding = pad) { Text("⛶") }
+            }
+            if (!fullscreen && !phone && !layout.controlsBeside) PcControls(Modifier.fillMaxWidth().height(52.dp).padding(horizontal = 4.dp, vertical = 2.dp), vertical = false)
+            if (showKeys && !fullscreen) DesktopKeyboard(ws)
         }
-        if (showKeys && !fullscreen) DesktopKeyboard(ws)
     }
     // The mouse switch belongs to fullscreen; leaving it must never leave the PC unreachable.
     LaunchedEffect(fullscreen) { if (!fullscreen) ws.desktopInputPaused = false }
@@ -820,6 +875,19 @@ private fun AppLauncher(ws: WsClient, onDismiss: () -> Unit) {
             }
         },
     )
+}
+
+/** One desktop mouse or nav button, the same in the rail and in the row under the picture. */
+@Composable
+private fun PcButton(
+    mod: Modifier,
+    label: String,
+    filled: Boolean = false,
+    onClick: () -> Unit,
+    pad: PaddingValues = PaddingValues(horizontal = 4.dp),
+) {
+    if (filled) FilledTonalButton(onClick = onClick, modifier = mod, contentPadding = pad) { Text(label) }
+    else OutlinedButton(onClick = onClick, modifier = mod, contentPadding = pad) { Text(label) }
 }
 
 /** Key combinations used all the time, one tap each, spelled for the PC's OS. */
