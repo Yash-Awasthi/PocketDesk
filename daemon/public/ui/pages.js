@@ -84,7 +84,7 @@ function recentApps() {
   if (!list.length) return "";
   return h("div", { className: "actions" }, h("span", { className: "dim small", textContent: "Recent apps:" }),
     list.map((x) => h("button", { className: "tog", onclick: () => PD.adb.open("app", { pkg: x.pkg, label: x.label }) },
-      PD.adb.icons?.[x.pkg] ? h("img", { src: img(PD.adb.icons[x.pkg]), alt: "", style: "width:18px;height:18px;vertical-align:-4px;margin-right:6px;border-radius:4px" }) : "", x.label)));
+      PD.adb.icons?.[x.pkg] ? h("img", { src: img(PD.adb.icons[x.pkg]), alt: "", className: "recent-ico" }) : "", x.label)));
 }
 function drawMedia() {
   const box = $("#homeMedia"), m = PD.hub.state.media;
@@ -151,7 +151,7 @@ function clippyLast() {
   const last = PD.clippy.last;
   const text = last ? last.text || last.typed || "" : "";
   if (!text) return "";
-  return h("div", { className: "card", style: "padding:8px;margin-top:8px" },
+  return h("div", { className: "card clippy-card" },
     h("div", { className: "bar" },
       h("span", { className: "dim small grow", textContent: `${last.window ? `From: ${last.window}` : "Last Ctrl+C"}${!last.text && last.typed ? " · typed buffer" : ""} · ${text.length.toLocaleString()} characters` }),
       btn("Copy", () => copyCaptured(text))),

@@ -30,13 +30,13 @@ PD.registerThisPc = () => PD.page("thispc", {
       return;
     }
     // ── Pairing ──
-    const pwInput = h("input", { type: "password", placeholder: "Connection password (blank = none)", autocomplete: "new-password", style: "flex:1;min-width:220px" });
-    const tokenInput = h("input", { type: "text", readOnly: true, value: PD.localToken, style: "width:min(520px,100%)", onfocus: (e) => e.target.select() });
+    const pwInput = h("input", { type: "password", placeholder: "Connection password (blank = none)", autocomplete: "new-password", className: "pw-input" });
+    const tokenInput = h("input", { type: "text", readOnly: true, value: PD.localToken, className: "token-input", onfocus: (e) => e.target.select() });
     tokenInput.setAttribute("aria-label", "Pairing token");
     // One code at a time. Side by side, a phone's scanner locked onto whichever it framed first (the
     // browser code, every time) instead of the app's, so the two are tabs now.
     const qrBox = h("div", { className: "qr" });
-    const qrNote = h("p", { className: "dim small", style: "margin:8px 0 0" });
+    const qrNote = h("p", { className: "dim small qr-note" });
     const hubLine = h("div", { className: "dim small" });
     const tabs = [["app", "PocketDesk app"], ["web", "Phone browser"]].map(([key, label]) =>
       h("button", { className: "tab", role: "tab", "aria-selected": "false", textContent: label, onclick: () => { S.qrTab = key; paintQr(); } }));
@@ -171,7 +171,7 @@ function drawDevices() {
     const meta = [d.platform || "unknown", `last seen ${fmt(d.lastSeen)}`];
     if (d.lastIp) meta.push(d.lastIp);
     meta.push(d.transport ? `via ${d.transport}` : "transport unknown");
-    const note = h("input", { type: "text", value: d.note || "", placeholder: "Note for this device", style: "margin-top:6px;max-width:320px" });
+    const note = h("input", { type: "text", value: d.note || "", placeholder: "Note for this device", className: "device-note" });
     note.setAttribute("aria-label", `Note for ${d.name}`);
     note.addEventListener("change", () =>
       api("/access/devices/note", { clientId: d.id, note: note.value }).then((r) => {
