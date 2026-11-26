@@ -13,7 +13,10 @@ export const RECORD_FLAG = path.join(configDir, "record-sessions");
 export const RECORDINGS = path.join(configDir, "recordings");
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-const safe = (s) => String(s || "").replace(/[^\w.-]+/g, "_").slice(0, 40);
+const safe = (s) =>
+  String(s || "")
+    .replace(/[^\w.-]+/g, "_")
+    .slice(0, 40);
 
 /** ffmpeg arguments for the audit copy of the screen: 10 fps, pointer drawn, playable even if cut off. */
 export function screenArgs(file, monitor) {
@@ -21,15 +24,44 @@ export function screenArgs(file, monitor) {
   // The audit copy has to show what the viewer saw: the whole extended desktop when that is the chosen
   // view (ddagrab can only take one output, so the desktop comes from GDI), one output otherwise.
   const input = monitor?.all
-    ? ["-f", "gdigrab", "-draw_mouse", "1", "-framerate", "10", "-i", "desktop",
-      "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p"]
-    : [...(adapter ? ["-init_hw_device", `d3d11va=rec:${adapter}`, "-filter_hw_device", "rec"] : []),
-      "-filter_complex", `ddagrab=output_idx=${monitor?.output || 0}:framerate=10,hwdownload,format=bgra,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p`];
-  return ["-hide_banner", "-loglevel", "error",
+    ? [
+        "-f",
+        "gdigrab",
+        "-draw_mouse",
+        "1",
+        "-framerate",
+        "10",
+        "-i",
+        "desktop",
+        "-vf",
+        "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+      ]
+    : [
+        ...(adapter ? ["-init_hw_device", `d3d11va=rec:${adapter}`, "-filter_hw_device", "rec"] : []),
+        "-filter_complex",
+        `ddagrab=output_idx=${monitor?.output || 0}:framerate=10,hwdownload,format=bgra,scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p`,
+      ];
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "error",
     ...input,
-    "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", "-g", "100",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "30",
+    "-g",
+    "100",
     // Fragmented MP4 stays playable up to the last fragment if the daemon dies mid-recording.
-    "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "-y", file];
+    "-movflags",
+    "frag_keyframe+empty_moov+default_base_moof",
+    "-f",
+    "mp4",
+    "-y",
+    file,
+  ];
 }
 
 export class Recorder {
@@ -46,8 +78,13 @@ export class Recorder {
   log(event, fields = {}) {
     try {
       fs.mkdirSync(RECORDINGS, { recursive: true });
-      fs.appendFileSync(path.join(RECORDINGS, "sessions.log"), JSON.stringify({ at: new Date().toISOString(), event, ...fields }) + "\n");
-    } catch { /* the audit log never takes the session down */ }
+      fs.appendFileSync(
+        path.join(RECORDINGS, "sessions.log"),
+        JSON.stringify({ at: new Date().toISOString(), event, ...fields }) + "\n",
+      );
+    } catch {
+      /* the audit log never takes the session down */
+    }
   }
 
   /** Follows whether anyone is watching; starts only when the flag is on. */
@@ -65,13 +102,21 @@ export class Recorder {
     const file = path.join(RECORDINGS, `desktop-${stamp()}-${safe(label)}.mp4`);
     let proc;
     try {
-      proc = spawn(this.ffmpeg, screenArgs(file, monitor), { stdio: ["pipe", "ignore", "pipe"], windowsHide: true });
+      proc = spawn(this.ffmpeg, screenArgs(file, monitor), {
+        stdio: ["pipe", "ignore", "pipe"],
+        windowsHide: true,
+      });
     } catch (e) {
       return this.log("recording_failed", { error: e.message });
     }
     let err = "";
-    proc.stderr.on("data", (d) => { err = (err + d).slice(-500); });
-    proc.on("error", (e) => { this.log("recording_failed", { error: e.message }); if (this.screen?.proc === proc) this.screen = null; });
+    proc.stderr.on("data", (d) => {
+      err = (err + d).slice(-500);
+    });
+    proc.on("error", (e) => {
+      this.log("recording_failed", { error: e.message });
+      if (this.screen?.proc === proc) this.screen = null;
+    });
     proc.on("exit", (code) => {
       if (this.screen?.proc === proc) this.screen = null;
       this.log("recording_saved", { file, code, error: code ? err.trim() : undefined });
@@ -84,8 +129,12 @@ export class Recorder {
     const { proc } = this.screen;
     this.screen = null;
     // "q" lets ffmpeg write its last fragment; a stuck one is killed.
-    try { proc.stdin.end("q"); } catch {}
-    setTimeout(() => { if (proc.exitCode === null) proc.kill(); }, 5000).unref();
+    try {
+      proc.stdin.end("q");
+    } catch {}
+    setTimeout(() => {
+      if (proc.exitCode === null) proc.kill();
+    }, 5000).unref();
   }
 
   terminalStarted({ id, harnessId, cwd }) {
@@ -94,9 +143,19 @@ export class Recorder {
       fs.mkdirSync(RECORDINGS, { recursive: true });
       const file = path.join(RECORDINGS, `terminal-${stamp()}-${safe(harnessId)}-${id}.cast`);
       const out = fs.createWriteStream(file);
-      out.write(JSON.stringify({ version: 2, width: 100, height: 30, timestamp: Math.floor(Date.now() / 1000), title: `${harnessId} in ${cwd}` }) + "\n");
+      out.write(
+        JSON.stringify({
+          version: 2,
+          width: 100,
+          height: 30,
+          timestamp: Math.floor(Date.now() / 1000),
+          title: `${harnessId} in ${cwd}`,
+        }) + "\n",
+      );
       this.casts.set(id, { out, t0: Date.now() });
-    } catch { /* recording is best effort */ }
+    } catch {
+      /* recording is best effort */
+    }
   }
 
   terminalOutput(id, text) {

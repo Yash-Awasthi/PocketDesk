@@ -63,8 +63,12 @@ function normalizePath(p) {
 
 // One allowlist predicate for both entry points, so they cannot drift.
 function isAllowed(resolved, home, tmpRoot) {
-  return resolved === home || resolved.startsWith(home + path.sep) ||
-    resolved.startsWith(tmpRoot + path.sep) || path.dirname(resolved) === tmpRoot;
+  return (
+    resolved === home ||
+    resolved.startsWith(home + path.sep) ||
+    resolved.startsWith(tmpRoot + path.sep) ||
+    path.dirname(resolved) === tmpRoot
+  );
 }
 
 function allowlistRoots() {
@@ -118,8 +122,15 @@ export function listDir(p, hidden = false) {
       } catch {}
       return { name: e.name, dir: e.isDirectory(), size, mtime };
     })
-    .sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name));
-  return { type: "fs", path: dir, parent: path.dirname(dir), home: realResolve(os.homedir()), items, truncated: shown.length > items.length };
+    .sort((a, b) => b.dir - a.dir || a.name.localeCompare(b.name));
+  return {
+    type: "fs",
+    path: dir,
+    parent: path.dirname(dir),
+    home: realResolve(os.homedir()),
+    items,
+    truncated: shown.length > items.length,
+  };
 }
 
 /** mkdir, rename and delete for the phone's file manager. Never overwrites an existing target. */
@@ -165,17 +176,33 @@ async function removeToTrash(target) {
   const kind = fs.statSync(target).isDirectory() ? "DeleteDirectory" : "DeleteFile";
   const script = `Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::${kind}($env:RH_TRASH, 'OnlyErrorDialogs', 'SendToRecycleBin')`;
   await new Promise((resolve, reject) => {
-    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, RH_TRASH: target }, windowsHide: true, timeout: 60000 },
-      (err, _out, stderr) => (err ? reject(new Error(String(stderr).trim().split("\n")[0] || err.message)) : resolve()));
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { env: { ...process.env, RH_TRASH: target }, windowsHide: true, timeout: 60000 },
+      (err, _out, stderr) =>
+        err ? reject(new Error(String(stderr).trim().split("\n")[0] || err.message)) : resolve(),
+    );
   });
   if (fs.existsSync(target)) throw new Error("could not move to the Recycle Bin");
 }
 
-const SKIP_DIRS = new Set(["node_modules", ".git", "AppData", "$Recycle.Bin", "__pycache__", ".venv", "build", "dist"]);
+const SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "AppData",
+  "$Recycle.Bin",
+  "__pycache__",
+  ".venv",
+  "build",
+  "dist",
+]);
 
 /** Case-insensitive name search below a folder, breadth first, so near matches come first. */
 export async function searchFiles(p, q, limit = 200) {
-  const needle = String(q || "").trim().toLowerCase();
+  const needle = String(q || "")
+    .trim()
+    .toLowerCase();
   let root;
   try {
     root = resolvePath(p);
@@ -200,7 +227,10 @@ export async function searchFiles(p, q, limit = 200) {
       const full = path.join(dir, e.name);
       if (e.name.toLowerCase().includes(needle)) {
         let size = null;
-        if (!e.isDirectory()) try { size = (await fs.promises.stat(full)).size; } catch {}
+        if (!e.isDirectory())
+          try {
+            size = (await fs.promises.stat(full)).size;
+          } catch {}
         items.push({ path: full, name: e.name, dir: e.isDirectory(), size });
         if (items.length >= limit) break;
       }

@@ -19,7 +19,8 @@ export function logDir(dataDir = ".pocketdesk") {
 }
 
 // Keys whose value is never useful in a log and always dangerous.
-const SECRET_KEY = /^(token|devicetoken|pairingtoken|password|pass|secret|apikey|api_key|authorization|cookie|totp)$/i;
+const SECRET_KEY =
+  /^(token|devicetoken|pairingtoken|password|pass|secret|apikey|api_key|authorization|cookie|totp)$/i;
 // Values embedded in prose: "token=abc", "Authorization: Bearer abc".
 const INLINE = [
   [/\b(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]{6,}/gi, "$1 <redacted>"],
@@ -39,7 +40,8 @@ export function redact(value, depth = 0) {
   if (Array.isArray(value)) return value.map((v) => redact(v, depth + 1));
   if (value && typeof value === "object") {
     const out = {};
-    for (const [k, v] of Object.entries(value)) out[k] = SECRET_KEY.test(k) ? "<redacted>" : redact(v, depth + 1);
+    for (const [k, v] of Object.entries(value))
+      out[k] = SECRET_KEY.test(k) ? "<redacted>" : redact(v, depth + 1);
     return out;
   }
   return value;

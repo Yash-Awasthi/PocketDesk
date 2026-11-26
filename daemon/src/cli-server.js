@@ -13,7 +13,11 @@ function allSessions() {
 let cliServer = null;
 
 /** `broadcast` reaches every connected client, so a terminal started here shows up on the phone too. */
-export function start(getToken, { broadcast = () => {}, allSessions: listAll = allSessions, pairLink = () => "" } = {}, port = Number(process.env.RH_CLI_PORT) || 4679) {
+export function start(
+  getToken,
+  { broadcast = () => {}, allSessions: listAll = allSessions, pairLink = () => "" } = {},
+  port = Number(process.env.RH_CLI_PORT) || 4679,
+) {
   cliServer = http.createServer((req, res) => {
     // A DNS-rebound web page reaches 127.0.0.1 under its own Host.
     if (!/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(req.headers.host || "")) {
@@ -90,17 +94,30 @@ export function start(getToken, { broadcast = () => {}, allSessions: listAll = a
           result = { ok: sessions.kill(s.id) };
         } else if (term?.[2] === "screen") {
           // ponytail: rebuilt from scrollback on each read; keep a live VT per session if reads get frequent.
-          res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end(render(s.scrollback, s.cols, s.rows) + "\n");
+          res
+            .writeHead(200, { "content-type": "text/plain; charset=utf-8" })
+            .end(render(s.scrollback, s.cols, s.rows) + "\n");
           return;
         } else if (term?.[2] === "stream") {
           // The replay first, then live output, until the terminal ends or the client leaves.
-          res.writeHead(200, { "content-type": "text/plain; charset=utf-8", "x-cols": s.cols, "x-rows": s.rows });
+          res.writeHead(200, {
+            "content-type": "text/plain; charset=utf-8",
+            "x-cols": s.cols,
+            "x-rows": s.rows,
+          });
           res.write(s.scrollback);
-          const out = (e) => { if (e.id === s.id) res.write(e.text); };
-          const end = (e) => { if (e.id === s.id) res.end(); };
+          const out = (e) => {
+            if (e.id === s.id) res.write(e.text);
+          };
+          const end = (e) => {
+            if (e.id === s.id) res.end();
+          };
           sessions.sessionEvents.on("output", out);
           sessions.sessionEvents.on("exit", end);
-          res.on("close", () => { sessions.sessionEvents.off("output", out); sessions.sessionEvents.off("exit", end); });
+          res.on("close", () => {
+            sessions.sessionEvents.off("output", out);
+            sessions.sessionEvents.off("exit", end);
+          });
           return;
         } else if (path === "/shutdown" && req.method === "POST") {
           // An elevated daemon cannot be killed by an unelevated installer, so it is asked to stop instead.

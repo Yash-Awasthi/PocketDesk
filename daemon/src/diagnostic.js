@@ -73,7 +73,11 @@ function walk(value, secrets) {
 }
 
 /** The last [maxBytes] of each log the daemon and the tray leave in the config folder. */
-export function logTail(dir = configDir, names = ["daemon.log", "daemon.log.1", "tray.log"], maxBytes = 64 * 1024) {
+export function logTail(
+  dir = configDir,
+  names = ["daemon.log", "daemon.log.1", "tray.log"],
+  maxBytes = 64 * 1024,
+) {
   const out = [];
   for (const name of names) {
     const file = path.join(dir, name);

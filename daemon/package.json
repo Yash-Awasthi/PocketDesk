@@ -12,6 +12,9 @@
   "scripts": {
     "start": "node src/index.js",
     "setup-tls": "node scripts/gen-cert.js",
+    "lint": "eslint .",
+    "format:check": "prettier --check .",
+    "check": "npm run lint && npm run format:check",
     "test": "node --test --test-global-setup=test/setup.mjs \"test/*.test.mjs\"",
     "coverage": "c8 --reporter=json-summary --reporter=text-summary node --test --test-global-setup=test/setup.mjs \"test/*.test.mjs\" && node scripts/check-coverage.mjs",
     "coverage:areas": "node scripts/coverage-areas.mjs"
@@ -28,6 +31,10 @@
     "@number0/iroh": "^1.1.0"
   },
   "devDependencies": {
-    "c8": "^12.0.0"
+    "@eslint/js": "^10.0.1",
+    "c8": "^12.0.0",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0",
+    "prettier": "^3.10.1"
   }
 }

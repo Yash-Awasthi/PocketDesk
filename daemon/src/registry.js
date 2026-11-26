@@ -7,7 +7,9 @@ const IS_WIN = process.platform === "win32";
 const cmdWrap = (cmd) => (IS_WIN ? ["cmd.exe", ["/c", cmd]] : ["/bin/sh", ["-c", cmd]]);
 
 const builtinDir = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "manifests");
-const userDir = process.env.RH_MANIFESTS || path.join(process.env.USERPROFILE || process.env.HOME, ".pocketdesk", "manifests");
+const userDir =
+  process.env.RH_MANIFESTS ||
+  path.join(process.env.USERPROFILE || process.env.HOME, ".pocketdesk", "manifests");
 
 export const registry = new Map();
 
@@ -43,9 +45,15 @@ function loadManifests() {
 const state = new Map(); // id -> { installed, version, installing }
 const pinned = new Set(); // ids of pinned tools
 
-export function pin(id) { pinned.add(id); }
-export function unpin(id) { pinned.delete(id); }
-export function listPinned() { return [...pinned]; }
+export function pin(id) {
+  pinned.add(id);
+}
+export function unpin(id) {
+  pinned.delete(id);
+}
+export function listPinned() {
+  return [...pinned];
+}
 
 function shell(cmd, timeoutMs = 8000) {
   return new Promise((resolve) => {
@@ -118,8 +126,11 @@ export function launchApp({ path: p, args = [], folder }) {
   if (!p || (!store && !fs.existsSync(p))) return { ok: false, reason: "not installed" };
   let dir;
   if (folder && folder.trim()) {
-    const resolved = path.resolve(folder.replace(/^~(?=$|[/\\])/, process.env.USERPROFILE || process.env.HOME || ""));
-    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) return { ok: false, reason: "no such folder" };
+    const resolved = path.resolve(
+      folder.replace(/^~(?=$|[/\\])/, process.env.USERPROFILE || process.env.HOME || ""),
+    );
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory())
+      return { ok: false, reason: "no such folder" };
     dir = resolved;
   }
   const tail = dir ? [dir] : [];
@@ -158,7 +169,9 @@ export function launchGui(id, folder) {
 // Settles after the first full scan; before it every tool reads as unknown or not installed, so
 // anything that starts a tool waits for it (a phone often connects while the daemon is starting).
 let firstScan;
-export const ready = new Promise((resolve) => { firstScan = resolve; });
+export const ready = new Promise((resolve) => {
+  firstScan = resolve;
+});
 
 export async function scanAll(broadcast) {
   loadManifests();
@@ -198,7 +211,11 @@ export async function install(id, broadcast) {
     broadcast({ type: "progress", id, line: `no installer defined for ${m.id}` });
     return;
   }
-  broadcast({ type: "progress", id, line: `$ ${m.install.npm ? `npm install -g ${m.install.npm}` : `pip install ${m.install.pip}`}` });
+  broadcast({
+    type: "progress",
+    id,
+    line: `$ ${m.install.npm ? `npm install -g ${m.install.npm}` : `pip install ${m.install.pip}`}`,
+  });
 
   const [kind, pkg] = m.install.npm ? ["npm", m.install.npm] : ["pip", m.install.pip];
   const cmd = kind === "npm" ? `npm install -g ${pkg}` : `pip install ${pkg}`;
@@ -210,13 +227,18 @@ export async function install(id, broadcast) {
       buf += d;
       const lines = buf.split(/\r?\n/);
       buf = lines.pop();
-      for (const line of lines) if (line.trim()) broadcast({ type: "progress", id, line: line.slice(0, 300) });
+      for (const line of lines)
+        if (line.trim()) broadcast({ type: "progress", id, line: line.slice(0, 300) });
     };
     p.stdout.on("data", push);
     p.stderr.on("data", push);
     p.on("close", async (code) => {
       if (buf.trim()) broadcast({ type: "progress", id, line: buf.slice(0, 300) });
-      broadcast({ type: "progress", id, line: code === 0 ? "install complete" : `install failed (exit ${code})` });
+      broadcast({
+        type: "progress",
+        id,
+        line: code === 0 ? "install complete" : `install failed (exit ${code})`,
+      });
       await detect(id);
       broadcast({ type: "manifests", items: list() });
       resolve();

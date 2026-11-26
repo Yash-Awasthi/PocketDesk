@@ -43,27 +43,45 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let _elevated = null;
 function isElevated() {
   if (_elevated !== null) return _elevated;
-  if (!IS_WIN) { _elevated = true; return _elevated; }
-  try { execFileSync("net", ["session"], { stdio: "ignore", windowsHide: true, timeout: 3000 }); _elevated = true; }
-  catch { _elevated = false; }
+  if (!IS_WIN) {
+    _elevated = true;
+    return _elevated;
+  }
+  try {
+    execFileSync("net", ["session"], { stdio: "ignore", windowsHide: true, timeout: 3000 });
+    _elevated = true;
+  } catch {
+    _elevated = false;
+  }
   return _elevated;
 }
 
 // Foreground window rectangle, in virtual-screen coordinates; null off Windows or on failure.
-const FG_RECT_SCRIPT = "Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public struct R{public int L,T,Rt,B;}public static class FG{[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();[DllImport(\"user32.dll\")]public static extern bool GetWindowRect(IntPtr h,out R r);}';$h=[FG]::GetForegroundWindow();$r=New-Object R;[FG]::GetWindowRect($h,[ref]$r)|Out-Null;'{0} {1} {2} {3}' -f $r.L,$r.T,$r.Rt,$r.B";
+const FG_RECT_SCRIPT =
+  "Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public struct R{public int L,T,Rt,B;}public static class FG{[DllImport(\"user32.dll\")]public static extern IntPtr GetForegroundWindow();[DllImport(\"user32.dll\")]public static extern bool GetWindowRect(IntPtr h,out R r);}';$h=[FG]::GetForegroundWindow();$r=New-Object R;[FG]::GetWindowRect($h,[ref]$r)|Out-Null;'{0} {1} {2} {3}' -f $r.L,$r.T,$r.Rt,$r.B";
 function foregroundRect() {
   if (!IS_WIN) return null;
   try {
-    const out = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", FG_RECT_SCRIPT],
-      { encoding: "utf8", windowsHide: true, timeout: 4000 });
+    const out = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", FG_RECT_SCRIPT],
+      { encoding: "utf8", windowsHide: true, timeout: 4000 },
+    );
     const m = out.trim().match(/^(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)$/);
     return m ? { left: +m[1], top: +m[2], right: +m[3], bottom: +m[4] } : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /** JSON-safe, ASCII-only wire line (PS 5.1 stdin is happiest with ASCII). */
 function wireLine(obj) {
-  return JSON.stringify(obj).replace(/[\u0080-\uFFFF]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")) + "\n";
+  return (
+    JSON.stringify(obj).replace(
+      /[\u0080-\uFFFF]/g,
+      (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
+    ) + "\n"
+  );
 }
 
 const COMMON_PRELUDE = `
@@ -73,7 +91,8 @@ $ErrorActionPreference = 'Stop'
 // The console endpoint runs as SYSTEM in the console session, which may attach to the
 // secure desktop (UAC, lock screen). Only it gets this, so the user daemon's scripts stay unchanged.
 const IS_CONSOLE = IS_WIN && !!process.env.RH_CONSOLE;
-const DESK_MEMBERS = IS_CONSOLE ? `
+const DESK_MEMBERS = IS_CONSOLE
+  ? `
   [DllImport("user32.dll", SetLastError=true)] static extern IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
   [DllImport("user32.dll", SetLastError=true)] static extern bool SetThreadDesktop(IntPtr h);
   [DllImport("user32.dll", SetLastError=true)] static extern bool CloseDesktop(IntPtr h);
@@ -84,10 +103,13 @@ const DESK_MEMBERS = IS_CONSOLE ? `
     if (d == IntPtr.Zero) return;
     if (SetThreadDesktop(d)) { if (cur != IntPtr.Zero && cur != d) CloseDesktop(cur); cur = d; } else CloseDesktop(d);
   }
-` : "";
+`
+  : "";
 const followInput = (cls) => (IS_CONSOLE ? `[${cls}]::FollowInput()\n  ` : "");
 
-const INPUT_SCRIPT = COMMON_PRELUDE + `
+const INPUT_SCRIPT =
+  COMMON_PRELUDE +
+  `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -TypeDefinition @'
 using System;
@@ -244,7 +266,9 @@ while ($true) {
 }
 `;
 
-const CAPTURE_SCRIPT = COMMON_PRELUDE + `
+const CAPTURE_SCRIPT =
+  COMMON_PRELUDE +
+  `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
@@ -388,7 +412,9 @@ while ($true) {
  * Clipboard helper, its own process so no single script mixes clipboard reads with
  * input injection. powershell.exe 5.1 runs STA, which the clipboard needs.
  */
-const CLIP_SCRIPT = COMMON_PRELUDE + `
+const CLIP_SCRIPT =
+  COMMON_PRELUDE +
+  `
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 Add-Type -TypeDefinition @'
@@ -459,7 +485,7 @@ export class PsHelper {
     this.starting = null;
     this.file = null;
     this.stderrTail = ""; // the last thing the helper said on stderr (a compile error, usually)
-    this.failed = "";     // why it never answered, once one ping loop has failed
+    this.failed = ""; // why it never answered, once one ping loop has failed
   }
 
   /** Write the script to a private .ps1 once (AV-deterministic, no quoting issues). */
@@ -468,7 +494,9 @@ export class PsHelper {
       try {
         fs.accessSync(this.file);
         return this.file;
-      } catch { /* rewrite below */ }
+      } catch {
+        /* rewrite below */
+      }
     }
     fs.mkdirSync(path.join(configDir, "helpers"), { recursive: true, mode: 0o700 });
     this.file = path.join(configDir, "helpers", `${this.name}.ps1`);
@@ -479,10 +507,14 @@ export class PsHelper {
   /** Spawn the helper process. Overridden per platform (PowerShell on Windows). */
   _launch() {
     const file = this.ensureFile();
-    return spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file], {
-      windowsHide: true,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    return spawn(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file],
+      {
+        windowsHide: true,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
   }
 
   async ensure() {
@@ -490,7 +522,12 @@ export class PsHelper {
     if (this.starting) return this.starting;
     this.starting = (async () => {
       // A helper that cannot start (no swiftc, a failed compile) leaves cmd() answering helper_not_running.
-      try { this.proc = this._launch(); } catch { this.proc = null; return; }
+      try {
+        this.proc = this._launch();
+      } catch {
+        this.proc = null;
+        return;
+      }
       this.buf = "";
       this.stderrTail = "";
       this.failed = "";
@@ -502,8 +539,12 @@ export class PsHelper {
           const line = this.buf.slice(0, nl).trim();
           this.buf = this.buf.slice(nl + 1);
           if (!line) continue;
-          let obj = null;
-          try { obj = JSON.parse(line); } catch { continue; }
+          let obj;
+          try {
+            obj = JSON.parse(line);
+          } catch {
+            continue;
+          }
           const id = obj?.id;
           if (id == null && obj?.event) this.onEvent?.(obj);
           if (id != null && this.waiters.has(id)) {
@@ -516,7 +557,9 @@ export class PsHelper {
       });
       // Never swallowed: when Add-Type fails, this is the only explanation the user gets.
       this.proc.stderr.setEncoding("utf8");
-      this.proc.stderr.on("data", (d) => { this.stderrTail = (this.stderrTail + d).slice(-4000); });
+      this.proc.stderr.on("data", (d) => {
+        this.stderrTail = (this.stderrTail + d).slice(-4000);
+      });
       this.proc.on("close", () => {
         this.proc = null;
         for (const w of this.waiters.values()) {
@@ -533,8 +576,16 @@ export class PsHelper {
         if (r?.ok) return;
       }
       // It never answered: remember why, and do not leave a half-dead process behind.
-      this.failed = (this.stderrTail.trim().split(/\r?\n/).filter(Boolean).slice(-3).join(" ") || "the helper did not start").slice(0, 400);
-      if (this.proc) try { this.proc.kill(); } catch { /* already gone */ }
+      this.failed = (
+        this.stderrTail.trim().split(/\r?\n/).filter(Boolean).slice(-3).join(" ") ||
+        "the helper did not start"
+      ).slice(0, 400);
+      if (this.proc)
+        try {
+          this.proc.kill();
+        } catch {
+          /* already gone */
+        }
       this.proc = null;
     })();
     try {
@@ -568,11 +619,19 @@ export class PsHelper {
 
   kill() {
     if (this.proc) {
-      try { this.proc.kill(); } catch { /* already gone */ }
+      try {
+        this.proc.kill();
+      } catch {
+        /* already gone */
+      }
       this.proc = null;
     }
     if (this.file) {
-      try { fs.unlinkSync(this.file); } catch { /* best effort */ }
+      try {
+        fs.unlinkSync(this.file);
+      } catch {
+        /* best effort */
+      }
       this.file = null;
     }
   }
@@ -1191,13 +1250,28 @@ export class MacHelper extends PsHelper {
     const src = path.join(dir, `${this.name}.swift`);
     this.bin = path.join(dir, this.name);
     this.file = this.bin;
-    const binExists = () => { try { fs.accessSync(this.bin); return true; } catch { return false; } };
+    const binExists = () => {
+      try {
+        fs.accessSync(this.bin);
+        return true;
+      } catch {
+        return false;
+      }
+    };
     const stale = () => {
-      try { return fs.statSync(this.bin).mtimeMs < fs.statSync(src).mtimeMs; } catch { return true; }
+      try {
+        return fs.statSync(this.bin).mtimeMs < fs.statSync(src).mtimeMs;
+      } catch {
+        return true;
+      }
     };
     // An upgrade brings new source while the old binary is newer than the old source on disk.
     let changed = true;
-    try { changed = fs.readFileSync(src, "utf8") !== this.script; } catch { /* first run */ }
+    try {
+      changed = fs.readFileSync(src, "utf8") !== this.script;
+    } catch {
+      /* first run */
+    }
     if (!changed && binExists() && !stale()) return this.bin;
     // A missing or broken swiftc would otherwise be retried on every poll (cursor runs at 33ms).
     // After a failure, don't attempt another compile for a minute.
@@ -1209,12 +1283,17 @@ export class MacHelper extends PsHelper {
       // macOS 14 is the oldest with ScreenCaptureKit stills (SCScreenshotManager).
       const target = `${process.arch === "arm64" ? "arm64" : "x86_64"}-apple-macos14.0`;
       // A compile killed by the timeout must not leave a half-written binary that looks current.
-      execFileSync("swiftc", ["-O", "-target", target, src, "-o", this.bin + ".tmp"], { stdio: ["ignore", "ignore", "pipe"], timeout: 120000 });
+      execFileSync("swiftc", ["-O", "-target", target, src, "-o", this.bin + ".tmp"], {
+        stdio: ["ignore", "ignore", "pipe"],
+        timeout: 120000,
+      });
       fs.renameSync(this.bin + ".tmp", this.bin);
       this._compileFailedAt = 0;
     } catch (e) {
       this._compileFailedAt = Date.now();
-      console.warn(`[desktop] ${this.name} helper failed to compile: ${String(e.stderr || e.message).slice(-1500)}`);
+      console.warn(
+        `[desktop] ${this.name} helper failed to compile: ${String(e.stderr || e.message).slice(-1500)}`,
+      );
       throw e;
     }
     return this.bin;
@@ -1225,7 +1304,14 @@ export class MacHelper extends PsHelper {
   }
 
   kill() {
-    if (this.proc) { try { this.proc.kill(); } catch { /* gone */ } this.proc = null; }
+    if (this.proc) {
+      try {
+        this.proc.kill();
+      } catch {
+        /* gone */
+      }
+      this.proc = null;
+    }
     // Keep the compiled binary; recompiled only when the source changes.
   }
 }
@@ -1246,47 +1332,88 @@ export class MacVideoNative {
     this.stop();
     const codec = (opts.codecs || []).includes("hevc") ? "hevc" : "h264";
     let bin;
-    try { bin = this.helper.ensureFile(); } catch { return null; }
+    try {
+      bin = this.helper.ensureFile();
+    } catch {
+      return null;
+    }
     const p = opts.preset;
-    const args = ["stream", "--display", String(opts.monitor?.output ?? -1), "--codec", codec,
-      "--fps", String(p.fps), "--bitrate", String(Math.round(parseRate(p.maxrate))), "--scale", String(p.scale)];
+    const args = [
+      "stream",
+      "--display",
+      String(opts.monitor?.output ?? -1),
+      "--codec",
+      codec,
+      "--fps",
+      String(p.fps),
+      "--bitrate",
+      String(Math.round(parseRate(p.maxrate))),
+      "--scale",
+      String(p.scale),
+    ];
     if (opts.audio) args.push("--audio");
     let proc;
-    try { proc = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"] }); } catch { return null; }
+    try {
+      proc = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"] });
+    } catch {
+      return null;
+    }
     this.proc = proc;
     const reader = new FrameReaderLocal();
     proc.stdout.on("data", (chunk) => {
       for (const rec of reader.push(chunk)) onRecord({ kind: rec.kind, data: rec.data, codec });
     });
     let err = "";
-    proc.stderr.on("data", (d) => { err = (err + d).slice(-400); });
+    proc.stderr.on("data", (d) => {
+      err = (err + d).slice(-400);
+    });
     const ended = new Promise((resolve) => {
-      proc.once("exit", () => { if (this.proc === proc) { this.proc = null; onEnd?.(); } resolve(); });
+      proc.once("exit", () => {
+        if (this.proc === proc) {
+          this.proc = null;
+          onEnd?.();
+        }
+        resolve();
+      });
       proc.once("error", () => resolve());
     });
     // Resolve once the first video record arrives (capture is working), or null if it dies first.
     const ready = new Promise((resolve) => {
       let done = false;
-      const onFirst = (chunk) => {
+      const onFirst = (_chunk) => {
         if (done) return;
         done = true;
         proc.stdout.off("data", onFirst);
         resolve({ encoder: `videotoolbox_${codec}`, codec });
       };
       proc.stdout.on("data", onFirst);
-      ended.then(() => { if (!done) { done = true; resolve(null); } });
+      ended.then(() => {
+        if (!done) {
+          done = true;
+          resolve(null);
+        }
+      });
     });
     return ready;
   }
 
   stop() {
-    if (this.proc) { try { this.proc.kill(); } catch { /* gone */ } this.proc = null; }
+    if (this.proc) {
+      try {
+        this.proc.kill();
+      } catch {
+        /* gone */
+      }
+      this.proc = null;
+    }
   }
 }
 
 /** Kept local so this file needs no import from desktop_video (which imports from here). */
 class FrameReaderLocal {
-  constructor() { this.buf = Buffer.alloc(0); }
+  constructor() {
+    this.buf = Buffer.alloc(0);
+  }
 
   push(chunk) {
     this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;
@@ -1301,7 +1428,14 @@ class FrameReaderLocal {
   }
 }
 
-const parseRate = (s) => (/g/i.test(s) ? parseFloat(s) * 1e9 : /m/i.test(s) ? parseFloat(s) * 1e6 : /k/i.test(s) ? parseFloat(s) * 1e3 : parseFloat(s));
+const parseRate = (s) =>
+  /g/i.test(s)
+    ? parseFloat(s) * 1e9
+    : /m/i.test(s)
+      ? parseFloat(s) * 1e6
+      : /k/i.test(s)
+        ? parseFloat(s) * 1e3
+        : parseFloat(s);
 
 /**
  * macOS input and the pointer work in points (CGEvent's global space), so displays stay in points.
@@ -1311,7 +1445,14 @@ const parseRate = (s) => (/g/i.test(s) ? parseFloat(s) * 1e9 : /m/i.test(s) ? pa
  */
 export function macMonitors(list) {
   return list.map((m, i) => ({
-    adapter: 0, output: i, name: `Display ${i + 1}`, left: m.x, top: m.y, w: m.w, h: m.h, primary: !!m.primary,
+    adapter: 0,
+    output: i,
+    name: `Display ${i + 1}`,
+    left: m.x,
+    top: m.y,
+    w: m.w,
+    h: m.h,
+    primary: !!m.primary,
   }));
 }
 
@@ -1325,7 +1466,12 @@ export const toFraction = (r, c) => ({ fx: (c.x - r.x) / r.w, fy: (c.y - r.y) / 
  */
 export function centerFor(rect, pointer, previousIndex) {
   if (!rect || previousIndex === rect.index) return null;
-  const on = pointer && pointer.x >= rect.x && pointer.x < rect.x + rect.w && pointer.y >= rect.y && pointer.y < rect.y + rect.h;
+  const on =
+    pointer &&
+    pointer.x >= rect.x &&
+    pointer.x < rect.x + rect.w &&
+    pointer.y >= rect.y &&
+    pointer.y < rect.y + rect.h;
   return previousIndex === undefined && on ? null : fromFraction(rect, 0.5, 0.5);
 }
 
@@ -1333,16 +1479,24 @@ export function centerFor(rect, pointer, previousIndex) {
 export function jpegRect(list, mac = IS_MAC) {
   if (!list?.length) return null;
   if (mac) return list.find((m) => m.primary) || list[0];
-  return { x: 0, y: 0, w: Math.max(...list.map((m) => m.x + m.w)), h: Math.max(...list.map((m) => m.y + m.h)) };
+  return {
+    x: 0,
+    y: 0,
+    w: Math.max(...list.map((m) => m.x + m.w)),
+    h: Math.max(...list.map((m) => m.y + m.h)),
+  };
 }
 
 // UIPI: Windows drops input from a normal process into an elevated window, with no other signal.
-const ELEVATED = "An administrator window (such as Task Manager) has focus, and Windows blocks remote input to it. " +
+const ELEVATED =
+  "An administrator window (such as Task Manager) has focus, and Windows blocks remote input to it. " +
   "Click another window, or install console access on the PC to control admin windows.";
 // macOS drops synthetic input, and returns no screen pixels, until the user allows each one.
 const MAC_HELP = {
-  accessibility_permission: "The Mac blocks remote input until you allow PocketDesk (it may be listed as node) under System Settings > Privacy & Security > Accessibility.",
-  screen_permission: "The Mac shows no screen until you allow PocketDesk (it may be listed as node) under System Settings > Privacy & Security > Screen Recording. The picture starts by itself once allowed.",
+  accessibility_permission:
+    "The Mac blocks remote input until you allow PocketDesk (it may be listed as node) under System Settings > Privacy & Security > Accessibility.",
+  screen_permission:
+    "The Mac shows no screen until you allow PocketDesk (it may be listed as node) under System Settings > Privacy & Security > Screen Recording. The picture starts by itself once allowed.",
 };
 // A helper that never started (a script that fails to compile, PowerShell blocked) used to answer a
 // bare "helper_not_running"; carry what it printed on stderr so the reason reaches the viewer.
@@ -1366,7 +1520,9 @@ export class DesktopController extends EventEmitter {
     this.lastFrame = null; // { base64, width, height, ts, seq }
     this.stats = { framesSent: 0, capturesFailed: 0, lastCaptureMs: 0 };
     this.helperInput = new PsHelper("input", INPUT_SCRIPT);
-    this.helperCapture = IS_MAC ? new MacHelper("pdcap", MAC_CAP_SWIFT) : new PsHelper("capture", CAPTURE_SCRIPT);
+    this.helperCapture = IS_MAC
+      ? new MacHelper("pdcap", MAC_CAP_SWIFT)
+      : new PsHelper("capture", CAPTURE_SCRIPT);
     this.helperClip = new PsHelper("clipboard", CLIP_SCRIPT);
     // macOS streams video through the same helper binary; DesktopVideo drives it.
     this.macVideo = IS_MAC ? new MacVideoNative(this.helperCapture) : null;
@@ -1375,13 +1531,15 @@ export class DesktopController extends EventEmitter {
     this.linux = IS_LINUX ? (IS_WAYLAND ? new WaylandDesktop() : new LinuxDesktop()) : null;
     this.origin = { x: 0, y: 0 };
     this.monitorList = null;
-    this.blocked = "";       // focused window that excludes itself from capture
+    this.blocked = ""; // focused window that excludes itself from capture
     this.captureAllowed = false;
     this.protectedTimer = null;
   }
 
   /** True when this host can do real desktop control now (a Linux box needs xdotool). */
-  get usable() { return IS_WIN || IS_MAC || !!this.linux?.supported; }
+  get usable() {
+    return IS_WIN || IS_MAC || !!this.linux?.supported;
+  }
 
   /** Stream frames for `clientId` (server keeps the ws mapping). */
   async startFrameStream(clientId, quality) {
@@ -1393,12 +1551,20 @@ export class DesktopController extends EventEmitter {
     // that cannot capture leaves a black window with no reason. The first frame or failure decides.
     if (!this.lastFrame) {
       const first = await new Promise((resolve) => {
-        const done = (r) => { clearTimeout(timer); this.off("frame", onFrame); resolve(r); };
+        const done = (r) => {
+          clearTimeout(timer);
+          this.off("frame", onFrame);
+          resolve(r);
+        };
         const onFrame = () => done({ ok: true });
-        const timer = setTimeout(() => done({
-          ok: false,
-          reason: inputError(this._lastCaptureError || "capture_timeout", this._lastCaptureDetail),
-        }), 6000);
+        const timer = setTimeout(
+          () =>
+            done({
+              ok: false,
+              reason: inputError(this._lastCaptureError || "capture_timeout", this._lastCaptureDetail),
+            }),
+          6000,
+        );
         this.once("frame", onFrame);
       });
       if (!first.ok) {
@@ -1432,9 +1598,11 @@ export class DesktopController extends EventEmitter {
       // captureOnce is a no-op while the stream loop has one in flight, so
       // wait for that frame rather than reporting a failure that never was.
       if (this.capturing) await this._nextFrame(15000);
-      else if (IS_WIN && await this._tryDXGI()) { /* frame set from DXGI */ }
-      else await this.captureOnce();
-      if (!this.lastFrame) return { ok: false, reason: inputError(this._lastCaptureError) || "capture_failed" };
+      else if (IS_WIN && (await this._tryDXGI())) {
+        /* frame set from DXGI */
+      } else await this.captureOnce();
+      if (!this.lastFrame)
+        return { ok: false, reason: inputError(this._lastCaptureError) || "capture_failed" };
     }
     return { ok: true, ...this.lastFrame };
   }
@@ -1444,14 +1612,21 @@ export class DesktopController extends EventEmitter {
   async _tryDXGI() {
     const t0 = Date.now();
     const dxgi = await this.captureFrameDXGI(this.quality);
-    if (dxgi?.ok && dxgi.b64) { this._setFrame(dxgi.b64, dxgi.width, dxgi.height, t0); return true; }
+    if (dxgi?.ok && dxgi.b64) {
+      this._setFrame(dxgi.b64, dxgi.width, dxgi.height, t0);
+      return true;
+    }
     this._lastCaptureError = dxgi?.error || "dxgi_failed";
     return false;
   }
 
   _nextFrame(timeoutMs) {
     return new Promise((resolve) => {
-      const done = () => { clearTimeout(timer); this.off("frame", done); resolve(); };
+      const done = () => {
+        clearTimeout(timer);
+        this.off("frame", done);
+        resolve();
+      };
       const timer = setTimeout(done, timeoutMs);
       this.once("frame", done);
     });
@@ -1492,8 +1667,13 @@ export class DesktopController extends EventEmitter {
         this._lastCaptureDetail = r?.detail || "";
         if (error === "screen_permission") {
           // Show the system prompt once; macOS applies a new grant only to a fresh process, so restart now and then.
-          if (!this._permRequested) { this._permRequested = true; this.requestPermissions().catch(() => {}); }
-          else if (Date.now() - (this._permRestartAt || 0) > 10_000) { this._permRestartAt = Date.now(); this.helperCapture.kill(); }
+          if (!this._permRequested) {
+            this._permRequested = true;
+            this.requestPermissions().catch(() => {});
+          } else if (Date.now() - (this._permRestartAt || 0) > 10_000) {
+            this._permRestartAt = Date.now();
+            this.helperCapture.kill();
+          }
         }
       }
     } catch {
@@ -1532,12 +1712,15 @@ export class DesktopController extends EventEmitter {
     if (!IS_WIN) return;
     // The elevated task does not always inherit LOCALAPPDATA, and the marker has to land in the user's
     // own profile: that is the path the alpha app polls. USERPROFILE is always there.
-    const base = process.env.LOCALAPPDATA
-      || (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "AppData", "Local") : "");
+    const base =
+      process.env.LOCALAPPDATA ||
+      (process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "AppData", "Local") : "");
     if (!base) {
       if (!this._markerWarned) {
         this._markerWarned = true;
-        console.warn("[pocketdesk] no LOCALAPPDATA or USERPROFILE: the alpha capture marker cannot be written");
+        console.warn(
+          "[pocketdesk] no LOCALAPPDATA or USERPROFILE: the alpha capture marker cannot be written",
+        );
       }
       return;
     }
@@ -1546,24 +1729,37 @@ export class DesktopController extends EventEmitter {
     try {
       if (on) {
         fs.mkdirSync(dir, { recursive: true });
-        if (!fs.existsSync(flag)) fs.writeFileSync(flag, JSON.stringify({ app: "PocketDesk", at: new Date().toISOString() }) + "\n");
+        if (!fs.existsSync(flag))
+          fs.writeFileSync(flag, JSON.stringify({ app: "PocketDesk", at: new Date().toISOString() }) + "\n");
       } else {
-        try { fs.unlinkSync(flag); } catch { /* already gone */ }
+        try {
+          fs.unlinkSync(flag);
+        } catch {
+          /* already gone */
+        }
       }
-    } catch { /* best effort; the app simply keeps its protection */ }
+    } catch {
+      /* best effort; the app simply keeps its protection */
+    }
     this.captureAllowed = !!on;
   }
 
   /** Poll the focused window's display affinity while anyone watches (video mode included). */
   watchProtected(on) {
-    if (!on || !IS_WIN) { clearInterval(this.protectedTimer); this.protectedTimer = null; return; }
+    if (!on || !IS_WIN) {
+      clearInterval(this.protectedTimer);
+      this.protectedTimer = null;
+      return;
+    }
     if (this.protectedTimer) return;
     const check = async () => {
       try {
         await this.helperCapture.ensure();
         const r = await this.helperCapture.cmd({ op: "protected" }, 3000);
         if (r?.ok) this._noteBlocked(r.blocked || "");
-      } catch { /* helper restarting */ }
+      } catch {
+        /* helper restarting */
+      }
     };
     check();
     this.protectedTimer = setInterval(check, 2000);
@@ -1591,8 +1787,15 @@ export class DesktopController extends EventEmitter {
     try {
       await this.helperCapture.ensure();
       const r = await this.helperCapture.cmd({ op: "fullscreen" }, 3000);
-      const f = r?.fullscreen || r || {};
-      return { ok: !!r?.ok, d3d: r?.d3d === true, state: r?.state ?? 0, title: r?.title || "", pid: r?.pid || 0, w: r?.w || 0, h: r?.h || 0 };
+      return {
+        ok: !!r?.ok,
+        d3d: r?.d3d === true,
+        state: r?.state ?? 0,
+        title: r?.title || "",
+        pid: r?.pid || 0,
+        w: r?.w || 0,
+        h: r?.h || 0,
+      };
     } catch (e) {
       return { ok: false, d3d: false, state: 0, title: "", error: e.message };
     }
@@ -1613,10 +1816,16 @@ export class DesktopController extends EventEmitter {
         const dir = path.join(base, pkg.name);
         for (const ver of fs.readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory())) {
           const p = path.join(dir, ver.name, "bin", "ffmpeg.exe");
-          try { if (fs.existsSync(p)) return p; } catch { /* skip */ }
+          try {
+            if (fs.existsSync(p)) return p;
+          } catch {
+            /* skip */
+          }
         }
       }
-    } catch { /* no winget packages */ }
+    } catch {
+      /* no winget packages */
+    }
     return "ffmpeg";
   }
 
@@ -1632,30 +1841,49 @@ export class DesktopController extends EventEmitter {
       let stdout = Buffer.alloc(0);
       let stderr = "";
       let resolved = false;
-      const child = spawn(ffmpeg, [
-        "-hide_banner", "-loglevel", "error",
-        "-f", "ddagrab",
-        "-framerate", "1",
-        "-i", "desktop",
-        "-frames:v", "1",
-        "-f", "image2pipe",
-        "-vcodec", "mjpeg",
-        "-qscale:v", String(qscale),
-        "-"
-      ], { windowsHide: true });
+      const child = spawn(
+        ffmpeg,
+        [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-f",
+          "ddagrab",
+          "-framerate",
+          "1",
+          "-i",
+          "desktop",
+          "-frames:v",
+          "1",
+          "-f",
+          "image2pipe",
+          "-vcodec",
+          "mjpeg",
+          "-qscale:v",
+          String(qscale),
+          "-",
+        ],
+        { windowsHide: true },
+      );
 
       const finish = (ok, error, b64, width, height) => {
         if (resolved) return;
         resolved = true;
         clearTimeout(timer);
-        try { child.kill("SIGKILL"); } catch { }
+        try {
+          child.kill("SIGKILL");
+        } catch {}
         resolve({ ok, error, b64, width, height });
       };
 
       const timer = setTimeout(() => finish(false, "ffmpeg_timeout"), 10000);
 
-      child.stdout.on("data", (d) => { stdout = Buffer.concat([stdout, d]); });
-      child.stderr.on("data", (d) => { stderr += d.toString(); });
+      child.stdout.on("data", (d) => {
+        stdout = Buffer.concat([stdout, d]);
+      });
+      child.stderr.on("data", (d) => {
+        stderr += d.toString();
+      });
 
       child.on("close", (code) => {
         if (resolved) return;
@@ -1663,28 +1891,37 @@ export class DesktopController extends EventEmitter {
           try {
             const b64 = stdout.toString("base64");
             // Parse JPEG SOF0 marker for dimensions: FF C0 .. length .. precision H W
-            let w = 0, h = 0;
+            let w = 0,
+              h = 0;
             for (let i = 2; i < stdout.length - 5; i++) {
-              if (stdout[i] === 0xFF && stdout[i + 1] === 0xC0) {
+              if (stdout[i] === 0xff && stdout[i + 1] === 0xc0) {
                 h = stdout.readUInt16BE(i + 5);
                 w = stdout.readUInt16BE(i + 7);
                 break;
               }
             }
             finish(true, null, b64, w || 0, h || 0);
-          } catch { finish(true, null, stdout.toString("base64"), 0, 0); }
+          } catch {
+            finish(true, null, stdout.toString("base64"), 0, 0);
+          }
         } else {
           finish(false, stderr.trim() || `ffmpeg exited ${code}`);
         }
       });
 
-      child.on("error", (e) => { finish(false, e.message); });
+      child.on("error", (e) => {
+        finish(false, e.message);
+      });
     });
   }
 
   /** x/y: from the top-left monitor's corner, in pixels (points on macOS) (omit to act at the cursor); click: left|right|middle|double; press: down|up of button. */
-  get _input() { return IS_MAC ? this.helperCapture : this.helperInput; }
-  get _clip() { return IS_MAC ? this.helperCapture : this.helperClip; }
+  get _input() {
+    return IS_MAC ? this.helperCapture : this.helperInput;
+  }
+  get _clip() {
+    return IS_MAC ? this.helperCapture : this.helperClip;
+  }
 
   async _inject(cmd, timeoutMs) {
     if (!IS_WIN && !IS_MAC) return { ok: false, reason: "unsupported_platform" };
@@ -1718,13 +1955,17 @@ export class DesktopController extends EventEmitter {
   }
 
   /** What a still frame shows, in input coordinates; null until the monitors are known. */
-  get frameRect() { return jpegRect(this.monitorList); }
+  get frameRect() {
+    return jpegRect(this.monitorList);
+  }
 
   /** press: down|up sends only that half, for held keys; without it the key is tapped with modifiers. */
   inputKey({ key, modifiers = [], press }) {
     const vk = Number(key);
     if (!Number.isFinite(vk) || vk <= 0 || vk > 254) return Promise.resolve({ ok: false, error: "bad_vk" });
-    const mods = (Array.isArray(modifiers) ? modifiers : []).filter((m) => ["ctrl", "alt", "shift", "win"].includes(m));
+    const mods = (Array.isArray(modifiers) ? modifiers : []).filter((m) =>
+      ["ctrl", "alt", "shift", "win"].includes(m),
+    );
     if (this.linux) return this.linux.key({ key: vk, modifiers: mods, press });
     return this._inject({ op: "key", key: vk, press, mods }, 8000);
   }
@@ -1743,7 +1984,17 @@ export class DesktopController extends EventEmitter {
       // xdotool/x11grab use raw X-screen coordinates, so monitors keep them and the origin stays 0.
       const list = await this.linux.monitors();
       if (!list.length) return { ok: false, error: "monitors_failed" };
-      const monitors = list.map((m, index) => ({ index, adapter: 0, output: index, name: m.name, x: m.x, y: m.y, w: m.w, h: m.h, primary: !!m.primary }));
+      const monitors = list.map((m, index) => ({
+        index,
+        adapter: 0,
+        output: index,
+        name: m.name,
+        x: m.x,
+        y: m.y,
+        w: m.w,
+        h: m.h,
+        primary: !!m.primary,
+      }));
       this.origin = { x: 0, y: 0 };
       this.monitorList = monitors;
       return { ok: true, monitors };
@@ -1756,8 +2007,15 @@ export class DesktopController extends EventEmitter {
     const ox = Math.min(...r.monitors.map((m) => m.left));
     const oy = Math.min(...r.monitors.map((m) => m.top));
     const monitors = r.monitors.map((m, index) => ({
-      index, adapter: m.adapter, output: m.output, name: m.name,
-      x: m.left - ox, y: m.top - oy, w: m.w, h: m.h, primary: m.primary ?? (m.left === 0 && m.top === 0),
+      index,
+      adapter: m.adapter,
+      output: m.output,
+      name: m.name,
+      x: m.left - ox,
+      y: m.top - oy,
+      w: m.w,
+      h: m.h,
+      primary: m.primary ?? (m.left === 0 && m.top === 0),
     }));
     // An extended desktop is several outputs side by side, and ddagrab only ever grabs one of them.
     // The whole desktop is listed first, as one picture, so a viewer sees both screens as they are and
@@ -1765,8 +2023,21 @@ export class DesktopController extends EventEmitter {
     if (monitors.length > 1) {
       const w = Math.max(...monitors.map((m) => m.x + m.w));
       const h = Math.max(...monitors.map((m) => m.y + m.h));
-      monitors.unshift({ index: 0, adapter: 0, output: 0, all: true, name: "All screens", x: 0, y: 0, w, h, primary: false });
-      monitors.forEach((m, i) => { m.index = i; });
+      monitors.unshift({
+        index: 0,
+        adapter: 0,
+        output: 0,
+        all: true,
+        name: "All screens",
+        x: 0,
+        y: 0,
+        w,
+        h,
+        primary: false,
+      });
+      monitors.forEach((m, i) => {
+        m.index = i;
+      });
     }
     // The Swift helper takes and reports global points, which start at the main display, not the top-left one.
     this.origin = IS_MAC ? { x: ox, y: oy } : { x: 0, y: 0 };
@@ -1784,7 +2055,10 @@ export class DesktopController extends EventEmitter {
     const cx = (rect.left + rect.right) / 2 - this.origin.x;
     const cy = (rect.top + rect.bottom) / 2 - this.origin.y;
     // The all-screens entry covers every point, so it would always match first; a real screen is wanted.
-    return this.monitorList.find((m) => !m.all && cx >= m.x && cx < m.x + m.w && cy >= m.y && cy < m.y + m.h) || null;
+    return (
+      this.monitorList.find((m) => !m.all && cx >= m.x && cx < m.x + m.w && cy >= m.y && cy < m.y + m.h) ||
+      null
+    );
   }
 
   /** The pointer now, in the same space as input, or null. */
@@ -1793,7 +2067,9 @@ export class DesktopController extends EventEmitter {
     if (!IS_WIN && !IS_MAC) return null;
     await this._input.ensure();
     const r = await this._input.cmd({ op: "cursor" }, 2000);
-    return r?.ok ? { x: r.x - this.origin.x, y: r.y - this.origin.y, shape: r.shape, visible: r.visible } : null;
+    return r?.ok
+      ? { x: r.x - this.origin.x, y: r.y - this.origin.y, shape: r.shape, visible: r.visible }
+      : null;
   }
 
   /** macOS only: locks the screen at once; { ok:false } elsewhere or when it did not lock. */
@@ -1805,20 +2081,33 @@ export class DesktopController extends EventEmitter {
 
   /** Polls the pointer while anyone watches and emits "cursor" when it moves or changes shape. */
   watchCursor(on) {
-    if (!on || !this.usable) { clearInterval(this.cursorTimer); this.cursorTimer = null; return; }
+    if (!on || !this.usable) {
+      clearInterval(this.cursorTimer);
+      this.cursorTimer = null;
+      return;
+    }
     if (this.cursorTimer) return;
     let busy = false;
     let last = "";
     // xdotool spawns a process per poll, so Linux polls far slower than the native Win/Mac helpers.
-    this.cursorTimer = setInterval(async () => {
-      if (busy) return;
-      busy = true;
-      try {
-        const c = await this.pointer();
-        const key = JSON.stringify(c);
-        if (c && key !== last) { last = key; this.cursor = c; this.emit("cursor", c); }
-      } finally { busy = false; }
-    }, this.linux ? 120 : 33);
+    this.cursorTimer = setInterval(
+      async () => {
+        if (busy) return;
+        busy = true;
+        try {
+          const c = await this.pointer();
+          const key = JSON.stringify(c);
+          if (c && key !== last) {
+            last = key;
+            this.cursor = c;
+            this.emit("cursor", c);
+          }
+        } finally {
+          busy = false;
+        }
+      },
+      this.linux ? 120 : 33,
+    );
   }
 
   /** { kind: text|image|files|empty, ... }; images above maxImage bytes come back without png. */
@@ -1846,7 +2135,11 @@ export class DesktopController extends EventEmitter {
    */
   watchClipboard(on, who = "viewer") {
     (this.clipHolders ||= new Set())[on ? "add" : "delete"](who);
-    if (!this.clipHolders.size || (!IS_WIN && !IS_MAC)) { clearInterval(this.clipTimer); this.clipTimer = null; return; }
+    if (!this.clipHolders.size || (!IS_WIN && !IS_MAC)) {
+      clearInterval(this.clipTimer);
+      this.clipTimer = null;
+      return;
+    }
     if (this.clipTimer) return;
     let busy = false;
     this.clipTimer = setInterval(async () => {
@@ -1856,17 +2149,23 @@ export class DesktopController extends EventEmitter {
         await this._clip.ensure();
         const r = await this._clip.cmd({ op: "seq" }, 5000);
         if (!r?.ok) return;
-        if (this.clipSeq == null) { this.clipSeq = r.seq; return; }
+        if (this.clipSeq == null) {
+          this.clipSeq = r.seq;
+          return;
+        }
         if (r.seq === this.clipSeq) return;
         const c = await this.clipboardRead();
         if (c.ok && c.kind !== "empty") this.emit("clipboard", c);
-      } finally { busy = false; }
+      } finally {
+        busy = false;
+      }
     }, 500);
   }
 
   /** macOS Screen-Recording / Accessibility grants; { ok:false } off macOS or without the helper. */
   async permissions() {
-    if (!IS_MAC) return { ok: false, screen: IS_WIN || !!this.linux, accessibility: IS_WIN || !!this.linux?.supported };
+    if (!IS_MAC)
+      return { ok: false, screen: IS_WIN || !!this.linux, accessibility: IS_WIN || !!this.linux?.supported };
     await this.helperCapture.ensure();
     return this.helperCapture.cmd({ op: "perms" }, 8000);
   }
@@ -1888,7 +2187,9 @@ export class DesktopController extends EventEmitter {
       clients: this.clients.size,
       quality: this.quality,
       frames: this.frameSeq,
-      lastFrame: this.lastFrame ? { width: this.lastFrame.width, height: this.lastFrame.height, ts: this.lastFrame.ts } : null,
+      lastFrame: this.lastFrame
+        ? { width: this.lastFrame.width, height: this.lastFrame.height, ts: this.lastFrame.ts }
+        : null,
       ...this.stats,
     };
   }

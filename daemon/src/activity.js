@@ -78,14 +78,18 @@ export function createActivityMonitor({ quietMs = 20_000, onEvent = () => {} } =
 
   function summary() {
     return [...tracked.entries()].map(([id, e]) => ({
-      id, kind: e.kind, state: e.state,
+      id,
+      kind: e.kind,
+      state: e.state,
       idleMs: e.lastOutputAt ? Date.now() - e.lastOutputAt : null,
     }));
   }
 
   function get(id) {
     const e = tracked.get(id);
-    return e ? { id, kind: e.kind, state: e.state, idleMs: e.lastOutputAt ? Date.now() - e.lastOutputAt : null } : null;
+    return e
+      ? { id, kind: e.kind, state: e.state, idleMs: e.lastOutputAt ? Date.now() - e.lastOutputAt : null }
+      : null;
   }
 
   return { feed, markChat, forget, start, stop, summary, get };

@@ -18,9 +18,16 @@ export function phoneBinary(ws, buf) {
     if (buf[0] === 0) w._phoneNeedKey = false;
     if (w._phoneNeedKey) continue;
     // A backed-up watcher waits for a fresh keyframe, which the phone makes on request.
-    if (w.bufferedAmount > 1_500_000) { w._phoneNeedKey = true; keyframe(); continue; }
+    if (w.bufferedAmount > 1_500_000) {
+      w._phoneNeedKey = true;
+      keyframe();
+      continue;
+    }
     // A desktop viewer gets the screen alone, in the desktop framing it already speaks.
-    if (w._shareFeed) { if (buf[0] >> 2 === 0) w.send(buf); continue; }
+    if (w._shareFeed) {
+      if (buf[0] >> 2 === 0) w.send(buf);
+      continue;
+    }
     w.send(out);
   }
 }
@@ -39,10 +46,12 @@ export const shareFeed = {
       if (k && m.press !== "up") go({ kind: "key", key: k });
       return;
     }
-    if (type === "desktop_nav") return ["back", "home", "recents", "notifications"].includes(m.key) && go({ kind: "key", key: m.key });
+    if (type === "desktop_nav")
+      return ["back", "home", "recents", "notifications"].includes(m.key) && go({ kind: "key", key: m.key });
     if (m.click === "long" && fin(m.fx) && fin(m.fy)) return go({ kind: "press", fx: m.fx, fy: m.fy });
     const button = m.button || m.click;
-    if ((m.click || m.press === "down") && (button === "right" || button === "middle")) return go({ kind: "key", key: button === "right" ? "back" : "home" });
+    if ((m.click || m.press === "down") && (button === "right" || button === "middle"))
+      return go({ kind: "key", key: button === "right" ? "back" : "home" });
     if (!fin(m.fx) || !fin(m.fy)) return;
     // Accessibility gestures are whole strokes: a press is held until release, then sent as a tap or swipe.
     if (m.click) return go({ kind: "tap", fx: m.fx, fy: m.fy });
@@ -51,8 +60,10 @@ export const shareFeed = {
       const d = ws._shareDown;
       ws._shareDown = null;
       const ms = Date.now() - d.at;
-      if (Math.hypot(m.fx - d.fx, m.fy - d.fy) < 0.01) go({ kind: ms > 500 ? "press" : "tap", fx: d.fx, fy: d.fy });
-      else go({ kind: "swipe", fx: d.fx, fy: d.fy, tx: m.fx, ty: m.fy, ms: Math.max(80, Math.min(3000, ms)) });
+      if (Math.hypot(m.fx - d.fx, m.fy - d.fy) < 0.01)
+        go({ kind: ms > 500 ? "press" : "tap", fx: d.fx, fy: d.fy });
+      else
+        go({ kind: "swipe", fx: d.fx, fy: d.fy, tx: m.fx, ty: m.fy, ms: Math.max(80, Math.min(3000, ms)) });
     }
   },
 };
@@ -77,7 +88,8 @@ let desktopRef = null;
 
 function record(e) {
   if (e.svc === "notif" && e.op === "posted" && e.item) {
-    const n = e.item, line = `${n.title || ""}${n.text || ""}`;
+    const n = e.item,
+      line = `${n.title || ""}${n.text || ""}`;
     if (said.get(n.key) === line) return;
     said.set(n.key, line);
     if (said.size > 500) said.delete(said.keys().next().value);
@@ -85,15 +97,30 @@ function record(e) {
     const code = syncSettings().otpCopy && n.code;
     if (code) desktopRef?.clipboardSet({ text: n.code }).catch?.(() => {});
     if (syncSettings().phoneToasts && !n.silent && !syncSettings().muted.includes(n.app)) {
-      toast({ title: n.title || n.appName, body: code ? `Code ${n.code} is on this PC's clipboard
-${n.text || ""}` : n.text, app: n.appName, tag: n.key });
+      toast({
+        title: n.title || n.appName,
+        body: code
+          ? `Code ${n.code} is on this PC's clipboard
+${n.text || ""}`
+          : n.text,
+        app: n.appName,
+        tag: n.key,
+      });
     }
   } else if (e.svc === "call" && e.state === "ringing") {
     timeline.add("call", e.name || "Incoming call", "Rang on the phone");
-    if (syncSettings().phoneToasts) toast({ title: e.name || "Incoming call", body: "Your phone is ringing. Answer or decline on the Calls page.", app: "Phone", tag: "call", call: true });
+    if (syncSettings().phoneToasts)
+      toast({
+        title: e.name || "Incoming call",
+        body: "Your phone is ringing. Answer or decline on the Calls page.",
+        app: "Phone",
+        tag: "call",
+        call: true,
+      });
   } else if (e.svc === "battery" && e.level <= 15 && !e.charging && hub.lowWarned !== true) {
     hub.lowWarned = true;
-    if (syncSettings().phoneToasts) toast({ title: `Phone battery ${e.level}%`, body: "Plug it in soon.", app: "Phone", tag: "battery" });
+    if (syncSettings().phoneToasts)
+      toast({ title: `Phone battery ${e.level}%`, body: "Plug it in soon.", app: "Phone", tag: "battery" });
   } else if (e.svc === "battery" && (e.charging || e.level > 20)) {
     hub.lowWarned = false;
   }
@@ -103,28 +130,41 @@ export default function phoneHandlers(ctx) {
   const { send, broadcast, clients = () => [] } = ctx;
   desktopRef = ctx.desktop;
   /** The phone answering storage requests: the sharing one, else the latest connected phone. */
-  const storagePhone = () => (share.phone?.readyState === 1 ? share.phone
-    : [...clients()].filter((w) => w._android && w._authed && w.readyState === 1).at(-1));
+  const storagePhone = () =>
+    share.phone?.readyState === 1
+      ? share.phone
+      : [...clients()].filter((w) => w._android && w._authed && w.readyState === 1).at(-1);
   function end() {
     if (!share.phone) return;
     share.phone = null;
     share.apps = [];
     share.active = null;
-    for (const w of share.watchers) send(w, w._shareFeed ? { type: "desktop_stopped", source: "share", why: "the phone stopped sharing" } : { type: "phone_stopped" });
+    for (const w of share.watchers)
+      send(
+        w,
+        w._shareFeed
+          ? { type: "desktop_stopped", source: "share", why: "the phone stopped sharing" }
+          : { type: "phone_stopped" },
+      );
     broadcast({ type: "swap", direction: "phone" });
   }
   function relay(ws, msg) {
     if (!share.phone) return send(ws, { type: "error", message: `${msg.type}: the phone is not shared` });
-    if (!share.watchers.has(ws)) return send(ws, { type: "error", message: `${msg.type}: not watching the phone` });
+    if (!share.watchers.has(ws))
+      return send(ws, { type: "error", message: `${msg.type}: not watching the phone` });
     send(share.phone, msg);
   }
   shareFeed.open = async (ws) => {
     ws._shareFeed = true;
     await this_.phone_watch(ws, { ask: false });
     // Only the other phones are asked; the viewer is a phone too.
-    if (!share.phone) for (const w of shareFeed.phones()) if (w !== ws) send(w, { type: "phone_share_request" });
+    if (!share.phone)
+      for (const w of shareFeed.phones()) if (w !== ws) send(w, { type: "phone_share_request" });
   };
-  shareFeed.close = (ws) => { ws._shareFeed = false; share.watchers.delete(ws); };
+  shareFeed.close = (ws) => {
+    ws._shareFeed = false;
+    share.watchers.delete(ws);
+  };
   const this_ = {
     async phone_watch(ws, msg = {}) {
       if (!share.watchers.has(ws)) {
@@ -134,7 +174,15 @@ export default function phoneHandlers(ctx) {
       ws._phoneNeedKey = true;
       // The encoder repeats frames on a still screen, so silence means the phone app died on a half-open socket.
       if (share.phone && Date.now() - share.lastPacket > STALE_MS) end();
-      send(ws, { type: "phone_state", sharing: !!share.phone, w: share.w, h: share.h, control: share.control, active: share.active, apps: share.apps });
+      send(ws, {
+        type: "phone_state",
+        sharing: !!share.phone,
+        w: share.w,
+        h: share.h,
+        control: share.control,
+        active: share.active,
+        apps: share.apps,
+      });
       if (share.phone) return keyframe();
       // Consent is the phone's: it asks its owner, then answers with phone_share_start.
       // A page that only opened (ask: false) listens for a share without prompting the phone.
@@ -152,15 +200,20 @@ export default function phoneHandlers(ctx) {
       share.lastPacket = Date.now();
       if (!ws._phoneCloseHooked) {
         ws._phoneCloseHooked = true;
-        ws.once?.("close", () => { if (share.phone === ws) end(); });
+        ws.once?.("close", () => {
+          if (share.phone === ws) end();
+        });
       }
-      for (const w of share.watchers) { w._phoneNeedKey = true; send(w, { type: "phone_started", w: share.w, h: share.h, control: share.control }); }
+      for (const w of share.watchers) {
+        w._phoneNeedKey = true;
+        send(w, { type: "phone_started", w: share.w, h: share.h, control: share.control });
+      }
       broadcast({ type: "swap", direction: "pc" });
     },
     async phone_share_stop(ws) {
       if (share.phone === ws) end();
     },
-    async phone_share_end(ws) {
+    async phone_share_end(_ws) {
       if (!share.phone) return;
       send(share.phone, { type: "phone_share_stop" });
       end();
@@ -181,8 +234,10 @@ export default function phoneHandlers(ctx) {
     // The phone's own storage, behind Android's "All files access" that its owner grants.
     async phone_fs(ws, msg) {
       const phone = storagePhone();
-      if (!phone) return send(ws, { type: "phone_fs_result", rid: msg.rid, error: "the phone is not connected" });
-      if (!FS_OPS.has(msg.op)) return send(ws, { type: "phone_fs_result", rid: msg.rid, error: `unknown op: ${msg.op}` });
+      if (!phone)
+        return send(ws, { type: "phone_fs_result", rid: msg.rid, error: "the phone is not connected" });
+      if (!FS_OPS.has(msg.op))
+        return send(ws, { type: "phone_fs_result", rid: msg.rid, error: `unknown op: ${msg.op}` });
       const id = nextAsk++;
       asked.set(id, { ws, rid: msg.rid, phone });
       setTimeout(() => asked.delete(id), 120_000).unref?.();
@@ -203,14 +258,27 @@ export default function phoneHandlers(ctx) {
     // settings, media, battery, photos, ringing. One request in, one answer back to who asked.
     async phone_req(ws, msg) {
       const phone = storagePhone();
-      if (!phone) return send(ws, { type: "phone_res", rid: msg.rid, ok: false, error: "the PocketDesk app on the phone is not connected" });
+      if (!phone)
+        return send(ws, {
+          type: "phone_res",
+          rid: msg.rid,
+          ok: false,
+          error: "the PocketDesk app on the phone is not connected",
+        });
       if (phone === ws) return;
-      if (!/^[a-z]{2,12}$/.test(String(msg.svc)) || !/^[a-z_]{2,20}$/.test(String(msg.op))) return send(ws, { type: "phone_res", rid: msg.rid, ok: false, error: "bad request" });
+      if (!/^[a-z]{2,12}$/.test(String(msg.svc)) || !/^[a-z_]{2,20}$/.test(String(msg.op)))
+        return send(ws, { type: "phone_res", rid: msg.rid, ok: false, error: "bad request" });
       const id = nextAsk++;
       asked.set(id, { ws, rid: msg.rid, phone });
       setTimeout(() => asked.delete(id), 120_000).unref?.();
-      if (msg.svc === "sms" && msg.op === "send") timeline.add("sms", `To ${String(msg.address || "")}`, String(msg.text || (msg.image ? "Picture" : "")));
-      if (msg.svc === "calls" && msg.op === "dial") timeline.add("call", `Called ${String(msg.number || "")}`, "from this PC");
+      if (msg.svc === "sms" && msg.op === "send")
+        timeline.add(
+          "sms",
+          `To ${String(msg.address || "")}`,
+          String(msg.text || (msg.image ? "Picture" : "")),
+        );
+      if (msg.svc === "calls" && msg.op === "dial")
+        timeline.add("call", `Called ${String(msg.number || "")}`, "from this PC");
       send(phone, { ...msg, type: "phone_req", rid: id });
     },
     async phone_res(ws, msg) {
@@ -233,7 +301,12 @@ export default function phoneHandlers(ctx) {
     },
     /** A PC page opening: the phone's last known state, and whether its app is there to ask. */
     async phone_hub(ws) {
-      send(ws, { type: "phone_hub", online: !!storagePhone(), name: storagePhone()?._name || null, last: Object.fromEntries(hub.last) });
+      send(ws, {
+        type: "phone_hub",
+        online: !!storagePhone(),
+        name: storagePhone()?._name || null,
+        last: Object.fromEntries(hub.last),
+      });
     },
   };
   shareFeed.phones = () => [...clients()].filter((w) => w._android && w._authed && w.readyState === 1);

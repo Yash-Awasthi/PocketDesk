@@ -21,7 +21,10 @@ function git(cwd, args) {
         if (err) {
           resolve({ ok: false, error: (stderr || err.message).slice(0, 500) });
         } else {
-          resolve({ ok: true, out: stdout.length > MAX_OUT ? stdout.slice(0, MAX_OUT) + "\n…[truncated]" : stdout });
+          resolve({
+            ok: true,
+            out: stdout.length > MAX_OUT ? stdout.slice(0, MAX_OUT) + "\n…[truncated]" : stdout,
+          });
         }
       },
     );
@@ -32,7 +35,9 @@ export async function gitStatus(cwd) {
   const r = await git(cwd, ["status", "--porcelain=v1", "-b"]);
   if (!r.ok) return r;
   const head = r.out.split("\n")[0] || "";
-  const branchMatch = head.match(/^## ([^.\s]+)(?:\.\.\.(\S+))?(?:\s+\[(?:ahead (\d+))?(?:, )?(?:behind (\d+))?\])?/);
+  const branchMatch = head.match(
+    /^## ([^.\s]+)(?:\.\.\.(\S+))?(?:\s+\[(?:ahead (\d+))?(?:, )?(?:behind (\d+))?\])?/,
+  );
   const files = r.out
     .split("\n")
     .slice(1)
@@ -59,10 +64,13 @@ export async function gitLog(cwd, limit = 20) {
   if (!r.ok) return r;
   return {
     ok: true,
-    commits: r.out.split("\n").filter(Boolean).map((l) => {
-      const [hash, author, when, ...subject] = l.split("|");
-      return { hash, author, when, subject: subject.join("|") };
-    }),
+    commits: r.out
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => {
+        const [hash, author, when, ...subject] = l.split("|");
+        return { hash, author, when, subject: subject.join("|") };
+      }),
   };
 }
 
@@ -71,9 +79,12 @@ export async function gitBranches(cwd) {
   if (!r.ok) return r;
   return {
     ok: true,
-    branches: r.out.split("\n").filter(Boolean).map((l) => {
-      const [name, current] = l.split("|");
-      return { name: name.trim(), current: current.trim() === "*" };
-    }),
+    branches: r.out
+      .split("\n")
+      .filter(Boolean)
+      .map((l) => {
+        const [name, current] = l.split("|");
+        return { name: name.trim(), current: current.trim() === "*" };
+      }),
   };
 }

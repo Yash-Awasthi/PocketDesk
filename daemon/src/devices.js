@@ -92,7 +92,12 @@ export function byToken(t) {
   const h = Buffer.from(hash(t));
   for (const d of devices.values()) {
     if (!d.revoked && d.tokenHash && crypto.timingSafeEqual(Buffer.from(d.tokenHash), h)) {
-      if (Date.now() - d.lastSeen > IDLE_EXPIRE_MS) { d.revoked = true; delete d.tokenHash; save(); return null; }
+      if (Date.now() - d.lastSeen > IDLE_EXPIRE_MS) {
+        d.revoked = true;
+        delete d.tokenHash;
+        save();
+        return null;
+      }
       return d;
     }
   }
@@ -127,7 +132,10 @@ export function claimEndpoint(clientId, endpointId) {
   const d = devices.get(String(clientId));
   if (!d) return true;
   if (d.endpointId && d.endpointId !== endpointId) return false;
-  if (!d.endpointId) { d.endpointId = endpointId; save(); }
+  if (!d.endpointId) {
+    d.endpointId = endpointId;
+    save();
+  }
   return true;
 }
 
@@ -151,7 +159,10 @@ export function remove(clientId) {
 
 export function list() {
   const now = Date.now();
-  return [...devices.values()].map(({ tokenHash, cred, ...d }) => ({ ...d, online: now - d.lastSeen < 5 * 60_000 }));
+  return [...devices.values()].map(({ tokenHash, cred, ...d }) => ({
+    ...d,
+    online: now - d.lastSeen < 5 * 60_000,
+  }));
 }
 
 export function touch(clientId) {

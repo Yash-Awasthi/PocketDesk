@@ -41,13 +41,18 @@ while ([PDHK]::GetMessage([ref]$m, [IntPtr]::Zero, 0, 0) -gt 0) {
 `;
 
 export class Hotkeys extends EventEmitter {
-  get supported() { return process.platform === "win32"; }
+  get supported() {
+    return process.platform === "win32";
+  }
 
   start() {
     if (!this.supported || this.proc) return;
     // Hotkey messages go to the thread that registered them, so the helper keeps one STA thread.
     const enc = Buffer.from(SCRIPT, "utf16le").toString("base64");
-    const p = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", enc], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+    const p = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-STA", "-EncodedCommand", enc], {
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     this.proc = p;
     let buf = "";
     p.stdout.on("data", (d) => {
@@ -57,13 +62,25 @@ export class Hotkeys extends EventEmitter {
         const line = buf.slice(0, i).trim();
         buf = buf.slice(i + 1);
         let m;
-        try { m = JSON.parse(line); } catch { continue; }
-        if (m.ready) { this.status = { copy: !!m.copy, paste: !!m.paste }; this.emit("ready", this.status); }
-        else if (m.op === "copy") this.emit("copy", (Array.isArray(m.files) ? m.files : [m.files]).filter((f) => typeof f === "string" && f));
+        try {
+          m = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (m.ready) {
+          this.status = { copy: !!m.copy, paste: !!m.paste };
+          this.emit("ready", this.status);
+        } else if (m.op === "copy")
+          this.emit(
+            "copy",
+            (Array.isArray(m.files) ? m.files : [m.files]).filter((f) => typeof f === "string" && f),
+          );
         else if (m.op === "paste") this.emit("paste");
       }
     });
-    p.on("exit", () => { if (this.proc === p) this.proc = null; });
+    p.on("exit", () => {
+      if (this.proc === p) this.proc = null;
+    });
   }
 
   stop() {

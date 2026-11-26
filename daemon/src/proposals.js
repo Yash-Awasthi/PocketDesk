@@ -127,9 +127,7 @@ export function get(id) {
  * Get all pending proposals.
  */
 export function listPending() {
-  return [...pending.values()]
-    .filter((p) => p.status === "pending")
-    .map(serialize);
+  return [...pending.values()].filter((p) => p.status === "pending").map(serialize);
 }
 
 /**

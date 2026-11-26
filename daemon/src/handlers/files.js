@@ -1,7 +1,7 @@
 import * as sessions from "../sessions.js";
 import { gitStatus, gitDiff, gitLog, gitBranches } from "../gitpanel.js";
 import * as mentions from "../mentions.js";
-import { listDir, readFileChunk, writeFileChunk, resolvePath, fileOp, searchFiles } from "../fs_ops.js";
+import { listDir, readFileChunk, writeFileChunk, fileOp, searchFiles } from "../fs_ops.js";
 import { zipFolder, thumbnail } from "../file_extras.js";
 
 export default function filesHandlers(ctx) {
@@ -9,7 +9,12 @@ export default function filesHandlers(ctx) {
   return {
     async fs(ws, msg) {
       // rid marks a listing asked for by the phone's Files app, apart from the screen it is browsing.
-      send(ws, msg.rid != null ? { ...listDir(msg.path, msg.hidden === true), rid: msg.rid } : listDir(msg.path, msg.hidden === true));
+      send(
+        ws,
+        msg.rid != null
+          ? { ...listDir(msg.path, msg.hidden === true), rid: msg.rid }
+          : listDir(msg.path, msg.hidden === true),
+      );
     },
     async fread(ws, msg) {
       send(ws, readFileChunk(msg.path, msg.offset));

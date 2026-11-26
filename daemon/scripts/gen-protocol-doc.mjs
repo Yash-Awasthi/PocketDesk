@@ -15,7 +15,6 @@ import { fileURLToPath } from "node:url";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON = path.dirname(HERE);
-const REPO = path.dirname(DAEMON);
 const README = path.join(DAEMON, "README.md");
 const BEGIN = "<!-- BEGIN protocol-table -->";
 const END = "<!-- END protocol-table -->";
@@ -32,7 +31,9 @@ function stubCtx() {
 
 // Some modules export their handlers as the default factory; a few also export helpers.
 async function handlerKeys(file) {
-  const mod = await import(new URL(`file://${path.join(DAEMON, "src", "handlers", file).replace(/\\/g, "/")}`));
+  const mod = await import(
+    new URL(`file://${path.join(DAEMON, "src", "handlers", file).replace(/\\/g, "/")}`)
+  );
   const factory = mod.default;
   const out = new Set();
   if (typeof factory === "function") {
@@ -44,7 +45,10 @@ async function handlerKeys(file) {
 
 const dir = path.join(DAEMON, "src", "handlers");
 const rows = [];
-for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".js")).sort()) {
+for (const file of fs
+  .readdirSync(dir)
+  .filter((f) => f.endsWith(".js"))
+  .sort()) {
   let keys;
   try {
     keys = await handlerKeys(file);
@@ -53,14 +57,17 @@ for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".js")).sort()) 
     // declares its message names as four-space-indented methods.
     const text = fs.readFileSync(path.join(dir, file), "utf8");
     keys = new Set([...text.matchAll(/^\s{4}(?:async\s+)?([a-z][a-z0-9_]*)\s*\(/gm)].map((m) => m[1]));
-    console.error(`gen-protocol-doc: ${file} could not be instantiated (${e.message.split("\n")[0]}); read statically`);
+    console.error(
+      `gen-protocol-doc: ${file} could not be instantiated (${e.message.split("\n")[0]}); read statically`,
+    );
   }
   for (const k of keys) rows.push({ type: k, file: `src/handlers/${file}` });
 }
 
 // Handlers added straight onto the map in server.js (loopback-only pages, the DAV drive).
 const serverText = fs.readFileSync(path.join(DAEMON, "src", "server.js"), "utf8");
-for (const m of serverText.matchAll(/handlers\.([a-z][a-z0-9_]*)\s*=/g)) rows.push({ type: m[1], file: "src/server.js" });
+for (const m of serverText.matchAll(/handlers\.([a-z][a-z0-9_]*)\s*=/g))
+  rows.push({ type: m[1], file: "src/server.js" });
 
 rows.sort((a, b) => a.type.localeCompare(b.type) || a.file.localeCompare(b.file));
 

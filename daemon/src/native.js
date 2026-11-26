@@ -24,7 +24,9 @@ export function runElevated(exe, args) {
   const list = args.map((a) => `'${String(a).replace(/'/g, "''")}'`).join(",");
   const cmd = `$p = Start-Process -FilePath '${exe.replace(/'/g, "''")}' -ArgumentList ${list || "@()"} -Verb RunAs -WindowStyle Hidden -Wait -PassThru; exit $p.ExitCode`;
   return new Promise((resolve) => {
-    const p = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", cmd], { windowsHide: true });
+    const p = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", cmd], {
+      windowsHide: true,
+    });
     p.on("exit", (code) => resolve(code ?? 1));
     p.on("error", () => resolve(1));
   });
@@ -35,7 +37,9 @@ export function runOut(exe, args) {
   return new Promise((resolve) => {
     let out = "";
     const p = spawn(exe, args, { windowsHide: true });
-    p.stdout.on("data", (d) => { out += d; });
+    p.stdout.on("data", (d) => {
+      out += d;
+    });
     p.on("exit", () => resolve(out.trim()));
     p.on("error", () => resolve(""));
   });

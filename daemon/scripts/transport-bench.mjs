@@ -45,7 +45,13 @@ async function irohEndpoint(relay) {
   const b = Endpoint.builder();
   b.applyMinimal();
   b.alpns([ALPN]);
-  b.relayMode(!relay ? RelayMode.disabled() : relay === "n0" ? RelayMode.defaultMode() : RelayMode.customFromUrls([relay]));
+  b.relayMode(
+    !relay
+      ? RelayMode.disabled()
+      : relay === "n0"
+        ? RelayMode.defaultMode()
+        : RelayMode.customFromUrls([relay]),
+  );
   b.bindAddr("127.0.0.1:0");
   const ep = await b.bind();
   keep.push(ep);
@@ -56,9 +62,17 @@ async function irohEndpoint(relay) {
 async function readFrames(stream, onFrame) {
   for (;;) {
     let len;
-    try { len = Buffer.from(await stream.readExact(4)).readUInt32BE(0); } catch { return; }
+    try {
+      len = Buffer.from(await stream.readExact(4)).readUInt32BE(0);
+    } catch {
+      return;
+    }
     let body;
-    try { body = Buffer.from(await stream.readExact(len)); } catch { return; }
+    try {
+      body = Buffer.from(await stream.readExact(len));
+    } catch {
+      return;
+    }
     onFrame(body);
   }
 }
@@ -73,20 +87,46 @@ function frame(pkt) {
 // ── viewer (child process) ───────────────────────────────────────────────
 async function viewer(info) {
   const t0 = now();
-  let firstShown = 0, lastShown = 0, shown = 0, bytes = 0, stalls = 0, stallMs = 0, maxGap = 0;
-  let haveConfig = false, chainOk = false, lastSeq = -1, lastKeySeq = -1, lateDropped = 0;
+  let firstShown = 0,
+    lastShown = 0,
+    shown = 0,
+    bytes = 0,
+    stalls = 0,
+    stallMs = 0,
+    maxGap = 0;
+  let haveConfig = false,
+    chainOk = false,
+    lastSeq = -1,
+    lastKeySeq = -1,
+    lateDropped = 0;
   const lat = [];
   const dump = opt.dump ? fs.createWriteStream(opt.dump) : null;
 
   function onPacket(buf) {
     const t = now();
     bytes += buf.length;
-    const kind = buf[0], seq = buf.readUInt32BE(1), ts = buf.readDoubleBE(5);
-    if (seq < lastKeySeq) { lateDropped++; return; } // tail of a GOP that was already replaced
+    const kind = buf[0],
+      seq = buf.readUInt32BE(1),
+      ts = buf.readDoubleBE(5);
+    if (seq < lastKeySeq) {
+      lateDropped++;
+      return;
+    } // tail of a GOP that was already replaced
     let show = false;
-    if (kind === KIND.config) { haveConfig = true; lastSeq = seq; chainOk = false; }
-    else if (kind === KIND.key) { chainOk = haveConfig; lastKeySeq = seq; lastSeq = seq; show = chainOk; }
-    else { chainOk = chainOk && seq === lastSeq + 1; lastSeq = seq; show = chainOk; }
+    if (kind === KIND.config) {
+      haveConfig = true;
+      lastSeq = seq;
+      chainOk = false;
+    } else if (kind === KIND.key) {
+      chainOk = haveConfig;
+      lastKeySeq = seq;
+      lastSeq = seq;
+      show = chainOk;
+    } else {
+      chainOk = chainOk && seq === lastSeq + 1;
+      lastSeq = seq;
+      show = chainOk;
+    }
     if (dump && (show || kind === KIND.config)) dump.write(buf.subarray(HEADER));
     if (!show) return;
     shown++;
@@ -95,7 +135,10 @@ async function viewer(info) {
     else {
       const gap = t - lastShown;
       if (gap > maxGap) maxGap = gap;
-      if (gap > STALL_MS) { stalls++; stallMs += gap; }
+      if (gap > STALL_MS) {
+        stalls++;
+        stallMs += gap;
+      }
     }
     lastShown = t;
   }
@@ -108,13 +151,21 @@ async function viewer(info) {
   } else {
     const { EndpointAddr, EndpointId } = await import("@number0/iroh");
     const ep = await irohEndpoint(opt.relay);
-    const addr = new EndpointAddr(EndpointId.fromString(info.id), info.relayUrl ?? null, info.relayUrl ? [] : info.direct);
+    const addr = new EndpointAddr(
+      EndpointId.fromString(info.id),
+      info.relayUrl ?? null,
+      info.relayUrl ? [] : info.direct,
+    );
     conn = await ep.connect(addr, ALPN);
     const streams = [];
     (async () => {
       for (;;) {
         let s;
-        try { s = await conn.acceptUni(); } catch { return; }
+        try {
+          s = await conn.acceptUni();
+        } catch {
+          return;
+        }
         // A newer GOP makes every older stream useless; stop them so the sender stops retrying.
         for (const old of streams.splice(0)) old.stop(0n).catch(() => {});
         streams.push(s);
@@ -127,22 +178,33 @@ async function viewer(info) {
   process.on("message", (m) => {
     if (m !== "report") return;
     const end = now();
-    if (lastShown && end - lastShown > STALL_MS) { stalls++; stallMs += end - lastShown; }
+    if (lastShown && end - lastShown > STALL_MS) {
+      stalls++;
+      stallMs += end - lastShown;
+    }
     lat.sort((a, b) => a - b);
-    const q = (p) => (lat.length ? +lat[Math.min(lat.length - 1, Math.floor(p * lat.length))].toFixed(1) : null);
+    const q = (p) =>
+      lat.length ? +lat[Math.min(lat.length - 1, Math.floor(p * lat.length))].toFixed(1) : null;
     const span = (end - (firstShown || end)) / 1000;
     const path = conn?.paths().find((p) => p.isSelected);
     dump?.end();
     process.send({
       connectMs: +connectMs.toFixed(0),
       firstFrameMs: firstShown ? +(firstShown - t0).toFixed(0) : null,
-      shown, fps: span ? +(shown / span).toFixed(1) : 0,
+      shown,
+      fps: span ? +(shown / span).toFixed(1) : 0,
       mbps: span ? +((bytes * 8) / span / 1e6).toFixed(2) : 0,
-      latP50: q(0.5), latP95: q(0.95), latP99: q(0.99),
-      stalls, stallMs: +stallMs.toFixed(0), stallPct: span ? +((stallMs / 10) / span).toFixed(2) : 0, maxGapMs: +maxGap.toFixed(0),
+      latP50: q(0.5),
+      latP95: q(0.95),
+      latP99: q(0.99),
+      stalls,
+      stallMs: +stallMs.toFixed(0),
+      stallPct: span ? +(stallMs / 10 / span).toFixed(2) : 0,
+      maxGapMs: +maxGap.toFixed(0),
       lateDropped,
       path: path ? (path.isRelay ? "relay" : "direct") : info.transport === "ws" ? "tcp" : null,
-      rttMs: path?.rttMs ?? null, lostPackets: conn?.stats().lostPackets ?? null,
+      rttMs: path?.rttMs ?? null,
+      lostPackets: conn?.stats().lostPackets ?? null,
     });
   });
   process.send("ready");
@@ -154,24 +216,60 @@ async function sender() {
   if (!p || !ENCODERS[opt.encoder]) throw new Error("unknown preset or encoder");
   const gopMode = opt.transport === "iroh-gop";
   const ffmpegPath = process.env.FFMPEG_PATH || "ffmpeg";
-  const w = Math.round((1920 * p.scale) / 2) * 2, h = Math.round((1080 * p.scale) / 2) * 2;
+  const w = Math.round((1920 * p.scale) / 2) * 2,
+    h = Math.round((1080 * p.scale) / 2) * 2;
   const stats = { packets: 0, restarts: -1, resets: 0, skippedDeltas: 0 };
 
-  let seq = 0, onPacket = () => {}, proc = null, gen = 0;
+  let seq = 0,
+    onPacket = () => {},
+    proc = null,
+    gen = 0;
   function startFfmpeg() {
     const my = ++gen;
     const extra = opt.encoder === "h264_nvenc" ? ["-forced-idr", "1"] : [];
-    proc = spawn(ffmpegPath, ["-hide_banner", "-loglevel", "error", "-re", "-f", "lavfi",
-      "-i", `testsrc2=size=${w}x${h}:rate=${p.fps}`, "-pix_fmt", "nv12",
-      "-c:v", opt.encoder, ...ENCODERS[opt.encoder](p.q, p), ...extra, "-g", gopMode ? opt.gop : "9999", "-bf", "0",
-      "-maxrate", p.maxrate, "-bufsize", p.maxrate, "-flush_packets", "1",
-      "-f", "flv", "-flvflags", "no_duration_filesize", "pipe:1"], { stdio: ["ignore", "pipe", "inherit"], windowsHide: true });
+    proc = spawn(
+      ffmpegPath,
+      [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-re",
+        "-f",
+        "lavfi",
+        "-i",
+        `testsrc2=size=${w}x${h}:rate=${p.fps}`,
+        "-pix_fmt",
+        "nv12",
+        "-c:v",
+        opt.encoder,
+        ...ENCODERS[opt.encoder](p.q, p),
+        ...extra,
+        "-g",
+        gopMode ? opt.gop : "9999",
+        "-bf",
+        "0",
+        "-maxrate",
+        p.maxrate,
+        "-bufsize",
+        p.maxrate,
+        "-flush_packets",
+        "1",
+        "-f",
+        "flv",
+        "-flvflags",
+        "no_duration_filesize",
+        "pipe:1",
+      ],
+      { stdio: ["ignore", "pipe", "inherit"], windowsHide: true },
+    );
     const demux = new FlvToAnnexB();
     proc.stdout.on("data", (chunk) => {
       for (const pkt of demux.push(chunk)) {
         if (my !== gen) return;
         const b = Buffer.allocUnsafe(HEADER + pkt.data.length);
-        b[0] = pkt.kind; b.writeUInt32BE(seq++ >>> 0, 1); b.writeDoubleBE(now(), 5);
+        b[0] = pkt.kind;
+        b.writeUInt32BE(seq++ >>> 0, 1);
+        b.writeDoubleBE(now(), 5);
         pkt.data.copy(b, HEADER);
         stats.packets++;
         onPacket(pkt.kind, b);
@@ -181,11 +279,16 @@ async function sender() {
   let restartTimer = null;
   const restart = () => {
     if (restartTimer) return;
-    restartTimer = setTimeout(() => { restartTimer = null; proc?.kill(); stats.restarts++; startFfmpeg(); }, 250);
+    restartTimer = setTimeout(() => {
+      restartTimer = null;
+      proc?.kill();
+      stats.restarts++;
+      startFfmpeg();
+    }, 250);
   };
 
   const info = { transport: opt.transport };
-  let cleanup = () => {};
+  let cleanup;
   if (opt.transport === "ws") {
     const wss = new WebSocketServer({ host: "127.0.0.1", port: 0 });
     await new Promise((r) => wss.once("listening", r));
@@ -196,7 +299,11 @@ async function sender() {
         if (ws.readyState !== 1) return;
         if (kind === KIND.config) needKey = false;
         if (needKey) return;
-        if (ws.bufferedAmount > LAG_LIMIT) { needKey = true; restart(); return; }
+        if (ws.bufferedAmount > LAG_LIMIT) {
+          needKey = true;
+          restart();
+          return;
+        }
         ws.send(b);
       };
       restart();
@@ -205,8 +312,10 @@ async function sender() {
   } else {
     const ep = await irohEndpoint(opt.relay);
     info.id = ep.id().toString();
-    if (opt.relay) { await ep.online(); info.relayUrl = ep.addr().relayUrl(); }
-    else info.direct = ep.addr().directAddresses();
+    if (opt.relay) {
+      await ep.online();
+      info.relayUrl = ep.addr().relayUrl();
+    } else info.direct = ep.addr().directAddresses();
     (async () => {
       const inc = await ep.acceptNext();
       const conn = await (await inc.accept()).connect();
@@ -217,7 +326,9 @@ async function sender() {
   }
 
   const cpu0 = process.cpuUsage();
-  const child = fork(new URL(import.meta.url), [...process.argv.slice(2), "--child"], { serialization: "advanced" });
+  const child = fork(new URL(import.meta.url), [...process.argv.slice(2), "--child"], {
+    serialization: "advanced",
+  });
   child.send(info);
   await new Promise((r) => child.once("message", r));
   const t0 = Date.now();
@@ -225,14 +336,25 @@ async function sender() {
   child.send("report");
   const result = await new Promise((r) => child.once("message", r));
   const cpu = process.cpuUsage(cpu0);
-  gen++; proc?.kill(); clearTimeout(restartTimer);
+  gen++;
+  proc?.kill();
+  clearTimeout(restartTimer);
   child.kill();
   cleanup();
-  console.log(JSON.stringify({
-    transport: opt.transport, relay: opt.relay ?? null, preset: opt.preset, gop: gopMode ? Number(opt.gop) : null,
-    encoder: opt.encoder, secs: Number(opt.secs), clock: "hrtime", ...result, ...stats,
-    senderCpuPct: +(((cpu.user + cpu.system) / 1000 / (Date.now() - t0)) * 100).toFixed(1),
-  }));
+  console.log(
+    JSON.stringify({
+      transport: opt.transport,
+      relay: opt.relay ?? null,
+      preset: opt.preset,
+      gop: gopMode ? Number(opt.gop) : null,
+      encoder: opt.encoder,
+      secs: Number(opt.secs),
+      clock: "hrtime",
+      ...result,
+      ...stats,
+      senderCpuPct: +(((cpu.user + cpu.system) / 1000 / (Date.now() - t0)) * 100).toFixed(1),
+    }),
+  );
   process.exit(0);
 }
 
@@ -242,12 +364,22 @@ function streamWriter(stream) {
   s.write = (buf) => {
     s.queued += buf.length;
     s.chain = s.chain.then(async () => {
-      if (!s.dead) await stream.writeAll(Array.from(buf)).catch(() => { s.dead = true; });
+      if (!s.dead)
+        await stream.writeAll(Array.from(buf)).catch(() => {
+          s.dead = true;
+        });
       s.queued -= buf.length;
     });
   };
-  s.reset = () => { if (!s.dead) { s.dead = true; stream.reset(0n).catch(() => {}); } };
-  s.finish = () => { s.chain = s.chain.then(() => (s.dead ? null : stream.finish().catch(() => {}))); };
+  s.reset = () => {
+    if (!s.dead) {
+      s.dead = true;
+      stream.reset(0n).catch(() => {});
+    }
+  };
+  s.finish = () => {
+    s.chain = s.chain.then(() => (s.dead ? null : stream.finish().catch(() => {})));
+  };
   return s;
 }
 
@@ -257,20 +389,35 @@ function singleSender(stream, restart) {
   return (kind, b) => {
     if (kind === KIND.config) needKey = false;
     if (needKey) return;
-    if (s.queued > LAG_LIMIT) { needKey = true; restart(); return; }
+    if (s.queued > LAG_LIMIT) {
+      needKey = true;
+      restart();
+      return;
+    }
     s.write(frame(b));
   };
 }
 
 function gopSender(conn, stats) {
-  let cur = null, config = null, prio = 0, opening = Promise.resolve();
+  let cur = null,
+    config = null,
+    prio = 0,
+    opening = Promise.resolve();
   return (kind, b) => {
-    if (kind === KIND.config) { config = b; return; }
+    if (kind === KIND.config) {
+      config = b;
+      return;
+    }
     if (kind === KIND.key) {
       const prev = cur;
       cur = null;
       // An unfinished GOP is stale once a newer keyframe exists.
-      if (prev) { if (prev.queued > 0) { prev.reset(); stats.resets++; } else prev.finish(); }
+      if (prev) {
+        if (prev.queued > 0) {
+          prev.reset();
+          stats.resets++;
+        } else prev.finish();
+      }
       const head = config;
       opening = opening.then(async () => {
         const st = await conn.openUni();
@@ -282,13 +429,31 @@ function gopSender(conn, stats) {
       return;
     }
     opening.then(() => {
-      if (!cur || cur.dead) { stats.skippedDeltas++; return; }
+      if (!cur || cur.dead) {
+        stats.skippedDeltas++;
+        return;
+      }
       // Too far behind to catch up inside this GOP: drop it and wait for the next keyframe.
-      if (cur.queued > LAG_LIMIT) { cur.reset(); stats.resets++; stats.skippedDeltas++; return; }
+      if (cur.queued > LAG_LIMIT) {
+        cur.reset();
+        stats.resets++;
+        stats.skippedDeltas++;
+        return;
+      }
       cur.write(frame(b));
     });
   };
 }
 
-if (opt.child) process.once("message", (info) => viewer(info).catch((e) => { console.error(e); process.exit(1); }));
-else sender().catch((e) => { console.error(e); process.exit(1); });
+if (opt.child)
+  process.once("message", (info) =>
+    viewer(info).catch((e) => {
+      console.error(e);
+      process.exit(1);
+    }),
+  );
+else
+  sender().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });

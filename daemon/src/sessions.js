@@ -11,9 +11,15 @@ import * as toolApproval from "./tool_approval.js";
 // npm installs node-pty's macOS spawn-helper without its exec bit, and every spawn then fails with posix_spawnp.
 if (process.platform === "darwin") {
   try {
-    const dir = path.join(path.dirname(createRequire(import.meta.url).resolve("node-pty/package.json")), "prebuilds");
-    for (const d of fs.readdirSync(dir)) if (d.startsWith("darwin")) fs.chmodSync(path.join(dir, d, "spawn-helper"), 0o755);
-  } catch { /* built from source: no prebuilds to fix */ }
+    const dir = path.join(
+      path.dirname(createRequire(import.meta.url).resolve("node-pty/package.json")),
+      "prebuilds",
+    );
+    for (const d of fs.readdirSync(dir))
+      if (d.startsWith("darwin")) fs.chmodSync(path.join(dir, d, "spawn-helper"), 0o755);
+  } catch {
+    /* built from source: no prebuilds to fix */
+  }
 }
 
 const IS_WIN = process.platform === "win32";
@@ -50,7 +56,9 @@ function _reap() {
   for (const [id, s] of sessions) {
     if (s.exitCode !== null && s.endedAt && now - s.endedAt > DEAD_SESSION_TTL_MS) {
       // Clean up the PTY if still lingering
-      try { s.pty.kill(); } catch {}
+      try {
+        s.pty.kill();
+      } catch {}
       s.subs.clear();
       sessions.delete(id);
       sessionEvents.emit("gone", { id });
@@ -59,7 +67,9 @@ function _reap() {
     }
     // Idle reaper (persistent-terminal-api pattern): kill live sessions idle too long.
     if (IDLE_KILL_MS > 0 && s.exitCode === null && now - s.lastActivity > IDLE_KILL_MS) {
-      try { s.pty.kill(); } catch {}
+      try {
+        s.pty.kill();
+      } catch {}
       s.exitCode = -1;
       s.endedAt = now;
       s.subs.clear();
@@ -83,7 +93,8 @@ export { stopReaper };
 // a PC-side viewer (browser terminal, `pocketdesk attach`) resizes to its real window.
 let pcSize = { cols: 120, rows: 32 };
 export function setPcScreen(w, h) {
-  if (w > 0 && h > 0) pcSize = { cols: Math.min(500, Math.floor(w / 9)), rows: Math.min(200, Math.floor(h / 19)) };
+  if (w > 0 && h > 0)
+    pcSize = { cols: Math.min(500, Math.floor(w / 9)), rows: Math.min(200, Math.floor(h / 19)) };
 }
 
 export function create({ harnessId, bin, cwd, args = [] }, broadcast) {
@@ -97,7 +108,9 @@ export function create({ harnessId, bin, cwd, args = [] }, broadcast) {
       }
     }
     if (oldestDead) {
-      try { oldestDead[1].pty.kill(); } catch {}
+      try {
+        oldestDead[1].pty.kill();
+      } catch {}
       oldestDead[1].subs.clear();
       sessions.delete(oldestDead[0]);
     } else {
@@ -115,7 +128,20 @@ export function create({ harnessId, bin, cwd, args = [] }, broadcast) {
   const proc = IS_WIN
     ? pty.spawn("cmd.exe", ["/c", bin, ...args], { name: "xterm-256color", ...pcSize, cwd: dir, env })
     : pty.spawn(bin, args, { name: "xterm-256color", ...pcSize, cwd: dir, env });
-  const s = { id, harnessId, cwd: dir, ...pcSize, pty: proc, decoder: new StringDecoder("utf8"), scrollback: "", chunks: [], seq: 0, subs: new Set(), exitCode: null, lastActivity: Date.now() };
+  const s = {
+    id,
+    harnessId,
+    cwd: dir,
+    ...pcSize,
+    pty: proc,
+    decoder: new StringDecoder("utf8"),
+    scrollback: "",
+    chunks: [],
+    seq: 0,
+    subs: new Set(),
+    exitCode: null,
+    lastActivity: Date.now(),
+  };
   sessions.set(id, s);
   sessionEvents.emit("create", { id, harnessId: s.harnessId, cwd: dir });
   proc.onData((data) => {
@@ -211,16 +237,28 @@ export function resize(id, cols, rows) {
 
 // The pty child leads its own session and process group, so signalling the group takes the agent's children too.
 function hangUpGroup(s) {
-  if (s.pty.pid) try { process.kill(-s.pty.pid, "SIGHUP"); } catch {}
+  if (s.pty.pid)
+    try {
+      process.kill(-s.pty.pid, "SIGHUP");
+    } catch {}
 }
 
 export function kill(id) {
   const s = sessions.get(id);
   if (!s || s.exitCode !== null) return false;
-  const killPty = () => { try { s.pty.kill(); } catch {} };
+  const killPty = () => {
+    try {
+      s.pty.kill();
+    } catch {}
+  };
   if (IS_WIN && s.pty.pid) {
     // Tree-kill the wrapper + children so agents don't keep running orphaned; the wrapper must outlive the walk.
-    execFile("taskkill", ["/PID", String(s.pty.pid), "/T", "/F"], { timeout: 5000, windowsHide: true }, killPty);
+    execFile(
+      "taskkill",
+      ["/PID", String(s.pty.pid), "/T", "/F"],
+      { timeout: 5000, windowsHide: true },
+      killPty,
+    );
   } else {
     hangUpGroup(s);
     killPty();
@@ -248,9 +286,18 @@ export function killAll() {
   for (const s of sessions.values()) {
     if (s.exitCode === null) {
       // Synchronous: the daemon exits right after, and the agent's own children must not outlive it.
-      if (IS_WIN && s.pty.pid) try { execFileSync("taskkill", ["/PID", String(s.pty.pid), "/T", "/F"], { stdio: "ignore", timeout: 5000, windowsHide: true }); } catch {}
+      if (IS_WIN && s.pty.pid)
+        try {
+          execFileSync("taskkill", ["/PID", String(s.pty.pid), "/T", "/F"], {
+            stdio: "ignore",
+            timeout: 5000,
+            windowsHide: true,
+          });
+        } catch {}
       else hangUpGroup(s);
-      try { s.pty.kill(); } catch {}
+      try {
+        s.pty.kill();
+      } catch {}
       s.exitCode = -1; // mark as killed by shutdown
       s.endedAt = Date.now();
       s.subs.clear();
@@ -264,7 +311,7 @@ export function killAll() {
  * Get all live session IDs (for shutdown logging).
  */
 export function liveIds() {
-  return [...sessions.values()].filter(s => s.exitCode === null).map(s => s.id);
+  return [...sessions.values()].filter((s) => s.exitCode === null).map((s) => s.id);
 }
 
 function b64(text) {

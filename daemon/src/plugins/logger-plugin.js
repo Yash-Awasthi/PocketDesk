@@ -32,15 +32,15 @@ export default {
     this._file = null;
   },
 
-  onConnect(ctx, ws) {
+  onConnect(_ctx, ws) {
     this._log("connect", { remote: ws._remote });
   },
 
-  onDisconnect(ctx, ws) {
+  onDisconnect(_ctx, ws) {
     this._log("disconnect", { remote: ws._remote });
   },
 
-  onMessage(ctx, ws, msg) {
+  onMessage(_ctx, ws, msg) {
     // Input and video acks arrive several times a second and would bury everything else.
     if (NOISY.has(msg.type)) return;
     this._log("message", { type: msg.type, remote: ws._remote });
@@ -50,7 +50,9 @@ export default {
     const line = logbook.record(event, data);
     try {
       if (this._file) logbook.appendLine(this._file, line);
-    } catch { /* a full disk must not stop the daemon */ }
+    } catch {
+      /* a full disk must not stop the daemon */
+    }
     process.stdout.write(line);
   },
 };

@@ -142,7 +142,7 @@ export class AdvancedSSHServerManager extends EventEmitter {
     if (!user) return null;
 
     const activeSessions = Array.from(this.sessions.values()).filter(
-      (s) => s.username === username && s.isActive
+      (s) => s.username === username && s.isActive,
     );
     if (activeSessions.length >= user.maxSessions) return null;
 
@@ -179,7 +179,15 @@ export class AdvancedSSHServerManager extends EventEmitter {
       if ((IS_WIN ? /[&|<>^%\r\n]/ : /[;&|<>`$()\r\n]/).test(command)) return false;
       // A rule's words must lead the command: "git" allows any git, "git status" only that subcommand.
       const argv = command.trim().split(/\s+/);
-      if (!user.allowedCommands.some((rule) => String(rule).trim().split(/\s+/).every((w, i) => argv[i] === w))) return false;
+      if (
+        !user.allowedCommands.some((rule) =>
+          String(rule)
+            .trim()
+            .split(/\s+/)
+            .every((w, i) => argv[i] === w),
+        )
+      )
+        return false;
     }
 
     const actualCommand = this.config.forceCommand || command;
@@ -245,7 +253,10 @@ export class AdvancedSSHServerManager extends EventEmitter {
     await new Promise((resolve, reject) => {
       this.server.once("error", reject);
       this.server.listen(listenPort, listenHost, () => resolve());
-    }).catch((err) => { this.server = null; throw err; });
+    }).catch((err) => {
+      this.server = null;
+      throw err;
+    });
 
     this.config.port = this.server.address().port;
     this.config.host = listenHost;
@@ -274,14 +285,18 @@ export class AdvancedSSHServerManager extends EventEmitter {
       // Unsigned publickey probes are how clients pick among their keys, so only real attempts count.
       const fail = () => {
         if (ctx.method === "password" || ctx.signature) {
-          for (const [ip, r] of this.authFailures) if (now - r.at > AUTH_WINDOW_MS) this.authFailures.delete(ip);
+          for (const [ip, r] of this.authFailures)
+            if (now - r.at > AUTH_WINDOW_MS) this.authFailures.delete(ip);
           this.authFailures.set(clientIp, { n: failures + 1, at: now });
         }
         return ctx.reject(["password", "publickey"]);
       };
-      const credential = ctx.method === "password" ? ctx.password
-        : ctx.method === "publickey" ? ctx.key?.data?.toString("base64")
-        : undefined;
+      const credential =
+        ctx.method === "password"
+          ? ctx.password
+          : ctx.method === "publickey"
+            ? ctx.key?.data?.toString("base64")
+            : undefined;
       const user = this.users.get(ctx.username);
       // Credential-less users exist for phone-side bookkeeping only, never for network logins.
       if (!user || (!user.passwordHash && !user.publicKey)) return fail();
@@ -305,35 +320,68 @@ export class AdvancedSSHServerManager extends EventEmitter {
           if (!this.executeCommand(session.id, execInfo.command)) return rej();
           const stream = acc();
           const command = this.config.forceCommand || execInfo.command;
-          const [sh, shArgv] = process.platform === "win32" ? ["cmd.exe", ["/d", "/s", "/c", command]] : ["/bin/sh", ["-c", command]];
+          const [sh, shArgv] =
+            process.platform === "win32"
+              ? ["cmd.exe", ["/d", "/s", "/c", command]]
+              : ["/bin/sh", ["-c", command]];
           const proc = spawn(sh, shArgv, { cwd: process.env.HOME || process.cwd(), windowsHide: true });
           proc.stdout.on("data", (d) => stream.write(d));
           proc.stderr.on("data", (d) => stream.stderr.write(d));
-          proc.on("close", (code) => { stream.exit(code ?? 0); stream.end(); });
-          proc.on("error", (err) => { stream.stderr.write(String(err.message)); stream.exit(127); stream.end(); });
+          proc.on("close", (code) => {
+            stream.exit(code ?? 0);
+            stream.end();
+          });
+          proc.on("error", (err) => {
+            stream.stderr.write(String(err.message));
+            stream.exit(127);
+            stream.end();
+          });
         });
         chan.on("shell", (acc, rej) => {
           // An interactive shell would bypass the per-user command allowlist.
           if (this.users.get(session.username)?.allowedCommands.length) return rej();
           const stream = acc();
           const shell = IS_WIN ? "powershell.exe" : process.env.SHELL || "bash";
-          const term = pty.spawn(shell, [], { name: "xterm-256color", cols: 100, rows: 30, cwd: process.env.HOME || process.cwd(), env: process.env });
+          const term = pty.spawn(shell, [], {
+            name: "xterm-256color",
+            cols: 100,
+            rows: 30,
+            cwd: process.env.HOME || process.cwd(),
+            env: process.env,
+          });
           session.pty = term;
-          term.onData((d) => { try { stream.write(d); } catch { /* channel closed */ } });
-          term.onExit(({ exitCode }) => { try { stream.exit(exitCode); stream.end(); } catch { /* already closed */ } });
+          term.onData((d) => {
+            try {
+              stream.write(d);
+            } catch {
+              /* channel closed */
+            }
+          });
+          term.onExit(({ exitCode }) => {
+            try {
+              stream.exit(exitCode);
+              stream.end();
+            } catch {
+              /* already closed */
+            }
+          });
           stream.on("data", (d) => term.write(d.toString()));
           stream.on("close", () => term.kill());
         });
         chan.on("pty", (acc) => acc?.());
-        chan.on("window-change", (acc, rej, dims) => {
+        chan.on("window-change", (acc, _rej, dims) => {
           session?.pty?.resize(dims.cols, dims.rows);
           acc?.();
         });
       });
     });
 
-    client.on("close", () => { if (session) this.endSession(session.id); });
-    client.on("error", () => { /* client vanished; close handles cleanup */ });
+    client.on("close", () => {
+      if (session) this.endSession(session.id);
+    });
+    client.on("error", () => {
+      /* client vanished; close handles cleanup */
+    });
   }
 
   getStats() {

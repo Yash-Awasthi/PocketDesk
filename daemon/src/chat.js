@@ -28,7 +28,14 @@ function saveHistory(c) {
   try {
     ensureHistoryDir();
     const file = path.join(HISTORY_DIR, `${c.created}-${c.id}.json`);
-    writeFileAtomic(file, JSON.stringify({ id: c.id, harnessId: c.harnessId, cwd: c.cwd, transcript: c.transcript, created: c.created }, null, 2));
+    writeFileAtomic(
+      file,
+      JSON.stringify(
+        { id: c.id, harnessId: c.harnessId, cwd: c.cwd, transcript: c.transcript, created: c.created },
+        null,
+        2,
+      ),
+    );
   } catch {}
 }
 
@@ -50,7 +57,11 @@ export function saveAttachments(chatId, images) {
     const ext = IMAGE_EXT[img?.mime];
     if (!ext || typeof img.data !== "string") continue;
     let buf;
-    try { buf = Buffer.from(img.data, "base64"); } catch { continue; }
+    try {
+      buf = Buffer.from(img.data, "base64");
+    } catch {
+      continue;
+    }
     if (!buf.length || buf.length > MAX_IMAGE_BYTES) continue;
     const file = path.join(ATTACH_DIR, chatId, `${Date.now()}-${paths.length}.${ext}`);
     fs.writeFileSync(file, buf);
@@ -62,10 +73,20 @@ export function saveAttachments(chatId, images) {
 export function listHistory() {
   try {
     ensureHistoryDir();
-    return fs.readdirSync(HISTORY_DIR).filter(f => f.endsWith(".json")).map(f => {
-      try { return JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f), "utf8")); } catch { return null; }
-    }).filter(Boolean);
-  } catch { return []; }
+    return fs
+      .readdirSync(HISTORY_DIR)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        try {
+          return JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, f), "utf8"));
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 const chats = new Map(); // id -> chat record
@@ -100,9 +121,10 @@ function lastAssistantPreview(c) {
 
 export function create({ manifest, cwd, resumeFirst = false, cliSession = null, transcript = [] }) {
   const id = "c" + nextId++;
-  const dir = cwd && String(cwd).trim()
-    ? path.resolve(String(cwd).replace(/^~(?=$|\/|\\)/, os.homedir()))
-    : os.homedir();
+  const dir =
+    cwd && String(cwd).trim()
+      ? path.resolve(String(cwd).replace(/^~(?=$|\/|\\)/, os.homedir()))
+      : os.homedir();
   const c = {
     id,
     harnessId: manifest.id,
@@ -146,10 +168,10 @@ export function create({ manifest, cwd, resumeFirst = false, cliSession = null, 
 export function forkChat(id, atMessageIndex = -1, { cwd, env } = {}) {
   const c = chats.get(id);
   if (!c) return { ok: false, error: `no such chat: ${id}` };
-  const cut = atMessageIndex >= 0 ? Math.min(Math.floor(atMessageIndex), c.transcript.length) : c.transcript.length;
-  const dir = cwd && String(cwd).trim()
-    ? path.resolve(String(cwd).replace(/^~(?=$|\/|\\)/, os.homedir()))
-    : c.cwd;
+  const cut =
+    atMessageIndex >= 0 ? Math.min(Math.floor(atMessageIndex), c.transcript.length) : c.transcript.length;
+  const dir =
+    cwd && String(cwd).trim() ? path.resolve(String(cwd).replace(/^~(?=$|\/|\\)/, os.homedir())) : c.cwd;
   const nc = {
     ...c,
     id: "c" + nextId++,
@@ -164,7 +186,10 @@ export function forkChat(id, atMessageIndex = -1, { cwd, env } = {}) {
   };
   chats.set(nc.id, nc);
   chatEvents.emit("state", { id: nc.id, state: "idle", harnessId: nc.harnessId });
-  return { ok: true, chat: { id: nc.id, harnessId: nc.harnessId, cwd: nc.cwd, kind: "chat", forkedFrom: nc.forkedFrom } };
+  return {
+    ok: true,
+    chat: { id: nc.id, harnessId: nc.harnessId, cwd: nc.cwd, kind: "chat", forkedFrom: nc.forkedFrom },
+  };
 }
 
 // What an agent's last session start reported (its slash commands, model, permission mode), kept per
@@ -172,23 +197,45 @@ export function forkChat(id, atMessageIndex = -1, { cwd, env } = {}) {
 const INFO_FILE = path.join(configDir, "agent-info.json");
 let agentInfo = null;
 function infoFor(harnessId) {
-  agentInfo ??= (() => { try { return JSON.parse(fs.readFileSync(INFO_FILE, "utf8")); } catch { return {}; } })();
+  agentInfo ??= (() => {
+    try {
+      return JSON.parse(fs.readFileSync(INFO_FILE, "utf8"));
+    } catch {
+      return {};
+    }
+  })();
   return agentInfo[harnessId] ?? {};
 }
 
 function chatInfo(c) {
   const known = { ...infoFor(c.harnessId), ...(c.info ?? {}) };
   // Before the agent's first session start, the skills and commands on disk stand in for its own list.
-  const disk = () => { const p = agentPanel.panel(c.harnessId); return p.ok ? [...p.skills, ...p.commands].map((x) => x.name) : []; };
-  return { type: "chat_info", id: c.id, model: known.model ?? null, permissionMode: known.permissionMode ?? null, commands: known.commands ?? disk(), pocketdesk: pocketdeskCommands() };
+  const disk = () => {
+    const p = agentPanel.panel(c.harnessId);
+    return p.ok ? [...p.skills, ...p.commands].map((x) => x.name) : [];
+  };
+  return {
+    type: "chat_info",
+    id: c.id,
+    model: known.model ?? null,
+    permissionMode: known.permissionMode ?? null,
+    commands: known.commands ?? disk(),
+    pocketdesk: pocketdeskCommands(),
+  };
 }
 
 /** Claude's init event: remember what it offers and tell the chat's viewers. */
 function noteInit(c, obj) {
-  c.info = { model: obj.model ?? null, permissionMode: obj.permissionMode ?? null, commands: Array.isArray(obj.slash_commands) ? obj.slash_commands : [] };
+  c.info = {
+    model: obj.model ?? null,
+    permissionMode: obj.permissionMode ?? null,
+    commands: Array.isArray(obj.slash_commands) ? obj.slash_commands : [],
+  };
   infoFor(c.harnessId);
   agentInfo[c.harnessId] = c.info;
-  try { writeFileAtomic(INFO_FILE, JSON.stringify(agentInfo)); } catch {}
+  try {
+    writeFileAtomic(INFO_FILE, JSON.stringify(agentInfo));
+  } catch {}
   push(c, chatInfo(c));
 }
 
@@ -240,20 +287,37 @@ export function sendUserMessage(c, rawText, once = {}) {
 }
 
 // Phone and browser names for Claude Code permission modes; unset keeps the user's own setting.
-const CLAUDE_MODES = { default: "default", ask: "default", autopilot: "acceptEdits", acceptEdits: "acceptEdits", readonly: "plan", plan: "plan", yolo: "bypassPermissions", bypassPermissions: "bypassPermissions" };
+const CLAUDE_MODES = {
+  default: "default",
+  ask: "default",
+  autopilot: "acceptEdits",
+  acceptEdits: "acceptEdits",
+  readonly: "plan",
+  plan: "plan",
+  yolo: "bypassPermissions",
+  bypassPermissions: "bypassPermissions",
+};
 
 function runTurn(c, prompt, once = {}) {
   if (c.proc && c.state === "running") return false;
   const continuing = c.turn > 0 && c.resumeArgs && c.resumeArgs.length > 0;
   const model = once.model !== undefined ? once.model : c.model;
-  const modelCfg = !model ? null : c.models?.[model] ?? (c.modelArg ? { args: [...c.modelArg, model] } : null);
+  const modelCfg = !model
+    ? null
+    : (c.models?.[model] ?? (c.modelArg ? { args: [...c.modelArg, model] } : null));
   const byId = c.turn > 0 && c.cliSession && c.resumeIdArgs;
-  const base = byId ? c.resumeIdArgs.map((a) => a.replaceAll("{id}", c.cliSession)) : continuing ? c.resumeArgs : c.args;
+  const base = byId
+    ? c.resumeIdArgs.map((a) => a.replaceAll("{id}", c.cliSession))
+    : continuing
+      ? c.resumeArgs
+      : c.args;
   if (c.inlineHistory && c.turn > 0) prompt = withHistory(c, prompt);
   const claude = c.format === "claude-stream-json";
   const permission = once.permissionMode ?? c.permissionMode;
   const mode = claude && Object.hasOwn(CLAUDE_MODES, permission) && CLAUDE_MODES[permission];
-  const approvals = claude ? [...toolApproval.claudeArgs(), ...(mode ? ["--permission-mode", mode] : [])] : [];
+  const approvals = claude
+    ? [...toolApproval.claudeArgs(), ...(mode ? ["--permission-mode", mode] : [])]
+    : [];
   const argv = [...base, ...approvals, ...(modelCfg?.args || []), ...(c.promptArg ? [prompt] : [])];
   c.turn++;
   c.state = "running";
@@ -263,7 +327,12 @@ function runTurn(c, prompt, once = {}) {
   const decoder = new StringDecoder("utf8");
   // Env profiles (1code BYOK / Vibe Companion envs): per-chat overrides
   // layered over the daemon's environment; a selected model's env wins.
-  const env = { ...process.env, ...(c.env || {}), ...(modelCfg?.env || {}), ...(approvals.length ? toolApproval.env(c.id) : {}) };
+  const env = {
+    ...process.env,
+    ...(c.env || {}),
+    ...(modelCfg?.env || {}),
+    ...(approvals.length ? toolApproval.env(c.id) : {}),
+  };
 
   const opts = { windowsHide: true, cwd: c.cwd, env, stdio: ["pipe", "pipe", "pipe"] };
   // cmd.exe re-parses its command line, so a prompt passed as an argument must bypass it.
@@ -271,7 +340,11 @@ function runTurn(c, prompt, once = {}) {
   if (IS_WIN && c.promptArg && !script) {
     c.state = "error";
     appendSystem(c, `cannot find the npm launcher for ${c.bin}`);
-    push(c, { type: "chatdelta", id: c.id, text: `\n[spawn failed] cannot find the npm launcher for ${c.bin}` });
+    push(c, {
+      type: "chatdelta",
+      id: c.id,
+      text: `\n[spawn failed] cannot find the npm launcher for ${c.bin}`,
+    });
     pushState(c);
     return true;
   }
@@ -316,7 +389,14 @@ function runTurn(c, prompt, once = {}) {
   let errBuf = "";
   proc.stdout.on("data", onChunk);
   // JSON agents print warnings on stderr every run; it only matters when the turn fails.
-  proc.stderr.on("data", PARSERS[c.format] ? (d) => { errBuf = (errBuf + d).slice(-4000); } : onChunk);
+  proc.stderr.on(
+    "data",
+    PARSERS[c.format]
+      ? (d) => {
+          errBuf = (errBuf + d).slice(-4000);
+        }
+      : onChunk,
+  );
   proc.on("error", (e) => {
     if (c.proc !== proc) return;
     c.state = "error";
@@ -387,7 +467,8 @@ function parseClaude(c, obj, emitText) {
     case "stream_event": {
       const ev = obj.event ?? {};
       if (ev.type === "message_start") c.streamedText = false;
-      else if (ev.type === "content_block_start" && ev.content_block?.type === "tool_use") toolUse(c, ev.content_block.name, "…", ev.content_block.id);
+      else if (ev.type === "content_block_start" && ev.content_block?.type === "tool_use")
+        toolUse(c, ev.content_block.name, "…", ev.content_block.id);
       else if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta" && ev.delta.text) {
         c.streamedText = true;
         emitText(ev.delta.text);
@@ -397,8 +478,9 @@ function parseClaude(c, obj, emitText) {
     case "assistant": {
       const content = obj.message?.content ?? [];
       for (const part of content) {
-        if (part.type === "text") { if (!c.streamedText) emitText(part.text); }
-        else if (part.type === "tool_use") toolUse(c, part.name, JSON.stringify(part.input ?? {}), part.id);
+        if (part.type === "text") {
+          if (!c.streamedText) emitText(part.text);
+        } else if (part.type === "tool_use") toolUse(c, part.name, JSON.stringify(part.input ?? {}), part.id);
         else if (part.type === "tool_result") {
           // arrives inside user messages in stream-json; ignore
         }
@@ -410,9 +492,7 @@ function parseClaude(c, obj, emitText) {
       if (Array.isArray(content)) {
         for (const part of content) {
           if (part.type === "tool_result") {
-            const txt = typeof part.content === "string"
-              ? part.content
-              : JSON.stringify(part.content ?? "");
+            const txt = typeof part.content === "string" ? part.content : JSON.stringify(part.content ?? "");
             toolResult(c, txt.slice(0, 200));
           }
         }
@@ -440,8 +520,17 @@ function parseCodex(c, obj, emitText) {
       break;
     case "item.completed":
       if (item.type === "agent_message") emitText(item.text ?? "");
-      else if (item.type === "command_execution") toolResult(c, String(item.aggregated_output ?? "").slice(0, 200));
-      else if (item.type === "file_change") toolUse(c, "patch", (item.changes ?? []).map((ch) => ch.path).join(", ").slice(0, 160));
+      else if (item.type === "command_execution")
+        toolResult(c, String(item.aggregated_output ?? "").slice(0, 200));
+      else if (item.type === "file_change")
+        toolUse(
+          c,
+          "patch",
+          (item.changes ?? [])
+            .map((ch) => ch.path)
+            .join(", ")
+            .slice(0, 160),
+        );
       break;
     case "turn.completed":
       emitUsage(c, obj.usage, 0);
@@ -495,7 +584,11 @@ function parseGemini(c, obj, emitText) {
       break;
     case "result":
       emitUsage(c, obj.stats, 0);
-      finishTurn(c, obj.status === "success" ? "idle" : "error", obj.status === "success" ? "" : obj.error?.message ?? "");
+      finishTurn(
+        c,
+        obj.status === "success" ? "idle" : "error",
+        obj.status === "success" ? "" : (obj.error?.message ?? ""),
+      );
       break;
     default:
       break;
@@ -530,8 +623,10 @@ function parseCline(c, obj, emitText) {
   const ev = obj.event ?? {};
   if (obj.type === "agent_event") {
     if (ev.type === "content_end" && ev.contentType === "text") emitText(ev.text ?? "");
-    else if (ev.type === "content_start" && ev.contentType === "tool") toolUse(c, ev.toolName ?? "tool", JSON.stringify(ev.input ?? {}));
-    else if (ev.type === "content_end" && ev.contentType === "tool") toolResult(c, JSON.stringify(ev.output ?? "").slice(0, 200));
+    else if (ev.type === "content_start" && ev.contentType === "tool")
+      toolUse(c, ev.toolName ?? "tool", JSON.stringify(ev.input ?? {}));
+    else if (ev.type === "content_end" && ev.contentType === "tool")
+      toolResult(c, JSON.stringify(ev.output ?? "").slice(0, 200));
   } else if (obj.type === "run_result") {
     emitUsage(c, obj.usage, obj.usage?.totalCost);
     finishTurn(c, obj.finishReason === "completed" ? "idle" : "error", "");
@@ -542,7 +637,8 @@ function parseCline(c, obj, emitText) {
 
 // Cline cannot resume a session without a TTY, so earlier turns ride along in the prompt.
 function withHistory(c, prompt) {
-  const past = c.transcript.slice(0, -1)
+  const past = c.transcript
+    .slice(0, -1)
     .filter((t) => t.role === "user" || t.role === "assistant")
     .map((t) => `${t.role === "user" ? "User" : "Assistant"}: ${t.text}`)
     .join("\n\n")
@@ -597,7 +693,10 @@ function finishTurn(c, state, finalText) {
     // This turn's last assistant text, even when a tool call came after it.
     let lastText = "";
     for (let i = c.transcript.length - 1; i >= 0 && c.transcript[i].role !== "user"; i--) {
-      if (c.transcript[i].role === "assistant") { lastText = c.transcript[i].text; break; }
+      if (c.transcript[i].role === "assistant") {
+        lastText = c.transcript[i].text;
+        break;
+      }
     }
     if (lastText && lastText.endsWith(finalText)) {
       // already fully streamed via deltas — no-op
@@ -658,7 +757,10 @@ export function setModel(id, model) {
   const c = chats.get(id);
   if (!c) return { ok: false, error: `no such chat: ${id}` };
   if (!modelAllowed(c, model)) {
-    return { ok: false, error: `unknown model: ${model} (available: ${Object.keys(c.models).join(", ") || "none"})` };
+    return {
+      ok: false,
+      error: `unknown model: ${model} (available: ${Object.keys(c.models).join(", ") || "none"})`,
+    };
   }
   c.model = model || null;
   return { ok: true, id, models: Object.keys(c.models), current: c.model, custom: Boolean(c.modelArg) };
@@ -667,9 +769,19 @@ export function setModel(id, model) {
 export function cancel(c) {
   if (c.proc) {
     const proc = c.proc;
-    const killProc = () => { try { proc.kill(); } catch {} };
+    const killProc = () => {
+      try {
+        proc.kill();
+      } catch {}
+    };
     // cmd.exe /c wrapper: kill the whole tree so the agent child doesn't keep running orphaned.
-    if (IS_WIN && proc.pid) execFile("taskkill", ["/PID", String(proc.pid), "/T", "/F"], { timeout: 5000, windowsHide: true }, killProc);
+    if (IS_WIN && proc.pid)
+      execFile(
+        "taskkill",
+        ["/PID", String(proc.pid), "/T", "/F"],
+        { timeout: 5000, windowsHide: true },
+        killProc,
+      );
     else killProc();
     c.proc = null;
   }
@@ -686,8 +798,17 @@ export function cancel(c) {
 export function killAll() {
   for (const c of chats.values()) {
     if (!c.proc) continue;
-    if (IS_WIN && c.proc.pid) try { execFileSync("taskkill", ["/PID", String(c.proc.pid), "/T", "/F"], { stdio: "ignore", timeout: 5000, windowsHide: true }); } catch {}
-    try { c.proc.kill(); } catch {}
+    if (IS_WIN && c.proc.pid)
+      try {
+        execFileSync("taskkill", ["/PID", String(c.proc.pid), "/T", "/F"], {
+          stdio: "ignore",
+          timeout: 5000,
+          windowsHide: true,
+        });
+      } catch {}
+    try {
+      c.proc.kill();
+    } catch {}
     c.proc = null;
   }
 }

@@ -260,7 +260,12 @@ if (cmd === "--version" || cmd === "version") {
   // Every probe prints with its result and the fix, so a script reads the same report a human does.
   const { diagnose } = await import("./doctor.js");
   const report = await diagnose({ tls: config.tls });
-  const checks = report.checks.map((c) => ({ name: c.name, ok: c.ok, detail: c.detail, fix: c.hint ?? null }));
+  const checks = report.checks.map((c) => ({
+    name: c.name,
+    ok: c.ok,
+    detail: c.detail,
+    fix: c.hint ?? null,
+  }));
   if (id === "--json" || rest.includes("--json")) {
     console.log(JSON.stringify({ ok: report.ok, problems: report.problems, checks }, null, 2));
   } else {

@@ -33,10 +33,12 @@ register("sessions", "List all active sessions", () => {
 register("agents", "List available agent manifests", () => {
   const manifests = registry.list();
   if (!manifests.length) return "No agents found.";
-  return manifests.map((m) => `  ${m.manifest.id} — ${m.manifest.name} ${m.installed ? "✓" : "✗"}`).join("\n");
+  return manifests
+    .map((m) => `  ${m.manifest.id} — ${m.manifest.name} ${m.installed ? "✓" : "✗"}`)
+    .join("\n");
 });
 
-register("clear", "Clear the current chat transcript", (args, chatId) => {
+register("clear", "Clear the current chat transcript", (_args, chatId) => {
   const c = chat.get(chatId);
   if (c) {
     c.transcript = [];

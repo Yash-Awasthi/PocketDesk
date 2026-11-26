@@ -42,6 +42,7 @@ export async function run(action, { platform = process.platform, lockMac } = {})
   if (realLock && (await lockMac().catch(() => null))?.ok) return { ok: true };
   return new Promise((resolve) => {
     execFile(cmd[0], cmd[1], { windowsHide: true, timeout: 15000 }, (err, _out, stderr) =>
-      resolve(err ? { ok: false, error: String(stderr).trim() || err.message } : { ok: true }));
+      resolve(err ? { ok: false, error: String(stderr).trim() || err.message } : { ok: true }),
+    );
   });
 }

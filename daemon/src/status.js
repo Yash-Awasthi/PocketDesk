@@ -12,14 +12,21 @@ export const DATA_DIR = process.env.RH_HOME || path.join(os.homedir(), ".pocketd
 /** A daemon port from the config, the environment, or the documented default. */
 export function daemonPort() {
   if (process.env.RH_PORT) return Number(process.env.RH_PORT);
-  try { return Number(JSON.parse(fs.readFileSync(path.join(DATA_DIR, "config.json"), "utf8")).port) || 8765; } catch { return 8765; }
+  try {
+    return Number(JSON.parse(fs.readFileSync(path.join(DATA_DIR, "config.json"), "utf8")).port) || 8765;
+  } catch {
+    return 8765;
+  }
 }
 
 /** True while something is listening on the loopback port. */
 export function listening(port) {
   return new Promise((resolve) => {
     const s = net.connect({ host: "127.0.0.1", port });
-    const done = (v) => { s.destroy(); resolve(v); };
+    const done = (v) => {
+      s.destroy();
+      resolve(v);
+    };
     s.setTimeout(500);
     s.once("connect", () => done(true));
     s.once("timeout", () => done(false));
@@ -31,8 +38,14 @@ export function listening(port) {
 export function taskXml(name = "PocketDesk") {
   if (process.platform !== "win32") return "";
   try {
-    return execFileSync("schtasks", ["/Query", "/TN", name, "/XML"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
-  } catch { return ""; }
+    return execFileSync("schtasks", ["/Query", "/TN", name, "/XML"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
+  } catch {
+    return "";
+  }
 }
 
 /** The parts of a task definition that decide whether a stop is a stop. Exported for the test. */
@@ -42,7 +55,12 @@ export function parseTaskXml(xml) {
   const count = /<RestartOnFailure>[\s\S]*?<Count>(\d+)<\/Count>/i.exec(xml)?.[1];
   const interval = /<RestartOnFailure>[\s\S]*?<Interval>([^<]+)<\/Interval>/i.exec(xml)?.[1] || "";
   // "Highest" and "HighestAvailable" both mean the task may hold a full token.
-  return { elevated: /highest/i.test(level), runLevel: level, restarts: count ? Number(count) : 0, interval: humanInterval(interval) };
+  return {
+    elevated: /highest/i.test(level),
+    runLevel: level,
+    restarts: count ? Number(count) : 0,
+    interval: humanInterval(interval),
+  };
 }
 
 /** ISO-8601 (PT1M, PT1H30M) to what a person reads. */
@@ -57,14 +75,30 @@ function humanInterval(iso) {
 export function isElevated() {
   if (process.platform !== "win32") return typeof process.getuid === "function" && process.getuid() === 0;
   try {
-    return /S-1-16-12288/.test(execFileSync("whoami", ["/groups"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }));
-  } catch { return false; }
+    return /S-1-16-12288/.test(
+      execFileSync("whoami", ["/groups"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      }),
+    );
+  } catch {
+    return false;
+  }
 }
 
 function autoStart() {
   if (process.platform === "win32") return parseTaskXml(taskXml());
-  if (process.platform === "darwin" && fs.existsSync(path.join(os.homedir(), "Library", "LaunchAgents", "com.pocketdesk.daemon.plist"))) return { runLevel: "launchd", elevated: false, restarts: 0, interval: "" };
-  if (process.platform === "linux" && fs.existsSync(path.join(os.homedir(), ".config", "systemd", "user", "pocketdesk.service"))) return { runLevel: "systemd", elevated: false, restarts: 0, interval: "" };
+  if (
+    process.platform === "darwin" &&
+    fs.existsSync(path.join(os.homedir(), "Library", "LaunchAgents", "com.pocketdesk.daemon.plist"))
+  )
+    return { runLevel: "launchd", elevated: false, restarts: 0, interval: "" };
+  if (
+    process.platform === "linux" &&
+    fs.existsSync(path.join(os.homedir(), ".config", "systemd", "user", "pocketdesk.service"))
+  )
+    return { runLevel: "systemd", elevated: false, restarts: 0, interval: "" };
   return null;
 }
 

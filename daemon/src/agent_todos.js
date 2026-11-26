@@ -22,13 +22,11 @@ function normalizeStatus(s) {
 }
 
 export function setTodos(sessionId, items) {
-  const list = (Array.isArray(items) ? items : [])
-    .slice(0, MAX_ITEMS)
-    .map((it, i) => ({
-      id: String(it?.id ?? "t" + (i + 1)),
-      content: String(it?.content ?? "").slice(0, 500),
-      status: normalizeStatus(it?.status),
-    }));
+  const list = (Array.isArray(items) ? items : []).slice(0, MAX_ITEMS).map((it, i) => ({
+    id: String(it?.id ?? "t" + (i + 1)),
+    content: String(it?.content ?? "").slice(0, 500),
+    status: normalizeStatus(it?.status),
+  }));
   boards.set(String(sessionId), list);
   return list;
 }
@@ -55,7 +53,11 @@ export function fromMarkdown(text) {
   const items = [];
   for (const line of String(text || "").split(/\r?\n/)) {
     const m = line.match(TODO_RE);
-    if (m) items.push({ content: m[2].trim().slice(0, 500), status: m[1].toLowerCase() === "x" ? "completed" : "pending" });
+    if (m)
+      items.push({
+        content: m[2].trim().slice(0, 500),
+        status: m[1].toLowerCase() === "x" ? "completed" : "pending",
+      });
   }
   return items;
 }
@@ -72,8 +74,14 @@ export function observeTurnEnd(sessionId, transcript) {
       const items = fromMarkdown(it.text);
       if (items.length) {
         const existing = boards.get(String(sessionId));
-        if (JSON.stringify(existing ?? []) !== JSON.stringify(items.map((x, i) => ({ id: "t" + (i + 1), content: x.content, status: x.status })))) {
-          return setTodos(sessionId, items.map((x, i) => ({ id: "t" + (i + 1), content: x.content, status: x.status })));
+        if (
+          JSON.stringify(existing ?? []) !==
+          JSON.stringify(items.map((x, i) => ({ id: "t" + (i + 1), content: x.content, status: x.status })))
+        ) {
+          return setTodos(
+            sessionId,
+            items.map((x, i) => ({ id: "t" + (i + 1), content: x.content, status: x.status })),
+          );
         }
         return getTodos(sessionId);
       }

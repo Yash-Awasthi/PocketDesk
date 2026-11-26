@@ -17,9 +17,18 @@ export const SCRCPY_SHA256 = "764eb6f79811d5211fe9df341120882ba9994c7a61b897d7bf
 // Versioned, checksummed builds; "latest" would let Google swap the bytes under a pinned hash.
 // The sha256 values were computed from downloads whose sha1 match Google's repository2-1.xml.
 export const PLATFORM_TOOLS = {
-  win32: { url: "https://dl.google.com/android/repository/platform-tools_r37.0.3-win.zip", sha256: "89d108360a3bf2924d3bea837239edaccc22fd6ff5befd3787c4348a9fe4f09d" },
-  darwin: { url: "https://dl.google.com/android/repository/platform-tools_r37.0.3-darwin.zip", sha256: "df21339b9371fef9b19264404338dc686f59a88a1dce634b963da344909001d6" },
-  linux: { url: "https://dl.google.com/android/repository/platform-tools_r37.0.3-linux.zip", sha256: "214548146cadb2ca3508143d8a1d4be4c59de5bb837253e3ede89ed74cf450d1" },
+  win32: {
+    url: "https://dl.google.com/android/repository/platform-tools_r37.0.3-win.zip",
+    sha256: "89d108360a3bf2924d3bea837239edaccc22fd6ff5befd3787c4348a9fe4f09d",
+  },
+  darwin: {
+    url: "https://dl.google.com/android/repository/platform-tools_r37.0.3-darwin.zip",
+    sha256: "df21339b9371fef9b19264404338dc686f59a88a1dce634b963da344909001d6",
+  },
+  linux: {
+    url: "https://dl.google.com/android/repository/platform-tools_r37.0.3-linux.zip",
+    sha256: "214548146cadb2ca3508143d8a1d4be4c59de5bb837253e3ede89ed74cf450d1",
+  },
 };
 
 const TOOLS = path.join(configDir, "tools");
@@ -27,21 +36,26 @@ const EXE = process.platform === "win32" ? "adb.exe" : "adb";
 
 /** A developer's own adb first: two adb builds on one PC keep killing each other's server on 5037. */
 export function findAdb() {
-  const onPath = String(process.env.PATH || "").split(path.delimiter).filter(Boolean).map((d) => path.join(d, EXE));
+  const onPath = String(process.env.PATH || "")
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((d) => path.join(d, EXE));
   const sdk = (p) => path.basename(path.dirname(p)).toLowerCase() === "platform-tools";
   const local = process.env.LOCALAPPDATA;
   const home = os.homedir();
-  return [
-    process.env.ADB,
-    process.env.ANDROID_HOME && path.join(process.env.ANDROID_HOME, "platform-tools", EXE),
-    process.env.ANDROID_SDK_ROOT && path.join(process.env.ANDROID_SDK_ROOT, "platform-tools", EXE),
-    local && path.join(local, "Android", "Sdk", "platform-tools", EXE),
-    path.join(home, "Library", "Android", "sdk", "platform-tools", EXE),
-    path.join(home, "Android", "Sdk", "platform-tools", EXE),
-    ...onPath.filter(sdk),
-    path.join(TOOLS, "platform-tools", EXE),
-    ...onPath.filter((p) => !sdk(p)),
-  ].find((p) => p && fs.existsSync(p)) || null;
+  return (
+    [
+      process.env.ADB,
+      process.env.ANDROID_HOME && path.join(process.env.ANDROID_HOME, "platform-tools", EXE),
+      process.env.ANDROID_SDK_ROOT && path.join(process.env.ANDROID_SDK_ROOT, "platform-tools", EXE),
+      local && path.join(local, "Android", "Sdk", "platform-tools", EXE),
+      path.join(home, "Library", "Android", "sdk", "platform-tools", EXE),
+      path.join(home, "Android", "Sdk", "platform-tools", EXE),
+      ...onPath.filter(sdk),
+      path.join(TOOLS, "platform-tools", EXE),
+      ...onPath.filter((p) => !sdk(p)),
+    ].find((p) => p && fs.existsSync(p)) || null
+  );
 }
 
 export const serverPath = () => path.join(TOOLS, `scrcpy-server-v${SCRCPY_VERSION}`);
@@ -50,17 +64,22 @@ export const serverPath = () => path.join(TOOLS, `scrcpy-server-v${SCRCPY_VERSIO
 function download(url, to, hops = 5) {
   return new Promise((resolve, reject) => {
     const mod = new URL(url).protocol === "http:" ? http : https;
-    mod.get(url, { headers: { "user-agent": "PocketDesk" } }, (res) => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && hops > 0) {
-        res.resume();
-        return resolve(download(new URL(res.headers.location, url).href, to, hops - 1));
-      }
-      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`download failed: HTTP ${res.statusCode}`)); }
-      const out = fs.createWriteStream(to);
-      res.pipe(out);
-      out.on("finish", () => out.close(resolve));
-      out.on("error", reject);
-    }).on("error", reject);
+    mod
+      .get(url, { headers: { "user-agent": "PocketDesk" } }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location && hops > 0) {
+          res.resume();
+          return resolve(download(new URL(res.headers.location, url).href, to, hops - 1));
+        }
+        if (res.statusCode !== 200) {
+          res.resume();
+          return reject(new Error(`download failed: HTTP ${res.statusCode}`));
+        }
+        const out = fs.createWriteStream(to);
+        res.pipe(out);
+        out.on("finish", () => out.close(resolve));
+        out.on("error", reject);
+      })
+      .on("error", reject);
   });
 }
 
@@ -101,7 +120,9 @@ export function ensureTools(deps = {}) {
         const zip = path.join(tmp, "pt.zip");
         await fetchVerified(pt.url, zip, pt.sha256);
         unpack(zip, TOOLS);
-      } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
       adb = locate();
       if (!adb) throw new Error("adb did not unpack");
       if (process.platform !== "win32") fs.chmodSync(adb, 0o755);
@@ -109,5 +130,7 @@ export function ensureTools(deps = {}) {
     const server = serverPath();
     if (!fs.existsSync(server)) await fetchVerified(SCRCPY_URL, server, SCRCPY_SHA256);
     return { adb, server };
-  })().finally(() => { fetching = null; }));
+  })().finally(() => {
+    fetching = null;
+  }));
 }

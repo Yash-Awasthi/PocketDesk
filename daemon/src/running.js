@@ -14,7 +14,14 @@ export function daemonVersion(dir = path.dirname(fileURLToPath(import.meta.url))
   }
 }
 
-export function snapshot({ version, ports = {}, sessions = [], streams = {}, policy = {}, now = Date.now() } = {}) {
+export function snapshot({
+  version,
+  ports = {},
+  sessions = [],
+  streams = {},
+  policy = {},
+  now = Date.now(),
+} = {}) {
   const items = sessions.map((s) => ({
     id: String(s.id ?? ""),
     harnessId: String(s.harnessId ?? ""),

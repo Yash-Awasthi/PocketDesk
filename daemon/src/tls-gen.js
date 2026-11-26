@@ -8,7 +8,8 @@ import { writeFileAtomic } from "./atomic_write.js";
 // Minimal DER encoder: just the ASN.1 types a self-signed certificate needs.
 function tlv(tag, body) {
   const n = body.length;
-  const len = n < 0x80 ? Buffer.from([n]) : n < 0x100 ? Buffer.from([0x81, n]) : Buffer.from([0x82, n >> 8, n & 0xff]);
+  const len =
+    n < 0x80 ? Buffer.from([n]) : n < 0x100 ? Buffer.from([0x81, n]) : Buffer.from([0x82, n >> 8, n & 0xff]);
   return Buffer.concat([Buffer.from([tag]), len, body]);
 }
 const seq = (...parts) => tlv(0x30, Buffer.concat(parts));
@@ -72,7 +73,10 @@ export function generateSelfSignedCert(tls, configDir) {
       dns: ["localhost", os.hostname()].filter((h) => /^[\w.-]+$/.test(h)),
       ips: ["127.0.0.1", ...lanAddresses()].filter((ip) => net.isIPv4(ip)),
     });
-    const pem = `-----BEGIN CERTIFICATE-----\n${der.toString("base64").match(/.{1,64}/g).join("\n")}\n-----END CERTIFICATE-----\n`;
+    const pem = `-----BEGIN CERTIFICATE-----\n${der
+      .toString("base64")
+      .match(/.{1,64}/g)
+      .join("\n")}\n-----END CERTIFICATE-----\n`;
     fs.mkdirSync(path.dirname(tls.cert), { recursive: true, mode: 0o700 });
     writeFileAtomic(tls.key, pair.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
     writeFileAtomic(tls.cert, pem);

@@ -34,12 +34,15 @@ export class PcMedia extends EventEmitter {
   watch(on) {
     this.users = Math.max(0, this.users + (on ? 1 : -1));
     if (this.users && !this.timer && process.platform === "win32") {
-      this.proc = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", SCRIPT], { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
+      this.proc = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", SCRIPT], {
+        stdio: ["pipe", "pipe", "ignore"],
+        windowsHide: true,
+      });
       this.proc.stdin.on("error", () => {});
       let buf = "";
       this.proc.stdout.on("data", (d) => {
         buf += d;
-        for (let i; (i = buf.indexOf("\n")) >= 0; ) {
+        for (let i; (i = buf.indexOf("\n")) >= 0;) {
           const line = buf.slice(0, i).trim();
           buf = buf.slice(i + 1);
           // A session can read empty for a poll while it changes tracks; only a run of them means nothing plays.
@@ -47,11 +50,15 @@ export class PcMedia extends EventEmitter {
           if (line === "{}" && this.empty < 3) continue;
           if (line && line !== this.last) {
             this.last = line;
-            try { this.emit("change", JSON.parse(line)); } catch {}
+            try {
+              this.emit("change", JSON.parse(line));
+            } catch {}
           }
         }
       });
-      this.proc.on("exit", () => { this.proc = null; });
+      this.proc.on("exit", () => {
+        this.proc = null;
+      });
       const ask = () => this.proc?.stdin.write("\n");
       ask();
       this.timer = setInterval(ask, 2000);
@@ -59,7 +66,9 @@ export class PcMedia extends EventEmitter {
     } else if (!this.users && this.timer) {
       clearInterval(this.timer);
       this.timer = null;
-      try { this.proc?.kill(); } catch {}
+      try {
+        this.proc?.kill();
+      } catch {}
       this.last = "";
     }
   }

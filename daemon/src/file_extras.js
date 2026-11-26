@@ -23,20 +23,37 @@ export async function zipFolder(p) {
   fs.mkdirSync(ZIP_DIR, { recursive: true });
   for (const f of fs.readdirSync(ZIP_DIR)) {
     const full = path.join(ZIP_DIR, f);
-    try { if (Date.now() - fs.statSync(full).mtimeMs > ZIP_TTL_MS) fs.rmSync(full, { force: true }); } catch {}
+    try {
+      if (Date.now() - fs.statSync(full).mtimeMs > ZIP_TTL_MS) fs.rmSync(full, { force: true });
+    } catch {}
   }
   const zip = path.join(ZIP_DIR, `${path.basename(dir) || "folder"}-${Date.now()}.zip`);
   // Windows 10+ ships bsdtar, which writes zip with -a; elsewhere the zip command does.
   const [bin, args] = IS_WIN
-    ? [path.join(process.env.WINDIR || "C:\\Windows", "System32", "tar.exe"), ["-a", "-cf", zip, "-C", path.dirname(dir), path.basename(dir)]]
+    ? [
+        path.join(process.env.WINDIR || "C:\\Windows", "System32", "tar.exe"),
+        ["-a", "-cf", zip, "-C", path.dirname(dir), path.basename(dir)],
+      ]
     : ["zip", ["-r", "-q", zip, path.basename(dir)]];
   return new Promise((resolve) => {
-    execFile(bin, args, { cwd: path.dirname(dir), windowsHide: true, timeout: 10 * 60 * 1000, maxBuffer: 1 << 20 }, (err, _out, stderr) => {
-      if (err || !fs.existsSync(zip)) {
-        return resolve({ type: "fs_zip", path: p, ok: false, error: String(stderr || err?.message || "zip failed").trim().split("\n")[0] });
-      }
-      resolve({ type: "fs_zip", path: p, ok: true, zip, size: fs.statSync(zip).size });
-    });
+    execFile(
+      bin,
+      args,
+      { cwd: path.dirname(dir), windowsHide: true, timeout: 10 * 60 * 1000, maxBuffer: 1 << 20 },
+      (err, _out, stderr) => {
+        if (err || !fs.existsSync(zip)) {
+          return resolve({
+            type: "fs_zip",
+            path: p,
+            ok: false,
+            error: String(stderr || err?.message || "zip failed")
+              .trim()
+              .split("\n")[0],
+          });
+        }
+        resolve({ type: "fs_zip", path: p, ok: true, zip, size: fs.statSync(zip).size });
+      },
+    );
   });
 }
 
@@ -73,13 +90,24 @@ let thumbHelper = null;
 export async function thumbnail(p, size = 160) {
   const reply = { type: "fs_thumb", path: p };
   let file;
-  try { file = resolvePath(p); } catch (e) { return { ...reply, ok: false, error: e.message }; }
+  try {
+    file = resolvePath(p);
+  } catch (e) {
+    return { ...reply, ok: false, error: e.message };
+  }
   if (!IS_WIN) return { ...reply, ok: false, error: "thumbnails need Windows" };
   if (!THUMB_EXT.test(file)) return { ...reply, ok: false, error: "not an image" };
-  try { if (fs.statSync(file).size > 50 << 20) return { ...reply, ok: false, error: "too large" }; } catch (e) { return { ...reply, ok: false, error: e.message }; }
+  try {
+    if (fs.statSync(file).size > 50 << 20) return { ...reply, ok: false, error: "too large" };
+  } catch (e) {
+    return { ...reply, ok: false, error: e.message };
+  }
   thumbHelper ||= new PsHelper("thumbs", THUMB_SCRIPT);
   await thumbHelper.ensure();
-  const r = await thumbHelper.cmd({ op: "thumb", path: file, size: Math.min(512, Math.max(32, Number(size) || 160)) }, 20000);
+  const r = await thumbHelper.cmd(
+    { op: "thumb", path: file, size: Math.min(512, Math.max(32, Number(size) || 160)) },
+    20000,
+  );
   return r.ok ? { ...reply, ok: true, jpeg: r.jpeg } : { ...reply, ok: false, error: r.error };
 }
 

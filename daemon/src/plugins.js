@@ -18,11 +18,19 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const VALID_HOOKS = new Set([
-  "init", "start", "stop",
-  "onConnect", "onDisconnect", "onMessage",
-  "onSessionCreated", "onSessionExit",
-  "onChatCreated", "onChatMessage",
-  "onProposal", "onProposalApproved", "onProposalRejected",
+  "init",
+  "start",
+  "stop",
+  "onConnect",
+  "onDisconnect",
+  "onMessage",
+  "onSessionCreated",
+  "onSessionExit",
+  "onChatCreated",
+  "onChatMessage",
+  "onProposal",
+  "onProposalApproved",
+  "onProposalRejected",
 ]);
 
 /**
@@ -63,8 +71,8 @@ function validateManifest(manifest, filePath) {
  *   ctx.sessions, ctx.chat, ctx.broadcast, ctx.registry, ctx.config
  */
 export function createPluginManager(ctx) {
-  const plugins = [];  // { manifest, loaded }
-  const hookCache = {};  // hookName -> [fn, ...]
+  const plugins = []; // { manifest, loaded }
+  const hookCache = {}; // hookName -> [fn, ...]
 
   /**
    * Discover and load all plugins from a directory.
@@ -96,7 +104,7 @@ export function createPluginManager(ctx) {
 
     // Build hook cache
     for (const p of plugins) {
-      for (const hook of (p.manifest.hooks || [])) {
+      for (const hook of p.manifest.hooks || []) {
         if (!hookCache[hook]) hookCache[hook] = [];
         // Keep the manifest so the hook can be invoked with `this` bound —
         // plugins hold per-instance state (e.g. logger._stream) on `this`.
@@ -176,7 +184,7 @@ export function createPluginManager(ctx) {
    * List loaded plugins.
    */
   function list() {
-    return plugins.map(p => ({
+    return plugins.map((p) => ({
       name: p.manifest.name,
       version: p.manifest.version,
       hooks: p.manifest.hooks || [],

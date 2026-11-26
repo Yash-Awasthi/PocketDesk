@@ -14,13 +14,24 @@ export default function pcPadHandlers(ctx) {
   function helper() {
     if (proc) return proc;
     const exe = findNative("pocketdesk-pad");
-    if (!exe) { error = "the controller helper is not installed"; return null; }
+    if (!exe) {
+      error = "the controller helper is not installed";
+      return null;
+    }
     proc = spawn(exe, [], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     ready = false;
-    proc.stdout.on("data", (d) => { if (String(d).includes("ready")) ready = true; });
-    proc.stderr.on("data", (d) => { error = String(d).trim(); });
+    proc.stdout.on("data", (d) => {
+      if (String(d).includes("ready")) ready = true;
+    });
+    proc.stderr.on("data", (d) => {
+      error = String(d).trim();
+    });
     proc.stdin.on("error", () => {});
-    proc.on("exit", () => { proc = null; ready = false; owners.clear(); });
+    proc.on("exit", () => {
+      proc = null;
+      ready = false;
+      owners.clear();
+    });
     return proc;
   }
 
@@ -46,9 +57,16 @@ export default function pcPadHandlers(ctx) {
       }
       if (!owner) {
         owners.set(pad, ws);
-        ws.once?.("close", () => { if (owners.get(pad) === ws) { owners.delete(pad); proc?.stdin.write(`${pad} off\n`); } });
+        ws.once?.("close", () => {
+          if (owners.get(pad) === ws) {
+            owners.delete(pad);
+            proc?.stdin.write(`${pad} off\n`);
+          }
+        });
       }
-      p.stdin.write(`${pad} ${int(msg.buttons, 0, 0xffff)} ${int(msg.lt, 0, 255)} ${int(msg.rt, 0, 255)} ${int(msg.lx, -32768, 32767)} ${int(msg.ly, -32768, 32767)} ${int(msg.rx, -32768, 32767)} ${int(msg.ry, -32768, 32767)}\n`);
+      p.stdin.write(
+        `${pad} ${int(msg.buttons, 0, 0xffff)} ${int(msg.lt, 0, 255)} ${int(msg.rt, 0, 255)} ${int(msg.lx, -32768, 32767)} ${int(msg.ly, -32768, 32767)} ${int(msg.rx, -32768, 32767)} ${int(msg.ry, -32768, 32767)}\n`,
+      );
     },
   };
 }

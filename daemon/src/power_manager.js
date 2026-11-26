@@ -6,13 +6,13 @@
  * assertions, stale status detection, and auto-mode switching.
  */
 
-import { spawn } from 'child_process';
+import { spawn } from "child_process";
 
 // --- Constants ---
 
 const STATUS_STALE_AFTER_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-const AWAKE_MODES = ['off', 'auto', 'on'];
+const AWAKE_MODES = ["off", "auto", "on"];
 
 // --- Types ---
 
@@ -37,10 +37,10 @@ const AWAKE_MODES = ['off', 'auto', 'on'];
 
 function getPlatform() {
   const platform = process.platform;
-  if (platform === 'darwin') return 'macos';
-  if (platform === 'linux') return 'linux';
-  if (platform === 'win32') return 'windows';
-  return 'unknown';
+  if (platform === "darwin") return "macos";
+  if (platform === "linux") return "linux";
+  if (platform === "win32") return "windows";
+  return "unknown";
 }
 
 // --- Awake Assertions ---
@@ -56,7 +56,7 @@ class MacosAssertion {
   start(reason) {
     if (this.child) return;
     try {
-      this.child = spawn('caffeinate', ['-is'], { stdio: 'ignore' });
+      this.child = spawn("caffeinate", ["-is"], { stdio: "ignore" });
       this.child.unref();
       this.logger.debug(`[power] macOS caffeinate started: ${reason}`);
     } catch (e) {
@@ -67,13 +67,15 @@ class MacosAssertion {
 
   stop(reason) {
     if (!this.child) return;
-    try { this.child.kill(); } catch {}
+    try {
+      this.child.kill();
+    } catch {}
     this.child = null;
     this.logger.debug(`[power] macOS caffeinate stopped: ${reason}`);
   }
 
   dispose() {
-    this.stop('dispose');
+    this.stop("dispose");
   }
 }
 
@@ -88,8 +90,12 @@ class LinuxAssertion {
     try {
       // Detached: the inhibitor lives until this process exits. spawn reports a missing binary
       // asynchronously, so the error handler restores the bookkeeping execSync's catch used to do.
-      const child = spawn('systemd-inhibit', ['--what=idle', '--who=PocketDesk', '--why=' + reason, '--mode=block'], { detached: true, stdio: 'ignore', windowsHide: true });
-      child.on('error', (e) => {
+      const child = spawn(
+        "systemd-inhibit",
+        ["--what=idle", "--who=PocketDesk", "--why=" + reason, "--mode=block"],
+        { detached: true, stdio: "ignore", windowsHide: true },
+      );
+      child.on("error", (e) => {
         this.inhibited = false;
         this.logger.warn(`[power] Failed to inhibit Linux idle: ${e.message}`);
       });
@@ -108,7 +114,7 @@ class LinuxAssertion {
   }
 
   dispose() {
-    this.stop('dispose');
+    this.stop("dispose");
   }
 }
 
@@ -124,11 +130,17 @@ class WindowsAssertion {
   start(reason) {
     if (this.child) return;
     try {
-      this.child = spawn('powershell.exe', [
-        '-NoProfile', '-NonInteractive', '-Command',
-        "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class RHKeepAwake { [DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint f); }'; " +
-        'while($true) { [RHKeepAwake]::SetThreadExecutionState(2147483649); Start-Sleep -Seconds 60 }',
-      ], { stdio: 'ignore', windowsHide: true });
+      this.child = spawn(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class RHKeepAwake { [DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint f); }'; " +
+            "while($true) { [RHKeepAwake]::SetThreadExecutionState(2147483649); Start-Sleep -Seconds 60 }",
+        ],
+        { stdio: "ignore", windowsHide: true },
+      );
       this.child.unref();
       this.logger.debug(`[power] Windows keep-awake helper started: ${reason}`);
     } catch (e) {
@@ -139,13 +151,15 @@ class WindowsAssertion {
 
   stop(reason) {
     if (!this.child) return;
-    try { this.child.kill(); } catch {}
+    try {
+      this.child.kill();
+    } catch {}
     this.child = null;
     this.logger.debug(`[power] Windows keep-awake helper stopped: ${reason}`);
   }
 
   dispose() {
-    this.stop('dispose');
+    this.stop("dispose");
   }
 }
 
@@ -153,7 +167,7 @@ class WindowsAssertion {
 
 export class PowerManager {
   constructor(options = {}) {
-    this.mode = options.mode || 'auto';
+    this.mode = options.mode || "auto";
     this.statuses = [];
     this.listeners = new Set();
     this.staleTimer = null;
@@ -161,9 +175,9 @@ export class PowerManager {
     this.logger = options.logger || console;
 
     const platform = options.platform || getPlatform();
-    if (platform === 'macos') {
+    if (platform === "macos") {
       this.assertion = new MacosAssertion(this.logger);
-    } else if (platform === 'linux') {
+    } else if (platform === "linux") {
       this.assertion = new LinuxAssertion(this.logger);
     } else {
       this.assertion = new WindowsAssertion(this.logger);
@@ -172,38 +186,38 @@ export class PowerManager {
 
   setMode(mode) {
     if (!AWAKE_MODES.includes(mode)) {
-      throw new Error(`Invalid mode: ${mode}. Must be one of: ${AWAKE_MODES.join(', ')}`);
+      throw new Error(`Invalid mode: ${mode}. Must be one of: ${AWAKE_MODES.join(", ")}`);
     }
     if (this.mode === mode) return;
     this.mode = mode;
-    this.refresh('settings-change');
+    this.refresh("settings-change");
   }
 
   setStatuses(statuses) {
-    this.statuses = statuses.map(s => ({ ...s }));
-    this.refresh('status-change');
+    this.statuses = statuses.map((s) => ({ ...s }));
+    this.refresh("status-change");
   }
 
   addStatus(status) {
-    const existing = this.statuses.findIndex(s => s.agentId === status.agentId);
+    const existing = this.statuses.findIndex((s) => s.agentId === status.agentId);
     if (existing >= 0) {
       this.statuses[existing] = { ...status };
     } else {
       this.statuses.push({ ...status });
     }
-    this.refresh('status-change');
+    this.refresh("status-change");
   }
 
   removeStatus(agentId) {
-    this.statuses = this.statuses.filter(s => s.agentId !== agentId);
-    this.refresh('status-change');
+    this.statuses = this.statuses.filter((s) => s.agentId !== agentId);
+    this.refresh("status-change");
   }
 
   getStatus() {
     const runningCount = this.getEligibleRunningCount();
     return {
       mode: this.mode,
-      active: this.mode === 'on' || (this.mode === 'auto' && runningCount > 0),
+      active: this.mode === "on" || (this.mode === "auto" && runningCount > 0),
     };
   }
 
@@ -221,15 +235,14 @@ export class PowerManager {
 
   getEligibleRunningCount() {
     const now = this.now();
-    return this.statuses.filter(s =>
-      s.state === 'running' && (now - s.receivedAt) < STATUS_STALE_AFTER_MS
-    ).length;
+    return this.statuses.filter((s) => s.state === "running" && now - s.receivedAt < STATUS_STALE_AFTER_MS)
+      .length;
   }
 
   refresh(reason) {
     this.scheduleStaleTimer();
     const runningCount = this.getEligibleRunningCount();
-    const shouldBlock = this.mode === 'on' || (this.mode === 'auto' && runningCount > 0);
+    const shouldBlock = this.mode === "on" || (this.mode === "auto" && runningCount > 0);
 
     if (shouldBlock) {
       this.assertion.start(reason);
@@ -253,7 +266,7 @@ export class PowerManager {
 
   scheduleStaleTimer() {
     this.clearStaleTimer();
-    this.staleTimer = setTimeout(() => this.refresh('stale-check'), STATUS_STALE_AFTER_MS);
+    this.staleTimer = setTimeout(() => this.refresh("stale-check"), STATUS_STALE_AFTER_MS);
   }
 
   clearStaleTimer() {
@@ -267,14 +280,14 @@ export class PowerManager {
 // --- Helpers ---
 
 export function normalizeAwakeMode(mode) {
-  if (typeof mode !== 'string') return 'off';
+  if (typeof mode !== "string") return "off";
   const normalized = mode.toLowerCase().trim();
   if (AWAKE_MODES.includes(normalized)) return normalized;
-  return 'off';
+  return "off";
 }
 
 export function isStatusStale(status, now = Date.now()) {
-  return (now - status.receivedAt) >= STATUS_STALE_AFTER_MS;
+  return now - status.receivedAt >= STATUS_STALE_AFTER_MS;
 }
 
 export default {

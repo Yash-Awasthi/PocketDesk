@@ -21,7 +21,11 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import path from "node:path";
 
-const CLIPPY_EXE = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), "clippy", "clippy.exe");
+const CLIPPY_EXE = path.join(
+  path.dirname(path.dirname(fileURLToPath(import.meta.url))),
+  "clippy",
+  "clippy.exe",
+);
 const CLIPPY_DIR = path.dirname(CLIPPY_EXE);
 const TASK = "Clippy";
 const DIR_CONFIG_FILE = path.join(CLIPPY_DIR, "clippy_dir.txt");
@@ -37,7 +41,9 @@ function writable(dir) {
     fs.writeFileSync(probe, "ok");
     fs.unlinkSync(probe);
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 let cachedDir = null;
@@ -53,15 +59,25 @@ function dataDir() {
   try {
     const p = fs.readFileSync(DIR_CONFIG_FILE, "utf8").trim();
     if (p && path.isAbsolute(p) && writable(p)) return (cachedDir = p);
-  } catch { /* no override set */ }
-  try { fs.mkdirSync(FALLBACK_DIR, { recursive: true }); } catch { /* reported on write */ }
+  } catch {
+    /* no override set */
+  }
+  try {
+    fs.mkdirSync(FALLBACK_DIR, { recursive: true });
+  } catch {
+    /* reported on write */
+  }
   if (writable(FALLBACK_DIR)) return (cachedDir = FALLBACK_DIR);
   if (writable(CLIPPY_DIR)) return (cachedDir = CLIPPY_DIR);
   return (cachedDir = FALLBACK_DIR);
 }
 
 function readJson(file) {
-  try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -78,32 +94,53 @@ function readHistory(file, limit = 20) {
       const buf = Buffer.alloc(size - from);
       fs.readSync(fd, buf, 0, buf.length, from);
       text = buf.toString("utf8");
-    } finally { fs.closeSync(fd); }
+    } finally {
+      fs.closeSync(fd);
+    }
     // A read that starts mid-line leaves an incomplete first entry; parsing drops it.
-    return text.split("\n").map((s) => s.trim()).filter(Boolean)
-      .map((s) => { try { return JSON.parse(s); } catch { return null; } })
-      .filter(Boolean).slice(-limit);
-  } catch { return []; }
+    return text
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => {
+        try {
+          return JSON.parse(s);
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean)
+      .slice(-limit);
+  } catch {
+    return [];
+  }
 }
 
 export class Clippy {
   constructor() {
     this.running = false;
     this.installed = false;
-    this.onCopy = null;   // ( { window, text, at } ) => void
-    this.onState = null;  // ( { running, installed } ) => void
+    this.onCopy = null; // ( { window, text, at } ) => void
+    this.onState = null; // ( { running, installed } ) => void
     this._timer = null;
     this._lastCapture = null; // "mtime:size" of the last clippy_capture.json seen
-    this._startedAt = 0;      // a task takes a moment to spawn its process; do not un-set running yet
+    this._startedAt = 0; // a task takes a moment to spawn its process; do not un-set running yet
   }
 
   /** Tell every listener (server broadcasts it as clippy_state) about state changes. */
   _emit() {
-    if (this.onState) try { this.onState({ running: this.running, installed: this.installed, dir: dataDir() }); } catch { /* silent */ }
+    if (this.onState)
+      try {
+        this.onState({ running: this.running, installed: this.installed, dir: dataDir() });
+      } catch {
+        /* silent */
+      }
   }
 
   /** The directory clippy writes its capture/history files to. */
-  getDir() { return dataDir(); }
+  getDir() {
+    return dataDir();
+  }
 
   /**
    * Point clippy at a new data directory (persisted in clippy_dir.txt beside the exe).
@@ -111,11 +148,18 @@ export class Clippy {
    */
   async setDir(dir) {
     const raw = String(dir ?? "").trim();
-    if (raw && !path.isAbsolute(raw)) return { ok: false, error: "path must be absolute (e.g. D:\\clippy-data)" };
+    if (raw && !path.isAbsolute(raw))
+      return { ok: false, error: "path must be absolute (e.g. D:\\clippy-data)" };
     if (raw && !writable(raw)) return { ok: false, error: `cannot write to ${raw}` };
     try {
       if (raw) fs.writeFileSync(DIR_CONFIG_FILE, raw + "\n");
-      else { try { fs.unlinkSync(DIR_CONFIG_FILE); } catch { /* already absent */ } }
+      else {
+        try {
+          fs.unlinkSync(DIR_CONFIG_FILE);
+        } catch {
+          /* already absent */
+        }
+      }
     } catch (e) {
       // A read-only install cannot persist the choice; the task still starts with --dir.
       if (!raw) return { ok: false, error: e.message };
@@ -129,8 +173,14 @@ export class Clippy {
   /** Is the Clippy scheduled task registered? */
   _taskXml() {
     try {
-      return execFileSync("schtasks.exe", ["/Query", "/TN", TASK, "/XML"], { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
-    } catch { return ""; }
+      return execFileSync("schtasks.exe", ["/Query", "/TN", TASK, "/XML"], {
+        encoding: "utf8",
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+    } catch {
+      return "";
+    }
   }
 
   _taskExists() {
@@ -143,26 +193,46 @@ export class Clippy {
    */
   _processRunning() {
     try {
-      const out = execFileSync("tasklist.exe", ["/FI", "IMAGENAME eq clippy.exe", "/FO", "CSV", "/NH"],
-        { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+      const out = execFileSync("tasklist.exe", ["/FI", "IMAGENAME eq clippy.exe", "/FO", "CSV", "/NH"], {
+        encoding: "utf8",
+        windowsHide: true,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
       return /"clippy\.exe"/i.test(out);
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
 
   /** Install clippy as a HighestAvailable scheduled task (elevated: UAC prompt once). */
   async install() {
     const dir = dataDir();
     const xml = this._taskXml();
-    if (xml.includes("<Task ") && xml.includes(dir.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))) {
-      this.installed = true; this._emit(); return { ok: true, already: true };
+    if (
+      xml.includes("<Task ") &&
+      xml.includes(dir.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"))
+    ) {
+      this.installed = true;
+      this._emit();
+      return { ok: true, already: true };
     }
     if (!fs.existsSync(CLIPPY_EXE)) return { ok: false, error: `clippy.exe not found at ${CLIPPY_EXE}` };
     try {
-      execFileSync("powershell.exe", [
-        "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-        "-Command", `Start-Process -FilePath '${CLIPPY_EXE.replace(/'/g, "''")}' -ArgumentList '--install','--dir','${dir.replace(/'/g, "''")}' -Verb runas -Wait`
-      ], { encoding: "utf8", windowsHide: true });
-    } catch (e) { return { ok: false, error: e.message }; }
+      execFileSync(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          `Start-Process -FilePath '${CLIPPY_EXE.replace(/'/g, "''")}' -ArgumentList '--install','--dir','${dir.replace(/'/g, "''")}' -Verb runas -Wait`,
+        ],
+        { encoding: "utf8", windowsHide: true },
+      );
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
     this.installed = true;
     this._emit();
     return { ok: true };
@@ -199,7 +269,11 @@ export class Clippy {
   /** Stop clippy and the watcher. */
   async stop() {
     this._stopWatch();
-    try { execFileSync("schtasks.exe", ["/End", "/TN", TASK], { encoding: "utf8", windowsHide: true }); } catch { /* already gone */ }
+    try {
+      execFileSync("schtasks.exe", ["/End", "/TN", TASK], { encoding: "utf8", windowsHide: true });
+    } catch {
+      /* already gone */
+    }
     this._startedAt = 0;
     this.running = false;
     this._emit();
@@ -213,7 +287,10 @@ export class Clippy {
   }
 
   _stopWatch() {
-    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    if (this._timer) {
+      clearInterval(this._timer);
+      this._timer = null;
+    }
   }
 
   _checkCapture() {
@@ -227,9 +304,20 @@ export class Clippy {
       this._lastCapture = stamp;
       const cap = readJson(capFile);
       if (cap && (cap.text || cap.typed) && this.onCopy) {
-        try { this.onCopy({ window: cap.window || "", text: cap.text || "", typed: cap.typed || "", at: cap.at || "" }); } catch { /* callback must not kill the watcher */ }
+        try {
+          this.onCopy({
+            window: cap.window || "",
+            text: cap.text || "",
+            typed: cap.typed || "",
+            at: cap.at || "",
+          });
+        } catch {
+          /* callback must not kill the watcher */
+        }
       }
-    } catch { /* directory may not exist yet; silent */ }
+    } catch {
+      /* directory may not exist yet; silent */
+    }
   }
 
   /** Current state: running flag, installed flag, data dir, recent history, exe path. */
@@ -239,7 +327,8 @@ export class Clippy {
     // Just-started clippy.exe may not be in the process table yet; let the flag stand for a moment.
     if (live !== null && Date.now() - this._startedAt > 5000 && live !== this.running) {
       this.running = live;
-      if (live) this._startWatch(); else this._stopWatch();
+      if (live) this._startWatch();
+      else this._stopWatch();
     }
     const dir = dataDir();
     const history = readHistory(path.join(dir, HISTORY_NAME));
@@ -250,12 +339,27 @@ export class Clippy {
   /** The most recent Ctrl+C capture, or the history entry with [at] when given. */
   async latest(at) {
     if (at) {
-      const hit = readHistory(path.join(dataDir(), HISTORY_NAME), 200).reverse().find((e) => e.at === at);
-      if (hit) return { ok: true, window: hit.window || "", text: hit.text || "", typed: hit.typed || "", at: hit.at || "" };
+      const hit = readHistory(path.join(dataDir(), HISTORY_NAME), 200)
+        .reverse()
+        .find((e) => e.at === at);
+      if (hit)
+        return {
+          ok: true,
+          window: hit.window || "",
+          text: hit.text || "",
+          typed: hit.typed || "",
+          at: hit.at || "",
+        };
     }
     const cap = readJson(path.join(dataDir(), CAPTURE_NAME));
     if (!cap || (!cap.text && !cap.typed)) return { ok: false, error: "no clippy capture yet" };
-    return { ok: true, window: cap.window || "", text: cap.text || "", typed: cap.typed || "", at: cap.at || "" };
+    return {
+      ok: true,
+      window: cap.window || "",
+      text: cap.text || "",
+      typed: cap.typed || "",
+      at: cap.at || "",
+    };
   }
 
   /**

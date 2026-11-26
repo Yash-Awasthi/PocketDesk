@@ -16,7 +16,11 @@ function load() {
   if (items) return items;
   items = [];
   try {
-    for (const l of fs.readFileSync(FILE, "utf8").split("\n")) if (l) try { items.push(JSON.parse(l)); } catch {}
+    for (const l of fs.readFileSync(FILE, "utf8").split("\n"))
+      if (l)
+        try {
+          items.push(JSON.parse(l));
+        } catch {}
   } catch {}
   prune();
   return items;
@@ -42,11 +46,20 @@ function save() {
 /** kind: notif | call | sms | clip | file | shot | pcnotif; text is what a search matches. */
 export function add(kind, title, text = "", extra = {}) {
   load();
-  const e = { at: Date.now(), kind, title: String(title || "").slice(0, 200), text: String(text || "").slice(0, 1000), ...extra };
+  const e = {
+    at: Date.now(),
+    kind,
+    title: String(title || "").slice(0, 200),
+    text: String(text || "").slice(0, 1000),
+    ...extra,
+  };
   items.push(e);
   if (items.length > MAX + 100) prune();
   save();
-  for (const fn of listeners) try { fn(e); } catch {}
+  for (const fn of listeners)
+    try {
+      fn(e);
+    } catch {}
   return e;
 }
 
@@ -65,7 +78,12 @@ export function list({ q = "", kind = "", limit = 300 } = {}) {
 
 export function clear() {
   items = [];
-  try { fs.rmSync(FILE, { force: true }); } catch {}
+  try {
+    fs.rmSync(FILE, { force: true });
+  } catch {}
 }
 
-export function onAdd(fn) { listeners.add(fn); return () => listeners.delete(fn); }
+export function onAdd(fn) {
+  listeners.add(fn);
+  return () => listeners.delete(fn);
+}

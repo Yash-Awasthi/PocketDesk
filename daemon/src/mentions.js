@@ -45,14 +45,21 @@ export function expand(text, cwd) {
     let entry = { token, path: abs, ok: false, bytes: 0 };
     try {
       const st = fs.statSync(abs);
-      if (st.isFile() && st.size <= MAX_PER_MENTION && total + Math.min(st.size, MAX_PER_MENTION) <= MAX_TOTAL) {
+      if (
+        st.isFile() &&
+        st.size <= MAX_PER_MENTION &&
+        total + Math.min(st.size, MAX_PER_MENTION) <= MAX_TOTAL
+      ) {
         const content = fs.readFileSync(abs, "utf8");
         out = out.replace(`@${token}`, `@${token}\n\`\`\`\n${content}\n\`\`\``);
         entry.ok = true;
         entry.bytes = content.length;
         total += content.length;
       } else if (st.isFile()) {
-        entry.error = st.size > MAX_PER_MENTION ? `file too large (${st.size} > ${MAX_PER_MENTION})` : "mention budget exceeded";
+        entry.error =
+          st.size > MAX_PER_MENTION
+            ? `file too large (${st.size} > ${MAX_PER_MENTION})`
+            : "mention budget exceeded";
       } else {
         entry.error = "not a plain file";
       }
