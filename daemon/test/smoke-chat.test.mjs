@@ -11,7 +11,9 @@ const TOKEN = "chattoken";
 // Real path as git reports it: macOS tmp sits behind a /var symlink, Windows CI tmp is an 8.3 short name.
 const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "rh-chat-")));
 const agentJs = path.join(tmp, "fakeagent.js");
-fs.writeFileSync(agentJs, `
+fs.writeFileSync(
+  agentJs,
+  `
 let input = "";
 process.stdin.on("data", (d) => (input += d));
 process.stdin.on("end", () => {
@@ -23,28 +25,43 @@ process.stdin.on("end", () => {
   line({ type: "assistant", message: { content: [{ type: "tool_use", name: "Bash", input: { command: "dir" } }] } });
   line({ type: "result", is_error: false, result: "" });
 });
-`);
+`,
+);
 const agentResumeJs = path.join(tmp, "fakeresume.js");
-fs.writeFileSync(agentResumeJs, `
+fs.writeFileSync(
+  agentResumeJs,
+  `
 let input = "";
 process.stdin.on("data", (d) => (input += d));
 process.stdin.on("end", () => {
   process.stdout.write(JSON.stringify({ type: "assistant", message: { content: [{ type: "text", text: "resumed: " + input.trim() }] } }) + "\\n");
   process.stdout.write(JSON.stringify({ type: "result", is_error: false, result: "" }) + "\\n");
 });
-`);
+`,
+);
 
-fs.writeFileSync(path.join(tmp, "fakechat.json"), JSON.stringify({
-  id: "fakechat",
-  name: "Fake Chat",
-  adapter: "terminal",
-  bin: "node",
-  install: {},
-  chat: { args: [agentJs], format: "claude-stream-json", resumeArgs: [agentResumeJs] },
-}));
+fs.writeFileSync(
+  path.join(tmp, "fakechat.json"),
+  JSON.stringify({
+    id: "fakechat",
+    name: "Fake Chat",
+    adapter: "terminal",
+    bin: "node",
+    install: {},
+    chat: { args: [agentJs], format: "claude-stream-json", resumeArgs: [agentResumeJs] },
+  }),
+);
 
 const daemon = spawn(process.execPath, ["src/index.js"], {
-  env: { ...process.env, RH_PORT: String(PORT), RH_CLI_PORT: String(PORT + 1), RH_TOKEN: TOKEN, RH_MANIFESTS: tmp, POCKETDESK_DATA: ".pocketdesk-test-" + PORT, RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT) },
+  env: {
+    ...process.env,
+    RH_PORT: String(PORT),
+    RH_CLI_PORT: String(PORT + 1),
+    RH_TOKEN: TOKEN,
+    RH_MANIFESTS: tmp,
+    POCKETDESK_DATA: ".pocketdesk-test-" + PORT,
+    RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT),
+  },
   stdio: ["ignore", "pipe", "pipe"],
 });
 daemon.stderr.on("data", (d) => process.stderr.write("[daemon!] " + d));
@@ -58,7 +75,7 @@ function check(name, cond) {
 
 const waiters = [];
 const seen = []; // every message — next() must match these too, else fast
-                 // senders lose the race against waiter re-registration
+// senders lose the race against waiter re-registration
 function next(pred, timeoutMs = 15000) {
   const hit = seen.find(pred);
   if (hit) return Promise.resolve(hit);
@@ -76,7 +93,7 @@ async function collect(preds, timeoutMs = 15000) {
   // messages can't starve the remaining preds.
   const got = new Array(preds.length).fill(null);
   const deadline = Date.now() + timeoutMs;
-  for (let idx = 0; got.some((g) => g === null); ) {
+  for (let idx = 0; got.some((g) => g === null);) {
     if (idx >= seen.length) {
       if (Date.now() > deadline) throw new Error("timeout collecting chat events");
       await new Promise((r) => setTimeout(r, 100));
@@ -112,7 +129,10 @@ async function run() {
 
     send({ type: "detect" });
     const mans = await next((m) => m.type === "manifests");
-    check("fake chat tool detected", mans.items.some((i) => i.manifest.id === "fakechat" && i.installed));
+    check(
+      "fake chat tool detected",
+      mans.items.some((i) => i.manifest.id === "fakechat" && i.installed),
+    );
 
     send({ type: "chatsession", harness: "fakechat", cwd: tmp, prompt: "hello world" });
     const created = await next((m) => m.type === "created" || m.type === "error");
@@ -131,16 +151,22 @@ async function run() {
     check("result flips state to idle", Boolean(doneEv));
 
     send({ type: "attach", id });
-    // a first, empty chatreplay went out at session creation — wait for the
-    // populated replay that this attach triggers
-    const replay = await next((m) => m.type === "chatreplay" && m.id === id && m.items.length > 0);
-    check(
-      "attach replays full transcript",
-      replay.id === id && replay.items.some((i) => i.role === "user") && replay.items.some((i) => i.role === "tool"),
+    // Session creation already sends a chatreplay, and it now carries the spawn's
+    // system line, so "not empty" no longer distinguishes it from this one. Match
+    // the replay that actually holds the turn instead.
+    const replay = await next(
+      (m) =>
+        m.type === "chatreplay" &&
+        m.id === id &&
+        m.items.some((i) => i.role === "user") &&
+        m.items.some((i) => i.role === "tool"),
     );
+    check("attach replays full transcript", replay.id === id && replay.items.length >= 4);
 
     send({ type: "chatmsg", id, text: "second turn" });
-    const resumedDelta = await next((m) => m.type === "chatdelta" && m.text?.includes("resumed: second turn"));
+    const resumedDelta = await next(
+      (m) => m.type === "chatdelta" && m.text?.includes("resumed: second turn"),
+    );
     check("follow-up uses resume adapter", Boolean(resumedDelta));
     await next((m) => m.type === "chatstate" && m.state === "idle");
 
@@ -153,10 +179,23 @@ async function run() {
     git("add", ".");
     git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init");
     send({ type: "chatsession", harness: "fakechat", cwd: repo, worktree: true });
-    const wt = await next((m) => (m.type === "created" && m.cwd?.includes("repo-")) || (m.type === "error" && /git|worktree/.test(m.message)));
-    check("a chat can start in its own worktree", wt.type === "created" && wt.cwd === path.join(tmp, "repo-fakechat") && fs.existsSync(path.join(wt.cwd, "a.txt")));
+    const wt = await next(
+      (m) =>
+        (m.type === "created" && m.cwd?.includes("repo-")) ||
+        (m.type === "error" && /git|worktree/.test(m.message)),
+    );
+    check(
+      "a chat can start in its own worktree",
+      wt.type === "created" &&
+        wt.cwd === path.join(tmp, "repo-fakechat") &&
+        fs.existsSync(path.join(wt.cwd, "a.txt")),
+    );
     send({ type: "chatsession", harness: "fakechat", cwd: path.join(tmp, "missing"), prompt: "hi" });
-    const bad = await next((m) => (m.type === "created" && m.cwd?.endsWith("missing")) || (m.type === "error" && /folder/.test(m.message)));
+    const bad = await next(
+      (m) =>
+        (m.type === "created" && m.cwd?.endsWith("missing")) ||
+        (m.type === "error" && /folder/.test(m.message)),
+    );
     check("a chat in a missing folder says so", bad.type === "error" && /folder not found/.test(bad.message));
     ws.close();
   } catch (e) {

@@ -125,6 +125,9 @@ data class FbConfig(val name: String, val size: Long, val mtime: String)
 /** One captured desktop frame: base64 JPEG, full virtual-screen geometry. */
 data class DesktopFrame(val base64: String, val width: Int, val height: Int)
 
+/** One capture method the PC measured, as it advertises it; only proven methods are listed. */
+data class CaptureChoice(val id: String, val label: String, val note: String, val current: Boolean)
+
 /** A file or folder on the PC clipboard. */
 data class PcFile(val path: String, val name: String, val size: Long?, val dir: Boolean)
 
@@ -133,6 +136,20 @@ data class PcClip(val kind: String, val text: String?, val png: String?, val fil
 
 /** A screen the PC can show: itself, a phone on it, another PC, or one of that PC's own (id "pc:<id>/adb:<serial>"). */
 data class DesktopSource(val id: String, val name: String, val os: String?, val kind: String, val online: Boolean)
+
+/** One Ctrl+C seen by clippy: what was typed since the last capture, and the system clipboard. */
+data class ClippyCapture(val window: String, val text: String, val typed: String, val at: String) {
+    /** The text worth pasting: the typed buffer first, because a game's copy may never reach Windows. */
+    val body: String get() = typed.ifBlank { text }
+}
+
+/** clippy state as the daemon reports it. */
+data class ClippyState(
+    val running: Boolean = false,
+    val installed: Boolean = false,
+    val dir: String = "",
+    val history: List<ClippyCapture> = emptyList(),
+)
 
 /** The PC pointer in picture pixels; [shape] is a CSS cursor name such as "arrow" or "text". */
 data class DesktopCursor(val x: Int, val y: Int, val shape: String, val fx: Double? = null, val fy: Double? = null)
@@ -272,6 +289,18 @@ object Proto {
         if (audio) put("audio", true)
     }
     fun desktopMonitors() = obj { put("type", "desktop_monitors") }
+    // Selecting how a game window is captured. "auto" walks the ladder and reports
+    // which rung worked; the rest pin one method so a mode that works is repeatable.
+    fun desktopCapture(mode: String? = null) = obj {
+        put("type", "desktop_capture")
+        if (mode != null) put("mode", mode)
+    }
+    // Runs the same control/gate/reverse comparison the desk probe runs, against the
+    // window the PC picked, and answers with the measured numbers.
+    fun desktopCaptureCheck(mode: String? = null) = obj {
+        put("type", "desktop_capture_check")
+        if (mode != null) put("mode", mode)
+    }
     fun desktopNav(key: String) = obj { put("type", "desktop_nav"); put("key", key) }
     fun sourcesList(of: String? = null) = obj { put("type", "sources_list"); if (of != null) put("of", of) }
     fun desktopPing(t: Long) = obj { put("type", "desktop_ping"); put("t", t) }
@@ -304,6 +333,16 @@ object Proto {
         if (press != null) put("press", press)
     }
     fun desktopType(text: String) = obj { put("type", "desktop_type"); put("text", text) }
+    // clippy: Ctrl+C capture from apps whose copy never reaches the Windows clipboard.
+    fun clippyStart() = obj { put("type", "clippy_start") }
+    fun clippyStop() = obj { put("type", "clippy_stop") }
+    fun clippyStatus() = obj { put("type", "clippy_status") }
+    fun clippyInstall() = obj { put("type", "clippy_install") }
+    fun clippySetDir(dir: String) = obj { put("type", "clippy_setdir"); put("dir", dir) }
+    fun clippyLatest() = obj { put("type", "clippy_latest") }
+    fun clippyPaste(paste: Boolean, at: String? = null) = obj {
+        put("type", "clippy_paste"); if (paste) put("paste", true); if (at != null) put("at", at)
+    }
     fun remoteMove(dx: Float, dy: Float) = obj { put("type", "remote_input"); put("kind", "move"); put("dx", dx); put("dy", dy) }
     fun remoteClick(button: String) = obj { put("type", "remote_input"); put("kind", "click"); put("button", button) }
     fun remotePress(button: String, down: Boolean) = obj { put("type", "remote_input"); put("kind", "press"); put("button", button); put("press", if (down) "down" else "up") }

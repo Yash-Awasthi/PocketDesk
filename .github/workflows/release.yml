@@ -1,0 +1,45 @@
+name: Release
+
+# A release is a tag: the workflow refuses a tag whose name disagrees with the version files, then
+# publishes the artefacts it built from that tag with one SHA256SUMS beside them. Signing the tag
+# needs the owner's key and stays an owner step outside CI.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Release gate and checksums
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: daemon
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: daemon/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: The tag matches every version file
+        run: node scripts/release.mjs check
+      - name: Build the daemon tarball
+        run: |
+          mkdir -p dist
+          npm pack --pack-destination dist
+      - name: Source archive from the same tag
+        working-directory: .
+        run: git archive --format=tar.gz --prefix=pocketdesk-${GITHUB_REF_NAME}/ -o daemon/dist/pocketdesk-source.tar.gz HEAD
+      - name: Checksums
+        run: node scripts/release.mjs sums --out dist/SHA256SUMS dist/*.tgz dist/*.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-checksums
+          path: dist/

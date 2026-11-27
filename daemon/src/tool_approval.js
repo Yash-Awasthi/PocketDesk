@@ -20,7 +20,9 @@ export function init(cliPort) {
   url = `http://127.0.0.1:${cliPort}/approval`;
   settingsFile = path.join(configDir, "claude-approval.json");
   const command = `"${process.execPath}" "${HOOK}"`;
-  const settings = { hooks: { PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command, timeout: 300 }] }] } };
+  const settings = {
+    hooks: { PermissionRequest: [{ matcher: "*", hooks: [{ type: "command", command, timeout: 300 }] }] },
+  };
   try {
     fs.mkdirSync(configDir, { recursive: true });
     writeFileAtomic(settingsFile, JSON.stringify(settings, null, 2));
@@ -53,8 +55,10 @@ export function trust(agentSession) {
 function describe(tool, input) {
   const i = input || {};
   if (tool === "Bash") return { type: "command_execute", summary: String(i.command || "").slice(0, 300) };
-  if (["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(tool)) return { type: "file_write", summary: `${tool} ${i.file_path || i.notebook_path || ""}` };
-  if (["WebFetch", "WebSearch"].includes(tool)) return { type: "network_request", summary: `${tool} ${i.url || i.query || ""}` };
+  if (["Edit", "Write", "MultiEdit", "NotebookEdit"].includes(tool))
+    return { type: "file_write", summary: `${tool} ${i.file_path || i.notebook_path || ""}` };
+  if (["WebFetch", "WebSearch"].includes(tool))
+    return { type: "network_request", summary: `${tool} ${i.url || i.query || ""}` };
   return { type: "tool", summary: tool };
 }
 
@@ -63,7 +67,12 @@ export async function request({ owner, agentSession, tool, input, cwd }) {
   if (agentSession && trusted.has(String(agentSession))) return { decision: "allow" };
   const p = proposals.create({
     ...describe(String(tool || ""), input),
-    detail: { tool: String(tool || ""), input: input || {}, cwd: cwd || "", agentSession: agentSession || "" },
+    detail: {
+      tool: String(tool || ""),
+      input: input || {},
+      cwd: cwd || "",
+      agentSession: agentSession || "",
+    },
     sessionId: owner || "unknown",
   });
   const { status } = await proposals.waitForDecision(p.id, WAIT_MS);

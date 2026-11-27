@@ -7,8 +7,10 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import androidx.core.app.RemoteInput
 
 object Notifier {
     private const val CHANNEL = "sessions"
@@ -133,22 +135,53 @@ object Notifier {
         (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).cancel(LINK_LOST_ID)
     }
 
-    fun sessionEnded(ctx: Context, label: String, code: Int) {
+    /** Sessions whose end notification is still unanswered; dismiss and reply both clear it. */
+    private val unread = java.util.Collections.newSetFromMap(java.util.concurrent.ConcurrentHashMap<String, Boolean>())
+
+    fun isUnread(id: String): Boolean = id in unread
+    fun markRead(id: String) { unread -= id }
+
+    /** The notification id for [id]; every action carries the session id. */
+    fun sessionNotificationId(id: String): Int = id.hashCode()
+
+    fun sessionEnded(ctx: Context, id: String, label: String, code: Int) {
         if (!canNotify(ctx)) return
-        val pi = PendingIntent.getActivity(
+        unread += id
+        val nid = sessionNotificationId(id)
+        val open = PendingIntent.getActivity(
             ctx,
-            0,
-            Intent(ctx, MainActivity::class.java),
+            nid,
+            Intent(ctx, MainActivity::class.java)
+                .setAction(Intent.ACTION_VIEW)
+                .setData(Uri.parse("pocketdesk://session/$id"))
+                .putExtra("open", "session:$id")
+                .putExtra(NotifActions.EXTRA_ID, id),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+        val replyPi = PendingIntent.getBroadcast(
+            ctx,
+            nid + 1,
+            Intent(ctx, NotifActions::class.java).setAction(NotifActions.ACTION_REPLY).putExtra(NotifActions.EXTRA_ID, id),
+            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val dismissPi = PendingIntent.getBroadcast(
+            ctx,
+            nid + 2,
+            Intent(ctx, NotifActions::class.java).setAction(NotifActions.ACTION_DISMISS).putExtra(NotifActions.EXTRA_ID, id),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val reply = RemoteInput.Builder(NotifActions.KEY_REPLY).setLabel("Reply to $label").build()
         val n = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle("PocketDesk")
             .setContentText("$label ended (exit $code)")
-            .setContentIntent(pi)
+            .setContentIntent(open)
             .setAutoCancel(true)
+            .setDeleteIntent(dismissPi)
+            .addAction(0, "Open", open)
+            .addAction(NotificationCompat.Action.Builder(0, "Reply", replyPi).addRemoteInput(reply).build())
+            .addAction(0, "Dismiss", dismissPi)
             .build()
-        val mgr = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        mgr.notify(label.hashCode(), n)
+        (ctx.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(nid, n)
     }
 }

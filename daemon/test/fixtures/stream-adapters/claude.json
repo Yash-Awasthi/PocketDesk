@@ -1,0 +1,75 @@
+{
+  "_fixture": {
+    "format": "claude-stream-json",
+    "cli": "claude",
+    "version": "2.0.14",
+    "produced": "synthetic",
+    "note": "claude CLI is not installed on this machine; these events are a synthetic subset of the inline adapter corpus, recorded as the 2.0.14 target."
+  },
+  "events": [
+    {
+      "type": "system",
+      "subtype": "init",
+      "session_id": "cl-1",
+      "model": "m",
+      "permissionMode": "default",
+      "slash_commands": ["review"]
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "message_start"
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "delta": {
+          "type": "text_delta",
+          "text": "x"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_start",
+        "content_block": {
+          "type": "tool_use",
+          "id": "tu1",
+          "name": "Read"
+        }
+      }
+    },
+    {
+      "type": "assistant",
+      "session_id": "cl-1",
+      "message": {
+        "content": [
+          {
+            "type": "text",
+            "text": "x"
+          },
+          {
+            "type": "tool_use",
+            "id": "tu1",
+            "name": "Read",
+            "input": {
+              "file_path": "a.txt"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "result",
+      "session_id": "cl-1",
+      "result": "x",
+      "usage": {
+        "input_tokens": 5,
+        "output_tokens": 1
+      }
+    }
+  ]
+}

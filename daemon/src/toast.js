@@ -27,13 +27,21 @@ while ($null -ne ($line = [Console]::In.ReadLine())) {
 let proc = null;
 // What we showed lately, so this PC's notification forwarding never sends the phone its own back.
 const shown = new Map();
-export const ours = (title, body) => { const at = shown.get(`${title}${body}`); return !!at && Date.now() - at < 120_000; };
+export const ours = (title, body) => {
+  const at = shown.get(`${title}${body}`);
+  return !!at && Date.now() - at < 120_000;
+};
 
 function shell() {
   if (proc) return proc;
-  proc = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", SCRIPT], { stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
+  proc = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", SCRIPT], {
+    stdio: ["pipe", "ignore", "ignore"],
+    windowsHide: true,
+  });
   proc.stdin.on("error", () => {});
-  proc.on("exit", () => { proc = null; });
+  proc.on("exit", () => {
+    proc = null;
+  });
   return proc;
 }
 
@@ -42,5 +50,13 @@ export function toast({ title, body = "", app = "Phone", tag, call = false }) {
   if (process.platform !== "win32" || !title) return;
   shown.set(`${String(title).slice(0, 200)}${String(body).slice(0, 500)}`, Date.now());
   if (shown.size > 100) shown.delete(shown.keys().next().value);
-  shell().stdin.write(JSON.stringify({ title: String(title).slice(0, 200), body: String(body).slice(0, 500), app: String(app).slice(0, 60), tag, call }) + "\n");
+  shell().stdin.write(
+    JSON.stringify({
+      title: String(title).slice(0, 200),
+      body: String(body).slice(0, 500),
+      app: String(app).slice(0, 60),
+      tag,
+      call,
+    }) + "\n",
+  );
 }

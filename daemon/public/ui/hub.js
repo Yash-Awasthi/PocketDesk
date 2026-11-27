@@ -2,10 +2,10 @@
 // What the PocketDesk app on the phone answers for the PC: notifications, texts, calls, contacts,
 // quick settings, media, battery and photos. Requests go out as phone_req and come back as
 // phone_res; the phone pushes changes as phone_evt.
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = (window.PD ||= {});
 let rid = 0;
 const waiting = new Map();
 PD.hub = { online: false, name: null, state: {} };

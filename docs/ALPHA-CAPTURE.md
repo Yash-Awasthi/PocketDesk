@@ -1,5 +1,14 @@
 # Alpha capture: letting your own app be mirrored while PocketDesk watches
 
+## Do not use this in proctoring, exam or DRM windows
+
+This handshake must not be used in proctoring, exam or DRM windows. The marker is per-user and
+unauthenticated, so anything running as that user can create it, and while it exists the window
+lifts `WDA_EXCLUDEFROMCAPTURE` for the whole time any viewer is attached rather than for a single
+capture. In a window where a candidate is being invigilated, or where a rights holder asked for
+protection, deny the handshake and leave the marker absent: the app keeps its protection on and
+PocketDesk shows the black or see-through frame that Windows intends.
+
 ## What the two symptoms mean
 
 When a window is mirrored from the phone, one of these shows up instead of the picture:

@@ -20,8 +20,8 @@ jobs:
       matrix:
         # Windows is the main platform (ConPTY, console endpoint); macOS and Linux run the hidden daemon too.
         os: [windows-latest, ubuntu-latest, macos-latest]
-        # 24 is the supported floor, 26 the current release.
-        node: [24, 26]
+        # 26 is the current LTS and the supported floor; the 24 runner was dropped.
+        node: [26]
     defaults:
       run:
         working-directory: daemon
@@ -40,6 +40,10 @@ jobs:
       - name: Syntax check
         shell: bash
         run: for f in $(git ls-files 'src/*.js' 'scripts/*.js' 'scripts/*.mjs'); do node --check "$f" || exit 1; done
+      - name: Lint and format check
+        run: npm run check
+      - name: Type check (JSDoc)
+        run: npm run typecheck
       - name: Compile the Windows launchers
         if: runner.os == 'Windows'
         shell: pwsh
@@ -56,6 +60,31 @@ jobs:
           }
       - name: Run test suite
         run: npm test
+      # Measurement row: print the number on an ordinary runner with nothing warmed up. The
+      # script gates on the worst of five starts (median is printed too); see docs/COLD-START.md.
+      - name: Cold start (five runs, worst under 400 ms)
+        run: node scripts/measure-startup.mjs
+        # The budget row (cold start under 400 ms on a mid PC) is still open: print the number
+        # and keep the job green until the budget holds on a runner that can meet it.
+        continue-on-error: true
+
+  web-ui:
+    name: Hub pages (Playwright)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: daemon
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: daemon/package-lock.json
+      - run: npm ci
+      # Chromium is the only browser the hub is tested in; --with-deps brings its shared libraries.
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
 
   android:
     name: Android lint, unit tests, build

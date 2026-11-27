@@ -1,7 +1,7 @@
 // SSH bastion + advanced SSH server + multi-protocol client: the protocol
 // surfaces from sshportal/bifroest/cardea (ssh_bastion, advanced_ssh_server)
 // and haven-ssh-client (ssh_vnc_client). In-memory and deterministic.
-import { check, connectRaw, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
+import { check, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
 import ssh2 from "ssh2";
 import { generateKeyPair as edPair } from "../src/advanced_ssh_server.js";
 
@@ -16,7 +16,10 @@ const TOKEN = "bastiontoken";
 function sshTry(opts) {
   return new Promise((resolve) => {
     const cl = new ssh2.Client();
-    cl.on("ready", () => { cl.end(); resolve("ready"); });
+    cl.on("ready", () => {
+      cl.end();
+      resolve("ready");
+    });
     cl.on("error", (e) => resolve(e.message));
     cl.connect({ host: "127.0.0.1", readyTimeout: 15000, ...opts });
   });
@@ -28,12 +31,24 @@ async function main() {
   const c = await openAndHello(PORT, TOKEN);
 
   // ── SSH bastion (sshportal/bifroest/cardea: users, hosts, access rules) ─
-  c.send({ type: "bastion_user_add", username: "alice", publicKey: "ssh-ed25519 AAAA", accessLevel: "admin" });
+  c.send({
+    type: "bastion_user_add",
+    username: "alice",
+    publicKey: "ssh-ed25519 AAAA",
+    accessLevel: "admin",
+  });
   const bu = await c.next((m) => m.type === "bastion_user_added");
   check("bastion user registered", bu.ok === true && bu.user.username === "alice");
   const aliceId = bu.user.id;
 
-  c.send({ type: "bastion_host_add", name: "web", hostname: "10.0.0.5", port: 22, username: "root", group: "prod" });
+  c.send({
+    type: "bastion_host_add",
+    name: "web",
+    hostname: "10.0.0.5",
+    port: 22,
+    username: "root",
+    group: "prod",
+  });
   const bh = await c.next((m) => m.type === "bastion_host_added");
   check("bastion host registered", bh.ok === true && bh.host.name === "web");
   const hostId = bh.host.id;
@@ -61,7 +76,10 @@ async function main() {
 
   c.send({ type: "bastion_stats" });
   const bstats = await c.next((m) => m.type === "bastion_stats");
-  check("bastion stats count", bstats.totalUsers === 1 && bstats.totalHosts === 1 && bstats.activeSessions === 1);
+  check(
+    "bastion stats count",
+    bstats.totalUsers === 1 && bstats.totalHosts === 1 && bstats.activeSessions === 1,
+  );
 
   c.send({ type: "bastion_session_end", sessionId: bs.session.id });
   const be = await c.next((m) => m.type === "bastion_session_ended");
@@ -102,7 +120,10 @@ async function main() {
 
   c.send({ type: "sshserver_user_list" });
   const users = await c.next((m) => m.type === "sshserver_user_list");
-  check("user list never leaks passwordHash", users.items.every((u) => !("passwordHash" in u)));
+  check(
+    "user list never leaks passwordHash",
+    users.items.every((u) => !("passwordHash" in u)),
+  );
 
   c.send({ type: "sshserver_exec", sessionId: ss.session.id, command: "git status" });
   const okExec = await c.next((m) => m.type === "sshserver_exec_ok");
@@ -114,9 +135,14 @@ async function main() {
   const badExec = await c.next((m) => m.type === "sshserver_exec_ok");
   check("disallowed command rejected", badExec.ok === false);
 
-  for (const command of IS_WIN ? ["git status & whoami", "git status | more", "git %PATH%"] : ["git status; id", "git $(id)", "git `id`", "git status | sh"]) {
+  for (const command of IS_WIN
+    ? ["git status & whoami", "git status | more", "git %PATH%"]
+    : ["git status; id", "git $(id)", "git `id`", "git status | sh"]) {
     c.send({ type: "sshserver_exec", sessionId: ss.session.id, command });
-    check(`allowlist cannot be chained: ${command}`, (await c.next((m) => m.type === "sshserver_exec_ok")).ok === false);
+    check(
+      `allowlist cannot be chained: ${command}`,
+      (await c.next((m) => m.type === "sshserver_exec_ok")).ok === false,
+    );
   }
 
   c.send({ type: "sshserver_stats" });
@@ -127,17 +153,30 @@ async function main() {
   const se = await c.next((m) => m.type === "sshserver_session_ended");
   check("sshserver session ends", se.ok === true);
 
-  c.send({ type: "sshserver_user_add", username: "dave", password: "pw", allowedCommands: ["git status", "git log"] });
+  c.send({
+    type: "sshserver_user_add",
+    username: "dave",
+    password: "pw",
+    allowedCommands: ["git status", "git log"],
+  });
   await c.next((m) => m.type === "sshserver_user_added");
   c.send({ type: "sshserver_session_create", username: "dave", method: "password", credential: "pw" });
   const dave = (await c.next((m) => m.type === "sshserver_session_created")).session.id;
-  for (const [command, want] of [["git status -s", true], ["git log", true], ["git -c core.pager=x status", false], ["git push", false], ["git statusx", false]]) {
+  for (const [command, want] of [
+    ["git status -s", true],
+    ["git log", true],
+    ["git -c core.pager=x status", false],
+    ["git push", false],
+    ["git statusx", false],
+  ]) {
     c.send({ type: "sshserver_exec", sessionId: dave, command });
-    check(`argument rule: ${command} -> ${want}`, (await c.next((m) => m.type === "sshserver_exec_ok")).ok === want);
+    check(
+      `argument rule: ${command} -> ${want}`,
+      (await c.next((m) => m.type === "sshserver_exec_ok")).ok === want,
+    );
   }
   c.send({ type: "sshserver_session_end", sessionId: dave });
   await c.next((m) => m.type === "sshserver_session_ended");
-
 
   // ── Real SSH round trip: the daemon's own listener, dialled by its own client ─
   c.send({ type: "sshserver_start", port: 0, host: "127.0.0.1" });
@@ -147,7 +186,14 @@ async function main() {
   c.send({ type: "sshserver_user_add", username: "tester", password: "s3cret", allowedCommands: ["echo"] });
   await c.next((m) => m.type === "sshserver_user_added");
 
-  c.send({ type: "profile_create", name: "loopback", host: "127.0.0.1", port: srv.port, username: "tester", protocols: ["ssh", "sftp"] });
+  c.send({
+    type: "profile_create",
+    name: "loopback",
+    host: "127.0.0.1",
+    port: srv.port,
+    username: "tester",
+    protocols: ["ssh", "sftp"],
+  });
   const pc = await c.next((m) => m.type === "profile_created");
   check("profile created", pc.ok === true && pc.profile.host === "127.0.0.1");
   const profileId = pc.profile.id;
@@ -155,14 +201,20 @@ async function main() {
   c.send({ type: "profile_connect", id: profileId, protocol: "ssh", password: "s3cret" });
   const conn = await c.next((m) => m.type === "profile_connected", 25000);
   check("profile connects over real SSH", conn.ok === true && conn.session.protocol === "ssh");
-  check("host key recorded on first use", conn.session.hostKey?.status === "accepted" && conn.session.hostKey.isNew === true);
+  check(
+    "host key recorded on first use",
+    conn.session.hostKey?.status === "accepted" && conn.session.hostKey.isNew === true,
+  );
   check("no live handles on the wire", !("client" in conn.session) && !("channels" in conn.session));
   const connEvt = await c.next((m) => m.type === "mproto_event" && m.mprotoEvent === "connected");
   check("connect event broadcast", connEvt.profileId === profileId);
 
   c.send({ type: "sshserver_sessions" });
   const live = await c.next((m) => m.type === "sshserver_sessions");
-  check("listener sees the authenticated session", live.items.some((x) => x.username === "tester"));
+  check(
+    "listener sees the authenticated session",
+    live.items.some((x) => x.username === "tester"),
+  );
 
   c.send({ type: "profile_disconnect", sessionId: conn.session.id, protocol: "ssh" });
   const dc = await c.next((m) => m.type === "profile_disconnected");
@@ -180,15 +232,33 @@ async function main() {
   const badConn = await c.next((m) => m.type === "profile_connected");
   check("unknown profile rejected", badConn.ok === false);
 
-  c.send({ type: "hostkey_verify", host: "192.168.1.10", port: 22, fingerprint: "SHA256:abc", keyType: "ssh-ed25519" });
+  c.send({
+    type: "hostkey_verify",
+    host: "192.168.1.10",
+    port: 22,
+    fingerprint: "SHA256:abc",
+    keyType: "ssh-ed25519",
+  });
   const hk1 = await c.next((m) => m.type === "hostkey_verify");
   check("hostkey TOFU accepts new", hk1.status === "accepted" && hk1.isNew === true);
 
-  c.send({ type: "hostkey_verify", host: "192.168.1.10", port: 22, fingerprint: "SHA256:abc", keyType: "ssh-ed25519" });
+  c.send({
+    type: "hostkey_verify",
+    host: "192.168.1.10",
+    port: 22,
+    fingerprint: "SHA256:abc",
+    keyType: "ssh-ed25519",
+  });
   const hk2 = await c.next((m) => m.type === "hostkey_verify");
   check("hostkey TOFU accepts known", hk2.status === "accepted" && hk2.isNew === false);
 
-  c.send({ type: "hostkey_verify", host: "192.168.1.10", port: 22, fingerprint: "SHA256:DIFFERENT", keyType: "ssh-ed25519" });
+  c.send({
+    type: "hostkey_verify",
+    host: "192.168.1.10",
+    port: 22,
+    fingerprint: "SHA256:DIFFERENT",
+    keyType: "ssh-ed25519",
+  });
   const hk3 = await c.next((m) => m.type === "hostkey_verify");
   check("hostkey change flagged", hk3.status === "changed" && hk3.oldFingerprint === "SHA256:abc");
 
@@ -225,11 +295,24 @@ async function main() {
   c.send({ type: "bastion_user_add", username: "alice2", publicKey: pair.public, accessLevel: "admin" });
   const ju = await c.next((m) => m.type === "bastion_user_added");
 
-  c.send({ type: "bastion_host_add", name: "target", hostname: "127.0.0.1", port: target.port, username: "jumped", password: "tpw" });
+  c.send({
+    type: "bastion_host_add",
+    name: "target",
+    hostname: "127.0.0.1",
+    port: target.port,
+    username: "jumped",
+    password: "tpw",
+  });
   const jh = await c.next((m) => m.type === "bastion_host_added");
   check("host credentials never returned", !("credentials" in jh.host));
 
-  c.send({ type: "bastion_rule_add", userId: ju.user.id, hostId: jh.host.id, accessLevel: "admin", allowed: true });
+  c.send({
+    type: "bastion_rule_add",
+    userId: ju.user.id,
+    hostId: jh.host.id,
+    accessLevel: "admin",
+    allowed: true,
+  });
   await c.next((m) => m.type === "bastion_rule_added");
 
   c.send({ type: "bastion_start", port: 0, host: "127.0.0.1" });
@@ -239,16 +322,32 @@ async function main() {
   // `alice2@target` is the sshportal login convention: bastion user @ host name.
   const jumpOut = await new Promise((resolve, reject) => {
     const cl = new ssh2.Client();
-    const timer = setTimeout(() => { cl.end(); reject(new Error("jump timeout")); }, 30000);
+    const timer = setTimeout(() => {
+      cl.end();
+      reject(new Error("jump timeout"));
+    }, 30000);
     cl.on("ready", () => {
       cl.exec("echo hi", (err, stream) => {
-        if (err) { clearTimeout(timer); cl.end(); return reject(err); }
+        if (err) {
+          clearTimeout(timer);
+          cl.end();
+          return reject(err);
+        }
         let out = "";
-        stream.on("data", (d) => { out += d; });
-        stream.on("close", () => { clearTimeout(timer); cl.end(); resolve(out); });
+        stream.on("data", (d) => {
+          out += d;
+        });
+        stream.on("close", () => {
+          clearTimeout(timer);
+          cl.end();
+          resolve(out);
+        });
       });
     });
-    cl.on("error", (err) => { clearTimeout(timer); reject(err); });
+    cl.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
     cl.connect({ host: "127.0.0.1", port: bsrv.port, username: "alice2@target", privateKey: pair.private });
   });
   check("command runs on the target through the bastion", /hi/.test(jumpOut));
@@ -260,7 +359,8 @@ async function main() {
     c.send({ type: "bastion_sessions" });
     const jsess = await c.next((m) => m.type === "bastion_sessions");
     proxied = jsess.items.find((x) => x.hostId === jh.host.id) || jsess.items[0];
-    if (!(proxied?.outputBytes > 0 && proxied?.commandCount === 1)) await new Promise((r) => setTimeout(r, 250));
+    if (!(proxied?.outputBytes > 0 && proxied?.commandCount === 1))
+      await new Promise((r) => setTimeout(r, 250));
   }
   check("proxied traffic is accounted", !!proxied && proxied.outputBytes > 0 && proxied.commandCount === 1);
 
@@ -268,23 +368,38 @@ async function main() {
   const forged = ssh2.utils.parseKey(edPair().private);
   const realPub = ssh2.utils.parseKey(pair.public);
   forged.getPublicSSH = () => realPub.getPublicSSH();
-  const forgedLogin = await sshTry({ port: bsrv.port, username: "alice2@target", authHandler: (_m, _p, cb) => cb({ type: "publickey", username: "alice2@target", key: forged }) });
+  const forgedLogin = await sshTry({
+    port: bsrv.port,
+    username: "alice2@target",
+    authHandler: (_m, _p, cb) => cb({ type: "publickey", username: "alice2@target", key: forged }),
+  });
   check("bastion refuses a public key with a forged signature", forgedLogin !== "ready");
 
   c.send({ type: "sshserver_user_add", username: "nocred" });
   await c.next((m) => m.type === "sshserver_user_added");
-  check("credential-less user cannot log in over the network", (await sshTry({ port: target.port, username: "nocred", password: "" })) !== "ready");
+  check(
+    "credential-less user cannot log in over the network",
+    (await sshTry({ port: target.port, username: "nocred", password: "" })) !== "ready",
+  );
 
   const shellOut = await new Promise((resolve) => {
     const cl = new ssh2.Client();
-    cl.on("ready", () => cl.shell((err) => { cl.end(); resolve(err ? "denied" : "opened"); }));
+    cl.on("ready", () =>
+      cl.shell((err) => {
+        cl.end();
+        resolve(err ? "denied" : "opened");
+      }),
+    );
     cl.on("error", (e) => resolve(`error: ${e.message}`));
     cl.connect({ host: "127.0.0.1", port: target.port, username: "tester", password: "s3cret" });
   });
   check("allowlisted user gets no interactive shell", shellOut === "denied");
 
   for (let i = 0; i < 10; i++) await sshTry({ port: target.port, username: "tester", password: "guess" + i });
-  check("ssh server locks out an address after repeated bad passwords", (await sshTry({ port: target.port, username: "tester", password: "s3cret" })) !== "ready");
+  check(
+    "ssh server locks out an address after repeated bad passwords",
+    (await sshTry({ port: target.port, username: "tester", password: "s3cret" })) !== "ready",
+  );
 
   c.send({ type: "bastion_start", port: 0 });
   const twice = await c.next((m) => m.type === "bastion_started");
@@ -301,4 +416,7 @@ async function main() {
   finish();
 }
 
-main().catch((err) => { console.error("TEST ERROR:", err); process.exit(1); });
+main().catch((err) => {
+  console.error("TEST ERROR:", err);
+  process.exit(1);
+});

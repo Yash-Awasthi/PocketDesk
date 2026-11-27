@@ -61,11 +61,11 @@ test("reject removes from pending", () => {
 
 test("listPending returns only pending", () => {
   const p1 = proposals.create({ type: "command_execute", summary: "a", detail: {}, sessionId: "s" });
-  const p2 = proposals.create({ type: "command_execute", summary: "b", detail: {}, sessionId: "s" });
+  proposals.create({ type: "command_execute", summary: "b", detail: {}, sessionId: "s" });
   proposals.approve(p1.id);
   const pending = proposals.listPending();
   assert.ok(pending.length >= 1, "should have at least 1 pending");
-  assert.ok(!pending.find(p => p.id === p1.id), "approved should not be in pending");
+  assert.ok(!pending.find((p) => p.id === p1.id), "approved should not be in pending");
 });
 
 test("requiresApproval returns true for command_execute", () => {

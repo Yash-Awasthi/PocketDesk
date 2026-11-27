@@ -44,6 +44,7 @@ import com.yasha.pocketdesk.ui.DesktopScreen
 import com.yasha.pocketdesk.ui.ConnectScreen
 import com.yasha.pocketdesk.ui.FilesScreen
 import com.yasha.pocketdesk.ui.FreebuffScreen
+import com.yasha.pocketdesk.ui.QuickAction
 import com.yasha.pocketdesk.ui.SessionsScreen
 import com.yasha.pocketdesk.ui.SshScreen
 import com.yasha.pocketdesk.ui.TerminalScreen
@@ -83,6 +84,31 @@ private object NoMotion : androidx.compose.ui.MotionDurationScale {
     override val scaleFactor = 0f
 }
 
+/** The surface a home-screen quick action opens once the phone is linked to that PC. */
+internal fun quickActionDestination(action: QuickAction): Screen = when (action) {
+    QuickAction.Chat -> Screen.Chats
+    QuickAction.Terminal -> Screen.Sessions
+    QuickAction.Files -> Screen.Files
+    QuickAction.Desktop -> Screen.Desktop
+}
+
+/** What an intent asks the app to open: its `open` extra, else a `pocketdesk://session/<id>` link. */
+internal fun openRequest(intent: android.content.Intent?): String? {
+    if (intent == null) return null
+    intent.getStringExtra("open")?.let { return it }
+    val data = intent.data ?: return null
+    if (data.scheme != Pairing.SCHEME || data.host != "session") return null
+    return data.pathSegments.lastOrNull()?.takeIf { it.isNotBlank() }?.let { "session:$it" }
+}
+
+/** The surface an open request names, once the phone is linked to that PC. */
+internal fun openDestination(open: String?): Screen? = when {
+    open == "remote" -> Screen.Remote
+    open != null && open.startsWith("session:") ->
+        open.removePrefix("session:").takeIf { it.isNotBlank() }?.let { Screen.Terminal(it) }
+    else -> null
+}
+
 class MainActivity : ComponentActivity() {
 
     private var locked by mutableStateOf(false)
@@ -108,10 +134,10 @@ class MainActivity : ComponentActivity() {
     }
 
     /** A screen asked for from a widget or shortcut, opened once the PC is linked. */
-    private var pendingOpen by mutableStateOf<String?>(null)
+    internal var pendingOpen by mutableStateOf<String?>(null)
 
     private fun takePairing(intent: android.content.Intent?) {
-        intent?.getStringExtra("open")?.let { pendingOpen = it }
+        openRequest(intent)?.let { pendingOpen = it }
         val link = intent?.dataString ?: return
         Pairing.parse(link).takeIf { it.isNotEmpty() }?.let { Link.pendingPair = it }
     }
@@ -181,7 +207,13 @@ class MainActivity : ComponentActivity() {
 
         val connected = client.status == Status.Connected
         LaunchedEffect(pendingOpen, connected) {
-            if (connected && pendingOpen == "remote") { pendingOpen = null; open(Screen.Remote) }
+            val next = openDestination(pendingOpen) ?: return@LaunchedEffect
+            if (connected) {
+                pendingOpen = null
+                // A session link sits on the Sessions list, so Back goes to the list, not to Connect.
+                if (next is Screen.Terminal) showTab(Screen.Sessions)
+                open(next)
+            }
         }
 
         Scaffold(
@@ -260,12 +292,14 @@ class MainActivity : ComponentActivity() {
                 if (Peer.open) {
                     com.yasha.pocketdesk.ui.PeerScreen(onClose = { Peer.open = false })
                 } else if (client.status == Status.Disconnected) {
-                    ConnectScreen(client) { showTab(Screen.Sessions) }
+                    ConnectScreen(client, onConnected = { showTab(Screen.Sessions) }, onQuickAction = { action, _ -> showTab(quickActionDestination(action)) })
                 } else NavDisplay(
                     backStack = backStack,
                     onBack = { back() },
                     entryProvider = entryProvider {
-                        entry<Screen.Connect> { ConnectScreen(client) { showTab(Screen.Sessions) } }
+                        entry<Screen.Connect> {
+                            ConnectScreen(client, onConnected = { showTab(Screen.Sessions) }, onQuickAction = { action, _ -> showTab(quickActionDestination(action)) })
+                        }
                         entry<Screen.Tools> {
                             ToolsScreen(
                                 client,

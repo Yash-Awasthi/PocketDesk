@@ -3,6 +3,7 @@ package com.yasha.pocketdesk.ui
 import com.yasha.pocketdesk.Wake
 import kotlinx.coroutines.launch
 import android.Manifest
+import android.content.SharedPreferences
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -11,15 +12,21 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Card
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -37,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.yasha.pocketdesk.Link
@@ -46,11 +54,156 @@ import com.yasha.pocketdesk.ServerBook
 import com.yasha.pocketdesk.ServerEntry
 import com.yasha.pocketdesk.Status
 import com.yasha.pocketdesk.WsClient
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+
+/** One shortcut on a saved PC's card: a surface that can be opened as soon as the phone links to it. */
+enum class QuickAction(val id: String, val label: String) {
+    Chat("chat", "New chat"),
+    Terminal("terminal", "New terminal"),
+    Files("files", "Files"),
+    Desktop("desktop", "Desktop");
+
+    companion object {
+        fun fromId(id: String?): QuickAction? = entries.firstOrNull { it.id == id }
+    }
+}
+
+private val DEFAULT_QUICK_ACTIONS = listOf(QuickAction.Chat, QuickAction.Terminal, QuickAction.Files, QuickAction.Desktop)
+
+/** The grid's saved shape: every action's order, hidden ones included, and the hidden ids. */
+@Serializable
+internal data class QuickActionsLayout(val order: List<String>, val hidden: List<String> = emptyList()) {
+    fun actions(): List<QuickAction> = order.mapNotNull(QuickAction::fromId)
+
+    /** The actions drawn on the card, in order. */
+    fun visible(): List<QuickAction> = actions().filter { it.id !in hidden }
+
+    /** [action] moved [delta] places, held inside the ends. */
+    fun moved(action: QuickAction, delta: Int): QuickActionsLayout {
+        val from = order.indexOf(action.id)
+        if (from < 0) return this
+        val to = (from + delta).coerceIn(0, order.lastIndex)
+        if (to == from) return this
+        return copy(order = order.toMutableList().apply { add(to, removeAt(from)) })
+    }
+
+    fun toggled(action: QuickAction): QuickActionsLayout =
+        copy(hidden = if (action.id in hidden) hidden - action.id else hidden + action.id)
+
+    companion object {
+        /** The order every PC card starts with. */
+        fun default(): QuickActionsLayout = QuickActionsLayout(DEFAULT_QUICK_ACTIONS.map { it.id })
+
+        /** Ids an update no longer knows are dropped and new actions are appended, so the grid survives either. */
+        fun normalized(saved: QuickActionsLayout?): QuickActionsLayout {
+            val known = saved?.order?.mapNotNull(QuickAction::fromId)?.distinct() ?: emptyList()
+            val order = known + DEFAULT_QUICK_ACTIONS.filter { it !in known }
+            val hidden = saved?.hidden?.filter { QuickAction.fromId(it) != null }?.distinct() ?: emptyList()
+            return QuickActionsLayout(order.map { it.id }, hidden)
+        }
+    }
+}
+
+/** Reads and writes the card grid in the app's preferences; a missing or damaged value is the default order. */
+internal class QuickActionsStore(private val prefs: SharedPreferences) {
+    fun load(): QuickActionsLayout = QuickActionsLayout.normalized(
+        prefs.getString(KEY, null)?.let { runCatching { Json.decodeFromString<QuickActionsLayout>(it) }.getOrNull() },
+    )
+
+    fun save(layout: QuickActionsLayout) =
+        prefs.edit().putString(KEY, Json.encodeToString(QuickActionsLayout.normalized(layout))).apply()
+
+    fun reset() = prefs.edit().remove(KEY).apply()
+
+    companion object { const val KEY = "quick_actions" }
+}
+
+/**
+ * The editable grid of shortcuts on one saved PC's card. Tapping one links to that PC and asks the
+ * host screen to open the action's surface; Edit moves and hides them, saved as each change is made.
+ */
+@Composable
+internal fun QuickActionsGrid(
+    entry: ServerEntry,
+    store: QuickActionsStore,
+    enabled: Boolean,
+    onAction: (QuickAction, ServerEntry) -> Unit,
+) {
+    var layout by remember(store) { mutableStateOf(store.load()) }
+    var editing by remember { mutableStateOf(false) }
+    fun update(next: QuickActionsLayout) {
+        layout = next
+        store.save(next)
+    }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Quick actions", style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+            TextButton(
+                onClick = { editing = !editing },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("quick-actions-edit"),
+            ) { Text(if (editing) "Done" else "Edit") }
+        }
+        if (editing) {
+            for (action in layout.actions()) {
+                val index = layout.order.indexOf(action.id)
+                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (action.id in layout.hidden) action.label + " (hidden)" else action.label,
+                        modifier = Modifier.weight(1f),
+                    )
+                    IconButton(
+                        onClick = { update(layout.moved(action, -1)) },
+                        enabled = index > 0,
+                        modifier = Modifier.size(48.dp).testTag("action-up-" + action.id),
+                    ) { Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move " + action.label + " up") }
+                    IconButton(
+                        onClick = { update(layout.moved(action, 1)) },
+                        enabled = index < layout.order.lastIndex,
+                        modifier = Modifier.size(48.dp).testTag("action-down-" + action.id),
+                    ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move " + action.label + " down") }
+                    TextButton(
+                        onClick = { update(layout.toggled(action)) },
+                        modifier = Modifier.heightIn(min = 48.dp).testTag("action-toggle-" + action.id),
+                    ) { Text(if (action.id in layout.hidden) "Show" else "Hide") }
+                }
+            }
+            TextButton(
+                onClick = { update(QuickActionsLayout.default()) },
+                modifier = Modifier.heightIn(min = 48.dp).testTag("quick-actions-reset"),
+            ) { Text("Reset") }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (pair in layout.visible().chunked(2)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (action in pair) {
+                            FilledTonalButton(
+                                onClick = { onAction(action, entry) },
+                                enabled = enabled,
+                                modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("quick-action-" + action.id),
+                            ) { Text(action.label) }
+                        }
+                        if (pair.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+    }
+}
 
 @Composable
-fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
+fun ConnectScreen(
+    ws: WsClient,
+    onConnected: () -> Unit,
+    /** Opens the surface of a quick action once the phone has linked to that PC. */
+    onQuickAction: (QuickAction, ServerEntry) -> Unit = { _, _ -> },
+) {
     val ctx = LocalContext.current
     val book = remember { ServerBook(ctx) }
+    val prefs = remember { ctx.getSharedPreferences("pocketdesk", android.content.Context.MODE_PRIVATE) }
+    val quickStore = remember(prefs) { QuickActionsStore(prefs) }
+    var pendingQuick by remember { mutableStateOf<Pair<ServerEntry, QuickAction>?>(null) }
     var servers by remember { mutableStateOf(book.load()) }
     var editing by remember { mutableStateOf<ServerEntry?>(null) }
     var adding by remember { mutableStateOf(false) }
@@ -73,9 +226,11 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
         book.save(list)
     }
 
-    fun startConnect(entry: ServerEntry) {
+    fun startConnect(entry: ServerEntry, quick: QuickAction? = null) {
+        // A quick action lands on its surface once this PC answers; a plain Connect takes the default tab.
+        pendingQuick = quick?.let { entry to it }
         // Remembered so the app reconnects by itself after a restart (AutoConnect).
-        ctx.getSharedPreferences("pocketdesk", android.content.Context.MODE_PRIVATE).edit().putString("last_pc", entry.url).apply()
+        prefs.edit().putString("last_pc", entry.url).apply()
         val wanted = buildList {
             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
             if (Build.VERSION.SDK_INT >= 37) add(Manifest.permission.ACCESS_LOCAL_NETWORK)
@@ -108,7 +263,12 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
         if (ws.status == Status.Connected) {
             val w = ws.wakeInfo
             if (w != null) persist(servers.map { if (it.url == ws.serverUrl && it.wake != w) it.copy(wake = w) else it })
-            onConnected()
+            val quick = pendingQuick
+            pendingQuick = null
+            if (quick != null) onQuickAction(quick.second, quick.first) else onConnected()
+        } else if (ws.status == Status.Disconnected) {
+            // A failed link must not fire the action on a later automatic reconnect.
+            pendingQuick = null
         }
     }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -206,39 +366,47 @@ fun ConnectScreen(ws: WsClient, onConnected: () -> Unit) {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(servers, key = { it.url }) { s ->
                     Card(Modifier.fillMaxWidth()) {
-                        Row(
-                            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text(s.name, style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    s.url.substringAfter("://").removeSuffix("/ws") + (if (s.fallback != null) " · anywhere" else ""),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
+                        Column {
+                            Row(
+                                Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(s.name, style = MaterialTheme.typography.titleMedium)
+                                    Text(
+                                        s.url.substringAfter("://").removeSuffix("/ws") + (if (s.fallback != null) " · anywhere" else ""),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                }
+                                s.wake?.let { w ->
+                                    TextButton(onClick = {
+                                        scope.launch {
+                                            val n = Wake.send(w)
+                                            android.widget.Toast.makeText(ctx,
+                                                if (n > 0) "Wake sent. A PC on this network starts in about 20 s." else "Could not send on this network",
+                                                android.widget.Toast.LENGTH_LONG).show()
+                                        }
+                                    }) { Text("Wake") }
+                                }
+                                IconButton(onClick = { editing = s }) {
+                                    Icon(Icons.Filled.Settings, contentDescription = "Edit")
+                                }
+                                IconButton(onClick = { deleting = s }) {
+                                    Icon(Icons.Filled.Delete, contentDescription = "Delete")
+                                }
+                                TextButton(onClick = { startConnect(s) }, enabled = ws.status == Status.Disconnected) {
+                                    Text(if (ws.status == Status.Connecting || ws.status == Status.AwaitingTrust) "..." else "Connect")
+                                }
                             }
-                            s.wake?.let { w ->
-                                TextButton(onClick = {
-                                    scope.launch {
-                                        val n = Wake.send(w)
-                                        android.widget.Toast.makeText(ctx,
-                                            if (n > 0) "Wake sent. A PC on this network starts in about 20 s." else "Could not send on this network",
-                                            android.widget.Toast.LENGTH_LONG).show()
-                                    }
-                                }) { Text("Wake") }
-                            }
-                            IconButton(onClick = { editing = s }) {
-                                Icon(Icons.Filled.Settings, contentDescription = "Edit")
-                            }
-                            IconButton(onClick = { deleting = s }) {
-                                Icon(Icons.Filled.Delete, contentDescription = "Delete")
-                            }
-                            TextButton(onClick = { startConnect(s) }, enabled = ws.status == Status.Disconnected) {
-                                Text(if (ws.status == Status.Connecting || ws.status == Status.AwaitingTrust) "..." else "Connect")
-                            }
+                            QuickActionsGrid(
+                                entry = s,
+                                store = quickStore,
+                                enabled = ws.status == Status.Disconnected,
+                                onAction = { action, target -> startConnect(target, action) },
+                            )
                         }
                     }
                 }

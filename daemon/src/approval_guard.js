@@ -27,7 +27,10 @@ export function markWaiting(chatId) {
   const timer = setTimeout(() => {
     waiting.delete(chatId);
     const cb = onAutoDeny;
-    if (cb) Promise.resolve().then(() => cb({ chatId, waitedMs: timeoutMs })).catch(() => {});
+    if (cb)
+      Promise.resolve()
+        .then(() => cb({ chatId, waitedMs: timeoutMs }))
+        .catch(() => {});
   }, timeoutMs);
   timer.unref?.();
   waiting.set(chatId, { since: Date.now(), timer });

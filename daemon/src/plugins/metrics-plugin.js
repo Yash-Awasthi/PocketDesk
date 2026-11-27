@@ -26,7 +26,7 @@ export default {
     this._startTime = Date.now();
   },
 
-  start(ctx) {
+  start(_ctx) {
     // Register /metrics HTTP endpoint if possible
     // (server.js will need to route this — or plugins can modify the handler)
   },
@@ -39,19 +39,21 @@ export default {
     this._counts.disconnects++;
   },
 
-  onMessage(ctx, ws, msg) {
+  onMessage(_ctx, _ws, msg) {
     this._counts.messages++;
     if (msg.type === "chatmsg" || msg.type === "chatcancel") this._counts.chatMessages++;
     if (msg.type === "fread" || msg.type === "fwrite" || msg.type === "fs") this._counts.fileOps++;
-    if (msg.type === "in" || msg.type === "resize") {} // terminal I/O — don't count separately
+    if (msg.type === "in" || msg.type === "resize") {
+      // Terminal I/O is not counted separately.
+    }
   },
 
-  onSessionCreated(ctx, session) {
+  onSessionCreated(_ctx, session) {
     this._counts.sessionsCreated++;
     this._sessionStarts.set(session.id, Date.now());
   },
 
-  onSessionExit(ctx, session) {
+  onSessionExit(_ctx, session) {
     this._counts.sessionsExited++;
     const start = this._sessionStarts.get(session.id);
     if (start) this._sessionStarts.delete(session.id);

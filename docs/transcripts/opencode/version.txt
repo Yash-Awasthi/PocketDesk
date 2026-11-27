@@ -1,0 +1,16 @@
+# Golden transcript: OpenCode (opencode)
+# package: opencode-ai
+# binary: opencode
+# command: opencode --version
+# argv: ["opencode","--version"]
+# cwd: C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd
+# env-overrides: XDG_CONFIG_HOME=C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd\opencode-config, XDG_DATA_HOME=C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd\opencode-data
+# credential-probe: no
+# outcome: exit 0 in 1615 ms
+# captured: 2026-11-26
+
+# ---- stdout ----
+1.19.6
+# ---- stderr ----
+(empty)
+# ---- end ----

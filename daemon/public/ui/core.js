@@ -1,10 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The page's connection to the daemon, a small event bus, pages and toasts. Every other ui/*.js
-// file hangs off window.PD.
-"use strict";
+// file imports this module, which owns the shared state and helpers.
 
-(() => {
-const PD = (window.PD ||= {});
+const PD = {};
 const handlers = new Map();
 const binary = [];
 PD.on = (type, fn) => { (handlers.get(type) || handlers.set(type, []).get(type)).push(fn); };
@@ -22,6 +20,50 @@ PD.h = (tag, props = {}, ...kids) => {
   const el = Object.assign(document.createElement(tag), props);
   for (const k of kids.flat()) if (k != null && k !== false) el.append(k.nodeType ? k : String(k));
   return el;
+};
+
+// ── list state: loading, empty, error, and one retry that survives a re-render ──
+// The click listener is on the container, never on the note or the button: a state paint replaces
+// those children, and a listener attached to a replaced node dies with it.
+const STATE = { loading: "Loading…", error: "Could not load this." };
+const boxes = new WeakMap();
+PD.up = () => PD.connState === "up";
+PD.stateBox = (el, opts = {}) => {
+  let box = boxes.get(el);
+  if (!box) {
+    el.addEventListener("click", (e) => {
+      const hit = e.target.closest?.('[data-action="retry"]');
+      if (!hit || !el.contains(hit) || !PD.up()) return;
+      boxes.get(el).opts.retry?.();
+    });
+    box = { el, opts: {} };
+    boxes.set(el, box);
+    PD.on("conn", () => {
+      const hit = el.querySelector('[data-action="retry"]');
+      if (hit) hit.disabled = !PD.up();
+    });
+    box.show = (state, detail) => {
+      if (!state) return void delete el.dataset.state;
+      el.dataset.state = state;
+      const text =
+        state === "empty"
+          ? box.opts.empty
+          : state === "error"
+            ? `${STATE.error}${detail ? ` ${detail}` : ""}`
+            : STATE.loading;
+      const kids = [PD.h("div", { className: "empty", textContent: text, role: state === "error" ? "alert" : "status" })];
+      if (state !== "loading") {
+        // `dataset` is a read-only accessor, so the attribute goes on after the element exists.
+        const again = PD.h("button", { textContent: "Retry", disabled: !PD.up() });
+        again.dataset.action = "retry";
+        kids.push(again);
+      }
+      el.replaceChildren(...kids);
+    };
+    box.clear = () => { delete el.dataset.state; };
+  }
+  Object.assign(box.opts, opts);
+  return box;
 };
 
 PD.toast = (text, bad) => {
@@ -66,12 +108,29 @@ PD.buildNav = () => {
 };
 
 // ── connection: the token comes from #t= in the link, this browser's last login, or the box ──
-let reconnectTimer, reconnectDelay = 1000, pairCode;
-function setUp(up, text) {
-  document.body.classList.toggle("online", up);
-  PD.$("#loginStatus").textContent = text || (up ? "connected" : "disconnected");
-  PD.$("#conn").textContent = up ? "Connected" : "Offline";
-  PD.$("#conn").className = up ? "pill ok" : "pill";
+const CONN = { up: "Connected", retry: "Reconnecting...", down: "Offline" };
+// A version refusal is permanent: name both numbers, keep #conn's vocabulary, never schedule a retry.
+const mismatchText = (m) =>
+  `protocol mismatch: this page sends ${m.found}, the daemon expects ${m.expected}. Reload after updating PocketDesk.`;
+// body.online follows live, not each socket: it stays on through a scheduled retry so the shell and
+// the indicator do not vanish on a blip, and drops only when no retry is scheduled.
+let reconnectTimer, reconnectDelay = 1000, pairCode, live = false;
+function setConn(state, note) {
+  PD.connState = state;
+  if (state === "up") live = true;
+  if (state === "down") live = false;
+  const pill = PD.$("#conn");
+  pill.textContent = CONN[state];
+  pill.dataset.state = state;
+  pill.classList.toggle("ok", state === "up");
+  pill.classList.toggle("wait", state === "retry");
+  const slot = live ? PD.$("#connSlot") : PD.$("#login .conn-row");
+  if (pill.parentElement !== slot) slot.append(pill);
+  const reason = PD.$("#loginStatus");
+  reason.textContent = note || "";
+  reason.hidden = !note;
+  document.body.classList.toggle("online", live);
+  PD.emit("conn", state);
 }
 PD.connect = () => {
   if (PD.ws) { PD.ws.onclose = null; PD.ws.close(); }
@@ -80,19 +139,31 @@ PD.connect = () => {
   ws.binaryType = "arraybuffer";
   ws.onopen = () => {
     reconnectDelay = 1000;
-    PD.send({ type: "hello", token: PD.$("#token").value.trim(), totp: pairCode, name: "PC browser" });
+    const hello = { type: "hello", token: PD.$("#token").value.trim(), totp: pairCode, name: "PC browser" };
+    // The version comes from the served page's pd-protocol meta, itself written from compat.json.
+    if (Number.isInteger(PD.protocolVersion)) hello.protocolVersion = PD.protocolVersion;
+    PD.send(hello);
     pairCode = undefined;
   };
   ws.onclose = (ev) => {
-    setUp(false);
     PD.emit("offline");
-    if (ev.code === 4011) { pairCode = prompt("Two-factor code from your authenticator app") || undefined; if (pairCode) PD.connect(); return; }
+    if (ev.code === 4011) {
+      pairCode = prompt("Two-factor code from your authenticator app") || undefined;
+      if (pairCode) { setConn("retry"); PD.connect(); } else setConn("down");
+      return;
+    }
+    // A version refusal is permanent and names both numbers; anything else 4xxx is a refusal too.
+    if (ev.code === 4026) {
+      setConn("down", PD.mismatch ? mismatchText(PD.mismatch) : "protocol version mismatch");
+      return;
+    }
     // 4xxx is a refusal (wrong token, locked out, switched off): retrying only burns login attempts.
     if (ev.code >= 4000) {
       if (ev.code === 4003) { try { localStorage.removeItem("pd_token"); } catch {} }
-      setUp(false, ev.code === 4029 ? "too many attempts: wait 10 minutes" : ev.reason || `refused (${ev.code})`);
+      setConn("down", ev.code === 4029 ? "too many attempts: wait 10 minutes" : ev.reason || `refused (${ev.code})`);
       return;
     }
+    setConn("retry");
     reconnectTimer = setTimeout(PD.connect, (reconnectDelay = Math.min(reconnectDelay * 2, 30000)));
   };
   ws.onmessage = (ev) => {
@@ -102,11 +173,15 @@ PD.connect = () => {
       return;
     }
     const m = JSON.parse(ev.data);
+    if (m.type === "protocol_mismatch") {
+      PD.mismatch = { expected: m.expected, found: m.found };
+      setConn("down", mismatchText(PD.mismatch));
+    }
     if (m.type === "welcome") {
       PD.os = m.os;
       if (m.deviceToken) PD.$("#token").value = m.deviceToken;
       try { localStorage.setItem("pd_token", PD.$("#token").value); } catch {}
-      setUp(true);
+      setConn("up");
       // PD.start() shows the first page before the socket opens, so its show() asked for data nobody
       // heard. Ask again now that the welcome arrived; otherwise Home stays empty until a page switch.
       pages.get(PD.current)?.show?.(PD.$(`#page-${PD.current}`));
@@ -121,6 +196,7 @@ PD.start = () => {
   // responses), so opening PocketDesk on the PC is already signed in; phones on the LAN get the
   // plain page. Read before buildNav, which renders the pages that use them.
   const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.content || "";
+  PD.protocolVersion = Number(meta("pd-protocol")) || null;
   PD.localToken = meta("pd-token");
   PD.pairPayload = meta("pd-qr");
   PD.hubUrl = meta("pd-hub");
@@ -150,4 +226,5 @@ PD.start = () => {
     try { theme ? localStorage.setItem("pd_theme", theme) : localStorage.removeItem("pd_theme"); } catch {}
   };
 };
-})();
+
+export { PD };

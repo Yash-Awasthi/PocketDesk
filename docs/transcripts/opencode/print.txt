@@ -1,0 +1,18 @@
+# Golden transcript: OpenCode (opencode)
+# package: opencode-ai
+# binary: opencode
+# command: opencode run --format json "Reply with OK"
+# argv: ["opencode","run","--format","json","Reply with OK"]
+# cwd: C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd
+# env-overrides: XDG_CONFIG_HOME=C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd\opencode-config, XDG_DATA_HOME=C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd\opencode-data
+# credential-probe: yes, no credentials supplied
+# outcome: exit 1 in 8518 ms
+# captured: 2026-11-26
+
+# note: XDG dirs point at empty directories so no stored provider credential is used
+
+# ---- stdout ----
+{"type":"error","timestamp":1795695545224,"sessionID":"ses_de8348977ffe27CQSTbpWCAZWi","error":{"name":"UnknownError","data":{"message":"CLOUDFLARE_GATEWAY_ID missing. Set with: export CLOUDFLARE_GATEWAY_ID=<value>"}}}
+# ---- stderr ----
+(empty)
+# ---- end ----

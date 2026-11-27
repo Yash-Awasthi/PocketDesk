@@ -5,6 +5,7 @@ local.properties
 *.jks
 *.keystore
 keystore.properties
+pocketdesk.ini
 .cxx/
 .kotlin/
 
@@ -26,3 +27,7 @@ desktop.ini
 
 # c8 output
 daemon/coverage/
+
+# Playwright writes these next to the daemon when the hub tests run
+daemon/test-results/
+daemon/playwright-report/

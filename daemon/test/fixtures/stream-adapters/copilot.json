@@ -1,0 +1,67 @@
+{
+  "_fixture": {
+    "format": "copilot-json",
+    "cli": "copilot",
+    "version": "0.0.354",
+    "produced": "synthetic",
+    "note": "The copilot CLI is not installed on this machine; this synthetic stream targets 0.0.354 and was written by hand, not captured."
+  },
+  "events": [
+    {
+      "type": "user.message",
+      "data": {
+        "content": "read a.txt"
+      }
+    },
+    {
+      "type": "assistant.message",
+      "data": {
+        "content": "",
+        "toolRequests": [
+          {
+            "name": "view"
+          }
+        ]
+      }
+    },
+    {
+      "type": "tool.execution_start",
+      "data": {
+        "toolName": "view",
+        "arguments": {
+          "path": "a.txt"
+        }
+      }
+    },
+    {
+      "type": "tool.execution_complete",
+      "data": {
+        "success": true,
+        "result": {
+          "content": "x\n"
+        }
+      }
+    },
+    {
+      "type": "assistant.message_delta",
+      "data": {
+        "deltaContent": "x"
+      }
+    },
+    {
+      "type": "assistant.message",
+      "data": {
+        "content": "x",
+        "toolRequests": []
+      }
+    },
+    {
+      "type": "result",
+      "sessionId": "cp-uuid-1",
+      "exitCode": 0,
+      "usage": {
+        "premiumRequests": 1
+      }
+    }
+  ]
+}

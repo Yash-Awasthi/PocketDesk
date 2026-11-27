@@ -26,16 +26,25 @@ function useBundledFfmpeg() {
     path.join(process.env.LOCALAPPDATA || "", "PocketDesk", "ffmpeg", exe),
   ];
   for (const p of candidates) {
-    try { if (fs.existsSync(p)) { process.env.FFMPEG_PATH = p; return; } } catch { /* try the next */ }
+    try {
+      if (fs.existsSync(p)) {
+        process.env.FFMPEG_PATH = p;
+        return;
+      }
+    } catch {
+      /* try the next */
+    }
   }
 }
 useBundledFfmpeg();
 
 // Surviving a stray rejection keeps the unsupervised user daemon alive; uncaughtException is left
 // to crash on purpose so an agent's child processes die with it (see crash-kills-agents test).
-// ponytail: a crash restarts nothing on purpose (no RestartCount on the default task): a stop is a
-// stop. Only an explicit -Protected install keeps a restart policy, like the SYSTEM console task.
-process.on("unhandledRejection", (e) => console.error(`[warn] unhandled rejection (kept alive): ${e?.stack || e}`));
+// ponytail: a crash exits non-zero, so the task's failure restart brings it back; a deliberate
+// stop exits 0, so the task does not restart it.
+process.on("unhandledRejection", (e) =>
+  console.error(`[warn] unhandled rejection (kept alive): ${e?.stack || e}`),
+);
 
 // ── Graceful shutdown ───────────────────────────────────────────────────────
 // On SIGTERM/SIGINT: kill all live PTY sessions (no orphaned children), stop
@@ -73,19 +82,25 @@ function gracefulShutdown(signal) {
 }
 
 // A crash skips gracefulShutdown; "exit" still runs, and both kills are synchronous and idempotent.
-process.on("exit", () => { killAll(); chat.killAll(); });
+process.on("exit", () => {
+  killAll();
+  chat.killAll();
+});
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-// Windows has no SIGTERM for a windowless child: the tray asks for a clean stop by closing stdin,
-// which also happens when the tray itself dies, so the daemon never outlives it.
+// Windows has no SIGTERM for a windowless child: a launcher asks for a clean stop by closing
+// stdin, which also happens when that launcher dies, so the daemon never outlives it.
 if (process.env.RH_STOP_ON_STDIN_EOF === "1") {
   process.stdin.on("end", () => gracefulShutdown("stdin closed"));
   process.stdin.resume();
 }
 
 const cfg = loadConfig();
-logEvent(EVENT_IDS.start, `PocketDesk started: port ${cfg.port}${process.env.RH_CONSOLE ? ", console endpoint" : ""}, pid ${process.pid}`);
+logEvent(
+  EVENT_IDS.start,
+  `PocketDesk started: port ${cfg.port}${process.env.RH_CONSOLE ? ", console endpoint" : ""}, pid ${process.pid}`,
+);
 start(cfg, {
   onTokenRotated(token) {
     cfg.token = token;

@@ -21,6 +21,30 @@
         "functions": 48
       }
     },
+    "desktop": {
+      "measured": {
+        "statements": 69.0,
+        "branches": 55.2,
+        "functions": 31.9
+      },
+      "floor": {
+        "statements": 66,
+        "branches": 52,
+        "functions": 29
+      }
+    },
+    "http": {
+      "measured": {
+        "statements": 81.1,
+        "branches": 40.4,
+        "functions": 42.9
+      },
+      "floor": {
+        "statements": 78,
+        "branches": 37,
+        "functions": 39
+      }
+    },
     "handlers": {
       "measured": {
         "statements": 37.6,

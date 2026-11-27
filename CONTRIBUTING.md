@@ -22,7 +22,7 @@ node daemon/src/index.js
 | Component | Technology | Version |
 |-----------|------------|---------|
 | Language | JavaScript | ES2022+ |
-| Runtime | Node.js | 24+ |
+| Runtime | Node.js | 26+ |
 | Protocol | WebSocket | ws 8.0+ |
 | Terminal | xterm.js | 5.0+ |
 | Testing | Node.js test runner | Built-in |
@@ -177,6 +177,7 @@ node --test --watch "test/*.test.mjs"
 
 ## Pull Request Checklist
 - [ ] Tests pass (`cd daemon && npm test`)
+- [ ] Pre-push gate run (see [Pre-push gate](#pre-push-gate))
 - [ ] No console.log in production code (use logger)
 - [ ] WebSocket messages validated
 - [ ] Plugin hooks documented
@@ -201,9 +202,23 @@ grep -rniE 'invisible to anti-?cheat|invisible to antivirus|RAT heuristics|\bAMS
   . | grep -v node_modules | grep -v '^./plan.md' | grep -v '^./docs/INTEGRITY.md' | grep -v '^./CONTRIBUTING.md' | grep -v '^./daemon/test/no-evasion.test.mjs'
 ```
 
-Expected output: none. `plan.md`, `docs/INTEGRITY.md` and this file are exempt
-because naming the forbidden pattern is their job — everywhere else a match is a
-bug.
+Expected output: exactly these five restored lines, in these four files, and
+nothing else -- anything else is a bug. `grep` prefixes each hit with `:<line>:`, so
+the numbers move as a file grows; the five texts below do not:
+
+```
+./daemon/src/desktop/capture.js:      // 40-69 = 75%, below = 50%. In-memory JPEG keeps AMSI calm — the
+./daemon/src/desktop_capture.js: * Windows AMSI blocks any single script combining SendInput P/Invoke WITH
+./docs/EXCLUSIVE-FULLSCREEN.md:must stay invisible to anti-cheat and antivirus (its capture helpers are already written to avoid the
+./docs/EXCLUSIVE-FULLSCREEN.md:RAT heuristics AMSI flags). Every other route is the OS saying no.
+./docs/FEATURE-MATRIX.md:| **Real desktop control (capture + input)** | rustdesk, anydesk | ✅ `desktop_start/stop/frame/mouse/key/type/quality/status` — Windows PowerShell helpers (warm ~3 fps JPEG capture in-memory to dodge AMSI RAT heuristics + warm SendInput input helper), canvas viewer in the browser tab (click/right-click/wheel/keyboard), watcher-scoped frame feed (no broadcast fan-out), capture loop stops at zero viewers; browser 🖨️ Desktop tab + relay status pill + 🔔 Test-push button |
+```
+
+`plan.md`, `docs/INTEGRITY.md` and this file are exempt because naming the
+forbidden pattern is their job. The five above are exempt line for line: the owner
+ruled on 2026-11-26 that the AMSI explanation stays, restored verbatim from
+`e6da7a5^` in `2ec01a0`, and `daemon/test/no-evasion.test.mjs` lists them in
+`RESTORED`, so editing one of them, or adding a sixth match, still fails the gate.
 
 ### Stable pins only
 
@@ -234,6 +249,77 @@ its floor. When coverage improves, raise the floor **and** the `measured` number
 in the same commit; never lower either. `test/coverage-floors.test.mjs` rejects a
 floor set above what was measured, a floor more than six points below it (a stale
 floor that would let coverage rot), and a folder of `src/` with no floor at all.
+
+## Pre-push gate
+
+CI runs on every push; run the same four jobs before you do. Each block below is
+one job from `.github/workflows/ci.yml`:
+
+```bash
+# daemon: syntax check (ci.yml line 42)
+(cd daemon && for f in $(git ls-files 'src/*.js' 'scripts/*.js' 'scripts/*.mjs'); do node --check "$f" || exit 1; done)
+
+# daemon: tests (ci.yml line 58)
+(cd daemon && npm test)
+
+# android: lint, unit tests, debug APK (ci.yml line 72)
+(cd app && chmod +x gradlew && ./gradlew lintDebug testDebugUnitTest assembleDebug --no-daemon)
+
+# native: Windows helpers (ci.yml lines 164 and 166)
+(cd native && cargo build --release && cargo test --release)
+```
+
+No git hook is installed: `.git/hooks` holds only `*.sample` files. This is a
+checklist, not automation.
+
+The daemon job is the cheapest to run on its own:
+
+```bash
+cd daemon
+node --test test/no-evasion.test.mjs
+node --test test/protocol-doc.test.mjs
+```
+
+Both are green. On Windows, `npm.cmd test` is the shim for the same `test`
+script.
+
+The rules these checks protect are in
+[No detection evasion, ever](#no-detection-evasion-ever).
+
+## Protocol changes
+
+A protocol change lands on both ends in one change:
+
+- **Daemon.** `handle()` in `daemon/src/server.js` dispatches on
+  `handlers[msg.type]`; each module in `daemon/src/handlers/` is a factory
+  returning a message-keyed object.
+- **Phone.** `app/app/src/main/java/com/yasha/pocketdesk/Protocol.kt`.
+
+The table in `daemon/README.md`, between `<!-- BEGIN protocol-table -->` and
+`<!-- END protocol-table -->`, is generated: one row per message type with its
+handler file, 222 types today. Regenerate it when the protocol moves:
+
+```bash
+node daemon/scripts/gen-protocol-doc.mjs
+```
+
+`node daemon/scripts/gen-protocol-doc.mjs --check` exits 1 when the table is
+stale, and `daemon/test/protocol-doc.test.mjs` runs it. Keep that test and
+`daemon/test/protocol-contract.test.mjs` (the app<->daemon contract) current in
+the same change.
+
+The check is green now: in `daemon/`, `node scripts/gen-protocol-doc.mjs --check`
+prints `protocol table is current (222 message types)` and exits 0.
+
+## One subtask, one PR
+
+One checklist item in [plan.md](plan.md) is one PR with one proving command. Tick
+the box and add the `verified-here:` line in the same commit that changes the
+code, so the plan never claims work the diff does not contain.
+
+Stage by path; never `git add -A`, `git add .` or `git commit -a`, so nothing
+unrelated rides along. The integrity rules behind this are in
+[docs/INTEGRITY.md](docs/INTEGRITY.md).
 
 ## Commit Messages
 ```

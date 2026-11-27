@@ -5,11 +5,11 @@
 import crypto from "node:crypto";
 const POLL_MS = 1500;
 const LIMIT_MS = 3 * 60000;
-const ALNUM = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
-const word = (n) => [...crypto.randomBytes(n)].map((b) => ALNUM[b % ALNUM.length]).join('');
+const ALNUM = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+const word = (n) => [...crypto.randomBytes(n)].map((b) => ALNUM[b % ALNUM.length]).join("");
 
 function startAdbQr({ adb, onPaired, onEnd }) {
-  const name = 'pocketdesk-' + word(8);
+  const name = "pocketdesk-" + word(8);
   const pass = word(10);
   let stopped = false;
   let busy = false;
@@ -22,18 +22,23 @@ function startAdbQr({ adb, onPaired, onEnd }) {
   };
   const timer = setInterval(async () => {
     if (stopped || busy) return;
-    if (Date.now() - started > LIMIT_MS) return end('timeout');
+    if (Date.now() - started > LIMIT_MS) return end("timeout");
     busy = true;
     try {
-      const s = (await adb.mdns()).find((x) => x.type === 'pairing' && x.name === name);
+      const s = (await adb.mdns()).find((x) => x.type === "pairing" && x.name === name);
       if (s) {
         const r = await adb.pair(s.address, s.port, pass);
-        if (r.ok) { end('paired'); if (onPaired) onPaired(s); } else end('failed: ' + (r.text.split('\n').pop() || 'no answer'));
+        if (r.ok) {
+          end("paired");
+          if (onPaired) onPaired(s);
+        } else end("failed: " + (r.text.split("\n").pop() || "no answer"));
       }
-    } catch (e) { /* the next look */ }
+    } catch {
+      /* the next look */
+    }
     busy = false;
   }, POLL_MS);
-  return { text: `WIFI:T:ADB;S:${name};P:${pass};;`, stop: () => end('stopped') };
+  return { text: `WIFI:T:ADB;S:${name};P:${pass};;`, stop: () => end("stopped") };
 }
 
 export { startAdbQr };

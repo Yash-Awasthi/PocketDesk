@@ -34,7 +34,7 @@ function Stop-PocketDesk {
     } catch {}
     $roots = @($InstallDir, $UserRoot, (Join-Path $consoleRoot "bin")) | ForEach-Object { $_.TrimEnd('\') + '\' }
     $helpers = Join-Path $env:USERPROFILE ".pocketdesk\helpers\"
-    $ids = @(Get-Process PocketDesk, PocketDeskTray, PocketDeskLauncher, PocketDeskConsole -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
+    $ids = @(Get-Process PocketDesk, PocketDeskLauncher, PocketDeskConsole -ErrorAction SilentlyContinue | ForEach-Object { $_.Id })
     $ids += @(Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in $port, 8766 } | ForEach-Object { $_.OwningProcess })
     $ids += @(Get-CimInstance Win32_Process | Where-Object {
         $exe = "$($_.ExecutablePath)"; $cmd = "$($_.CommandLine)"

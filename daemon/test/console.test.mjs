@@ -19,7 +19,10 @@ const TOKEN = "consoletoken";
 
 async function hello(token) {
   const c = connect(PORT, token);
-  await new Promise((res, rej) => { c.ws.on("open", res); c.ws.on("error", rej); });
+  await new Promise((res, rej) => {
+    c.ws.on("open", res);
+    c.ws.on("error", rej);
+  });
   const closed = new Promise((res) => c.ws.once("close", (code) => res(code)));
   c.send({ type: "hello", token, name: "phone" });
   const first = await Promise.race([c.next((m) => m.type === "welcome"), closed]);
@@ -27,7 +30,13 @@ async function hello(token) {
 }
 
 async function main() {
-  const d = startDaemon(PORT, CLI_PORT, { token: TOKEN, manifests: tmp, home, dataDir: ".pocketdesk-consoletest", env: { RH_CONSOLE: "1" } });
+  const d = startDaemon(PORT, CLI_PORT, {
+    token: TOKEN,
+    manifests: tmp,
+    home,
+    dataDir: ".pocketdesk-consoletest",
+    env: { RH_CONSOLE: "1" },
+  });
   await d.ready;
 
   const phone = await hello(TOKEN);
@@ -43,8 +52,15 @@ async function main() {
   byDevice.c.send({ type: "desktop_ping" });
   byDevice.c.send({ type: "stats" });
   await byDevice.c.next((m) => m.type === "stats");
-  const lines = fs.readFileSync(path.join(home, "console-audit.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
-  check("console actions are audited with device and path", lines.some((l) => l.type === "fs" && l.device === byDevice.first.clientId && l.path === os.tmpdir()));
+  const lines = fs
+    .readFileSync(path.join(home, "console-audit.log"), "utf8")
+    .trim()
+    .split("\n")
+    .map((l) => JSON.parse(l));
+  check(
+    "console actions are audited with device and path",
+    lines.some((l) => l.type === "fs" && l.device === byDevice.first.clientId && l.path === os.tmpdir()),
+  );
   check("high-rate traffic stays out of the audit log", !lines.some((l) => l.type === "desktop_ping"));
 
   await phone.c.close();
@@ -54,4 +70,7 @@ async function main() {
   finish();
 }
 
-main().catch((err) => { console.error("TEST ERROR:", err); process.exit(1); });
+main().catch((err) => {
+  console.error("TEST ERROR:", err);
+  process.exit(1);
+});

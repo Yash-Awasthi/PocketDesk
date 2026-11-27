@@ -9,8 +9,7 @@ try {
     $cfg = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json
     if ($cfg.port) { $port = [int]$cfg.port }
 } catch {}
-Get-Process PocketDeskTray -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-# Delete the autostart task before killing the daemon: a -Protected install's task has RestartCount,
+# Delete the autostart task before killing the daemon: the task has RestartCount,
 # so ending it without deleting it would let it respawn mid-uninstall.
 try { schtasks /End /TN "PocketDesk" 2>$null | Out-Null } catch {}
 try { schtasks /Delete /F /TN "PocketDesk" 2>$null | Out-Null } catch {}
@@ -33,7 +32,7 @@ if (Test-Path $consoleBin) { Remove-Item -Recurse -Force $consoleBin -ErrorActio
 $consoleHome = Join-Path $env:ProgramData "PocketDesk\console"
 if ($Purge -and (Test-Path $consoleHome)) {
     Remove-Item -Recurse -Force $consoleHome -ErrorAction SilentlyContinue
-    Write-Host "removed. tray autostart and console endpoint gone, including the paired token (-Purge)."
+    Write-Host "removed. autostart and console endpoint gone, including the paired token (-Purge)."
 } else {
-    Write-Host "removed. tray autostart and console endpoint gone. Console token kept in $consoleHome (use -Purge to delete)."
+    Write-Host "removed. autostart and console endpoint gone. Console token kept in $consoleHome (use -Purge to delete)."
 }

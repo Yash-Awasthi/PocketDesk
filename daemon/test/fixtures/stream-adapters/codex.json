@@ -1,0 +1,52 @@
+{
+  "_fixture": {
+    "format": "codex-json",
+    "cli": "codex",
+    "version": "0.55.0",
+    "produced": "synthetic",
+    "note": "Synthetic fixture: codex is not installed on this machine, so no real 0.55.0 run was captured here; the events mirror the inline adapter corpus."
+  },
+  "events": [
+    {
+      "type": "thread.started",
+      "thread_id": "cx-thread-1"
+    },
+    {
+      "type": "turn.started"
+    },
+    {
+      "type": "item.started",
+      "item": {
+        "id": "item_0",
+        "type": "command_execution",
+        "command": "cat a.txt",
+        "status": "in_progress"
+      }
+    },
+    {
+      "type": "item.completed",
+      "item": {
+        "id": "item_0",
+        "type": "command_execution",
+        "command": "cat a.txt",
+        "aggregated_output": "x\n",
+        "exit_code": 0
+      }
+    },
+    {
+      "type": "item.completed",
+      "item": {
+        "id": "item_1",
+        "type": "agent_message",
+        "text": "x"
+      }
+    },
+    {
+      "type": "turn.completed",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 1
+      }
+    }
+  ]
+}

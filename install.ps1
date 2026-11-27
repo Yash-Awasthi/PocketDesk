@@ -52,7 +52,7 @@ try {
         Start-Sleep -Seconds 2
     } catch {}
     # Whole trees, so the daemon's PowerShell and ffmpeg helpers go with it.
-    $running = @(Get-Process PocketDesk, PocketDeskTray -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) +
+    $running = @(Get-Process PocketDesk -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) +
                @(Get-NetTCPConnection -State Listen -LocalPort $uport -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess })
     foreach ($id in $running | Sort-Object -Unique) { taskkill /T /F /PID $id 2>$null | Out-Null }
     Start-Sleep -Milliseconds 300

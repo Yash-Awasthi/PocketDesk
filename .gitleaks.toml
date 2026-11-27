@@ -1,0 +1,14 @@
+# Extends the default gitleaks rules; the allowlist covers only values already known to be
+# placeholders or public vectors, plus vendored minified code that the generic rule misreads.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and vendored minified code, not credentials"
+paths = ['''^app/app/src/main/assets/vendor/''']
+regexes = [
+  '''abcdef1234567890''',
+  '''0123456789abcdef''',
+  '''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''',
+  '''MFRGGZDFMZTWQ2LKNNWG23TPOBYXE43U''',
+]

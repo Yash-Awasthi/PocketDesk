@@ -1,8 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import * as worktree from "../worktree.js";
-import { exec, execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { execFile } from "node:child_process";
 import * as registry from "../registry.js";
 import * as appDiscovery from "../app_discovery.js";
 import * as sessions from "../sessions.js";
@@ -44,6 +43,12 @@ function startScan() {
   return scanInFlight;
 }
 
+/** execFile as a promise of { stdout }. */
+const execFileP = (bin, args, opts) =>
+  new Promise((resolve, reject) => {
+    execFile(bin, args, opts, (err, stdout) => (err ? reject(err) : resolve({ stdout })));
+  });
+
 /**
  * Which known agent binaries have a live process right now.
  *
@@ -53,10 +58,21 @@ function startScan() {
  * ~0.35 s to ~21 s, and only image names are matched anyway.
  */
 async function probeAgents() {
-  const probe = process.platform === "win32"
-    ? "wmic process get processid,commandline /format:csv 2>nul || tasklist /fo csv /nh"
-    : "ps -eo pid=,args=";
-  const { stdout: out } = await promisify(exec)(probe, { encoding: "utf-8", timeout: 120_000, windowsHide: true });
+  const opts = { encoding: "utf-8", timeout: 120_000, windowsHide: true };
+  let out;
+  if (process.platform === "win32") {
+    try {
+      ({ stdout: out } = await execFileP(
+        "wmic",
+        ["process", "get", "processid,commandline", "/format:csv"],
+        opts,
+      ));
+    } catch {
+      ({ stdout: out } = await execFileP("tasklist", ["/fo", "csv", "/nh"], opts));
+    }
+  } else {
+    ({ stdout: out } = await execFileP("ps", ["-eo", "pid=,args="], opts));
+  }
   const lines = String(out).split(/\r?\n/).filter(Boolean);
   // GUI manifests have no `bin`: they are detected by path, not by a process name.
   const known = registry
@@ -68,21 +84,32 @@ async function probeAgents() {
   for (const line of lines) {
     const low = line.toLowerCase();
     for (const bin of known) {
-      if (low.includes(bin) && !found.some((f) => f.bin === bin)) found.push({ bin, sample: line.slice(0, 300) });
+      if (low.includes(bin) && !found.some((f) => f.bin === bin))
+        found.push({ bin, sample: line.slice(0, 300) });
     }
   }
   return found;
 }
 
 /** Starts a chat attached to [ws] and sends its first prompt; returns { error } when the harness cannot chat. */
-export function startChat({ send, broadcast, allSessions, plugins, power }, ws, harness, cwd, prompt, resume = {}) {
+export function startChat(
+  { send, broadcast, allSessions, plugins, power },
+  ws,
+  harness,
+  cwd,
+  prompt,
+  resume = {},
+) {
   const m = registry.get(harness);
   if (!m) return { error: `unknown harness: ${harness}` };
   if (!chat.supported(m)) return { error: `${m.name} has no chat adapter` };
   if (!registry.isInstalled(m.id)) return { error: `${m.name} is not installed` };
   // Windows reports a missing working folder as the shell itself missing (spawn cmd.exe ENOENT).
-  if (cwd && !fs.statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) return { error: `folder not found: ${cwd}` };
-  const s = chat.create({ manifest: m, cwd, ...resume });
+  if (cwd && !fs.statSync(cwd, { throwIfNoEntry: false })?.isDirectory())
+    return { error: `folder not found: ${cwd}` };
+  // chat.create requires the version, so hand it the value the registry's last probe recorded.
+  const entry = registry.list().find((r) => r.manifest.id === m.id);
+  const s = chat.create({ manifest: m, cwd, ...resume, version: entry?.version ?? null });
   sessionStore.upsert(s.id, { name: m.name, project: cwd || "", type: "chat", status: "idle" });
   plugins.callHook("onChatCreated", s);
   power.addStatus({ agentId: s.id, state: "running", receivedAt: Date.now() });
@@ -90,23 +117,32 @@ export function startChat({ send, broadcast, allSessions, plugins, power }, ws, 
   send(ws, { type: "created", ...s });
   // A sent prompt changes the chat's state, and every state change already broadcasts the list.
   const text = String(prompt ?? "").trim();
-  if (!text || !chat.sendUserMessage(chat.get(s.id), text)) broadcast({ type: "sessions", items: allSessions() });
+  if (!text || !chat.sendUserMessage(chat.get(s.id), text))
+    broadcast({ type: "sessions", items: allSessions() });
   return { chat: s };
 }
 
 export default function agentsHandlers(ctx) {
   const { send, broadcast, allSessions, plugins, power, activity } = ctx;
   // Runs one of a manifest's fixed auth commands; nothing from the client reaches the command line.
-  const runAuth = (m, args) => new Promise((resolve) => {
-    const [bin, argv] = process.platform === "win32" ? ["cmd.exe", ["/c", m.bin, ...args]] : [m.bin, args];
-    execFile(bin, argv, { timeout: 30000, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) =>
-      resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, text: `${stdout}${stderr}`.trim().slice(0, 2000) }));
-  });
+  const runAuth = (m, args) =>
+    new Promise((resolve) => {
+      const [bin, argv] = process.platform === "win32" ? ["cmd.exe", ["/c", m.bin, ...args]] : [m.bin, args];
+      execFile(bin, argv, { timeout: 30000, windowsHide: true, encoding: "utf8" }, (err, stdout, stderr) =>
+        resolve({
+          code: err ? (typeof err.code === "number" ? err.code : 1) : 0,
+          text: `${stdout}${stderr}`.trim().slice(0, 2000),
+        }),
+      );
+    });
   /** The folder a new chat or terminal runs in: its own worktree when asked for; null after reporting an error. */
   const inWorktree = (ws, msg) => {
     if (!msg.worktree) return msg.cwd;
     try {
-      return worktree.add(msg.cwd || os.homedir(), typeof msg.worktree === "string" ? msg.worktree : msg.harness || "session");
+      return worktree.add(
+        msg.cwd || os.homedir(),
+        typeof msg.worktree === "string" ? msg.worktree : msg.harness || "session",
+      );
     } catch (e) {
       send(ws, { type: "error", message: e.message });
       return null;
@@ -128,7 +164,10 @@ export default function agentsHandlers(ctx) {
       const r = await runAuth(m, m.auth.status);
       // OpenCode also counts provider keys from the environment next to its stored credentials.
       const noCreds = /\b0 credentials/i.test(r.text) && !/[1-9]\d* environment variables?/i.test(r.text);
-      const loggedIn = r.code === 0 && !noCreds && !/not logged in|logged out|no credentials|"loggedIn":\s*false/i.test(r.text);
+      const loggedIn =
+        r.code === 0 &&
+        !noCreds &&
+        !/not logged in|logged out|no credentials|"loggedIn":\s*false/i.test(r.text);
       send(ws, { type: "auth_status", harness: m.id, loggedIn, text: r.text });
     },
     async auth_logout(ws, msg) {
@@ -141,11 +180,13 @@ export default function agentsHandlers(ctx) {
       if (!m) return;
       return self.create(ws, { harness: m.id, cwd: msg.cwd, args: m.auth.login });
     },
-    async detect(ws, msg) {
+    async detect(_ws, _msg) {
       await registry.scanAll(broadcast);
     },
     async install(ws, msg) {
-      registry.install(msg.id, broadcast).catch((e) => send(ws, { type: "error", message: `install failed: ${e?.message || e}` }));
+      registry
+        .install(msg.id, broadcast)
+        .catch((e) => send(ws, { type: "error", message: `install failed: ${e?.message || e}` }));
     },
     async create(ws, msg) {
       await registry.ready;
@@ -154,12 +195,15 @@ export default function agentsHandlers(ctx) {
       // The path reaches the PTY's `cmd /c`, so only a discovered tool is
       // accepted — an arbitrary string would be a command injection.
       const tool = msg.path ? appDiscovery.find(String(msg.path)) : null;
-      if (msg.path && !tool) return send(ws, { type: "error", message: `not a discovered tool: ${msg.path}` });
+      if (msg.path && !tool)
+        return send(ws, { type: "error", message: `not a discovered tool: ${msg.path}` });
       const m = tool
         ? { id: tool.name, name: tool.name, bin: tool.path, adapter: "terminal" }
         : registry.get(msg.harness);
-      if (!m || m.adapter !== "terminal") return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
-      if (!msg.path && !registry.isInstalled(m.id)) return send(ws, { type: "error", message: `${m.name} is not installed` });
+      if (!m || m.adapter !== "terminal")
+        return send(ws, { type: "error", message: `unknown harness: ${msg.harness}` });
+      if (!msg.path && !registry.isInstalled(m.id))
+        return send(ws, { type: "error", message: `${m.name} is not installed` });
       const cwd = inWorktree(ws, msg);
       if (cwd === null) return;
       const s = sessions.create({ harnessId: m.id, bin: m.bin, cwd, args: msg.args }, broadcast);
@@ -179,7 +223,8 @@ export default function agentsHandlers(ctx) {
     async chatmsg(ws, msg) {
       const c = chat.get(msg.id);
       if (!c) return send(ws, { type: "error", message: `no such chat: ${msg.id}` });
-      if (c.state === "running") return send(ws, { type: "error", message: "still working on the previous prompt" });
+      if (c.state === "running")
+        return send(ws, { type: "error", message: "still working on the previous prompt" });
       // Attaching again would replay the whole transcript on every message.
       if (!ws._subs.has("chat:" + msg.id)) chat.attach(msg.id, ws);
       let text = String(msg.text || "");
@@ -194,7 +239,8 @@ export default function agentsHandlers(ctx) {
       const once = {};
       if ("model" in msg) {
         const model = msg.model ? String(msg.model) : null;
-        if (!chat.modelAllowed(c, model)) return send(ws, { type: "error", message: `unknown model: ${model}` });
+        if (!chat.modelAllowed(c, model))
+          return send(ws, { type: "error", message: `unknown model: ${model}` });
         once.model = model;
       }
       if (msg.mode) once.permissionMode = String(msg.mode);
@@ -202,7 +248,7 @@ export default function agentsHandlers(ctx) {
     },
     // ── Chat forking (1code): clone transcript up to a message into a sub-chat ──
     // ── Sessions list on request (phone reconnect asks for current state) ──
-    async sessions(ws, msg) {
+    async sessions(ws, _msg) {
       send(ws, { type: "sessions", items: allSessions() });
     },
     async chat_fork(ws, msg) {
@@ -234,17 +280,20 @@ export default function agentsHandlers(ctx) {
     async chat_text(ws, msg) {
       const c = chat.get(msg.id);
       if (!c) return send(ws, { type: "error", message: `no such chat: ${msg.id}` });
-      const text = (c.transcript ?? []).map((it) => {
-        if (it.role === "user") return `❯ ${it.text}`;
-        if (it.role === "assistant") return it.text;
-        if (it.role === "tool") return `[tool:${it.name}] ${it.detail}`;
-        if (it.role === "system") return `[system] ${it.text}`;
-        return "";
-      }).filter(Boolean).join("\n\n");
+      const text = (c.transcript ?? [])
+        .map((it) => {
+          if (it.role === "user") return `❯ ${it.text}`;
+          if (it.role === "assistant") return it.text;
+          if (it.role === "tool") return `[tool:${it.name}] ${it.detail}`;
+          if (it.role === "system") return `[system] ${it.text}`;
+          return "";
+        })
+        .filter(Boolean)
+        .join("\n\n");
       send(ws, { type: "chat_text", id: c.id, text });
     },
     // Cancelling a running turn changes its state, which broadcasts the list.
-    async chatcancel(ws, msg) {
+    async chatcancel(_ws, msg) {
       const c = chat.get(msg.id);
       if (c) chat.cancel(c);
     },
@@ -253,10 +302,10 @@ export default function agentsHandlers(ctx) {
         send(ws, { type: "error", message: `no live session: ${msg.id}` });
       }
     },
-    async sessions_get(ws, msg) {
+    async sessions_get(ws, _msg) {
       send(ws, { type: "sessions_get", items: allSessions() });
     },
-    async sessions_scan(ws, msg) {
+    async sessions_scan(ws, _msg) {
       // Zero-touch OS-level agent scan (c9watch/nexting): which known agent
       // binaries have live processes right now, with their command lines.
       //
@@ -265,18 +314,29 @@ export default function agentsHandlers(ctx) {
       // the last list with `refreshing: true` until the probe lands, and the phone can ask again.
       // An earlier version awaited the probe, which turned a loaded machine into "the scan failed".
       const fresh = Date.now() - scanCache.at < SCAN_CACHE_MS;
-      if (fresh) return send(ws, { type: "sessions_scan", items: scanCache.items, scannedAt: scanCache.at, cached: true });
+      if (fresh)
+        return send(ws, {
+          type: "sessions_scan",
+          items: scanCache.items,
+          scannedAt: scanCache.at,
+          cached: true,
+        });
       const pending = startScan();
-      const landed = await Promise.race([pending, new Promise((r) => setTimeout(() => r(null), SCAN_WAIT_MS))]).catch((e) => e);
-      if (landed && !(landed instanceof Error)) return send(ws, { type: "sessions_scan", items: landed, scannedAt: scanCache.at });
-      if (landed instanceof Error) return send(ws, { type: "sessions_scan", items: [], scannedAt: scanCache.at, error: landed.message });
+      const landed = await Promise.race([
+        pending,
+        new Promise((r) => setTimeout(() => r(null), SCAN_WAIT_MS)),
+      ]).catch((e) => e);
+      if (landed && !(landed instanceof Error))
+        return send(ws, { type: "sessions_scan", items: landed, scannedAt: scanCache.at });
+      if (landed instanceof Error)
+        return send(ws, { type: "sessions_scan", items: [], scannedAt: scanCache.at, error: landed.message });
       send(ws, { type: "sessions_scan", items: scanCache.items, scannedAt: scanCache.at, refreshing: true });
     },
     async detach(ws, msg) {
       sessions.detach(ws, msg.id);
       chat.detach(ws, msg.id);
     },
-    async in(ws, msg) {
+    async in(_ws, msg) {
       sessions.write(msg.id, Buffer.from(msg.data, "base64").toString("utf8"));
     },
     async resize(ws, msg) {
@@ -284,7 +344,7 @@ export default function agentsHandlers(ctx) {
       if (ws._android) return;
       sessions.resize(msg.id, msg.cols, msg.rows);
     },
-    async kill(ws, msg) {
+    async kill(_ws, msg) {
       const c = chat.get(msg.id);
       if (c) chat.cancel(c);
       else sessions.kill(msg.id);
@@ -292,7 +352,7 @@ export default function agentsHandlers(ctx) {
       power.removeStatus(msg.id);
       broadcast({ type: "sessions", items: allSessions() });
     },
-    async chat_history(ws, msg) {
+    async chat_history(ws, _msg) {
       send(ws, { type: "chat_history", items: chat.listHistory() });
     },
     async pin(ws, msg) {
@@ -311,7 +371,8 @@ export default function agentsHandlers(ctx) {
       // `path` is a discovered application with no manifest behind it.
       const label = String(msg.harness || msg.path || "");
       const known = msg.path ? appDiscovery.find(String(msg.path)) : null;
-      if (msg.path && !known) return send(ws, { type: "gui_opened", ok: false, harness: label, reason: "not a discovered app" });
+      if (msg.path && !known)
+        return send(ws, { type: "gui_opened", ok: false, harness: label, reason: "not a discovered app" });
       const r = known
         ? registry.launchApp({ path: known.path, folder: msg.cwd })
         : registry.launchGui(msg.harness, msg.cwd);
@@ -323,7 +384,10 @@ export default function agentsHandlers(ctx) {
       if (msg.refresh) appDiscovery.discover({ refresh: true });
       // The app drawer asks for windowed apps only; mixed in with PATH tools they fell past the limit.
       const gui = msg.kind === "gui";
-      send(ws, { type: "apps", items: appDiscovery.search(msg.q ?? "", gui ? 2000 : 200, gui ? "gui" : null) });
+      send(ws, {
+        type: "apps",
+        items: appDiscovery.search(msg.q ?? "", gui ? 2000 : 200, gui ? "gui" : null),
+      });
     },
     // ── Model selection (phone picks the model a chat runs with) ───────────
     async model_list(ws, msg) {
@@ -335,7 +399,7 @@ export default function agentsHandlers(ctx) {
       send(ws, { type: "chat_model_set", ...r });
     },
     // ── Activity monitor (webmux/purplemux: busy→quiet, per-session status) ──
-    async activity_list(ws, msg) {
+    async activity_list(ws, _msg) {
       send(ws, { type: "activity_list", items: activity.summary() });
     },
     // ── Prompt queue (1code/ccpocket/oc-remote: queued follow-ups) ───────
@@ -346,7 +410,14 @@ export default function agentsHandlers(ctx) {
       if (imagePaths.length) text = `${text}\n\nAttached image(s): ${imagePaths.join(", ")}`.trim();
       if (!text) return send(ws, { type: "prompt_queued", ok: false, error: "empty prompt" });
       const r = promptQueue.enqueue(chatId, text);
-      if (r.ok) send(ws, { type: "prompt_queued", ok: true, id: chatId, queue: promptQueue.list(chatId), position: promptQueue.list(chatId).length });
+      if (r.ok)
+        send(ws, {
+          type: "prompt_queued",
+          ok: true,
+          id: chatId,
+          queue: promptQueue.list(chatId),
+          position: promptQueue.list(chatId).length,
+        });
       else send(ws, { type: "prompt_queued", ok: false, error: r.error });
     },
     async prompt_queue(ws, msg) {
@@ -357,7 +428,7 @@ export default function agentsHandlers(ctx) {
       send(ws, { type: "prompt_removed", ok, id: msg.id, queue: promptQueue.list(String(msg.id ?? "")) });
     },
     // ── Agent todos (c9watch/claude-threads/codeman: live task board) ────
-    async todos_set(ws, msg) {
+    async todos_set(_ws, msg) {
       const items = agentTodos.setTodos(String(msg.id ?? ""), Array.isArray(msg.items) ? msg.items : []);
       broadcast({ type: "todos_updated", id: msg.id, items, derived: false });
     },
@@ -365,40 +436,77 @@ export default function agentsHandlers(ctx) {
       send(ws, { type: "todos", id: msg.id, items: agentTodos.getTodos(String(msg.id ?? "")) });
     },
     async todos_status(ws, msg) {
-      const item = agentTodos.updateStatus(String(msg.id ?? ""), String(msg.todoId ?? ""), String(msg.status ?? "pending"));
-      if (item) broadcast({ type: "todos_updated", id: msg.id, items: agentTodos.getTodos(String(msg.id ?? "")), derived: false });
+      const item = agentTodos.updateStatus(
+        String(msg.id ?? ""),
+        String(msg.todoId ?? ""),
+        String(msg.status ?? "pending"),
+      );
+      if (item)
+        broadcast({
+          type: "todos_updated",
+          id: msg.id,
+          items: agentTodos.getTodos(String(msg.id ?? "")),
+          derived: false,
+        });
       else send(ws, { type: "error", message: `no todo ${msg.todoId} for ${msg.id}` });
     },
     // ── Run scheduler (codeman/codex-bee/kagora: loops + cron) ───────────
     async schedule_create(ws, msg) {
-      const job = scheduler.schedule({ chatId: msg.chatId, text: msg.text, kind: msg.kind, intervalMs: msg.intervalMs, delayMs: msg.delayMs, maxRuns: msg.maxRuns });
+      const job = scheduler.schedule({
+        chatId: msg.chatId,
+        text: msg.text,
+        kind: msg.kind,
+        intervalMs: msg.intervalMs,
+        delayMs: msg.delayMs,
+        maxRuns: msg.maxRuns,
+      });
       send(ws, { type: "schedule_created", job });
     },
-    async schedule_list(ws, msg) {
+    async schedule_list(ws, _msg) {
       send(ws, { type: "schedule_list", items: scheduler.list() });
     },
     async schedule_pause(ws, msg) {
       const job = scheduler.pause(String(msg.jobId ?? ""));
-      send(ws, job ? { type: "schedule_paused", ok: true, job } : { type: "error", message: `no job ${msg.jobId}` });
+      send(
+        ws,
+        job ? { type: "schedule_paused", ok: true, job } : { type: "error", message: `no job ${msg.jobId}` },
+      );
     },
     async schedule_resume(ws, msg) {
       const job = scheduler.resume(String(msg.jobId ?? ""));
-      send(ws, job ? { type: "schedule_resumed", ok: true, job } : { type: "error", message: `no job ${msg.jobId}` });
+      send(
+        ws,
+        job ? { type: "schedule_resumed", ok: true, job } : { type: "error", message: `no job ${msg.jobId}` },
+      );
     },
     async schedule_cancel(ws, msg) {
       const ok = scheduler.cancel(String(msg.jobId ?? ""));
       send(ws, { type: "schedule_cancelled", ok, jobId: msg.jobId });
     },
     // ── Approval auto-deny status (cc-pocket) ───────────────────────────
-    async approval_waiting(ws, msg) {
-      send(ws, { type: "approval_waiting", items: approvalGuard.listWaiting(), timeoutMs: approvalGuard.getTimeoutMs() });
+    async approval_waiting(ws, _msg) {
+      send(ws, {
+        type: "approval_waiting",
+        items: approvalGuard.listWaiting(),
+        timeoutMs: approvalGuard.getTimeoutMs(),
+      });
     },
     // ── Usage/cost dashboard (c9watch/flue/orca/cc-pocket) ──────────────
-    async usage_list(ws, msg) {
+    async usage_list(ws, _msg) {
       send(ws, { type: "usage_list", items: statsUsage.list(), totals: statsUsage.totals() });
     },
     async usage_get(ws, msg) {
-      send(ws, { type: "usage", id: msg.id, ...(statsUsage.get(String(msg.id ?? "")) ?? { inputTokens: 0, outputTokens: 0, costUsd: 0, turns: 0, points: [] }) });
+      send(ws, {
+        type: "usage",
+        id: msg.id,
+        ...(statsUsage.get(String(msg.id ?? "")) ?? {
+          inputTokens: 0,
+          outputTokens: 0,
+          costUsd: 0,
+          turns: 0,
+          points: [],
+        }),
+      });
     },
     // ── Chat search (flue/1code: find prompts across history) ─────────
     async chat_search(ws, msg) {
@@ -406,8 +514,19 @@ export default function agentsHandlers(ctx) {
       const hits = [];
       for (const h of chat.listHistory()) {
         for (const it of h.transcript ?? []) {
-          if (q && String(it.text ?? "").toLowerCase().includes(q)) {
-            hits.push({ chatId: h.id, harnessId: h.harnessId, cwd: h.cwd, role: it.role, text: String(it.text).slice(0, 200) });
+          if (
+            q &&
+            String(it.text ?? "")
+              .toLowerCase()
+              .includes(q)
+          ) {
+            hits.push({
+              chatId: h.id,
+              harnessId: h.harnessId,
+              cwd: h.cwd,
+              role: it.role,
+              text: String(it.text).slice(0, 200),
+            });
             if (hits.length >= 50) break;
           }
         }
@@ -417,22 +536,39 @@ export default function agentsHandlers(ctx) {
     },
     // ── Agent history: conversations every agent on this PC saved, per agent and app ──
     async history_list(ws, msg) {
-      send(ws, { type: "history", agent: msg.agent ?? null, items: await agentHistory.list(msg.agent ? String(msg.agent) : null) });
+      send(ws, {
+        type: "history",
+        agent: msg.agent ?? null,
+        items: await agentHistory.list(msg.agent ? String(msg.agent) : null),
+      });
     },
     async history_get(ws, msg) {
       const h = await agentHistory.get(String(msg.agent ?? ""), String(msg.id ?? ""));
-      send(ws, h ? { type: "history_item", ...h } : { type: "error", message: "that conversation is no longer on the PC" });
+      send(
+        ws,
+        h
+          ? { type: "history_item", ...h }
+          : { type: "error", message: "that conversation is no longer on the PC" },
+      );
     },
     // Continues a saved Claude Code or Codex conversation by its own id: as a phone chat, or in the agent's terminal UI.
     async history_resume(ws, msg) {
       await registry.ready;
       const h = await agentHistory.get(String(msg.agent ?? ""), String(msg.id ?? ""));
-      if (!h?.resumable) return send(ws, { type: "error", message: "only Claude Code and Codex conversations can be continued" });
+      if (!h?.resumable)
+        return send(ws, {
+          type: "error",
+          message: "only Claude Code and Codex conversations can be continued",
+        });
       if (msg.mode === "terminal") {
         const args = h.agent === "codex" ? ["resume", h.id] : ["--resume", h.id];
         return self.create(ws, { harness: h.agent, cwd: h.cwd, args });
       }
-      const transcript = h.items.map((it) => (it.role === "tool" ? { role: "tool", name: it.name, detail: it.detail } : { role: it.role, text: it.text }));
+      const transcript = h.items.map((it) =>
+        it.role === "tool"
+          ? { role: "tool", name: it.name, detail: it.detail }
+          : { role: it.role, text: it.text },
+      );
       const r = startChat(ctx, ws, h.agent, h.cwd, null, { cliSession: h.id, resumeFirst: true, transcript });
       if (r.error) send(ws, { type: "error", message: r.error });
     },
@@ -441,10 +577,16 @@ export default function agentsHandlers(ctx) {
       send(ws, { type: "agent_panel", ...agentPanel.panel(String(msg.agent ?? "")) });
     },
     async agent_doc(ws, msg) {
-      send(ws, { type: "agent_doc", ...agentPanel.readDoc(String(msg.agent ?? ""), String(msg.kind ?? ""), String(msg.name ?? "")) });
+      send(ws, {
+        type: "agent_doc",
+        ...agentPanel.readDoc(String(msg.agent ?? ""), String(msg.kind ?? ""), String(msg.name ?? "")),
+      });
     },
     async agent_file_set(ws, msg) {
-      send(ws, { type: "agent_file_saved", ...agentPanel.writeFile(String(msg.agent ?? ""), String(msg.name ?? ""), msg.content) });
+      send(ws, {
+        type: "agent_file_saved",
+        ...agentPanel.writeFile(String(msg.agent ?? ""), String(msg.name ?? ""), msg.content),
+      });
     },
     // ── Account switching: saved logins per agent, restored on the PC; tokens never leave it ──
     async accounts_list(ws, msg) {
@@ -453,20 +595,29 @@ export default function agentsHandlers(ctx) {
     async account_save(ws, msg) {
       const agent = String(msg.agent ?? "");
       const r = await accounts.save(agent, msg.label);
-      send(ws, r.ok ? { type: "accounts", ...(await accounts.list(agent)) } : { type: "error", message: r.error });
+      send(
+        ws,
+        r.ok ? { type: "accounts", ...(await accounts.list(agent)) } : { type: "error", message: r.error },
+      );
     },
     async account_switch(ws, msg) {
       const agent = String(msg.agent ?? "");
       const r = await accounts.switchTo(agent, String(msg.id ?? ""), isRunning);
-      send(ws, r.ok ? { type: "accounts", ...(await accounts.list(agent)) } : { type: "error", message: r.error });
+      send(
+        ws,
+        r.ok ? { type: "accounts", ...(await accounts.list(agent)) } : { type: "error", message: r.error },
+      );
     },
     async account_forget(ws, msg) {
       const agent = String(msg.agent ?? "");
       const r = accounts.forget(agent, String(msg.id ?? ""));
-      send(ws, r.ok ? { type: "accounts", ...(await accounts.list(agent)) } : { type: "error", message: r.error });
+      send(
+        ws,
+        r.ok ? { type: "accounts", ...(await accounts.list(agent)) } : { type: "error", message: r.error },
+      );
     },
     // ── Hot manifest reload (frp: config reload without restart) ─────
-    async manifest_reload(ws, msg) {
+    async manifest_reload(ws, _msg) {
       await registry.scanAll(broadcast);
       send(ws, { type: "manifests_reloaded", count: registry.list().length });
     },

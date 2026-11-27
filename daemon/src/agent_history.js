@@ -44,14 +44,66 @@ const MAX_TEXT = 20_000;
 /** key "agent:id" -> what get() needs to read it back. Rebuilt by every list(). */
 const refs = new Map();
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
-const mtime = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
-const lines = (f) => { try { return fs.readFileSync(f, "utf8").split("\n"); } catch { return []; } };
-const parseLine = (l) => { try { return l.trim() ? JSON.parse(l) : null; } catch { return null; } };
-const dirs = (d) => { try { return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => path.join(d, e.name)); } catch { return []; } };
-const files = (d, ext) => { try { return fs.readdirSync(d).filter((n) => n.endsWith(ext)).map((n) => path.join(d, n)); } catch { return []; } };
-const clip = (s, n = 120) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
-const uriPath = (u) => { try { return u?.startsWith("file:") ? fileURLToPath(u) : u || ""; } catch { return ""; } };
+const readJson = (f) => {
+  try {
+    return JSON.parse(fs.readFileSync(f, "utf8"));
+  } catch {
+    return null;
+  }
+};
+const mtime = (f) => {
+  try {
+    return fs.statSync(f).mtimeMs;
+  } catch {
+    return 0;
+  }
+};
+const lines = (f) => {
+  try {
+    return fs.readFileSync(f, "utf8").split("\n");
+  } catch {
+    return [];
+  }
+};
+const parseLine = (l) => {
+  try {
+    return l.trim() ? JSON.parse(l) : null;
+  } catch {
+    return null;
+  }
+};
+const dirs = (d) => {
+  try {
+    return fs
+      .readdirSync(d, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => path.join(d, e.name));
+  } catch {
+    return [];
+  }
+};
+const files = (d, ext) => {
+  try {
+    return fs
+      .readdirSync(d)
+      .filter((n) => n.endsWith(ext))
+      .map((n) => path.join(d, n));
+  } catch {
+    return [];
+  }
+};
+const clip = (s, n = 120) =>
+  String(s ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, n);
+const uriPath = (u) => {
+  try {
+    return u?.startsWith("file:") ? fileURLToPath(u) : u || "";
+  } catch {
+    return "";
+  }
+};
 
 /** First and last bytes of a file: enough for a session's header and its latest title. */
 function headTail(f, n = 64 << 10) {
@@ -59,21 +111,38 @@ function headTail(f, n = 64 << 10) {
     const fd = fs.openSync(f, "r");
     try {
       const size = fs.fstatSync(fd).size;
-      const read = (at, len) => { const b = Buffer.alloc(len); fs.readSync(fd, b, 0, len, at); return b.toString("utf8"); };
+      const read = (at, len) => {
+        const b = Buffer.alloc(len);
+        fs.readSync(fd, b, 0, len, at);
+        return b.toString("utf8");
+      };
       if (size <= 2 * n) return read(0, size).split("\n");
       // The cut lines at the seams are dropped: a half JSON line parses to nothing anyway.
-      return [...read(0, n).split("\n").slice(0, -1), ...read(size - n, n).split("\n").slice(1)];
-    } finally { fs.closeSync(fd); }
-  } catch { return []; }
+      return [
+        ...read(0, n).split("\n").slice(0, -1),
+        ...read(size - n, n)
+          .split("\n")
+          .slice(1),
+      ];
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return [];
+  }
 }
 
 // A prompt the agent's harness injected, not one the user typed.
-const SYNTHETIC = /^\s*<(local-command|command-|system-reminder|environment_context|user_instructions|ide_|bash-)/;
+const SYNTHETIC =
+  /^\s*<(local-command|command-|system-reminder|environment_context|user_instructions|ide_|bash-)/;
 
 function textOf(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
-  return content.filter((p) => p?.type === "text" || p?.type === "input_text" || p?.type === "output_text").map((p) => p.text).join("\n");
+  return content
+    .filter((p) => p?.type === "text" || p?.type === "input_text" || p?.type === "output_text")
+    .map((p) => p.text)
+    .join("\n");
 }
 
 // ── Claude Code ─────────────────────────────────────────────────────────────
@@ -81,7 +150,10 @@ function claudeList() {
   const out = [];
   for (const proj of dirs(path.join(home(), ".claude", "projects"))) {
     for (const f of files(proj, ".jsonl")) {
-      let cwd = "", entry = "", first = "", title = "";
+      let cwd = "",
+        entry = "",
+        first = "",
+        title = "";
       for (const o of headTail(f).map(parseLine)) {
         if (!o) continue;
         cwd ||= o.cwd || "";
@@ -96,7 +168,16 @@ function claudeList() {
       // A file with no typed prompt is a session that was opened and left.
       if (!first && !title) continue;
       const id = path.basename(f, ".jsonl");
-      out.push({ agent: "claude", app: /vscode/i.test(entry) ? "VS Code" : "CLI", id, title: clip(title || first), cwd, updated: mtime(f), resumable: true, ref: f });
+      out.push({
+        agent: "claude",
+        app: /vscode/i.test(entry) ? "VS Code" : "CLI",
+        id,
+        title: clip(title || first),
+        cwd,
+        updated: mtime(f),
+        resumable: true,
+        ref: f,
+      });
     }
   }
   return out;
@@ -113,7 +194,8 @@ function claudeGet(f) {
     } else if (o.type === "assistant" && Array.isArray(content)) {
       for (const p of content) {
         if (p.type === "text" && p.text?.trim()) items.push({ role: "assistant", text: p.text });
-        else if (p.type === "tool_use") items.push({ role: "tool", name: p.name, detail: clip(JSON.stringify(p.input ?? {}), 300) });
+        else if (p.type === "tool_use")
+          items.push({ role: "tool", name: p.name, detail: clip(JSON.stringify(p.input ?? {}), 300) });
       }
     }
   }
@@ -122,7 +204,13 @@ function claudeGet(f) {
 
 // ── Codex ───────────────────────────────────────────────────────────────────
 function walk(d, ext, out = []) {
-  for (const e of (() => { try { return fs.readdirSync(d, { withFileTypes: true }); } catch { return []; } })()) {
+  for (const e of (() => {
+    try {
+      return fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+  })()) {
     const p = path.join(d, e.name);
     if (e.isDirectory()) walk(p, ext, out);
     else if (e.name.endsWith(ext)) out.push(p);
@@ -133,7 +221,8 @@ function walk(d, ext, out = []) {
 function codexList() {
   const out = [];
   for (const f of walk(path.join(home(), ".codex", "sessions"), ".jsonl")) {
-    let meta = null, first = "";
+    let meta = null,
+      first = "";
     for (const o of headTail(f).map(parseLine)) {
       if (o?.type === "session_meta") meta ||= o.payload;
       const p = o?.payload;
@@ -143,7 +232,16 @@ function codexList() {
       }
     }
     if (!meta?.id || !first) continue;
-    out.push({ agent: "codex", app: /vscode/i.test(meta.originator || "") ? "VS Code" : "CLI", id: meta.id, title: clip(first), cwd: meta.cwd || "", updated: mtime(f), resumable: true, ref: f });
+    out.push({
+      agent: "codex",
+      app: /vscode/i.test(meta.originator || "") ? "VS Code" : "CLI",
+      id: meta.id,
+      title: clip(first),
+      cwd: meta.cwd || "",
+      updated: mtime(f),
+      resumable: true,
+      ref: f,
+    });
   }
   return out;
 }
@@ -157,7 +255,11 @@ function codexGet(f) {
       const t = textOf(p.content);
       if (t && !SYNTHETIC.test(t)) items.push({ role: p.role, text: t });
     } else if (p.type === "function_call" || p.type === "local_shell_call") {
-      items.push({ role: "tool", name: p.name || "shell", detail: clip(p.arguments ?? JSON.stringify(p.action ?? {}), 300) });
+      items.push({
+        role: "tool",
+        name: p.name || "shell",
+        detail: clip(p.arguments ?? JSON.stringify(p.action ?? {}), 300),
+      });
     }
   }
   return items;
@@ -165,7 +267,11 @@ function codexGet(f) {
 
 // ── VS Code family: Copilot Chat, Cline, Roo Code; Cursor's own chat ────────
 function editors() {
-  return EDITORS.map(([dir, label, gui]) => ({ user: path.join(userDataRoot(), dir, "User"), label, gui })).filter((e) => fs.existsSync(e.user));
+  return EDITORS.map(([dir, label, gui]) => ({
+    user: path.join(userDataRoot(), dir, "User"),
+    label,
+    gui,
+  })).filter((e) => fs.existsSync(e.user));
 }
 
 /** Copilot keeps each chat as a log: kind 0 sets the whole state, 1 sets a path, 2 appends at a path (from index i), 3 deletes. */
@@ -174,7 +280,10 @@ export function replayChatLog(text) {
   const at = (k) => k.slice(0, -1).reduce((o, key) => (o[key] ??= typeof key === "number" ? [] : {}), state);
   for (const op of text.split("\n").map(parseLine)) {
     if (!op) continue;
-    if (op.kind === 0) { state = op.v; continue; }
+    if (op.kind === 0) {
+      state = op.v;
+      continue;
+    }
     if (!state || !Array.isArray(op.k) || !op.k.length) continue;
     const parent = at(op.k);
     const last = op.k.at(-1);
@@ -202,7 +311,11 @@ function copilotSessions(ed) {
 
 function copilotState(f) {
   if (f.endsWith(".json")) return readJson(f);
-  try { return replayChatLog(fs.readFileSync(f, "utf8")); } catch { return null; }
+  try {
+    return replayChatLog(fs.readFileSync(f, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 function copilotList(ed) {
@@ -212,7 +325,17 @@ function copilotList(ed) {
     const reqs = Array.isArray(s?.requests) ? s.requests : [];
     const first = reqs.map((r) => r?.message?.text).find(Boolean);
     if (!first) continue;
-    out.push({ agent: "copilot", app: ed.label, gui: ed.gui, id: s.sessionId || path.basename(f).replace(/\.jsonl?$/, ""), title: clip(s.customTitle || first), cwd, updated: s.lastMessageDate || mtime(f), resumable: false, ref: f });
+    out.push({
+      agent: "copilot",
+      app: ed.label,
+      gui: ed.gui,
+      id: s.sessionId || path.basename(f).replace(/\.jsonl?$/, ""),
+      title: clip(s.customTitle || first),
+      cwd,
+      updated: s.lastMessageDate || mtime(f),
+      resumable: false,
+      ref: f,
+    });
   }
   return out;
 }
@@ -222,13 +345,20 @@ function copilotGet(f) {
   for (const r of copilotState(f)?.requests ?? []) {
     if (r?.message?.text) items.push({ role: "user", text: r.message.text });
     const parts = Array.isArray(r?.response) ? r.response : [];
-    const text = parts.map((p) => (typeof p?.value === "string" ? p.value : typeof p?.value?.value === "string" ? p.value.value : "")).join("");
+    const text = parts
+      .map((p) =>
+        typeof p?.value === "string" ? p.value : typeof p?.value?.value === "string" ? p.value.value : "",
+      )
+      .join("");
     if (text.trim()) items.push({ role: "assistant", text });
   }
   return items;
 }
 
-const CLINE_LIKE = [["saoudrizwan.claude-dev", "cline"], ["rooveterinaryinc.roo-cline", "roo"]];
+const CLINE_LIKE = [
+  ["saoudrizwan.claude-dev", "cline"],
+  ["rooveterinaryinc.roo-cline", "roo"],
+];
 
 function clineList(ed) {
   const out = [];
@@ -238,7 +368,17 @@ function clineList(ed) {
       const msgs = readJson(f);
       const task = Array.isArray(msgs) ? msgs.find((m) => m.say === "task")?.text : null;
       if (!task) continue;
-      out.push({ agent, app: ed.label, gui: ed.gui, id: path.basename(t), title: clip(task), cwd: "", updated: mtime(f), resumable: false, ref: f });
+      out.push({
+        agent,
+        app: ed.label,
+        gui: ed.gui,
+        id: path.basename(t),
+        title: clip(task),
+        cwd: "",
+        updated: mtime(f),
+        resumable: false,
+        ref: f,
+      });
     }
   }
   return out;
@@ -249,7 +389,8 @@ function clineGet(f) {
   for (const m of readJson(f) ?? []) {
     if (m?.type !== "say" || !m.text) continue;
     if (m.say === "task" || m.say === "user_feedback") items.push({ role: "user", text: m.text });
-    else if (m.say === "text" || m.say === "completion_result") items.push({ role: "assistant", text: m.text });
+    else if (m.say === "text" || m.say === "completion_result")
+      items.push({ role: "assistant", text: m.text });
   }
   return items;
 }
@@ -260,7 +401,9 @@ async function sqlite(f) {
   try {
     const { DatabaseSync } = await import("node:sqlite");
     return new DatabaseSync(f, { readOnly: true });
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 async function cursorList(ed) {
@@ -270,26 +413,63 @@ async function cursorList(ed) {
   if (!db) return [];
   try {
     const out = [];
-    for (const row of db.prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'").all()) {
-      const c = (() => { try { return JSON.parse(String(row.value)); } catch { return null; } })();
+    for (const row of db
+      .prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'")
+      .all()) {
+      const c = (() => {
+        try {
+          return JSON.parse(String(row.value));
+        } catch {
+          return null;
+        }
+      })();
       if (!c?.composerId) continue;
       const heads = c.fullConversationHeadersOnly ?? c.conversation ?? [];
       if (!heads.length) continue;
-      out.push({ agent: "cursor", app: "Cursor", gui: "cursor", id: c.composerId, title: clip(c.name || heads.find((h) => h.type === 1)?.text || "Cursor chat"), cwd: "", updated: c.lastUpdatedAt || c.createdAt || 0, resumable: false, ref: f });
+      out.push({
+        agent: "cursor",
+        app: "Cursor",
+        gui: "cursor",
+        id: c.composerId,
+        title: clip(c.name || heads.find((h) => h.type === 1)?.text || "Cursor chat"),
+        cwd: "",
+        updated: c.lastUpdatedAt || c.createdAt || 0,
+        resumable: false,
+        ref: f,
+      });
     }
     return out;
-  } catch { return []; } finally { db.close(); }
+  } catch {
+    return [];
+  } finally {
+    db.close();
+  }
 }
 
 async function cursorGet(f, id) {
   const db = await sqlite(f);
   if (!db) return [];
   try {
-    const value = (key) => { const r = db.prepare("SELECT value FROM cursorDiskKV WHERE key = ?").get(key); try { return r ? JSON.parse(String(r.value)) : null; } catch { return null; } };
+    const value = (key) => {
+      const r = db.prepare("SELECT value FROM cursorDiskKV WHERE key = ?").get(key);
+      try {
+        return r ? JSON.parse(String(r.value)) : null;
+      } catch {
+        return null;
+      }
+    };
     const c = value(`composerData:${id}`);
-    const bubbles = c?.conversation?.length ? c.conversation : (c?.fullConversationHeadersOnly ?? []).map((h) => value(`bubbleId:${id}:${h.bubbleId}`) ?? h);
-    return bubbles.filter((b) => b?.text?.trim()).map((b) => ({ role: b.type === 1 ? "user" : "assistant", text: b.text }));
-  } catch { return []; } finally { db.close(); }
+    const bubbles = c?.conversation?.length
+      ? c.conversation
+      : (c?.fullConversationHeadersOnly ?? []).map((h) => value(`bubbleId:${id}:${h.bubbleId}`) ?? h);
+    return bubbles
+      .filter((b) => b?.text?.trim())
+      .map((b) => ({ role: b.type === 1 ? "user" : "assistant", text: b.text }));
+  } catch {
+    return [];
+  } finally {
+    db.close();
+  }
 }
 
 // ── Antigravity ─────────────────────────────────────────────────────────────
@@ -299,12 +479,38 @@ async function antigravityList() {
   const db = await sqlite(agyDb());
   if (!db) return [];
   try {
-    return db.prepare("SELECT conversation_id, title, preview, workspace_uris, last_modified_time FROM conversation_summaries").all().map((r) => {
-      let cwd = "";
-      try { cwd = uriPath(JSON.parse(r.workspace_uris)?.[0]); } catch {}
-      return { agent: "antigravity", app: "Antigravity", gui: "antigravity", id: r.conversation_id, title: clip(r.title || r.preview || "Antigravity conversation"), cwd, updated: Date.parse(String(r.last_modified_time).replace(" ", "T").replace(/(\.\d{3})\d+/, "$1")) || 0, resumable: false, ref: agyDb() };
-    });
-  } catch { return []; } finally { db.close(); }
+    return db
+      .prepare(
+        "SELECT conversation_id, title, preview, workspace_uris, last_modified_time FROM conversation_summaries",
+      )
+      .all()
+      .map((r) => {
+        let cwd = "";
+        try {
+          cwd = uriPath(JSON.parse(r.workspace_uris)?.[0]);
+        } catch {}
+        return {
+          agent: "antigravity",
+          app: "Antigravity",
+          gui: "antigravity",
+          id: r.conversation_id,
+          title: clip(r.title || r.preview || "Antigravity conversation"),
+          cwd,
+          updated:
+            Date.parse(
+              String(r.last_modified_time)
+                .replace(" ", "T")
+                .replace(/(\.\d{3})\d+/, "$1"),
+            ) || 0,
+          resumable: false,
+          ref: agyDb(),
+        };
+      });
+  } catch {
+    return [];
+  } finally {
+    db.close();
+  }
 }
 
 /** The search index keeps each conversation as chunks of user and agent text; one turn pair per chunk. */
@@ -313,16 +519,32 @@ async function antigravityGet(f, id) {
   if (!db) return [];
   try {
     const items = [];
-    for (const r of db.prepare("SELECT user_body, agent_body FROM conversations_fts WHERE conversation_id = ? ORDER BY CAST(chunk_index AS INTEGER)").all(id)) {
+    for (const r of db
+      .prepare(
+        "SELECT user_body, agent_body FROM conversations_fts WHERE conversation_id = ? ORDER BY CAST(chunk_index AS INTEGER)",
+      )
+      .all(id)) {
       if (String(r.user_body ?? "").trim()) items.push({ role: "user", text: String(r.user_body) });
       if (String(r.agent_body ?? "").trim()) items.push({ role: "assistant", text: String(r.agent_body) });
     }
     return items;
-  } catch { return []; } finally { db.close(); }
+  } catch {
+    return [];
+  } finally {
+    db.close();
+  }
 }
 
 // ── Public ──────────────────────────────────────────────────────────────────
-const GETTERS = { claude: claudeGet, codex: codexGet, copilot: copilotGet, cline: clineGet, roo: clineGet, cursor: cursorGet, antigravity: antigravityGet };
+const GETTERS = {
+  claude: claudeGet,
+  codex: codexGet,
+  copilot: copilotGet,
+  cline: clineGet,
+  roo: clineGet,
+  cursor: cursorGet,
+  antigravity: antigravityGet,
+};
 
 /** Every saved conversation, newest first; `agent` narrows it to one agent. */
 export async function list(agent = null) {
@@ -350,7 +572,9 @@ export async function get(agent, id) {
   const it = refs.get(key);
   const read = GETTERS[agent];
   if (!it || !read) return null;
-  const items = (await read(it.ref, id)).map((x) => (x.text?.length > MAX_TEXT ? { ...x, text: x.text.slice(0, MAX_TEXT) + "…" } : x));
+  const items = (await read(it.ref, id)).map((x) =>
+    x.text?.length > MAX_TEXT ? { ...x, text: x.text.slice(0, MAX_TEXT) + "…" } : x,
+  );
   const { ref, ...summary } = it;
   return { ...summary, items: items.slice(-MAX_ITEMS) };
 }

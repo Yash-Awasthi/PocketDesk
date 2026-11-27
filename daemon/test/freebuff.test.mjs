@@ -5,7 +5,6 @@
 // surfaces are derived from file state only (the token is never transmitted).
 import { check, finish, makeTmp, openAndHello, startDaemon, teardown } from "./helpers.mjs";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 const tmp = makeTmp("rh-t-");
@@ -24,7 +23,9 @@ fs.writeFileSync(path.join(fbSkills, "hello-skill", "SKILL.md"), "# Hello Skill\
 // Hermetic claude override: the builtin claude manifest needs a real CLI.
 // A node fake agent + manifest override keeps the chat/model tests hermetic.
 const fakeAgentJs = path.join(tmp, "fakeagent.js");
-fs.writeFileSync(fakeAgentJs, `
+fs.writeFileSync(
+  fakeAgentJs,
+  `
 let input = "";
 process.stdin.on("data", (d) => (input += d));
 process.stdin.on("end", () => {
@@ -33,22 +34,26 @@ process.stdin.on("end", () => {
   line({ type: "assistant", message: { content: [{ type: "text", text: "echo: " + input.trim() }] } });
   line({ type: "result", is_error: false, result: "" });
 });
-`);
-fs.writeFileSync(path.join(tmp, "claude.json"), JSON.stringify({
-  id: "claude",
-  name: "Claude Code (fake)",
-  adapter: "terminal",
-  bin: "node",
-  install: {},
-  chat: {
-    args: [fakeAgentJs],
-    format: "claude-stream-json",
-    models: {
-      opus: { args: ["--model", "fake-opus"] },
-      sonnet: { args: ["--model", "fake-sonnet"] },
+`,
+);
+fs.writeFileSync(
+  path.join(tmp, "claude.json"),
+  JSON.stringify({
+    id: "claude",
+    name: "Claude Code (fake)",
+    adapter: "terminal",
+    bin: "node",
+    install: {},
+    chat: {
+      args: [fakeAgentJs],
+      format: "claude-stream-json",
+      models: {
+        opus: { args: ["--model", "fake-opus"] },
+        sonnet: { args: ["--model", "fake-sonnet"] },
+      },
     },
-  },
-}));
+  }),
+);
 
 const PORT = 8827;
 const CLI_PORT = 46827;
@@ -72,7 +77,13 @@ async function main() {
   // ── Status ────────────────────────────────────────────────────────────────
   c.send({ type: "fb_status" });
   const st = await c.next((m) => m.type === "fb_status");
-  check("fb_status reports profile + counts", st.profile === fbProfile && st.skillCount === 1 && st.configCount === 1 && typeof st.running === "boolean");
+  check(
+    "fb_status reports profile + counts",
+    st.profile === fbProfile &&
+      st.skillCount === 1 &&
+      st.configCount === 1 &&
+      typeof st.running === "boolean",
+  );
 
   // ── Configs: allowlist, get, deep-merge set with backup ───────────────────
   c.send({ type: "fb_config_list" });
@@ -87,12 +98,19 @@ async function main() {
   const got = await c.next((m) => m.type === "fb_config_get");
   check("config_get parses content", got.ok === true && got.content.window.width === 1200);
 
-  c.send({ type: "fb_config_set", name: "Preferences", patch: { some: { nested: { flag: 2 } }, added: "x" } });
+  c.send({
+    type: "fb_config_set",
+    name: "Preferences",
+    patch: { some: { nested: { flag: 2 } }, added: "x" },
+  });
   const set = await c.next((m) => m.type === "fb_config_set");
   check("config_set deep-merges + backs up", set.ok === true && !!set.backedUp);
   c.send({ type: "fb_config_get", name: "Preferences" });
   const got2 = await c.next((m) => m.type === "fb_config_get");
-  check("merge preserved untouched keys", got2.content.window.width === 1200 && got2.content.some.nested.flag === 2 && got2.content.added === "x");
+  check(
+    "merge preserved untouched keys",
+    got2.content.window.width === 1200 && got2.content.some.nested.flag === 2 && got2.content.added === "x",
+  );
 
   c.send({ type: "fb_config_get", name: "../../etc/passwd" });
   const trav = await c.next((m) => m.type === "fb_config_get");
@@ -101,7 +119,12 @@ async function main() {
   // ── Skills: list, get, run through a real chat surface ────────────────────
   c.send({ type: "fb_skill_list" });
   const sl = await c.next((m) => m.type === "fb_skill_list");
-  check("skill list finds SKILL.md", sl.items.length === 1 && sl.items[0].name === "hello-skill" && sl.items[0].description.includes("Hello Skill"));
+  check(
+    "skill list finds SKILL.md",
+    sl.items.length === 1 &&
+      sl.items[0].name === "hello-skill" &&
+      sl.items[0].description.includes("Hello Skill"),
+  );
 
   c.send({ type: "fb_skill_get", name: "hello-skill" });
   const sg = await c.next((m) => m.type === "fb_skill_get");
@@ -117,10 +140,15 @@ async function main() {
 
   // ── Accounts: the desktop app keeps its codebuff session in state.json ────
   // Tokens stay on the PC: no reply may carry one, only email and name.
-  const writeState = (sessions) => fs.writeFileSync(fbState, JSON.stringify({ workspace: { activeId: "w1" }, authSessions: sessions }));
-  const sessionFor = (email, token) => ({ "https://www.codebuff.com": { token, user: { id: "u-" + email, email, name: email.split("@")[0] } } });
+  const writeState = (sessions) =>
+    fs.writeFileSync(fbState, JSON.stringify({ workspace: { activeId: "w1" }, authSessions: sessions }));
+  const sessionFor = (email, token) => ({
+    "https://www.codebuff.com": { token, user: { id: "u-" + email, email, name: email.split("@")[0] } },
+  });
   const leaks = [];
-  c.ws.on("message", (d) => { if (/tok-(alpha|bravo)/.test(String(d))) leaks.push(String(d).slice(0, 80)); });
+  c.ws.on("message", (d) => {
+    if (/tok-(alpha|bravo)/.test(String(d))) leaks.push(String(d).slice(0, 80));
+  });
 
   writeState(sessionFor("a@x.com", "tok-alpha"));
   c.send({ type: "fb_auth_status" });
@@ -134,7 +162,12 @@ async function main() {
   c.send({ type: "fb_auth_logout", confirm: "CLEAR" });
   const out = await c.next((m) => m.type === "fb_auth_logout");
   const afterOut = JSON.parse(fs.readFileSync(fbState, "utf8"));
-  check("logout drops the session and keeps the workspace", out.ok === true && !afterOut.authSessions?.["https://www.codebuff.com"] && afterOut.workspace.activeId === "w1");
+  check(
+    "logout drops the session and keeps the workspace",
+    out.ok === true &&
+      !afterOut.authSessions?.["https://www.codebuff.com"] &&
+      afterOut.workspace.activeId === "w1",
+  );
   c.send({ type: "fb_auth_status" });
   const au2 = await c.next((m) => m.type === "fb_auth_status");
   check("status signed out after logout", au2.loggedIn === false);
@@ -143,13 +176,24 @@ async function main() {
   writeState(sessionFor("b@x.com", "tok-bravo"));
   c.send({ type: "fb_accounts" });
   const acc = await c.next((m) => m.type === "fb_accounts");
-  const emails = acc.accounts.map((a) => a.email).sort().join(",");
-  check("both accounts saved, current marked", emails === "a@x.com,b@x.com" && acc.accounts.find((a) => a.current).email === "b@x.com");
+  const emails = acc.accounts
+    .map((a) => a.email)
+    .sort()
+    .join(",");
+  check(
+    "both accounts saved, current marked",
+    emails === "a@x.com,b@x.com" && acc.accounts.find((a) => a.current).email === "b@x.com",
+  );
 
   c.send({ type: "fb_account_switch", email: "a@x.com" });
   const sw = await c.next((m) => m.type === "fb_account_switch");
   const afterSw = JSON.parse(fs.readFileSync(fbState, "utf8"));
-  check("switch restores the saved session", sw.ok === true && afterSw.authSessions["https://www.codebuff.com"].token === "tok-alpha" && afterSw.workspace.activeId === "w1");
+  check(
+    "switch restores the saved session",
+    sw.ok === true &&
+      afterSw.authSessions["https://www.codebuff.com"].token === "tok-alpha" &&
+      afterSw.workspace.activeId === "w1",
+  );
 
   c.send({ type: "fb_account_switch", email: "nobody@x.com" });
   const swBad = await c.next((m) => m.type === "fb_account_switch");
@@ -171,7 +215,10 @@ async function main() {
   const chatId = created.id;
   c.send({ type: "model_list", id: chatId });
   const ml = await c.next((m) => m.type === "model_list");
-  check("model_list shows manifest models", ml.ok === true && ml.models.includes("opus") && ml.models.includes("sonnet") && ml.current === null);
+  check(
+    "model_list shows manifest models",
+    ml.ok === true && ml.models.includes("opus") && ml.models.includes("sonnet") && ml.current === null,
+  );
 
   c.send({ type: "chat_model_set", id: chatId, model: "sonnet" });
   const ms = await c.next((m) => m.type === "chat_model_set");
@@ -190,4 +237,7 @@ async function main() {
   finish();
 }
 
-main().catch((err) => { console.error("TEST ERROR:", err); process.exit(1); });
+main().catch((err) => {
+  console.error("TEST ERROR:", err);
+  process.exit(1);
+});

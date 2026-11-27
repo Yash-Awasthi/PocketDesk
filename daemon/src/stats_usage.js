@@ -75,6 +75,12 @@ export function totals() {
     cacheCreateTokens += e.cacheCreateTokens;
     costUsd += e.costUsd;
   }
-  return { inputTokens, outputTokens, cacheReadTokens, cacheCreateTokens, costUsd: Number(costUsd.toFixed(6)), sessions: usage.size };
+  return {
+    inputTokens,
+    outputTokens,
+    cacheReadTokens,
+    cacheCreateTokens,
+    costUsd: Number(costUsd.toFixed(6)),
+    sessions: usage.size,
+  };
 }
-

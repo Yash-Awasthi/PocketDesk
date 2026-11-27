@@ -5,11 +5,11 @@
 [![CI](https://github.com/Yash-Awasthi/PocketDesk/actions/workflows/ci.yml/badge.svg)](https://github.com/Yash-Awasthi/PocketDesk/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/Yash-Awasthi/PocketDesk)](https://github.com/Yash-Awasthi/PocketDesk/releases/latest)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
-[![Node](https://img.shields.io/badge/Node-≥24-brightgreen.svg)](https://nodejs.org)
+[![Node](https://img.shields.io/badge/Node-≥26-brightgreen.svg)](https://nodejs.org)
 [![WebSocket](https://img.shields.io/badge/Protocol-WebSocket-orange.svg)](#protocol-v1)
 [![Android](https://img.shields.io/badge/Android-Kotlin-purple.svg)](https://developer.android.com)
 [![Plugins](https://img.shields.io/badge/Plugins-4-blueviolet.svg)](#plugin-system)
-[![Tests](https://img.shields.io/badge/Tests-65%20files-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-103%20files-brightgreen.svg)](#testing)
 
 **No cloud. No accounts. Your machine, your data, your agents.**
 
@@ -107,9 +107,10 @@ so the installer detects it and runs the daemon from signed programs only (`conh
 the bundled Node.js, through `run-daemon.ps1`); the Start Menu shortcut then opens pairing through
 `open-pairing.ps1`. Nothing to do on your side.
 
-It downloads the daemon with its own Node.js and ffmpeg, starts it at logon with a **tray icon**
-near the clock (right-click it to open, stop or uninstall; the daemon process is `PocketDesk.exe` in
-Task Manager), adds a **PocketDesk** shortcut to the Start Menu, and opens the pairing QR. It runs
+It downloads the daemon with its own Node.js and ffmpeg, starts it at logon in the background with
+**no tray icon and no window** (the daemon process is `PocketDesk.exe` in Task Manager; stop it with
+`node src/cli.js stop`), adds a **PocketDesk** shortcut to the Start Menu that opens the local
+settings page, and opens the pairing QR. It runs
 with your own rights by default; add `-Protected` to the installer only if you need admin windows
 to be controllable from the phone, because that build can only be stopped by an administrator.
 Scan the QR with the app and you are done. Clicking the shortcut later starts PocketDesk,
@@ -124,7 +125,7 @@ curl -fsSL https://raw.githubusercontent.com/Yash-Awasthi/PocketDesk/master/inst
 On macOS you can instead download **PocketDesk-mac.zip** from the
 [latest release](https://github.com/Yash-Awasthi/PocketDesk/releases/latest), unzip it and
 double-click **PocketDesk-Install.command** (the first time, right-click > **Open**, since it is not
-notarized). Both need [Node.js](https://nodejs.org) 24 or newer installed first.
+notarized). Both need [Node.js](https://nodejs.org) 26 or newer installed first.
 The daemon runs hidden in the background, like on Windows: a LaunchAgent on macOS (seen only in
 Activity Monitor) and a systemd user service on Linux. It serves terminals, files, chat and agent
 control. Open **PocketDesk** from Spotlight, Launchpad or the app menu to pair a phone and change
@@ -571,12 +572,21 @@ Proposals auto-expire after 5 minutes.
 
 ---
 
-## 📖 Protocol (v1)
+## 📖 Protocol (v4)
 
 JSON frames; binary payloads are base64.
 
+**Compatibility:** adding a message is additive and ships without a version bump, because an
+older peer ignores a type it does not know. Removing, renaming or changing one needs a new
+protocol version in this heading plus a note naming it in
+[docs/adr/0001-protocol-changes.md](docs/adr/0001-protocol-changes.md). The baseline the
+suite compares this list against is `daemon/protocol/compat.json`.
+
 **Client → Server:**
-`hello` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg {id, text, model?, mode?}` (model and mode for this message only) · `chatcancel` · `history_list {agent?}` · `history_get {agent, id}` · `history_resume {agent, id, mode?: "terminal"}` · `agent_panel {agent}` · `agent_doc {agent, kind: skill|command|file, name}` · `agent_file_set {agent, name, content}` · `fs_op {op: mkdir|rename|delete}` · `fs_search {path, q}` · `propose` · `approve {id, all?}` · `reject` · `proposal_list` · `pc_power {action}` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
+`hello {protocolVersion?}` · `detect` · `install` · `create` · `attach {since?}` · `detach` · `in` · `resize` · `kill` · `session_resume {id}` · `fs` · `fread` · `fwrite` · `chatsession` · `chatmsg {id, text, model?, mode?}` (model and mode for this message only) · `chatcancel` · `history_list {agent?}` · `history_get {agent, id}` · `history_resume {agent, id, mode?: "terminal"}` · `agent_panel {agent}` · `agent_doc {agent, kind: skill|command|file, name}` · `agent_file_set {agent, name, content}` · `fs_op {op: mkdir|rename|delete}` · `fs_search {path, q}` · `propose` · `approve {id, all?}` · `reject` · `proposal_list` · `pc_power {action}` · `chat_history` · `pin`/`unpin` · `gui_open {harness|path, cwd}` — open a desktop IDE on the PC at a project folder · `apps_discover {q, refresh}` — search everything installed
+`session_resume {id}` restarts an exited session under the same id on a fresh PTY and
+runs the replies queued while it was down; it is refused while the session is live or after
+the queue window. Nothing respawns a session implicitly.
 <details>
 <summary>Absorbed-feature messages</summary>
 
@@ -591,6 +601,10 @@ JSON frames; binary payloads are base64.
 `profile_connect {id, protocol, password?, passphrase?}` — real SSH/SFTP/VNC connect ·
 
 `stats` — host CPU/mem/uptime · `git_status` · `git_diff` · `git_log` · `git_branches` — read-only repo inspection ·
+`running_state` — version, ports, sessions, streams and policy for the Running page ·
+`diagnostic_bundle` — logs, status, versions and known-secret names, with every secret stripped ·
+`desktop_monitor_rename {index, name}` — label a screen in the picker; an empty name clears it ·
+`desktop_monitor_order {order: [index...]}` — reorder the picker; capture indices and streams keep their order ·
 `activity_list` — per-session activity states
 </details>
 

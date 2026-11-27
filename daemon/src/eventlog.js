@@ -13,14 +13,20 @@ let failed = false;
 
 /** The argv for `eventcreate`, with the message flattened and bounded (the tool caps it, not nicely). */
 export function eventArguments(id, message) {
-  const text = String(message ?? "").replace(/\s+/g, " ").trim().slice(0, 900) || "PocketDesk event";
+  const text =
+    String(message ?? "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 900) || "PocketDesk event";
   return ["/L", "APPLICATION", "/T", "INFORMATION", "/SO", "PocketDesk", "/ID", String(id), "/D", text];
 }
 
 function note(error) {
   if (failed) return;
   failed = true;
-  console.warn(`  eventlog  cannot write to the Application log (${error?.code || error?.message || error}); events go unrecorded`);
+  console.warn(
+    `  eventlog  cannot write to the Application log (${error?.code || error?.message || error}); events go unrecorded`,
+  );
 }
 
 /**
@@ -36,7 +42,11 @@ export function logEvent(id, message, run = defaultRun) {
 export function logEventSync(id, message) {
   if (!IS_WIN || failed) return false;
   try {
-    execFileSync("eventcreate", eventArguments(id, message), { stdio: "ignore", windowsHide: true, timeout: 4000 });
+    execFileSync("eventcreate", eventArguments(id, message), {
+      stdio: "ignore",
+      windowsHide: true,
+      timeout: 4000,
+    });
     return true;
   } catch (e) {
     note(e);

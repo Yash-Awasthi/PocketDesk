@@ -7,29 +7,45 @@ import * as fbCtrl from "../freebuff_control.js";
 import * as doctor from "../doctor.js";
 import * as devices from "../devices.js";
 import { startChat } from "./agents.js";
+import { snapshot, daemonVersion } from "../running.js";
+import { bundle, knownSecrets, logTail } from "../diagnostic.js";
+import { statusLines } from "../status.js";
+import * as totp from "../totp.js";
 import fs from "node:fs";
 import path from "node:path";
-import { RECORDINGS } from "../recorder.js";
+import { RECORDINGS, pruneRecordings, replayCast } from "../recorder.js";
 
 export default function systemHandlers(ctx) {
   const { send, plugins, streamParser, tls, desktop } = ctx;
   return {
     // Recorded terminal sessions (asciicast) for the phone's player; the folder is flat, so a bare name is all it takes.
     async recordings_list(ws) {
+      pruneRecordings(RECORDINGS);
       let names = [];
-      try { names = fs.readdirSync(RECORDINGS).filter((n) => n.endsWith(".cast")); } catch {}
-      const items = names.map((name) => {
-        const st = fs.statSync(path.join(RECORDINGS, name));
-        return { name, size: st.size, mtime: st.mtimeMs };
-      }).sort((a, b) => b.mtime - a.mtime);
+      try {
+        names = fs.readdirSync(RECORDINGS).filter((n) => n.endsWith(".cast"));
+      } catch {}
+      const items = names
+        .map((name) => {
+          const st = fs.statSync(path.join(RECORDINGS, name));
+          return { name, size: st.size, mtime: st.mtimeMs };
+        })
+        .sort((a, b) => b.mtime - a.mtime);
       send(ws, { type: "recordings_list", items });
     },
     async recording_get(ws, msg) {
       const name = String(msg.name || "");
       const file = path.join(RECORDINGS, name);
-      if (name !== path.basename(name) || !name.endsWith(".cast") || !fs.existsSync(file)) return send(ws, { type: "recording_get", name, error: `no such recording: ${name}` });
+      if (name !== path.basename(name) || !name.endsWith(".cast") || !fs.existsSync(file))
+        return send(ws, { type: "recording_get", name, error: `no such recording: ${name}` });
       // ponytail: whole file in one message; stream it in chunks if recordings outgrow the socket's message cap.
-      send(ws, { type: "recording_get", name, text: fs.readFileSync(file, "utf8") });
+      const raw = fs.readFileSync(file, "utf8");
+      if (msg.format !== "text") return send(ws, { type: "recording_get", name, text: raw });
+      try {
+        send(ws, { type: "recording_get", name, text: replayCast(raw) });
+      } catch (e) {
+        send(ws, { type: "recording_get", name, error: `invalid recording: ${name}: ${e.message}` });
+      }
     },
     async propose(ws, msg) {
       const p = proposals.create({
@@ -59,20 +75,24 @@ export default function systemHandlers(ctx) {
       }
     },
     async pc_power(ws, msg) {
-      send(ws, { type: "pc_power", action: msg.action, ...(await pcPower.run(msg.action, { lockMac: () => desktop.lockScreen() })) });
+      send(ws, {
+        type: "pc_power",
+        action: msg.action,
+        ...(await pcPower.run(msg.action, { lockMac: () => desktop.lockScreen() })),
+      });
     },
-    async proposal_list(ws, msg) {
+    async proposal_list(ws, _msg) {
       send(ws, { type: "proposal_list", items: proposals.listPending() });
     },
     // ── Host stats (webmux/vmux host cards) ──
-    async stats(ws, msg) {
+    async stats(ws, _msg) {
       send(ws, hostStats());
     },
     // ── Freebuff control (status/configs/skills/auth from the phone) ───────
-    async fb_status(ws, msg) {
+    async fb_status(ws, _msg) {
       send(ws, { type: "fb_status", ...fbCtrl.status() });
     },
-    async fb_config_list(ws, msg) {
+    async fb_config_list(ws, _msg) {
       send(ws, { type: "fb_config_list", items: fbCtrl.configList() });
     },
     async fb_config_get(ws, msg) {
@@ -82,7 +102,7 @@ export default function systemHandlers(ctx) {
       const r = fbCtrl.configSet(String(msg.name ?? ""), msg.patch);
       send(ws, { type: "fb_config_set", ...r });
     },
-    async fb_skill_list(ws, msg) {
+    async fb_skill_list(ws, _msg) {
       send(ws, { type: "fb_skill_list", items: fbCtrl.skillList() });
     },
     async fb_skill_get(ws, msg) {
@@ -91,20 +111,34 @@ export default function systemHandlers(ctx) {
     async fb_skill_run(ws, msg) {
       await registry.ready;
       const s = fbCtrl.skillGet(String(msg.name ?? ""));
-      if (!s.ok) { send(ws, { type: "fb_skill_run", ok: false, error: s.error }); return; }
-      const prompt = [`Skill: ${s.name}`, "", s.content, "", String(msg.args ?? "").trim() ? `Task: ${msg.args}` : ""].filter(Boolean).join("\n");
+      if (!s.ok) {
+        send(ws, { type: "fb_skill_run", ok: false, error: s.error });
+        return;
+      }
+      const prompt = [
+        `Skill: ${s.name}`,
+        "",
+        s.content,
+        "",
+        String(msg.args ?? "").trim() ? `Task: ${msg.args}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
       const r = startChat(ctx, ws, String(msg.harness ?? "claude"), msg.cwd, prompt);
-      if (r.error) { send(ws, { type: "fb_skill_run", ok: false, error: r.error }); return; }
+      if (r.error) {
+        send(ws, { type: "fb_skill_run", ok: false, error: r.error });
+        return;
+      }
       send(ws, { type: "fb_skill_run", ok: true, skill: s.name, chatId: r.chat.id });
     },
-    async fb_auth_status(ws, msg) {
+    async fb_auth_status(ws, _msg) {
       send(ws, { type: "fb_auth_status", ...fbCtrl.authStatus() });
     },
     async fb_auth_logout(ws, msg) {
       const r = fbCtrl.authLogout(String(msg.confirm ?? ""));
       send(ws, { type: "fb_auth_logout", ...r });
     },
-    async fb_accounts(ws, msg) {
+    async fb_accounts(ws, _msg) {
       send(ws, { type: "fb_accounts", accounts: fbCtrl.accounts() });
     },
     async fb_account_switch(ws, msg) {
@@ -115,32 +149,91 @@ export default function systemHandlers(ctx) {
     async fb_account_forget(ws, msg) {
       send(ws, { type: "fb_accounts", accounts: fbCtrl.accountForget(String(msg.email ?? "")) });
     },
-    async fb_app_open(ws, msg) {
+    async fb_app_open(ws, _msg) {
       send(ws, { type: "fb_app_open", ...fbCtrl.appOpen() });
     },
-    async fb_app_quit(ws, msg) {
+    async fb_app_quit(ws, _msg) {
       send(ws, { type: "fb_app_quit", ...fbCtrl.appQuit() });
     },
     // ── Stream JSON parser (format-claude-stream: agent JSONL → cards) ────
     async stream_parse(ws, msg) {
       const parsed = streamParser.parseLines(String(msg.lines ?? ""));
-      send(ws, { type: "stream_parsed", items: parsed.map((p) => ({ type: p.type, formatted: p.formatted, sessionId: p.sessionId })), stats: streamParser.getStats() });
+      send(ws, {
+        type: "stream_parsed",
+        items: parsed.map((p) => ({ type: p.type, formatted: p.formatted, sessionId: p.sessionId })),
+        stats: streamParser.getStats(),
+      });
     },
-    async stream_stats(ws, msg) {
+    async stream_stats(ws, _msg) {
       send(ws, { type: "stream_stats", ...streamParser.getStats() });
     },
-    async stream_reset(ws, msg) {
+    async stream_reset(ws, _msg) {
       streamParser.reset();
       send(ws, { type: "stream_reset", ok: true });
     },
     // ── Doctor (whatsapp-claude-plugin/marchat: self-diagnosis) ──────────
-    async doctor(ws, msg) {
+    async doctor(ws, _msg) {
       const health = await doctor.diagnose({ tls, manifests: undefined });
       send(ws, { type: "doctor_report", ...health });
     },
     // ── Client devices: read-only here; revoke and allow live on the local settings page ──
-    async device_list(ws, msg) {
+    async device_list(ws, _msg) {
       send(ws, { type: "device_list", items: devices.list() });
+    },
+    // ── What is running (the hub's Running page): version, ports, sessions, streams, policy ──
+    async running_state(ws) {
+      send(ws, {
+        type: "running_state",
+        ...snapshot({
+          version: daemonVersion(),
+          ports: {
+            daemon: ctx.port,
+            page: Number(process.env.RH_LOCAL_PORT) || ctx.port + 10,
+            cli: Number(process.env.RH_CLI_PORT) || 4679,
+            usb: ctx.usbPort,
+          },
+          sessions: ctx.allSessions(),
+          streams: {
+            video: ctx.videoWatchers.size,
+            desktop: ctx.desktopWatchers.size,
+            audio: ctx.audioListeners.size,
+            remote: [...ctx.videoWatchers].filter((w) => w._audio).length,
+          },
+          policy: {
+            control: ctx.access.controlAllowed,
+            remote: ctx.access.remoteOn,
+            password: ctx.access.hasPassword,
+            totp: totp.enabled(),
+            recording: ctx.recorder.enabled,
+          },
+        }),
+      });
+    },
+    // ── Support bundle: logs, status and versions, with every known secret stripped ──────────
+    async diagnostic_bundle(ws) {
+      const logs = logTail();
+      send(ws, {
+        type: "diagnostic_bundle",
+        ...bundle({
+          ports: {
+            daemon: ctx.port,
+            page: Number(process.env.RH_LOCAL_PORT) || ctx.port + 10,
+            cli: Number(process.env.RH_CLI_PORT) || 4679,
+            usb: ctx.usbPort,
+          },
+          sessions: ctx.allSessions(),
+          policy: {
+            control: ctx.access.controlAllowed,
+            remote: ctx.access.remoteOn,
+            password: ctx.access.hasPassword,
+            totp: totp.enabled(),
+            recording: ctx.recorder.enabled,
+          },
+          status: await statusLines(),
+          logs,
+          secrets: knownSecrets(),
+        }),
+      });
     },
   };
 }

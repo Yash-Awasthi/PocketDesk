@@ -9,8 +9,13 @@ const CLI_PORT = 46861;
 const TOKEN = "plaintoken";
 const home = path.join(os.tmpdir(), "rh-home-" + PORT);
 
-const lan = Object.values(os.networkInterfaces()).flat().find((ni) => ni?.family === "IPv4" && !ni.internal)?.address;
-const fetchCode = (host) => fetch(`http://${host}:${PORT}/health`).then((r) => r.status).catch(() => 0);
+const lan = Object.values(os.networkInterfaces())
+  .flat()
+  .find((ni) => ni?.family === "IPv4" && !ni.internal)?.address;
+const fetchCode = (host) =>
+  fetch(`http://${host}:${PORT}/health`)
+    .then((r) => r.status)
+    .catch(() => 0);
 
 const d = startDaemon(PORT, CLI_PORT, { token: TOKEN });
 await d.ready;

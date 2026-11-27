@@ -14,7 +14,8 @@ import { execFileSync } from "node:child_process";
 
 const IS_WIN = process.platform === "win32";
 // Start Menu folders are mostly these; none of them is a tool to launch.
-const JUNK = /uninstall|readme|release notes|documentation|website|home page|license|changelog|^help$|^docs?$/i;
+const JUNK =
+  /uninstall|readme|release notes|documentation|website|home page|license|changelog|^help$|^docs?$/i;
 
 function walk(dir, match, depth, out) {
   let entries;
@@ -58,16 +59,24 @@ function readDesktopEntry(file) {
   if (!name || !exec || hidden) return null;
   // %U, %F and friends are placeholders the launcher substitutes; the folder
   // argument takes their place.
-  const bin = exec.replace(/%[a-zA-Z]/g, "").trim().split(/\s+/)[0];
+  const bin = exec
+    .replace(/%[a-zA-Z]/g, "")
+    .trim()
+    .split(/\s+/)[0];
   return bin ? { name, path: bin, kind: "gui" } : null;
 }
 
 /** Store (MSIX) apps have no Start Menu shortcut; Windows lists them by AppID, which contains "!". */
 function storeApps() {
   try {
-    const json = execFileSync("powershell.exe", ["-NoProfile", "-Command", "Get-StartApps | Where-Object AppID -like '*!*' | ConvertTo-Json -Compress"],
-      { encoding: "utf8", timeout: 15000, windowsHide: true });
-    return [].concat(JSON.parse(json || "[]")).map((a) => ({ name: a.Name, path: `shell:AppsFolder\\${a.AppID}`, kind: "gui" }));
+    const json = execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-Command", "Get-StartApps | Where-Object AppID -like '*!*' | ConvertTo-Json -Compress"],
+      { encoding: "utf8", timeout: 15000, windowsHide: true },
+    );
+    return []
+      .concat(JSON.parse(json || "[]"))
+      .map((a) => ({ name: a.Name, path: `shell:AppsFolder\\${a.AppID}`, kind: "gui" }));
   } catch {
     return [];
   }
@@ -77,7 +86,13 @@ function guiApps() {
   const out = [];
   if (IS_WIN) {
     const roots = [
-      path.join(process.env.ProgramData || "C:\\ProgramData", "Microsoft", "Windows", "Start Menu", "Programs"),
+      path.join(
+        process.env.ProgramData || "C:\\ProgramData",
+        "Microsoft",
+        "Windows",
+        "Start Menu",
+        "Programs",
+      ),
       path.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs"),
     ];
     const links = [];
@@ -95,11 +110,16 @@ function guiApps() {
       } catch {
         continue;
       }
-      for (const n of entries) if (n.endsWith(".app")) out.push({ name: n.slice(0, -4), path: path.join(r, n), kind: "gui" });
+      for (const n of entries)
+        if (n.endsWith(".app")) out.push({ name: n.slice(0, -4), path: path.join(r, n), kind: "gui" });
     }
   } else {
     const files = [];
-    for (const r of ["/usr/share/applications", "/usr/local/share/applications", path.join(os.homedir(), ".local/share/applications")]) {
+    for (const r of [
+      "/usr/share/applications",
+      "/usr/local/share/applications",
+      path.join(os.homedir(), ".local/share/applications"),
+    ]) {
       walk(r, (n) => n.endsWith(".desktop"), 2, files);
     }
     for (const f of files) {
@@ -112,7 +132,9 @@ function guiApps() {
 
 function cliTools() {
   const out = [];
-  const exts = IS_WIN ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").toLowerCase().split(";").filter(Boolean) : null;
+  const exts = IS_WIN
+    ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").toLowerCase().split(";").filter(Boolean)
+    : null;
   const seen = new Set();
   for (const dir of (process.env.PATH || "").split(path.delimiter)) {
     if (!dir) continue;
@@ -156,7 +178,9 @@ export function discover({ refresh = false } = {}) {
   for (const a of [...guiApps(), ...cliTools()]) {
     // Store (MSIX) apps use their unique path as key so a Start Menu shortcut with
     // the same display name cannot shadow them in the cache.
-    const key = a.path.startsWith("shell:AppsFolder\\") ? `store:${a.path.toLowerCase()}` : `${a.kind}:${a.name.toLowerCase()}`;
+    const key = a.path.startsWith("shell:AppsFolder\\")
+      ? `store:${a.path.toLowerCase()}`
+      : `${a.kind}:${a.name.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
     apps.push(a);

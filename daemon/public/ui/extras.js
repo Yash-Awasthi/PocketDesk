@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The Timeline page, the command palette (Ctrl+K), this PC's game controllers on the phone, and
 // the switches for what flows by itself (clipboard, this PC's notifications).
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = window.PD;
 const { h, $ } = PD;
 const btn = (label, onclick, cls = "") => h("button", { className: cls, textContent: label, onclick });
 
@@ -50,6 +50,7 @@ PD.page("timeline", {
   render(sec) {
     const q = h("input", { type: "search", placeholder: "Search everything that moved", oninput: () => ask() });
     const kind = h("select", { onchange: () => ask() }, h("option", { value: "", textContent: "All" }), Object.entries(KIND).map(([k, v]) => h("option", { value: k, textContent: v })));
+    kind.setAttribute("aria-label", "Kind");
     const list = h("div", { className: "list" });
     let timer;
     const ask = () => { clearTimeout(timer); timer = setTimeout(() => PD.send({ type: "timeline_list", q: q.value, kind: kind.value }), 200); };

@@ -6,14 +6,15 @@
 <link rel="stylesheet" href="vendor/xterm.min.css" />
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #14161a; }
-  #term { position: absolute; inset: 0; }
+  /* A PC grid larger than the phone pans here instead of shrinking the glyphs below a readable size. */
+  #term { position: absolute; inset: 0; overflow: auto; }
 </style>
 </head>
 <body>
 <div id="term"></div>
 <script src="vendor/xterm.min.js"></script>
 <script>
-const term = new Terminal({ fontSize: 13, theme: { background: '#14161a' } });
+const term = new Terminal({ fontSize: 13, lineHeight: 1.2, theme: { background: '#14161a' } });
 term.open(document.getElementById('term'));
 
 function enc(s) { const u = new TextEncoder().encode(s); let b = ''; for (const c of u) b += String.fromCharCode(c); return btoa(b); }
@@ -27,22 +28,21 @@ window.termOut = function (b64) {
   term.write(u);
 };
 
-// The terminal runs on the PC at the PC's size; the phone shrinks the font until that grid fits.
+// The terminal runs on the PC at the PC's size; the phone pans a grid that is wider than it is.
 window.termSize = function (cols, rows) {
   term.resize(cols, rows);
-  fitFont();
 };
-function fitFont() {
-  const box = document.getElementById('term');
-  const screen = box.querySelector('.xterm-screen');
-  if (!screen || !screen.offsetWidth) return;
-  const k = Math.min(box.clientWidth / screen.offsetWidth, box.clientHeight / screen.offsetHeight);
-  const size = Math.max(4, Math.min(20, term.options.fontSize * k));
-  // Cell width follows the font only roughly; settle over a frame or two.
-  if (Math.abs(size - term.options.fontSize) > 0.25) { term.options.fontSize = size; requestAnimationFrame(fitFont); }
-}
-if (window.visualViewport) visualViewport.addEventListener('resize', fitFont);
-else window.addEventListener('resize', fitFont);
+
+// The phone's font size control. The cell comes with the size because xterm re-measures its grid
+// from the font: setting fontSize alone would move the glyphs and leave the cell behind.
+// cellWidth is the declared advance the phone reviews; xterm's monospace measure matches it.
+window.termFont = function (px, cellWidth, cellHeight) {
+  term.options.fontSize = px;
+  term.options.lineHeight = cellHeight / px;
+};
+
+// The selection a long press made. The phone copies this text and never clears it.
+window.termSelection = function () { try { return term.getSelection(); } catch (e) { return ''; } };
 </script>
 </body>
 </html>

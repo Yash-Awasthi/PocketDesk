@@ -1,5 +1,6 @@
 # Installs the hidden PocketDesk daemon and registers it to start at logon.
-# There is no tray or window: the daemon runs in the background and is stopped from Task Manager.
+# There is no tray and no window: the daemon runs in the background and is stopped with
+# `node src/cli.js stop` or from Task Manager.
 # A Start-menu/desktop launcher starts it if needed and opens the pairing page.
 #
 # From a checkout (development): powershell -File daemon\scripts\install-service.ps1
@@ -10,7 +11,7 @@ param(
     [string]$InstallDir = (Join-Path $env:USERPROFILE ".pocketdesk"),
     [switch]$NoStart,
     # Registers the SYSTEM console endpoint (secure desktop: lock screen, UAC, before login)
-    # instead of the tray. Must run elevated. See plan.md, Appendix D.
+    # alongside the per-user daemon. Must run elevated. See plan.md, Appendix D.
     [switch]$Console,
     # Advanced, opt-in: copy PocketDesk into Program Files and run it elevated. An elevated daemon
     # cannot be stopped by ordinary programs, so the default install never asks for elevation.
@@ -48,7 +49,8 @@ if ($Protect) {
     Set-Content -Path (Join-Path $Protect "PocketDesk.ini") -Value (Join-Path $Protect "daemon")
 
     # Autostart at logon, registered here where we are already elevated. RunLevel Highest starts the
-    # elevated daemon with no per-logon UAC prompt; RestartCount brings it back if it crashes.
+    # elevated daemon with no per-logon UAC prompt, while RestartCount restarts the task only on failure
+    # (a crash or a non-zero exit) - an explicit stop is a success, so it stays down.
     $exe      = Join-Path $Protect "PocketDeskLauncher.exe"
     $me       = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $action   = if ($sac) {
@@ -172,8 +174,8 @@ if (-not (Test-Path $bundledNode) -and -not (Get-Command node -ErrorAction Silen
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
-# Stop a previous install's running daemon (the detached node on the user port) and any old tray,
-# so its port and the launcher exe are free to replace.
+# Stop a previous install's running daemon (the detached node on the user port), so its port and
+# the launcher exe are free to replace.
 $port = 8765
 try {
     $cfg = Get-Content (Join-Path $env:USERPROFILE ".pocketdesk\config.json") -Raw | ConvertFrom-Json
@@ -186,7 +188,7 @@ try {
     Start-Sleep -Seconds 2
 } catch {}
 # Whole trees, so the daemon's PowerShell and ffmpeg helpers go with it.
-$running = @(Get-Process PocketDesk, PocketDeskTray -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) +
+$running = @(Get-Process PocketDesk -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }) +
            @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue | ForEach-Object { $_.OwningProcess })
 foreach ($id in $running | Sort-Object -Unique) { taskkill /T /F /PID $id 2>$null | Out-Null }
 Start-Sleep -Milliseconds 300
@@ -196,9 +198,8 @@ $nodeExe = if (Test-Path $bundledNode) { $bundledNode } else { (Get-Command node
 Copy-Item $nodeExe (Join-Path $InstallDir "PocketDesk.exe") -Force
 
 # Always rebuilt: a release zip gives the source its commit time, often older than the previous exe.
-# The tray needs WinForms; the launcher stays one exe, so there is nothing separate to start or hide.
-& $csc /nologo /target:winexe /out:$staged /r:System.dll /r:System.Windows.Forms.dll /r:System.Drawing.dll `
-    $src (Join-Path $PSScriptRoot "PocketDeskTray.cs")
+# One windowless exe: no tray, no icon and no window to start or hide.
+& $csc /nologo /target:winexe /out:$staged /r:System.dll $src
 if ($LASTEXITCODE -ne 0) { throw "compile failed" }
 
 # -Protected (advanced, opt-in): the daemon runs as administrator, and this folder is writable by
@@ -237,10 +238,10 @@ $action = if ($sac) {
 } else { New-ScheduledTaskAction -Execute $exe -Argument "--supervise" }
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
 $prin = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
-# No RestartCount: a stop is a stop. Ending the task (Task Manager, `schtasks /End`) leaves the
-# daemon down until you start it again — the next logon, or the Start-menu entry.
+# RestartCount restarts the task only on failure (a crash or a non-zero exit), while an explicit stop -
+# Task Manager, `schtasks /End`, `Stop-ScheduledTask` - is a success, so the task stays down until you start it.
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-                -ExecutionTimeLimit ([TimeSpan]::Zero)
+                -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit ([TimeSpan]::Zero)
 Register-ScheduledTask -TaskName "PocketDesk" -Action $action -Trigger $trigger -Principal $prin -Settings $settings -Force | Out-Null
 
 # Start Menu only: a click starts the daemon if needed and opens the pairing and settings page.

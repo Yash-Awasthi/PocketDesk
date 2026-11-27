@@ -1,4 +1,4 @@
-// The tray stops the daemon by closing its stdin: the daemon must exit and take
+// A stopped launcher closes the daemon's stdin: the daemon must exit and take
 // the processes its agents started with it, so nothing is left running.
 import fs from "node:fs";
 import os from "node:os";
@@ -9,19 +9,35 @@ import { REPO, check, connect, failureCount, failureNames, makeTmp, waitForHealt
 const PORT = 8812;
 const tmp = makeTmp("rh-eof-");
 const agent = path.join(tmp, "agent.js");
-fs.writeFileSync(agent, `
+fs.writeFileSync(
+  agent,
+  `
 const c = require("child_process").spawn(process.execPath, ["-e", "setInterval(() => {}, 1e6)"], { stdio: "ignore" });
 console.log("GRANDCHILD " + c.pid);
 setInterval(() => {}, 1e6);
-`);
+`,
+);
 
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const d = spawn(process.execPath, ["src/index.js"], {
   cwd: REPO + "/daemon",
   env: {
-    ...process.env, RH_PORT: String(PORT), RH_CLI_PORT: String(PORT + 1), RH_TOKEN: "testtoken", RH_MANIFESTS: tmp,
-    POCKETDESK_DATA: ".pocketdesk-test-" + PORT, RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT), RH_STOP_ON_STDIN_EOF: "1",
+    ...process.env,
+    RH_PORT: String(PORT),
+    RH_CLI_PORT: String(PORT + 1),
+    RH_TOKEN: "testtoken",
+    RH_MANIFESTS: tmp,
+    POCKETDESK_DATA: ".pocketdesk-test-" + PORT,
+    RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT),
+    RH_STOP_ON_STDIN_EOF: "1",
   },
   stdio: ["pipe", "pipe", "pipe"],
 });
@@ -29,7 +45,9 @@ d.stderr.on("data", () => {});
 let grandchild = 0;
 try {
   await new Promise((resolve, reject) => {
-    d.stdout.on("data", (x) => { if (String(x).includes("registry scanned")) resolve(); });
+    d.stdout.on("data", (x) => {
+      if (String(x).includes("registry scanned")) resolve();
+    });
     d.on("exit", () => reject(new Error("daemon exited early")));
   });
   await waitForHealth(PORT, 30_000);
@@ -56,7 +74,10 @@ try {
   await closed;
   // A phone that reconnects while the daemon is winding down must be turned away, not served.
   const late = connect(PORT);
-  const lateClose = new Promise((r) => { late.ws.on("close", (code) => r(code)); late.ws.on("error", () => {}); });
+  const lateClose = new Promise((r) => {
+    late.ws.on("close", (code) => r(code));
+    late.ws.on("error", () => {});
+  });
   const code = await Promise.race([exited, new Promise((r) => setTimeout(() => r("timeout"), 15000))]);
   check("daemon exits when stdin closes", code !== "timeout");
   const [closeCode, closeReason] = await closed;
@@ -67,9 +88,16 @@ try {
 } catch (e) {
   check(`no error (${e.message})`, false);
 } finally {
-  try { d.kill("SIGKILL"); } catch {}
-  if (grandchild && alive(grandchild)) try { process.kill(grandchild); } catch {}
-  try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}
+  try {
+    d.kill("SIGKILL");
+  } catch {}
+  if (grandchild && alive(grandchild))
+    try {
+      process.kill(grandchild);
+    } catch {}
+  try {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  } catch {}
 }
 console.log(failureCount() ? `\nFAILURES: ${failureNames()}` : "\nALL PASS");
 process.exit(failureCount() ? 1 : 0);

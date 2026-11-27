@@ -19,13 +19,15 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execSync, execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { writeFileAtomic } from "./atomic_write.js";
 import { docDescription } from "./agent_panel.js";
 
-const PROFILE_DIR = process.env.FB_PROFILE_DIR || (process.env.APPDATA
-  ? path.join(process.env.APPDATA, "Freebuff")
-  : path.join(os.homedir(), ".config", "Freebuff"));
+const PROFILE_DIR =
+  process.env.FB_PROFILE_DIR ||
+  (process.env.APPDATA
+    ? path.join(process.env.APPDATA, "Freebuff")
+    : path.join(os.homedir(), ".config", "Freebuff"));
 
 const DEFAULT_SKILLS_DIRS = () => {
   const dirs = [path.join(os.homedir(), ".claude", "skills")];
@@ -44,18 +46,11 @@ function skillsDirs() {
 }
 
 // Only these profile-relative files are readable/writable via the protocol.
-const CONFIG_ALLOWLIST = [
-  "Preferences",
-  "Local State",
-  "Network/Network Persistent State",
-];
+const CONFIG_ALLOWLIST = ["Preferences", "Local State", "Network/Network Persistent State"];
 
-const APP_EXE = process.env.FB_APP_EXE || path.join(
-  process.env.LOCALAPPDATA || "",
-  "Programs",
-  "@codebufffreebuff-desktop",
-  "Freebuff.exe",
-);
+const APP_EXE =
+  process.env.FB_APP_EXE ||
+  path.join(process.env.LOCALAPPDATA || "", "Programs", "@codebufffreebuff-desktop", "Freebuff.exe");
 
 const MAX_CONFIG_BYTES = 1024 * 1024;
 
@@ -73,7 +68,7 @@ function appBasename() {
 export function isRunning(exeName = appBasename()) {
   try {
     if (process.platform === "win32") {
-      const out = execSync(`tasklist /FI "IMAGENAME eq ${exeName}" /NH`, {
+      const out = execFileSync("tasklist", ["/FI", `IMAGENAME eq ${exeName}`, "/NH"], {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 5000,
@@ -154,7 +149,9 @@ export function configSet(name, patch) {
       // The Electron app may hold these files open and flush over our edit on
       // exit — warn the client when it's running.
       appRunning,
-      warning: appRunning ? "Freebuff is running — it may overwrite this edit when it exits. Quit the app first for guaranteed persistence." : undefined,
+      warning: appRunning
+        ? "Freebuff is running — it may overwrite this edit when it exits. Quit the app first for guaranteed persistence."
+        : undefined,
     };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -164,7 +161,14 @@ export function configSet(name, patch) {
 function deepMerge(base, patch) {
   const out = { ...base };
   for (const [k, v] of Object.entries(patch)) {
-    if (v && typeof v === "object" && !Array.isArray(v) && out[k] && typeof out[k] === "object" && !Array.isArray(out[k])) {
+    if (
+      v &&
+      typeof v === "object" &&
+      !Array.isArray(v) &&
+      out[k] &&
+      typeof out[k] === "object" &&
+      !Array.isArray(out[k])
+    ) {
       out[k] = deepMerge(out[k], v);
     } else {
       out[k] = v;
@@ -178,8 +182,12 @@ export function skillList() {
   const items = [];
   for (const dir of skillsDirs()) {
     if (!fs.existsSync(dir)) continue;
-    let entries = [];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
     for (const e of entries) {
       if (!e.isDirectory() || seen.has(e.name)) continue;
       const skillDir = path.join(dir, e.name);
@@ -201,7 +209,11 @@ export function skillList() {
 }
 
 function readDescription(md) {
-  try { return docDescription(fs.readFileSync(md, "utf8")); } catch { return ""; }
+  try {
+    return docDescription(fs.readFileSync(md, "utf8"));
+  } catch {
+    return "";
+  }
 }
 
 function skillDirFor(name) {
@@ -226,11 +238,13 @@ export function skillGet(name) {
 }
 
 // The desktop app keeps its codebuff.com session in state.json (not in its Electron storage).
-const STATE_FILE = process.env.FB_STATE_FILE || path.join(os.homedir(), ".config", "freebuff-desktop", "state.json");
+const STATE_FILE =
+  process.env.FB_STATE_FILE || path.join(os.homedir(), ".config", "freebuff-desktop", "state.json");
 const AUTH_HOST = "https://www.codebuff.com";
 // Saved sessions for switching accounts; tokens never leave this file.
-const VAULT = process.env.FB_VAULT
-  || path.join(os.homedir(), process.env.POCKETDESK_DATA || ".pocketdesk", "freebuff-accounts.json");
+const VAULT =
+  process.env.FB_VAULT ||
+  path.join(os.homedir(), process.env.POCKETDESK_DATA || ".pocketdesk", "freebuff-accounts.json");
 
 function readJson(file, fallback) {
   try {
@@ -269,7 +283,12 @@ export function accounts() {
   if (cur) remember(cur);
   const vault = readJson(VAULT, {});
   return Object.entries(vault)
-    .map(([email, v]) => ({ email, name: v.session?.user?.name ?? "", savedAt: v.savedAt, current: cur?.user.email === email }))
+    .map(([email, v]) => ({
+      email,
+      name: v.session?.user?.name ?? "",
+      savedAt: v.savedAt,
+      current: cur?.user.email === email,
+    }))
     .sort((x, y) => x.email.localeCompare(y.email));
 }
 
@@ -278,7 +297,8 @@ function withAppClosed(edit) {
   const wasRunning = isRunning();
   if (wasRunning) {
     appQuit();
-    for (let i = 0; i < 50 && isRunning(); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    for (let i = 0; i < 50 && isRunning(); i++)
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
     if (isRunning()) return { ok: false, error: "Freebuff did not close; quit it on the PC and retry" };
   }
   const state = readJson(STATE_FILE, {});
@@ -293,7 +313,9 @@ export function authLogout(confirm) {
   if (confirm !== "CLEAR") return { ok: false, error: 'confirm must be exactly "CLEAR"' };
   const cur = currentSession();
   if (cur) remember(cur);
-  return withAppClosed((sessions) => { delete sessions[AUTH_HOST]; });
+  return withAppClosed((sessions) => {
+    delete sessions[AUTH_HOST];
+  });
 }
 
 export function accountSwitch(email) {
@@ -301,7 +323,9 @@ export function accountSwitch(email) {
   if (!saved?.session) return { ok: false, error: `no saved Freebuff account: ${email}` };
   const cur = currentSession();
   if (cur) remember(cur);
-  return withAppClosed((sessions) => { sessions[AUTH_HOST] = saved.session; });
+  return withAppClosed((sessions) => {
+    sessions[AUTH_HOST] = saved.session;
+  });
 }
 
 export function accountForget(email) {
@@ -326,9 +350,13 @@ export function appOpen() {
 export function appQuit() {
   try {
     if (process.platform === "win32") {
-      execSync(`taskkill /IM ${appBasename()} /T`, { stdio: "ignore", timeout: 10000, windowsHide: true });
+      execFileSync("taskkill", ["/IM", appBasename(), "/T"], {
+        stdio: "ignore",
+        timeout: 10000,
+        windowsHide: true,
+      });
     } else {
-      execSync(`pkill -f ${JSON.stringify(appBasename())} || true`, { stdio: "ignore", timeout: 10000 });
+      execFileSync("pkill", ["-f", appBasename()], { stdio: "ignore", timeout: 10000 });
     }
     return { ok: true };
   } catch {

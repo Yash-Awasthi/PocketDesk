@@ -19,7 +19,7 @@ export default {
     this._token = ctx.config?.token;
   },
 
-  onMessage(ctx, ws, msg) {
+  onMessage(_ctx, ws, msg) {
     if (ws._authed) return; // post-auth: pass through
     if (msg.type !== "hello") return { block: true }; // nothing leaks pre-auth
     // Wrong-token hellos MUST reach server.js: it owns the close contract

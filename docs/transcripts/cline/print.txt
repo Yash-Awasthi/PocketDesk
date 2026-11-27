@@ -1,0 +1,18 @@
+# Golden transcript: Cline CLI (cline)
+# package: cline
+# binary: cline
+# command: cline --json "Reply with OK"
+# argv: ["cline","--json","Reply with OK"]
+# cwd: C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd
+# env-overrides: none
+# credential-probe: yes, no credentials supplied
+# outcome: exit 1 in 5614 ms
+# captured: 2026-11-26
+
+# note: no provider key configured for cline
+
+# ---- stdout ----
+(empty)
+# ---- stderr ----
+{"ts":"2026-11-26T12:19:33.548Z","type":"error","message":"Token refresh failed: 503"}
+# ---- end ----

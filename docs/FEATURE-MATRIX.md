@@ -52,7 +52,7 @@ Status legend:
 | Native-scrollback passthrough (plain text lines for touch scroll) | retach | ✅ `chat_text` renders the full transcript as plain text |
 | Cell-grid snapshot replay (restore vim/htop screens) | muxterm, retach, zellij | 🗺️ |
 | mosh-style UDP roam (auth datagrams, state diff, predictive echo) | mosh, zmosh, zmx | 🗺️ (WS+TCP for now; Tailscale covers roaming) |
-| Boot persistence (service/launchd start) | pm2, muxterm | ⚙️ install-service.ps1 + tray |
+| Boot persistence (service/launchd start) | pm2, muxterm | ⚙️ install-service.ps1 + Scheduled Task |
 | remain-on-exit + respawn | tmux | ✅ tmux respawn-config on session create; `remain_on_exit` |
 | Windows/panes/layouts | tmux, zellij, muxterm | ➖ removed 2026-09-22 with the tmux manager |
 | Git-worktree-per-agent | vmux, orca, ccpocket | ✅ a new chat or terminal can start in its own worktree (`create {worktree}`, `chatsession {worktree}`, `worktree.js`); there is no `wt_*` message |
@@ -109,7 +109,7 @@ Status legend:
 | mkcert-style local CA install (no cert warnings) | mkcert, selfsigned | 🗺️ (pinning covers it today) |
 | Remote desktop / screen streaming | rustdesk, ws-scrcpy, novnc, guacamole | ✅ `rd_*` (session lifecycle w/ async connect, frame buffering, input forwarding, quality presets, stats) — TS→ESM port; full WebRTC video remains roadmap (frame relay transport is simulated) |
 | VNC frame bridge (TCP frame server + frame feed) | novnc, guacamole-server | ➖ the frame bridge is gone (no `vnc_*` handler, no `vnc_bridge.js`); VNC survives only as an outbound client through `profile_connect` (`ssh_vnc_client.js`) |
-| **Real desktop control (capture + input)** | rustdesk, anydesk | ✅ `desktop_start/stop/frame/mouse/key/type/quality/status` — Windows PowerShell helpers (warm ~3 fps JPEG capture in-memory + warm SendInput input helper), canvas viewer in the browser tab (click/right-click/wheel/keyboard), watcher-scoped frame feed (no broadcast fan-out), capture loop stops at zero viewers; browser 🖨️ Desktop tab + relay status pill + 🔔 Test-push button |
+| **Real desktop control (capture + input)** | rustdesk, anydesk | ✅ `desktop_start/stop/frame/mouse/key/type/quality/status` — Windows PowerShell helpers (warm ~3 fps JPEG capture in-memory to dodge AMSI RAT heuristics + warm SendInput input helper), canvas viewer in the browser tab (click/right-click/wheel/keyboard), watcher-scoped frame feed (no broadcast fan-out), capture loop stops at zero viewers; browser 🖨️ Desktop tab + relay status pill + 🔔 Test-push button |
 | SSH jump-host / bastion access control | sshportal, ssh_bastion_cardea, bifroest | ✅ `bastion_*` — users/hosts registry, access rules w/ expiry, session gating, invite tokens (`bastion_user_add/host_add/rule_add/access/session_start/session_end/sessions/stats/invite/invite_accept`) |
 | SSH server auth + per-user command allowlists | bifroest, sshwifty | ✅ `sshserver_*` — user registry, session lifecycle, allowlisted commands w/ recording, idle reaping (`sshserver_user_add/session_create/exec/session_end/sessions/stats`) |
 | Wake-on-LAN | rustdesk | ✅ `wake` — magic-packet UDP broadcast (multi-MAC, custom port/address) |
@@ -161,7 +161,7 @@ Status legend:
 | Feature | Source repos | Status |
 |---|---|---|
 | One-liner installers (bash + PowerShell) | — | ⚙️ |
-| Windows service + tray | node-windows | ⚙️ |
+| Windows service + tray | node-windows | n/a: no tray, a Scheduled Task runs the daemon |
 | Watchdog crash recovery | node-windows, pm2 | ⚙️ (service restart); the in-daemon process monitor was removed 2026-09-22, unused |
 | Keep-PC-awake while agents run (per-process assertion) | orca, LinkShell | ✅ `power_*` (`RH_AWAKE` auto/on/off) — rewritten to SetThreadExecutionState/caffeinate, **no global powercfg/pmset mutation** |
 | Host stats cards (CPU/mem/uptime) | webmux, vmux, multimux | ✅ `stats` |
@@ -299,6 +299,15 @@ error payload that the old assertion could not tell from an empty result. Tests:
 gui-manifests.test.mjs (19 checks incl. a real detached launch and the `gui_open` round
 trip) + ProtocolTest.kt (6); full daemon suite 326 PASS, Gradle 20 tests / 0 failures.
 
+Manifest registry tooling (2026-11-26): an entry is added by dropping JSON into
+`daemon/manifests`, `$RH_MANIFESTS`, or `~/.pocketdesk/manifests`; a user file overrides a
+built-in with the same id. `pocketdesk manifests validate [file|dir]` checks the built-in set
+or a given file/folder and prints one line per problem as `<file>: <field>: <message>`; unknown
+top-level keys are warnings and do not fail the exit. `pocketdesk agent compat <id>` runs that
+entry's `bin --version` once and prints `agent`, `installed`, `version`, `found`, `expected`
+and `compat: ok|mismatch|unknown`; a version below `compat.minVersion` is a mismatch, and GUI
+entries report the expanded path because they have no version probe.
+
 Transports made real (2026-09-22): the six surfaces that were in-memory
 bookkeeping now carry real traffic, and each one's test asserts the real
 behaviour rather than the simulation.
@@ -359,6 +368,6 @@ the messages that tab sends. Full suite: 30 files, all pass.
 | Remote restart / power | AnyDesk, RustDesk | ✅ `pc_power` |
 | Wake on LAN | AnyDesk | ⚙️ |
 | Screen recording | AnyDesk | ⚙️ |
-| Unattended access | AnyDesk | ⚙️ tray at logon; console task at boot |
+| Unattended access | AnyDesk | ⚙️ Scheduled Task at logon; console task at boot |
 | One-click installer | AnyDesk, RustDesk | ✅ `PocketDesk-Install.exe` / `PocketDesk-Uninstall.exe` (IExpress around `install.ps1` / `uninstall.ps1`) and Start Menu shortcut |
 | Audio, whiteboard, remote printing, address book sync, group policies, REST API for admins | AnyDesk | ➖ out of scope: personal use, no sound |

@@ -12,7 +12,9 @@ export function pulseMonitorSource(run = (c, a) => execFileSync(c, a, { encoding
   try {
     const sink = run("pactl", ["get-default-sink"]).trim();
     if (sink) return sink + ".monitor";
-  } catch { /* pactl missing or no sink */ }
+  } catch {
+    /* pactl missing or no sink */
+  }
   return "default";
 }
 
@@ -90,7 +92,21 @@ public static class RHA {
 [RHA]::Run()
 `;
 
-const AAC_OUT = ["-ac", "2", "-ar", "48000", "-c:a", "aac", "-b:a", "128k", "-f", "adts", "-flush_packets", "1", "pipe:1"];
+const AAC_OUT = [
+  "-ac",
+  "2",
+  "-ar",
+  "48000",
+  "-c:a",
+  "aac",
+  "-b:a",
+  "128k",
+  "-f",
+  "adts",
+  "-flush_packets",
+  "1",
+  "pipe:1",
+];
 
 /** ffmpeg input arguments for raw loopback samples in the format the helper announced. */
 export function rawInput(fmt) {
@@ -100,7 +116,9 @@ export function rawInput(fmt) {
 
 /** ADTS frames out of a byte stream; the header's 13-bit length says where each one ends. */
 export class AdtsReader {
-  constructor() { this.buf = Buffer.alloc(0); }
+  constructor() {
+    this.buf = Buffer.alloc(0);
+  }
 
   push(chunk) {
     this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;
@@ -112,7 +130,10 @@ export class AdtsReader {
         continue;
       }
       const len = ((this.buf[3] & 3) << 11) | (this.buf[4] << 3) | (this.buf[5] >> 5);
-      if (len < 7) { this.buf = this.buf.subarray(1); continue; }
+      if (len < 7) {
+        this.buf = this.buf.subarray(1);
+        continue;
+      }
       if (this.buf.length < len) break;
       out.push(this.buf.subarray(0, len));
       this.buf = this.buf.subarray(len);
@@ -130,16 +151,24 @@ export class DesktopAudio extends EventEmitter {
     this.helper = new PsHelper("loopback", LOOPBACK_SCRIPT);
   }
 
-  get running() { return this.procs.length > 0; }
+  get running() {
+    return this.procs.length > 0;
+  }
 
   start() {
     if (this.running || !["win32", "linux"].includes(this.platform)) return;
-    if (this.platform === "linux") return this._encode(["-f", "pulse", "-fragment_size", "1920", "-i", pulseMonitorSource()]);
+    if (this.platform === "linux")
+      return this._encode(["-f", "pulse", "-fragment_size", "1920", "-i", pulseMonitorSource()]);
     let loop;
     try {
-      loop = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", this.helper.ensureFile()],
-        { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-    } catch { return; }
+      loop = spawn(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", this.helper.ensureFile()],
+        { stdio: ["ignore", "pipe", "pipe"], windowsHide: true },
+      );
+    } catch {
+      return;
+    }
     this.procs.push(loop);
     loop.on("exit", () => this.stop());
     let head = "";
@@ -149,7 +178,11 @@ export class DesktopAudio extends EventEmitter {
       if (nl < 0) return;
       loop.stderr.off("data", onHead);
       let fmt;
-      try { fmt = JSON.parse(head.slice(0, nl)); } catch { return this.stop(); }
+      try {
+        fmt = JSON.parse(head.slice(0, nl));
+      } catch {
+        return this.stop();
+      }
       const enc = this._encode(rawInput(fmt));
       if (enc) loop.stdout.pipe(enc.stdin).on("error", () => {});
     };
@@ -160,13 +193,21 @@ export class DesktopAudio extends EventEmitter {
   _encode(input) {
     let proc;
     try {
-      proc = spawn(this.ffmpeg, ["-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", ...input, ...AAC_OUT],
-        { stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
-    } catch { this.stop(); return null; }
+      proc = spawn(
+        this.ffmpeg,
+        ["-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", ...input, ...AAC_OUT],
+        { stdio: ["pipe", "pipe", "ignore"], windowsHide: true },
+      );
+    } catch {
+      this.stop();
+      return null;
+    }
     this.procs.push(proc);
     proc.stdin.on("error", () => {});
     const adts = new AdtsReader();
-    proc.stdout.on("data", (chunk) => { for (const f of adts.push(chunk)) this.emit("audio", f); });
+    proc.stdout.on("data", (chunk) => {
+      for (const f of adts.push(chunk)) this.emit("audio", f);
+    });
     proc.on("error", () => this.stop());
     proc.on("exit", () => this.stop());
     return proc;
@@ -175,6 +216,12 @@ export class DesktopAudio extends EventEmitter {
   stop() {
     const procs = this.procs;
     this.procs = [];
-    for (const p of procs) { try { p.kill(); } catch { /* already gone */ } }
+    for (const p of procs) {
+      try {
+        p.kill();
+      } catch {
+        /* already gone */
+      }
+    }
   }
 }

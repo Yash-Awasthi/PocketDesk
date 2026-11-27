@@ -4,7 +4,6 @@
 //
 // `IS_CONSOLE` is read when desktop_capture.js/desktop_video.js load, so the comparison runs in
 // two `node -e` subprocesses rather than in this process, where the flag cannot change.
-import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { REPO, check, finish } from "./helpers.mjs";
 
@@ -54,11 +53,17 @@ try {
 check("the geometry/encoder probe runs in both modes", plain.length > 0 && console_.length > 0, err);
 
 if (plain && console_) {
-  check("console mode does not change capture geometry or encoder args", plain === console_,
-    plain === console_ ? "" : `plain ${plain.length} bytes vs console ${console_.length} bytes`);
+  check(
+    "console mode does not change capture geometry or encoder args",
+    plain === console_,
+    plain === console_ ? "" : `plain ${plain.length} bytes vs console ${console_.length} bytes`,
+  );
   // Guard against the comparison passing because both sides are empty or both threw.
   const parsed = JSON.parse(plain);
-  check("the probe produced real arguments", Array.isArray(parsed.args) && parsed.args.every((a) => Array.isArray(a) && a.length > 5));
+  check(
+    "the probe produced real arguments",
+    Array.isArray(parsed.args) && parsed.args.every((a) => Array.isArray(a) && a.length > 5),
+  );
   check("the probe covers monitors with different origins", parsed.center0.x !== parsed.center1.x);
   check("the console run is a separate process, so the flag really was read at load", plain === run(false));
 }

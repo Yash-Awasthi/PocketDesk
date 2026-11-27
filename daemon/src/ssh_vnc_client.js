@@ -43,9 +43,18 @@ function readBytes(socket, n, timeoutMs = 10000) {
       if (all.length > n) socket.unshift(all.subarray(n));
       resolve(all.subarray(0, n));
     };
-    const onError = (err) => { cleanup(); reject(err); };
-    const onClose = () => { cleanup(); reject(new Error("connection closed")); };
-    const timer = setTimeout(() => { cleanup(); reject(new Error("timeout")); }, timeoutMs);
+    const onError = (err) => {
+      cleanup();
+      reject(err);
+    };
+    const onClose = () => {
+      cleanup();
+      reject(new Error("connection closed"));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("timeout"));
+    }, timeoutMs);
     socket.on("data", onData);
     socket.on("error", onError);
     socket.on("close", onClose);
@@ -57,7 +66,8 @@ function vncDesResponse(password, challenge) {
   const key = Buffer.alloc(8);
   const pw = Buffer.from(String(password), "latin1");
   for (let i = 0; i < 8; i++) {
-    let b = pw[i] ?? 0, r = 0;
+    let b = pw[i] ?? 0,
+      r = 0;
     for (let bit = 0; bit < 8; bit++) r |= ((b >> bit) & 1) << (7 - bit);
     key[i] = r;
   }
@@ -89,9 +99,14 @@ export class MultiProtocolClient extends EventEmitter {
         const id = name.slice(0, -4);
         const meta = path.join(KEY_DIR, `${id}.json`);
         if (!fs.existsSync(meta)) continue;
-        this.sshKeys.set(id, { ...JSON.parse(fs.readFileSync(meta, "utf8")), publicKey: fs.readFileSync(path.join(KEY_DIR, name), "utf8").trim() });
+        this.sshKeys.set(id, {
+          ...JSON.parse(fs.readFileSync(meta, "utf8")),
+          publicKey: fs.readFileSync(path.join(KEY_DIR, name), "utf8").trim(),
+        });
       }
-    } catch { /* no key directory yet */ }
+    } catch {
+      /* no key directory yet */
+    }
   }
 
   // ─── Connection Profile Management ─────────────────────────────────
@@ -170,7 +185,12 @@ export class MultiProtocolClient extends EventEmitter {
         ...this._auth(profile, options),
         hostVerifier: (key) => {
           const fp = crypto.createHash("sha256").update(key).digest("base64").replace(/=+$/, "");
-          verdict = this.verifyHostKey(profile.host, profile.port, `SHA256:${fp}`, utils.parseKey(key)?.type || "unknown");
+          verdict = this.verifyHostKey(
+            profile.host,
+            profile.port,
+            `SHA256:${fp}`,
+            utils.parseKey(key)?.type || "unknown",
+          );
           return verdict.status === "accepted";
         },
       });
@@ -182,7 +202,16 @@ export class MultiProtocolClient extends EventEmitter {
     profile.lastConnected = Date.now();
     profile.connectCount++;
 
-    const session = { id: crypto.randomUUID(), profileId, protocol: "ssh", status: "connected", connectedAt: Date.now(), hostKey: verdict, client, channels: new Map() };
+    const session = {
+      id: crypto.randomUUID(),
+      profileId,
+      protocol: "ssh",
+      status: "connected",
+      connectedAt: Date.now(),
+      hostKey: verdict,
+      client,
+      channels: new Map(),
+    };
     this.sshSessions.set(session.id, session);
     client.on("close", () => {
       session.status = "disconnected";
@@ -212,9 +241,19 @@ export class MultiProtocolClient extends EventEmitter {
         (err, s) => (err ? reject(err) : resolve(s)),
       );
     });
-    const terminal = { id: crypto.randomUUID(), sessionId, type: "terminal", pty: options.pty || "xterm-256color", width: options.width || 120, height: options.height || 40, status: "open" };
+    const terminal = {
+      id: crypto.randomUUID(),
+      sessionId,
+      type: "terminal",
+      pty: options.pty || "xterm-256color",
+      width: options.width || 120,
+      height: options.height || 40,
+      status: "open",
+    };
     session.channels.set(terminal.id, stream);
-    stream.on("data", (chunk) => this.emit("terminal:data", { terminalId: terminal.id, sessionId, data: chunk.toString("base64") }));
+    stream.on("data", (chunk) =>
+      this.emit("terminal:data", { terminalId: terminal.id, sessionId, data: chunk.toString("base64") }),
+    );
     stream.on("close", () => {
       terminal.status = "closed";
       session.channels.delete(terminal.id);
@@ -238,9 +277,14 @@ export class MultiProtocolClient extends EventEmitter {
     return new Promise((resolve, reject) => {
       session.client.exec(command, (err, stream) => {
         if (err) return reject(err);
-        let stdout = "", stderr = "";
-        stream.on("data", (c) => { stdout += c; });
-        stream.stderr.on("data", (c) => { stderr += c; });
+        let stdout = "",
+          stderr = "";
+        stream.on("data", (c) => {
+          stdout += c;
+        });
+        stream.stderr.on("data", (c) => {
+          stderr += c;
+        });
         stream.on("close", (code) => resolve({ stdout, stderr, code }));
       });
     });
@@ -330,9 +374,20 @@ export class MultiProtocolClient extends EventEmitter {
 
   async connectSFTP(profileId, options = {}) {
     const ssh = await this.connectSSH(profileId, options);
-    const sftp = await new Promise((resolve, reject) => ssh.client.sftp((err, s) => (err ? reject(err) : resolve(s))));
+    const sftp = await new Promise((resolve, reject) =>
+      ssh.client.sftp((err, s) => (err ? reject(err) : resolve(s))),
+    );
     const cwd = await new Promise((resolve) => sftp.realpath(".", (err, p) => resolve(err ? "/" : p)));
-    const session = { id: crypto.randomUUID(), profileId, sshSessionId: ssh.id, protocol: "sftp", status: "connected", connectedAt: Date.now(), currentDir: cwd, sftp };
+    const session = {
+      id: crypto.randomUUID(),
+      profileId,
+      sshSessionId: ssh.id,
+      protocol: "sftp",
+      status: "connected",
+      connectedAt: Date.now(),
+      currentDir: cwd,
+      sftp,
+    };
     this.sftpSessions.set(session.id, session);
     this.emit("sftp:connected", { ...session, sftp: undefined });
     return session;
@@ -352,19 +407,28 @@ export class MultiProtocolClient extends EventEmitter {
     const session = this.sftpSessions.get(sessionId);
     if (!session) throw new Error("Session not found");
     const target = dir || session.currentDir;
-    const list = await new Promise((resolve, reject) => session.sftp.readdir(target, (err, l) => (err ? reject(err) : resolve(l))));
+    const list = await new Promise((resolve, reject) =>
+      session.sftp.readdir(target, (err, l) => (err ? reject(err) : resolve(l))),
+    );
     session.currentDir = target;
     this.emit("sftp:readdir", { sessionId, path: target, count: list.length });
     return {
       path: target,
-      files: list.map((e) => ({ name: e.filename, dir: (e.attrs.mode & 0o170000) === 0o040000, size: e.attrs.size, mtime: e.attrs.mtime })),
+      files: list.map((e) => ({
+        name: e.filename,
+        dir: (e.attrs.mode & 0o170000) === 0o040000,
+        size: e.attrs.size,
+        mtime: e.attrs.mtime,
+      })),
     };
   }
 
   async uploadFile(sessionId, localPath, remotePath) {
     const session = this.sftpSessions.get(sessionId);
     if (!session) throw new Error("Session not found");
-    await new Promise((resolve, reject) => session.sftp.fastPut(localPath, remotePath, (err) => (err ? reject(err) : resolve())));
+    await new Promise((resolve, reject) =>
+      session.sftp.fastPut(localPath, remotePath, (err) => (err ? reject(err) : resolve())),
+    );
     this.emit("sftp:upload", { sessionId, localPath, remotePath });
     return { localPath, remotePath, status: "uploaded", size: fs.statSync(localPath).size };
   }
@@ -372,7 +436,9 @@ export class MultiProtocolClient extends EventEmitter {
   async downloadFile(sessionId, remotePath, localPath) {
     const session = this.sftpSessions.get(sessionId);
     if (!session) throw new Error("Session not found");
-    await new Promise((resolve, reject) => session.sftp.fastGet(remotePath, localPath, (err) => (err ? reject(err) : resolve())));
+    await new Promise((resolve, reject) =>
+      session.sftp.fastGet(remotePath, localPath, (err) => (err ? reject(err) : resolve())),
+    );
     this.emit("sftp:download", { sessionId, remotePath, localPath });
     return { remotePath, localPath, status: "downloaded", size: fs.statSync(localPath).size };
   }
@@ -384,7 +450,12 @@ export class MultiProtocolClient extends EventEmitter {
     const existing = this.hostKeys.get(keyId);
 
     if (!existing) {
-      this.hostKeys.set(keyId, { fingerprint: keyFingerprint, type: keyType, firstSeen: Date.now(), verified: true });
+      this.hostKeys.set(keyId, {
+        fingerprint: keyFingerprint,
+        type: keyType,
+        firstSeen: Date.now(),
+        verified: true,
+      });
       this.emit("hostkey:new", { host, port, fingerprint: keyFingerprint });
       return { status: "accepted", isNew: true };
     }
@@ -393,7 +464,12 @@ export class MultiProtocolClient extends EventEmitter {
       return { status: "accepted", isNew: false };
     }
 
-    this.emit("hostkey:changed", { host, port, oldFingerprint: existing.fingerprint, newFingerprint: keyFingerprint });
+    this.emit("hostkey:changed", {
+      host,
+      port,
+      oldFingerprint: existing.fingerprint,
+      newFingerprint: keyFingerprint,
+    });
     return { status: "changed", oldFingerprint: existing.fingerprint, newFingerprint: keyFingerprint };
   }
 
@@ -425,7 +501,9 @@ export class MultiProtocolClient extends EventEmitter {
       privatePath,
       createdAt: Date.now(),
     };
-    fs.writeFileSync(`${privatePath}.json`, JSON.stringify({ ...key, publicKey: undefined }), { mode: 0o600 });
+    fs.writeFileSync(`${privatePath}.json`, JSON.stringify({ ...key, publicKey: undefined }), {
+      mode: 0o600,
+    });
     this.sshKeys.set(id, key);
     return key;
   }
@@ -452,7 +530,11 @@ export class MultiProtocolClient extends EventEmitter {
     const key = this.sshKeys.get(id);
     if (key?.privatePath) {
       for (const f of [key.privatePath, `${key.privatePath}.pub`, `${key.privatePath}.json`]) {
-        try { fs.unlinkSync(f); } catch { /* already gone */ }
+        try {
+          fs.unlinkSync(f);
+        } catch {
+          /* already gone */
+        }
       }
     }
     return this.sshKeys.delete(id);
@@ -460,7 +542,10 @@ export class MultiProtocolClient extends EventEmitter {
 
   /** Never exposes the private half — only where it lives. */
   listKeys() {
-    return Array.from(this.sshKeys.values()).map(({ privatePath, ...k }) => ({ ...k, hasPrivate: !!privatePath }));
+    return Array.from(this.sshKeys.values()).map(({ privatePath, ...k }) => ({
+      ...k,
+      hasPrivate: !!privatePath,
+    }));
   }
 
   // ─── Status ────────────────────────────────────────────────────────

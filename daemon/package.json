@@ -1,20 +1,25 @@
 {
   "name": "pocketdesk-daemon",
-  "version": "0.1.0",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
   "bin": {
     "pocketdesk": "src/index.js"
   },
   "engines": {
-    "node": ">=24"
+    "node": ">=26"
   },
   "scripts": {
     "start": "node src/index.js",
     "setup-tls": "node scripts/gen-cert.js",
-    "test": "node --test --test-global-setup=test/setup.mjs \"test/*.test.mjs\"",
-    "coverage": "c8 --reporter=json-summary --reporter=text-summary node --test --test-global-setup=test/setup.mjs \"test/*.test.mjs\" && node scripts/check-coverage.mjs",
-    "coverage:areas": "node scripts/coverage-areas.mjs"
+    "lint": "eslint .",
+    "format:check": "prettier --check .",
+    "check": "npm run lint && npm run format:check && node scripts/check-ui-tokens.mjs",
+    "typecheck": "node scripts/typecheck.mjs",
+    "test": "node --test --test-concurrency=2 --test-global-setup=test/setup.mjs \"test/*.test.mjs\"",
+    "coverage": "c8 --reporter=json-summary --reporter=text-summary node --test --test-concurrency=2 --test-global-setup=test/setup.mjs \"test/*.test.mjs\" && node scripts/check-coverage.mjs",
+    "coverage:areas": "node scripts/coverage-areas.mjs",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "node-pty": "1.1.0",
@@ -25,9 +30,17 @@
     "node-pty@1.1.0": true
   },
   "optionalDependencies": {
-    "@number0/iroh": "^1.1.0"
+    "@number0/iroh": "^1.2.0"
   },
   "devDependencies": {
-    "c8": "^12.0.0"
+    "@axe-core/playwright": "^4.14.1",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
+    "@types/node": "^26.6.10",
+    "c8": "^12.0.0",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0",
+    "prettier": "^3.10.1",
+    "typescript": "^5.9.3"
   }
 }

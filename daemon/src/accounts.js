@@ -16,12 +16,22 @@ import { writeFileAtomic } from "./atomic_write.js";
 import { configDir } from "./config.js";
 
 const home = () => process.env.AH_HOME || os.homedir();
-const userData = () => process.env.AH_USERDATA || (process.platform === "win32"
-  ? process.env.APPDATA || path.join(home(), "AppData", "Roaming")
-  : process.platform === "darwin" ? path.join(home(), "Library", "Application Support") : path.join(home(), ".config"));
+const userData = () =>
+  process.env.AH_USERDATA ||
+  (process.platform === "win32"
+    ? process.env.APPDATA || path.join(home(), "AppData", "Roaming")
+    : process.platform === "darwin"
+      ? path.join(home(), "Library", "Application Support")
+      : path.join(home(), ".config"));
 const vaultDir = () => process.env.PD_ACCOUNTS || path.join(configDir, "accounts");
 
-const jwtEmail = (t) => { try { return JSON.parse(Buffer.from(String(t).split(".")[1], "base64url")).email ?? null; } catch { return null; } };
+const jwtEmail = (t) => {
+  try {
+    return JSON.parse(Buffer.from(String(t).split(".")[1], "base64url")).email ?? null;
+  } catch {
+    return null;
+  }
+};
 
 /**
  * Where each agent keeps its login. A source is a whole file, one key path inside a JSON file, or
@@ -30,7 +40,11 @@ const jwtEmail = (t) => { try { return JSON.parse(Buffer.from(String(t).split(".
 const AGENTS = {
   claude: {
     sources: () => [
-      { kind: "jsonKey", file: path.join(home(), ".claude", "settings.json"), key: ["env", "CLAUDE_CODE_OAUTH_TOKEN"] },
+      {
+        kind: "jsonKey",
+        file: path.join(home(), ".claude", "settings.json"),
+        key: ["env", "CLAUDE_CODE_OAUTH_TOKEN"],
+      },
       { kind: "jsonKey", file: path.join(home(), ".claude", ".credentials.json"), key: ["claudeAiOauth"] },
       { kind: "jsonKey", file: path.join(home(), ".claude.json"), key: ["oauthAccount"] },
     ],
@@ -38,26 +52,65 @@ const AGENTS = {
   },
   codex: {
     sources: () => [{ kind: "file", file: path.join(home(), ".codex", "auth.json") }],
-    email: (snap) => { try { return jwtEmail(JSON.parse(snap[0]).tokens?.id_token); } catch { return null; } },
+    email: (snap) => {
+      try {
+        return jwtEmail(JSON.parse(snap[0]).tokens?.id_token);
+      } catch {
+        return null;
+      }
+    },
   },
   gemini: {
     sources: () => [
       { kind: "file", file: path.join(home(), ".gemini", "oauth_creds.json") },
       { kind: "file", file: path.join(home(), ".gemini", "google_accounts.json") },
     ],
-    email: (snap) => { try { return JSON.parse(snap[1]).active ?? null; } catch { return null; } },
+    email: (snap) => {
+      try {
+        return JSON.parse(snap[1]).active ?? null;
+      } catch {
+        return null;
+      }
+    },
   },
   cursor: {
     app: "Cursor.exe",
-    sources: () => [{ kind: "rows", file: path.join(userData(), "Cursor", "User", "globalStorage", "state.vscdb"),
-      keys: ["cursorAuth/accessToken", "cursorAuth/refreshToken", "cursorAuth/cachedEmail", "cursorAuth/cachedSignUpType", "cursorAuth/stripeMembershipType"] }],
+    sources: () => [
+      {
+        kind: "rows",
+        file: path.join(userData(), "Cursor", "User", "globalStorage", "state.vscdb"),
+        keys: [
+          "cursorAuth/accessToken",
+          "cursorAuth/refreshToken",
+          "cursorAuth/cachedEmail",
+          "cursorAuth/cachedSignUpType",
+          "cursorAuth/stripeMembershipType",
+        ],
+      },
+    ],
     email: (snap) => snap[0]?.["cursorAuth/cachedEmail"] ?? null,
   },
   antigravity: {
     app: "Antigravity.exe",
-    sources: () => [{ kind: "rows", file: path.join(userData(), "Antigravity", "User", "globalStorage", "state.vscdb"),
-      keys: ["antigravityUnifiedStateSync.oauthToken", "antigravityUnifiedStateSync.userStatus", "antigravityAuthStatus", "antigravity.profileUrl"] }],
-    email: (snap) => { try { return JSON.parse(snap[0]?.antigravityAuthStatus ?? "null")?.email ?? null; } catch { return null; } },
+    sources: () => [
+      {
+        kind: "rows",
+        file: path.join(userData(), "Antigravity", "User", "globalStorage", "state.vscdb"),
+        keys: [
+          "antigravityUnifiedStateSync.oauthToken",
+          "antigravityUnifiedStateSync.userStatus",
+          "antigravityAuthStatus",
+          "antigravity.profileUrl",
+        ],
+      },
+    ],
+    email: (snap) => {
+      try {
+        return JSON.parse(snap[0]?.antigravityAuthStatus ?? "null")?.email ?? null;
+      } catch {
+        return null;
+      }
+    },
   },
 };
 
@@ -69,12 +122,24 @@ async function sqlite(file, readOnly) {
   return new DatabaseSync(file, { readOnly });
 }
 
-const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return null; } };
+const readJson = (f) => {
+  try {
+    return JSON.parse(fs.readFileSync(f, "utf8"));
+  } catch {
+    return null;
+  }
+};
 const dig = (o, key) => key.reduce((v, k) => (v == null ? undefined : v[k]), o);
 
 /** The current login of one source, or null when that source holds none. */
 async function readSource(s) {
-  if (s.kind === "file") { try { return fs.readFileSync(s.file, "utf8"); } catch { return null; } }
+  if (s.kind === "file") {
+    try {
+      return fs.readFileSync(s.file, "utf8");
+    } catch {
+      return null;
+    }
+  }
   if (s.kind === "jsonKey") return dig(readJson(s.file), s.key) ?? null;
   const db = await sqlite(s.file, true);
   if (!db) return null;
@@ -85,21 +150,27 @@ async function readSource(s) {
       if (r) rows[k] = String(r.value);
     }
     return Object.keys(rows).length ? rows : null;
-  } finally { db.close(); }
+  } finally {
+    db.close();
+  }
 }
 
 /** Puts a saved login back; null removes that source's login (the agent then shows signed out there). */
 async function writeSource(s, value) {
   if (s.kind === "file") {
     if (value == null) fs.rmSync(s.file, { force: true });
-    else { fs.mkdirSync(path.dirname(s.file), { recursive: true }); writeFileAtomic(s.file, value, { mode: 0o600 }); }
+    else {
+      fs.mkdirSync(path.dirname(s.file), { recursive: true });
+      writeFileAtomic(s.file, value, { mode: 0o600 });
+    }
     return;
   }
   if (s.kind === "jsonKey") {
     const o = readJson(s.file) ?? {};
     let at = o;
     for (const k of s.key.slice(0, -1)) at = at[k] ??= {};
-    if (value == null) delete at[s.key.at(-1)]; else at[s.key.at(-1)] = value;
+    if (value == null) delete at[s.key.at(-1)];
+    else at[s.key.at(-1)] = value;
     fs.mkdirSync(path.dirname(s.file), { recursive: true });
     writeFileAtomic(s.file, JSON.stringify(o, null, 2));
     return;
@@ -111,7 +182,9 @@ async function writeSource(s, value) {
       if (value?.[k] == null) db.prepare("DELETE FROM ItemTable WHERE key = ?").run(k);
       else db.prepare("INSERT OR REPLACE INTO ItemTable (key, value) VALUES (?, ?)").run(k, value[k]);
     }
-  } finally { db.close(); }
+  } finally {
+    db.close();
+  }
 }
 
 async function snapshot(agent) {
@@ -121,7 +194,9 @@ async function snapshot(agent) {
 // By email where the agent keeps one: tokens refresh, so a hash of the login would change under the same account.
 const idFor = (agent, snap) => {
   const email = AGENTS[agent].email(snap);
-  return email ? `e:${email.toLowerCase()}` : `h:${crypto.createHash("sha256").update(JSON.stringify(snap)).digest("hex").slice(0, 16)}`;
+  return email
+    ? `e:${email.toLowerCase()}`
+    : `h:${crypto.createHash("sha256").update(JSON.stringify(snap)).digest("hex").slice(0, 16)}`;
 };
 const vaultFile = (agent) => path.join(vaultDir(), `${agent}.json`);
 const loadVault = (agent) => readJson(vaultFile(agent)) ?? {};
@@ -142,7 +217,13 @@ export async function list(agent) {
     agent,
     signedIn,
     email: signedIn ? AGENTS[agent].email(snap) : null,
-    saved: Object.entries(vault).map(([id, a]) => ({ id, label: a.label, email: a.email, current: id === current, savedAt: a.savedAt })),
+    saved: Object.entries(vault).map(([id, a]) => ({
+      id,
+      label: a.label,
+      email: a.email,
+      current: id === current,
+      savedAt: a.savedAt,
+    })),
   };
 }
 
@@ -168,9 +249,11 @@ export async function switchTo(agent, id, isRunning = () => false) {
   const target = loadVault(agent)[id];
   if (!target) return { ok: false, error: "that account is not saved on this PC" };
   const app = AGENTS[agent].app;
-  if (app && isRunning(app)) return { ok: false, error: `close ${app.replace(/\.exe$/, "")} on the PC first` };
+  if (app && isRunning(app))
+    return { ok: false, error: `close ${app.replace(/\.exe$/, "")} on the PC first` };
   const snap = await snapshot(agent);
-  if (snap.some((v) => v != null) && !loadVault(agent)[idFor(agent, snap)]) await save(agent, AGENTS[agent].email(snap) || "Previous");
+  if (snap.some((v) => v != null) && !loadVault(agent)[idFor(agent, snap)])
+    await save(agent, AGENTS[agent].email(snap) || "Previous");
   const sources = AGENTS[agent].sources();
   for (let i = 0; i < sources.length; i++) await writeSource(sources[i], target.snap[i] ?? null);
   return { ok: true, id };

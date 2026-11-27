@@ -1,14 +1,18 @@
 import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.cyclonedx.gradle.CyclonedxDirectTask
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.cyclonedx)
+    // Baseline profile: `:benchmark:generateBaselineProfile` records the hot paths on a device.
+    alias(libs.plugins.androidx.baselineprofile)
 }
 
 val keystoreProps = Properties().apply {
-    val f = rootProject.file("keystore.properties")
+    val f = rootDir.resolve("keystore.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
@@ -34,7 +38,7 @@ android {
     signingConfigs {
         if (keystoreProps.isNotEmpty()) {
             create("release") {
-                storeFile = rootProject.file(keystoreProps.getProperty("storeFile"))
+                storeFile = rootDir.resolve(keystoreProps.getProperty("storeFile"))
                 storePassword = keystoreProps.getProperty("storePassword")
                 keyAlias = keystoreProps.getProperty("keyAlias")
                 keyPassword = keystoreProps.getProperty("keyPassword")
@@ -73,6 +77,8 @@ android {
 
     testOptions {
         unitTests.all { it.useJUnitPlatform() }
+        // Robolectric needs the merged debug manifest and resources to launch an activity.
+        unitTests.isIncludeAndroidResources = true
     }
 }
 
@@ -82,7 +88,17 @@ kotlin {
     }
 }
 
+// JDK 25 compiles; bytecode stays 21 (compileOptions and Kotlin jvmTarget above).
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
 dependencies {
+    // The device-only generator test that fills app/src/main/baseline-prof.txt.
+    baselineProfile(project(":benchmark"))
+
     implementation(platform(libs.compose.bom))
     implementation(libs.activity.compose)
     implementation(libs.compose.material3)
@@ -106,6 +122,17 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.platform.launcher)
+    // Robolectric runs JUnit 4 tests through the vintage engine, beside the Jupiter ones.
+    testImplementation(libs.junit4)
+    testRuntimeOnly(libs.junit.vintage.engine)
+    // Golden screenshots: Roborazzi captures the Compose tree through the Robolectric runtime.
+    testImplementation(libs.robolectric)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test.junit4)
+    testImplementation(libs.androidx.test.junit)
+    testImplementation(libs.androidx.test.core)
     // Instrumented Compose tests need the empty activity createComposeRule() launches.
     debugImplementation(libs.compose.ui.test.manifest)
     // Instrumented tests (androidTest) exercise the pairing payload and the TLS pinning on a device.
@@ -117,3 +144,58 @@ dependencies {
     androidTestImplementation(platform(libs.okhttp.bom))
     androidTestImplementation(libs.okhttp.tls)
 }
+
+// Golden screenshots of the five screens live in the repo, beside the hand-shot baselines:
+// a diff is reviewable, and the test only compares. The directory is passed in because a unit
+// test's working directory is this module, not the repo root.
+val goldenDir = rootDir.resolve("../docs/screenshots/golden")
+
+// Verify by default: a plain test run must never rewrite a golden, or a red diff could be
+// "fixed" by running the tests again. Recording is the opt-in -Pgolden.record=true flag.
+val recordRequested = providers.gradleProperty("golden.record").orNull == "true"
+
+tasks.withType<Test>().configureEach {
+    // A unit test's working directory is this module, not the repo root.
+    systemProperty("golden.dir", goldenDir.absolutePath)
+    systemProperty("roborazzi.test.record", recordRequested.toString())
+    systemProperty("roborazzi.test.verify", (!recordRequested).toString())
+}
+
+tasks.register("verifyGoldens") {
+    group = "verification"
+    description = "Compares the five screen goldens; fails naming the PNG and never rewrites them."
+    dependsOn("testDebugUnitTest")
+}
+
+val goldenRecordFlag = tasks.register("checkGoldenRecordFlag") {
+    doLast {
+        check(recordRequested) {
+            "recordGoldens rewrites checked-in PNGs; pass -Pgolden.record=true to opt in"
+        }
+    }
+}
+
+tasks.register("recordGoldens") {
+    group = "verification"
+    description = "Rewrites docs/screenshots/golden; only with -Pgolden.record=true. Review the PNGs after."
+    dependsOn(goldenRecordFlag, "testDebugUnitTest")
+}
+
+tasks.matching { it.name == "testDebugUnitTest" }.configureEach { mustRunAfter(goldenRecordFlag) }
+
+// SBOM for a release APK: only the runtime graph that ships, not test or debug jars.
+tasks.withType<CyclonedxDirectTask>().configureEach {
+    includeConfigs.set(listOf("releaseRuntimeClasspath"))
+    jsonOutput.set(layout.buildDirectory.file("reports/pocketdesk-apk-sbom.json"))
+    includeBomSerialNumber.set(false)
+}
+
+// A source profile, not a build output: a regenerated file is a reviewable diff, and AGP applies
+// src/main/baseline-prof.txt to every variant, the benchmark one included. The plugin writes into
+// src/<variant>/, so the output dir climbs one level back to the main source set.
+baselineProfile {
+    saveInSrc = true
+    baselineProfileOutputDir = "../main"
+}
+
+apply(from = rootDir.resolve("gradle/build-timings.gradle.kts"))

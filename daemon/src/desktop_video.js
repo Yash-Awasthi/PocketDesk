@@ -24,46 +24,129 @@ const scaleTo = (p) => (p.scale === 1 ? "" : `scale=trunc(iw*${p.scale}/2)*2:-2,
 // The pointer is left out of the picture; viewers draw it from desktop_cursor so it moves without video delay.
 // dup_frames=1 matters: with ddagrab's 0 a screen that is not changing yields no frames at all, so a viewer
 // who joins on an idle PC gets the sequence header and then black until something on screen moves.
-const grab = (p, output) => `ddagrab=output_idx=${output}:framerate=${p.fps}:dup_frames=1:draw_mouse=0,hwdownload,format=bgra,`
-  + scaleTo(p) + "format=nv12";
+const grab = (p, output) =>
+  `ddagrab=output_idx=${output}:framerate=${p.fps}:dup_frames=1:draw_mouse=0,hwdownload,format=bgra,` +
+  scaleTo(p) +
+  "format=nv12";
 // The extended desktop as one picture. ddagrab takes a single output, so two screens side by side need
 // GDI's whole-desktop grab; it is a software capture, so it runs at a lower rate and is scaled down to
 // stay smooth at 4480x1440 and above.
-const grabAll = (p) => ["-f", "gdigrab", "-draw_mouse", "0", "-framerate", String(Math.min(p.fps, 20)),
-  "-i", "desktop", "-vf", "scale=trunc(iw*0.66/2)*2:-2,format=nv12"];
+const grabAll = (p) => [
+  "-f",
+  "gdigrab",
+  "-draw_mouse",
+  "0",
+  "-framerate",
+  String(Math.min(p.fps, 20)),
+  "-i",
+  "desktop",
+  "-vf",
+  "scale=trunc(iw*0.66/2)*2:-2,format=nv12",
+];
 // avfoundation hands over full-resolution (Retina) pixels; the pointer is left out as on Windows.
-const grabMac = (p, output) => ["-f", "avfoundation", "-capture_cursor", "0", "-framerate", String(p.fps),
-  "-pixel_format", "nv12", "-i", `Capture screen ${output}:none`, "-vf", scaleTo(p) + "format=nv12"];
+const grabMac = (p, output) => [
+  "-f",
+  "avfoundation",
+  "-capture_cursor",
+  "0",
+  "-framerate",
+  String(p.fps),
+  "-pixel_format",
+  "nv12",
+  "-i",
+  `Capture screen ${output}:none`,
+  "-vf",
+  scaleTo(p) + "format=nv12",
+];
 // One monitor's rectangle of the X screen; VA-API encoders take frames uploaded to the GPU.
 const grabX11 = (p, m, vaapi) => [
   ...(vaapi ? ["-vaapi_device", "/dev/dri/renderD128"] : []),
-  "-f", "x11grab", "-draw_mouse", "0", "-framerate", String(p.fps),
-  ...(m ? ["-video_size", `${m.w}x${m.h}`] : []), "-i", `${process.env.DISPLAY || ":0"}+${m?.x || 0},${m?.y || 0}`,
-  "-vf", scaleTo(p) + "format=nv12" + (vaapi ? ",hwupload" : "")];
+  "-f",
+  "x11grab",
+  "-draw_mouse",
+  "0",
+  "-framerate",
+  String(p.fps),
+  ...(m ? ["-video_size", `${m.w}x${m.h}`] : []),
+  "-i",
+  `${process.env.DISPLAY || ":0"}+${m?.x || 0},${m?.y || 0}`,
+  "-vf",
+  scaleTo(p) + "format=nv12" + (vaapi ? ",hwupload" : ""),
+];
 
-const nvenc = (zerolatency) => (q) => ["-preset", "p1", "-tune", "ull", ...(zerolatency ? ["-zerolatency", "1"] : []),
-  "-rc", "vbr", "-cq", String(q), "-b:v", "0", "-forced-idr", "1"];
+const nvenc = (zerolatency) => (q) => [
+  "-preset",
+  "p1",
+  "-tune",
+  "ull",
+  ...(zerolatency ? ["-zerolatency", "1"] : []),
+  "-rc",
+  "vbr",
+  "-cq",
+  String(q),
+  "-b:v",
+  "0",
+  "-forced-idr",
+  "1",
+];
 const qsv = (q) => ["-preset", "veryfast", "-low_delay_brc", "1", "-global_quality", String(q - 2)];
 // AMF and VA-API count AV1 quantizers to 255, so they target the preset's bitrate instead of a quality.
-const amf = (q, p) => ["-usage", "ultralowlatency", "-quality", "speed", "-rc", "vbr_latency", "-b:v", p.maxrate];
-const vaapi = (q, p) => ["-rc_mode", "VBR", "-b:v", p.maxrate];
+const amf = (_q, p) => [
+  "-usage",
+  "ultralowlatency",
+  "-quality",
+  "speed",
+  "-rc",
+  "vbr_latency",
+  "-b:v",
+  p.maxrate,
+];
+const vaapi = (_q, p) => ["-rc_mode", "VBR", "-b:v", p.maxrate];
 export const ENCODERS = {
-  av1_nvenc: nvenc(false), hevc_nvenc: nvenc(true), h264_nvenc: nvenc(true),
-  av1_qsv: qsv, hevc_qsv: qsv, h264_qsv: qsv,
-  av1_amf: amf, hevc_amf: amf, h264_amf: amf,
-  av1_vaapi: vaapi, hevc_vaapi: vaapi, h264_vaapi: vaapi,
+  av1_nvenc: nvenc(false),
+  hevc_nvenc: nvenc(true),
+  h264_nvenc: nvenc(true),
+  av1_qsv: qsv,
+  hevc_qsv: qsv,
+  h264_qsv: qsv,
+  av1_amf: amf,
+  hevc_amf: amf,
+  h264_amf: amf,
+  av1_vaapi: vaapi,
+  hevc_vaapi: vaapi,
+  h264_vaapi: vaapi,
   // VideoToolbox has no constant-quality mode on Intel Macs, so it targets the preset's cap.
-  h264_videotoolbox: (q, p) => ["-realtime", "1", "-b:v", p.maxrate],
+  h264_videotoolbox: (_q, p) => ["-realtime", "1", "-b:v", p.maxrate],
   libx264: (q) => ["-preset", "ultrafast", "-tune", "zerolatency", "-crf", String(q - 2)],
 };
 /** Encoders worth trying on each platform: newest codec first, then GPU vendor, CPU last. */
 export const ENCODER_ORDER = {
-  win32: ["av1_nvenc", "av1_qsv", "av1_amf", "hevc_nvenc", "hevc_qsv", "hevc_amf", "h264_nvenc", "h264_qsv", "h264_amf", "libx264"],
+  win32: [
+    "av1_nvenc",
+    "av1_qsv",
+    "av1_amf",
+    "hevc_nvenc",
+    "hevc_qsv",
+    "hevc_amf",
+    "h264_nvenc",
+    "h264_qsv",
+    "h264_amf",
+    "libx264",
+  ],
   linux: ["av1_nvenc", "av1_vaapi", "hevc_nvenc", "hevc_vaapi", "h264_nvenc", "h264_vaapi", "libx264"],
   darwin: ["h264_videotoolbox", "libx264"],
   // wf-recorder carries its own encoder, without NVENC.
   wayland: ["h264_vaapi", "libx264"],
 };
+const kbpsOf = (rate) => (/k$/i.test(rate) ? Number.parseFloat(rate) : Number.parseFloat(rate) * 1000);
+
+/** A preset with its maxrate lowered to a per-stream cap; a cap never raises a preset's own rate. */
+export function presetWithCap(name, capKbps = 0) {
+  const p = PRESETS[name] || PRESETS.balanced;
+  if (!(capKbps > 0)) return p;
+  return { ...p, maxrate: `${Math.min(Math.round(kbpsOf(p.maxrate)), Math.round(capKbps))}k` };
+}
+
 export const CODECS = ["av1", "hevc", "h264"];
 export const codecOf = (enc) => (enc.startsWith("av1") ? "av1" : enc.startsWith("hevc") ? "hevc" : "h264");
 const START_CODE = Buffer.from([0, 0, 0, 1]);
@@ -73,21 +156,45 @@ const LADDER = ["low", "saver", "balanced", "quality"];
 export const KIND = { config: 0, key: 1, delta: 2, audio: 3 };
 
 /* * ffmpeg arguments for one encoder; a monitor on another GPU needs its own D3D11 device. */
-export function ffmpegArgs(enc, presetName, monitor, platform = process.platform) {
-  const p = PRESETS[presetName];
+export function ffmpegArgs(enc, presetName, monitor, platform = process.platform, capKbps = 0) {
+  const p = presetWithCap(presetName, capKbps);
   let input;
   if (platform === "darwin") input = grabMac(p, monitor?.output || 0);
   else if (platform === "linux") input = grabX11(p, monitor, enc.endsWith("_vaapi"));
   else if (monitor?.all) input = grabAll(p);
   else {
     const adapter = monitor?.adapter || 0;
-    input = [...(adapter ? ["-init_hw_device", `d3d11va=rh:${adapter}`, "-filter_hw_device", "rh"] : []),
-      "-filter_complex", grab(p, monitor?.output || 0)];
+    input = [
+      ...(adapter ? ["-init_hw_device", `d3d11va=rh:${adapter}`, "-filter_hw_device", "rh"] : []),
+      "-filter_complex",
+      grab(p, monitor?.output || 0),
+    ];
   }
-  return ["-hide_banner", "-loglevel", "error", ...input,
+  return [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    ...input,
     // A keyframe every `fps` changed frames starts each iroh GOP stream; see docs/TRANSPORT-BENCH.md.
-    "-c:v", enc, ...ENCODERS[enc](p.q, p), "-g", String(p.fps), "-bf", "0", "-maxrate", p.maxrate, "-bufsize", p.maxrate,
-    "-flush_packets", "1", "-f", "flv", "-flvflags", "no_duration_filesize", "pipe:1"];
+    "-c:v",
+    enc,
+    ...ENCODERS[enc](p.q, p),
+    "-g",
+    String(p.fps),
+    "-bf",
+    "0",
+    "-maxrate",
+    p.maxrate,
+    "-bufsize",
+    p.maxrate,
+    "-flush_packets",
+    "1",
+    "-f",
+    "flv",
+    "-flvflags",
+    "no_duration_filesize",
+    "pipe:1",
+  ];
 }
 
 /**
@@ -102,17 +209,34 @@ function stampBytes(ms) {
   return t;
 }
 export function seiStamp(ms) {
-  return Buffer.concat([START_CODE, Buffer.from([0x06, 0x05, 16 + 7]), STAMP_UUID, stampBytes(ms), Buffer.from([0x80])]);
+  return Buffer.concat([
+    START_CODE,
+    Buffer.from([0x06, 0x05, 16 + 7]),
+    STAMP_UUID,
+    stampBytes(ms),
+    Buffer.from([0x80]),
+  ]);
 }
 export function stampFrame(codec, data, ms) {
   if (codec === "av1") return Buffer.concat([data, Buffer.from([0x7a, 16 + 7]), STAMP_UUID, stampBytes(ms)]);
-  if (codec === "hevc") return Buffer.concat([START_CODE, Buffer.from([0x4e, 0x01, 0x05, 16 + 7]), STAMP_UUID, stampBytes(ms), Buffer.from([0x80]), data]);
+  if (codec === "hevc")
+    return Buffer.concat([
+      START_CODE,
+      Buffer.from([0x4e, 0x01, 0x05, 16 + 7]),
+      STAMP_UUID,
+      stampBytes(ms),
+      Buffer.from([0x80]),
+      data,
+    ]);
   return Buffer.concat([seiStamp(ms), data]);
 }
 
 /** Incremental FLV demuxer yielding { kind, data, codec }, legacy H.264 tags and enhanced HEVC/AV1 ones. */
 export class FlvToAnnexB {
-  constructor() { this.buf = Buffer.alloc(0); this.headerDone = false; }
+  constructor() {
+    this.buf = Buffer.alloc(0);
+    this.headerDone = false;
+  }
 
   push(chunk) {
     this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;
@@ -138,17 +262,31 @@ export class FlvToAnnexB {
         const key = ((body[0] >> 4) & 7) === 1;
         let payload = body.subarray(5);
         if (!codec) continue;
-        if (packetType === 0) out.push({ kind: KIND.config, codec, data: codec === "hevc" ? hvccToAnnexB(payload) : payload.subarray(4) });
+        if (packetType === 0)
+          out.push({
+            kind: KIND.config,
+            codec,
+            data: codec === "hevc" ? hvccToAnnexB(payload) : payload.subarray(4),
+          });
         else if (packetType === 1 || packetType === 3) {
           if (packetType === 1 && codec === "hevc") payload = payload.subarray(3); // composition time
-          out.push({ kind: key ? KIND.key : KIND.delta, codec, data: codec === "hevc" ? lengthPrefixedToAnnexB(payload) : payload });
+          out.push({
+            kind: key ? KIND.key : KIND.delta,
+            codec,
+            data: codec === "hevc" ? lengthPrefixedToAnnexB(payload) : payload,
+          });
         }
         continue;
       }
       if ((body[0] & 0x0f) !== 7) continue;
       const payload = body.subarray(5);
       if (body[1] === 0) out.push({ kind: KIND.config, codec: "h264", data: avccToAnnexB(payload) });
-      else if (body[1] === 1) out.push({ kind: body[0] >> 4 === 1 ? KIND.key : KIND.delta, codec: "h264", data: lengthPrefixedToAnnexB(payload) });
+      else if (body[1] === 1)
+        out.push({
+          kind: body[0] >> 4 === 1 ? KIND.key : KIND.delta,
+          codec: "h264",
+          data: lengthPrefixedToAnnexB(payload),
+        });
     }
     return out;
   }
@@ -157,8 +295,16 @@ export class FlvToAnnexB {
 function avccToAnnexB(c) {
   const parts = [];
   let p = 6;
-  for (let n = c[5] & 0x1f; n > 0; n--) { const len = c.readUInt16BE(p); parts.push(START_CODE, c.subarray(p + 2, p + 2 + len)); p += 2 + len; }
-  for (let n = c[p++]; n > 0; n--) { const len = c.readUInt16BE(p); parts.push(START_CODE, c.subarray(p + 2, p + 2 + len)); p += 2 + len; }
+  for (let n = c[5] & 0x1f; n > 0; n--) {
+    const len = c.readUInt16BE(p);
+    parts.push(START_CODE, c.subarray(p + 2, p + 2 + len));
+    p += 2 + len;
+  }
+  for (let n = c[p++]; n > 0; n--) {
+    const len = c.readUInt16BE(p);
+    parts.push(START_CODE, c.subarray(p + 2, p + 2 + len));
+    p += 2 + len;
+  }
   return Buffer.concat(parts);
 }
 
@@ -169,7 +315,11 @@ export function hvccToAnnexB(c) {
   for (let a = c[22]; a > 0 && p + 3 <= c.length; a--) {
     let n = c.readUInt16BE(p + 1);
     p += 3;
-    for (; n > 0 && p + 2 <= c.length; n--) { const len = c.readUInt16BE(p); parts.push(START_CODE, c.subarray(p + 2, p + 2 + len)); p += 2 + len; }
+    for (; n > 0 && p + 2 <= c.length; n--) {
+      const len = c.readUInt16BE(p);
+      parts.push(START_CODE, c.subarray(p + 2, p + 2 + len));
+      p += 2 + len;
+    }
   }
   return Buffer.concat(parts);
 }
@@ -188,7 +338,10 @@ function lengthPrefixedToAnnexB(b) {
 function nalUnits(data) {
   const starts = [];
   for (let i = 0; i + 3 <= data.length; i++) {
-    if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1) { starts.push(i + 3); i += 2; }
+    if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1) {
+      starts.push(i + 3);
+      i += 2;
+    }
   }
   return starts.map((s, k) => {
     if (k + 1 === starts.length) return data.subarray(s);
@@ -203,7 +356,8 @@ function nalUnits(data) {
  * carries them, as native encoders do on keyframes. Returns [config or null, frame].
  */
 export function splitConfig(codec, data) {
-  const isParam = codec === "hevc" ? (u) => [32, 33, 34].includes((u[0] >> 1) & 0x3f) : (u) => [7, 8].includes(u[0] & 0x1f);
+  const isParam =
+    codec === "hevc" ? (u) => [32, 33, 34].includes((u[0] >> 1) & 0x3f) : (u) => [7, 8].includes(u[0] & 0x1f);
   const units = nalUnits(data);
   const params = units.filter(isParam);
   if (!params.length) return [null, data];
@@ -213,7 +367,9 @@ export function splitConfig(codec, data) {
 
 /** Records [kind u8][length u32 BE][data] from a native helper: 1 key, 2 delta, 3 audio. */
 export class FrameReader {
-  constructor() { this.buf = Buffer.alloc(0); }
+  constructor() {
+    this.buf = Buffer.alloc(0);
+  }
 
   push(chunk) {
     this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;
@@ -261,15 +417,29 @@ export class DesktopVideo extends EventEmitter {
     this.audio = false;
     this.failed = new Set();
     this.preset = "balanced";
+    this.capKbps = 0;
     this.monitor = null;
     this.stats = { packets: 0, bytes: 0, restarts: 0 };
   }
 
-  get running() { return !!this.proc; }
-  get scale() { return PRESETS[this.preset].scale; }
+  get running() {
+    return !!this.proc;
+  }
+  get scale() {
+    return PRESETS[this.preset].scale;
+  }
 
   /** Unknown names keep the current preset. */
-  setPreset(name) { if (PRESETS[name]) this.preset = this.wanted = name; }
+  setPreset(name) {
+    if (PRESETS[name]) this.preset = this.wanted = name;
+  }
+
+  /** The narrowest per-stream ceiling among config and viewers; 0 means each preset's own maxrate. */
+  setCap(kbps) {
+    const n = Math.round(Number(kbps));
+    this.capKbps = Number.isFinite(n) && n > 0 ? Math.min(n, 50_000) : 0;
+    return this.capKbps;
+  }
 
   /** Codecs every viewer decodes, best first; H.264 is always there as the floor. */
   setCodecs(list) {
@@ -295,7 +465,9 @@ export class DesktopVideo extends EventEmitter {
 
   /** ffmpeg encoders to try, in the viewers' codec order; ones that failed where a later one worked are skipped. */
   candidates(platform = IS_WAYLAND ? "wayland" : process.platform) {
-    const order = (ENCODER_ORDER[platform] || []).filter((e) => this.codecs.includes(codecOf(e)) && !this.failed.has(e));
+    const order = (ENCODER_ORDER[platform] || []).filter(
+      (e) => this.codecs.includes(codecOf(e)) && !this.failed.has(e),
+    );
     return order.sort((a, b) => this.codecs.indexOf(codecOf(a)) - this.codecs.indexOf(codecOf(b)));
   }
 
@@ -323,7 +495,9 @@ export class DesktopVideo extends EventEmitter {
       return null;
     })();
     const p = this._starting;
-    p.finally(() => { if (this._starting === p) this._starting = null; });
+    p.finally(() => {
+      if (this._starting === p) this._starting = null;
+    });
     return p;
   }
 
@@ -354,34 +528,57 @@ export class DesktopVideo extends EventEmitter {
    * marks where a stream starts.
    */
   _spawnNative(gen) {
-    const opts = { monitor: this.monitor, preset: PRESETS[this.preset], codecs: this.codecs, audio: this.audio };
-    return this.native.start(opts, ({ kind, data, codec }) => {
-      if (gen !== this.gen) return;
-      if (kind === KIND.audio) return this.emit("audio", data);
-      this.codec = codec;
-      if (kind === KIND.key) {
-        const [config, frame] = codec === "av1" ? [Buffer.alloc(0), data] : splitConfig(codec, data);
-        if (config) this.emit("packet", { kind: KIND.config, data: config });
-        return this._emit(KIND.key, frame);
-      }
-      if (kind === KIND.delta) this._emit(kind, data);
-    }, () => { if (gen === this.gen) { this.proc = null; this.emit("ended", "native helper stopped"); } })
-      .then((r) => {
-        if (!r || gen !== this.gen) return false;
-        this.encoder = r.encoder;
-        this.codec = r.codec;
-        this.proc = this.native;
-        return true;
-      }, () => false);
+    const opts = {
+      monitor: this.monitor,
+      preset: presetWithCap(this.preset, this.capKbps),
+      codecs: this.codecs,
+      audio: this.audio,
+    };
+    return this.native
+      .start(
+        opts,
+        ({ kind, data, codec }) => {
+          if (gen !== this.gen) return;
+          if (kind === KIND.audio) return this.emit("audio", data);
+          this.codec = codec;
+          if (kind === KIND.key) {
+            const [config, frame] = codec === "av1" ? [Buffer.alloc(0), data] : splitConfig(codec, data);
+            if (config) this.emit("packet", { kind: KIND.config, data: config });
+            return this._emit(KIND.key, frame);
+          }
+          if (kind === KIND.delta) this._emit(kind, data);
+        },
+        () => {
+          if (gen === this.gen) {
+            this.proc = null;
+            this.emit("ended", "native helper stopped");
+          }
+        },
+      )
+      .then(
+        (r) => {
+          if (!r || gen !== this.gen) return false;
+          this.encoder = r.encoder;
+          this.codec = r.codec;
+          this.proc = this.native;
+          return true;
+        },
+        () => false,
+      );
   }
 
   /** True once the first packet arrives; false if ffmpeg dies first. */
   _spawn(enc, gen) {
     return new Promise((resolve) => {
-      const [bin, args] = IS_WAYLAND ? ["wf-recorder", wfRecorderArgs(enc, PRESETS[this.preset], this.monitor)] : [this.ffmpeg, ffmpegArgs(enc, this.preset, this.monitor)];
+      const [bin, args] = IS_WAYLAND
+        ? ["wf-recorder", wfRecorderArgs(enc, presetWithCap(this.preset, this.capKbps), this.monitor)]
+        : [this.ffmpeg, ffmpegArgs(enc, this.preset, this.monitor, process.platform, this.capKbps)];
       let proc;
-      try { proc = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true }); }
-      catch { return resolve(false); }
+      try {
+        proc = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      } catch {
+        return resolve(false);
+      }
       this.child = proc;
       const live = () => gen === this.gen && this.child === proc;
       const demux = new FlvToAnnexB();
@@ -389,26 +586,49 @@ export class DesktopVideo extends EventEmitter {
       let av1Header = null;
       let started = false;
       let err = "";
-      proc.stderr.on("data", (d) => { err = (err + d).slice(-2000); });
+      proc.stderr.on("data", (d) => {
+        err = (err + d).slice(-2000);
+      });
       proc.stdout.on("data", (chunk) => {
         let packets;
-        try { packets = demux.push(chunk); } catch { proc.kill(); return; }
+        try {
+          packets = demux.push(chunk);
+        } catch {
+          proc.kill();
+          return;
+        }
         for (const pkt of packets) {
           if (!live()) return;
-          if (!started) { started = true; this.proc = proc; this.codec = codec; resolve(true); }
+          if (!started) {
+            started = true;
+            this.proc = proc;
+            this.codec = codec;
+            resolve(true);
+          }
           if (pkt.kind === KIND.config) {
             if (codec === "av1") av1Header = pkt.data;
             this.stats.packets++;
             this.emit("packet", { kind: KIND.config, data: pkt.data });
             continue;
           }
-          this._emit(pkt.kind, codec === "av1" && pkt.kind === KIND.key ? av1WithSequenceHeader(av1Header, pkt.data) : pkt.data);
+          this._emit(
+            pkt.kind,
+            codec === "av1" && pkt.kind === KIND.key ? av1WithSequenceHeader(av1Header, pkt.data) : pkt.data,
+          );
         }
       });
-      proc.on("error", () => { if (!started) resolve(false); });
+      proc.on("error", () => {
+        if (!started) resolve(false);
+      });
       proc.on("exit", () => {
-        if (!started) { this.lastError = err.trim(); return resolve(false); }
-        if (live()) { this.child = this.proc = null; this.emit("ended", err.trim()); }
+        if (!started) {
+          this.lastError = err.trim();
+          return resolve(false);
+        }
+        if (live()) {
+          this.child = this.proc = null;
+          this.emit("ended", err.trim());
+        }
       });
     });
   }

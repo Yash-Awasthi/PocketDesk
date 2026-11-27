@@ -52,12 +52,22 @@ function pump(ws) {
     }
   });
 }
-function send(ws, o) { ws.send(JSON.stringify(o)); }
+function send(ws, o) {
+  ws.send(JSON.stringify(o));
+}
 
 async function run() {
   const daemon = spawn(process.execPath, ["src/index.js"], {
     cwd: new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"),
-    env: { ...process.env, RH_PORT: String(PORT), RH_CLI_PORT: String(PORT + 1), RH_TOKEN: TOKEN, RH_MANIFESTS: tmpMan, POCKETDESK_DATA: ".pocketdesk-test-" + PORT, RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT) },
+    env: {
+      ...process.env,
+      RH_PORT: String(PORT),
+      RH_CLI_PORT: String(PORT + 1),
+      RH_TOKEN: TOKEN,
+      RH_MANIFESTS: tmpMan,
+      POCKETDESK_DATA: ".pocketdesk-test-" + PORT,
+      RH_HOME: path.join(os.tmpdir(), "rh-home-" + PORT),
+    },
     stdio: ["ignore", "pipe", "pipe"],
   });
   daemon.stderr.on("data", () => {});
@@ -66,7 +76,10 @@ async function run() {
     // Ready means the server answers, not that 2000 ms have passed (see waitForHealth).
     await waitForHealth(PORT);
     const ws = new WebSocket(`ws://localhost:${PORT}/ws`);
-    await new Promise((res, rej) => { ws.on("open", res); ws.on("error", rej); });
+    await new Promise((res, rej) => {
+      ws.on("open", res);
+      ws.on("error", rej);
+    });
     pump(ws);
     send(ws, { type: "hello", token: TOKEN });
     const welcome = await next((m) => m.type === "welcome");
@@ -78,7 +91,10 @@ async function run() {
     send(ws, { type: "create", harness: "node", cwd: os.tmpdir() });
     // Spawning a PTY can take well over 8 s while the other suites run in parallel.
     const created = await next((m) => m.type === "created" || m.type === "error", 30000);
-    check("session created for shutdown test" + (created.type === "error" ? `: ${created.message}` : ""), created.type === "created");
+    check(
+      "session created for shutdown test" + (created.type === "error" ? `: ${created.message}` : ""),
+      created.type === "created",
+    );
 
     // Kill it — the kill flow is what the shutdown handler uses per-session
     send(ws, { type: "kill", id: created.id });

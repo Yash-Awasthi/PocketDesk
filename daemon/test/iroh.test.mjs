@@ -4,7 +4,9 @@ import { check, finish, makeTmp, startDaemon, teardown } from "./helpers.mjs";
 import { IrohSocket, ALPN } from "../src/iroh_link.js";
 
 let iroh;
-try { iroh = await import("@number0/iroh"); } catch {
+try {
+  iroh = await import("@number0/iroh");
+} catch {
   console.log("SKIP  @number0/iroh not installed");
   process.exit(0);
 }
@@ -26,7 +28,12 @@ async function endpoint(alpns = []) {
   return ep;
 }
 
-const frame = (buf) => { const b = Buffer.alloc(4 + buf.length); b.writeUInt32BE(buf.length, 0); buf.copy(b, 4); return b; };
+const frame = (buf) => {
+  const b = Buffer.alloc(4 + buf.length);
+  b.writeUInt32BE(buf.length, 0);
+  buf.copy(b, 4);
+  return b;
+};
 async function readMsg(recv) {
   const len = Buffer.from(await recv.readExact(4)).readUInt32BE(0);
   return Buffer.from(await recv.readExact(len));
@@ -47,7 +54,12 @@ async function dialAndHello(ticket, hello) {
 
 async function main() {
   const tmp = makeTmp("rh-iroh-");
-  const d = startDaemon(PORT, CLI_PORT, { token: TOKEN, manifests: tmp, dataDir: ".pocketdesk-irohtest", env: { RH_IROH: "local" } });
+  const d = startDaemon(PORT, CLI_PORT, {
+    token: TOKEN,
+    manifests: tmp,
+    dataDir: ".pocketdesk-irohtest",
+    env: { RH_IROH: "local" },
+  });
   await d.ready;
 
   let ticket = null;
@@ -62,13 +74,23 @@ async function main() {
   if (sawRefresh) console.log("  (pair page refreshed itself while iroh was starting)");
 
   const phone = await dialAndHello(ticket, { type: "hello", token: TOKEN, name: "phone" });
-  check("master token over iroh pairs and returns a device token", phone.reply?.type === "welcome" && typeof phone.reply.deviceToken === "string");
-  check("welcome tells the phone the current iroh ticket", typeof phone.reply.iroh === "string" && phone.reply.iroh.length > 20);
+  check(
+    "master token over iroh pairs and returns a device token",
+    phone.reply?.type === "welcome" && typeof phone.reply.deviceToken === "string",
+  );
+  check(
+    "welcome tells the phone the current iroh ticket",
+    typeof phone.reply.iroh === "string" && phone.reply.iroh.length > 20,
+  );
   await phone.bi.send.writeAll([...frame(Buffer.from(JSON.stringify({ type: "device_list" })))]);
   let list;
-  do list = JSON.parse((await readMsg(phone.bi.recv)).toString()); while (list.type !== "device_list");
+  do list = JSON.parse((await readMsg(phone.bi.recv)).toString());
+  while (list.type !== "device_list");
   const me = list.items.find((x) => x.id === phone.reply.clientId);
-  check("device is bound to the iroh key it paired from", typeof me?.endpointId === "string" && me.endpointId.length > 20);
+  check(
+    "device is bound to the iroh key it paired from",
+    typeof me?.endpointId === "string" && me.endpointId.length > 20,
+  );
 
   const stolen = await dialAndHello(ticket, { type: "hello", token: phone.reply.deviceToken });
   check("device token from a different iroh key is refused", stolen.reply === "closed");
@@ -107,11 +129,17 @@ async function main() {
   // A viewer that stops reading leaves the GOP unfinished: the next keyframe reports congestion.
   sock.sendVideo(1, Buffer.alloc(4 << 20, 5));
   await new Promise((r) => setTimeout(r, 300));
-  check("a GOP still unsent when the next keyframe comes reports congestion", sock.sendVideo(1, pkt(6)) === false);
+  check(
+    "a GOP still unsent when the next keyframe comes reports congestion",
+    sock.sendVideo(1, pkt(6)) === false,
+  );
   // Acks say the viewer has not read the newest GOP for 1.6 s: late even with nothing queued here.
   sock.onVideoAck(4, 0);
   await new Promise((r) => setTimeout(r, 1600));
-  check("an ack showing the viewer 1.6 s behind reports congestion", sock.lagMs() > 1500 && sock.sendVideo(1, pkt(7)) === false);
+  check(
+    "an ack showing the viewer 1.6 s behind reports congestion",
+    sock.lagMs() > 1500 && sock.sendVideo(1, pkt(7)) === false,
+  );
   sock.close();
 
   await teardown(tmp);
@@ -119,4 +147,7 @@ async function main() {
   process.exit(0); // live endpoints would otherwise keep the process up
 }
 
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

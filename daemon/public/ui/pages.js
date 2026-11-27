@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The pages of the PC's phone hub.
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = window.PD;
 const { h, esc, $ } = PD;
 const I = {
   home: '<svg viewBox="0 0 20 20"><path d="M3.5 9 10 3.5 16.5 9v7.5h-4.5v-5h-4v5H3.5z"/></svg>',
@@ -71,7 +71,7 @@ function drawPhoneCard() {
   box.replaceChildren(
     h("div", { className: "row" }, h("div", { className: "phone-ico", innerHTML: I.screen }),
       h("div", { className: "grow" }, h("div", { className: "big", textContent: name }),
-        h("div", { className: "dim", textContent: [a?.serial ? `Control: ${a.via === "usb" ? "USB cable" : "wireless debugging"}` : "Control: not set up", hub.online ? "App: connected" : "App: offline", bat ? `Battery ${bat.level}%${bat.charging ? " charging" : ""}` : ""].filter(Boolean).join(" · ") }))),
+        h("div", { className: "dim", textContent: [a?.serial ? `Control: ${a.via === "usb" ? "USB cable" : "wireless debugging"}` : "Control: not set up", bat ? `Battery ${bat.level}%${bat.charging ? " charging" : ""}` : ""].filter(Boolean).join(" · ") }))),
     h("div", { className: "actions" },
       a?.serial ? [btn("Show screen", () => PD.adb.open("screen"), "primary"), btn("Apps", () => PD.go("apps")), btn("Camera", () => PD.go("camera"))]
         : btn("Set up phone control", () => PD.go("connect"), "primary"),
@@ -84,7 +84,7 @@ function recentApps() {
   if (!list.length) return "";
   return h("div", { className: "actions" }, h("span", { className: "dim small", textContent: "Recent apps:" }),
     list.map((x) => h("button", { className: "tog", onclick: () => PD.adb.open("app", { pkg: x.pkg, label: x.label }) },
-      PD.adb.icons?.[x.pkg] ? h("img", { src: img(PD.adb.icons[x.pkg]), alt: "", style: "width:18px;height:18px;vertical-align:-4px;margin-right:6px;border-radius:4px" }) : "", x.label)));
+      PD.adb.icons?.[x.pkg] ? h("img", { src: img(PD.adb.icons[x.pkg]), alt: "", className: "recent-ico" }) : "", x.label)));
 }
 function drawMedia() {
   const box = $("#homeMedia"), m = PD.hub.state.media;
@@ -151,7 +151,7 @@ function clippyLast() {
   const last = PD.clippy.last;
   const text = last ? last.text || last.typed || "" : "";
   if (!text) return "";
-  return h("div", { className: "card", style: "padding:8px;margin-top:8px" },
+  return h("div", { className: "card clippy-card" },
     h("div", { className: "bar" },
       h("span", { className: "dim small grow", textContent: `${last.window ? `From: ${last.window}` : "Last Ctrl+C"}${!last.text && last.typed ? " · typed buffer" : ""} · ${text.length.toLocaleString()} characters` }),
       btn("Copy", () => copyCaptured(text))),
@@ -323,7 +323,9 @@ PD.page("camera", {
   title: "Camera", icon: I.camera,
   render(sec) {
     const facing = h("select", {}, h("option", { value: "back", textContent: "Back camera" }), h("option", { value: "front", textContent: "Front camera" }));
+    facing.setAttribute("aria-label", "Camera");
     const size = h("select", {}, h("option", { value: "", textContent: "Best size" }));
+    size.setAttribute("aria-label", "Capture size");
     PD.on("adb_cameras", (m) => {
       size.replaceChildren(h("option", { value: "", textContent: "Best size" }));
       const cam = m.cameras.find((c) => c.facing === facing.value);
@@ -361,6 +363,7 @@ PD.page("camera", {
 
 // ── Messages ──
 PD.sms = { threads: [], open: null };
+let chatTimer;
 PD.page("messages", {
   title: "Messages", icon: I.messages,
   render(sec) {
@@ -370,7 +373,6 @@ PD.page("messages", {
     sec.append(h("div", { className: "col" }, h("div", { className: "bar" }, btn("New message", () => openThread(null), "primary"), btn("Refresh", () => loadThreads())), list), conv);
     PD.on("evt_sms", (e) => { loadThreads(); if (PD.sms.open && e.thread === PD.sms.open.id) openThread(PD.sms.open); });
     // A new chat message arrives as an updated notification: the list and the open chat follow it.
-    let chatTimer;
     PD.on("notifs_changed", () => {
       if (PD.current !== "messages") return;
       clearTimeout(chatTimer);
@@ -384,17 +386,25 @@ PD.page("messages", {
   show() { loadThreads(); },
 });
 async function loadThreads() {
+  // Any refresh supersedes a notification's queued one; a stale repaint would undo a newer state.
+  clearTimeout(chatTimer);
   const list = $("#smsList");
-  if (!PD.hub.online) return list.replaceChildren(needApp());
-  const r = await PD.ask("sms", "threads").catch((e) => ({ threads: [], error: e.message }));
+  const box = PD.stateBox(list, { retry: loadThreads, empty: "No conversations on the phone." });
+  if (!PD.hub.online) { box.clear(); return list.replaceChildren(needApp()); }
+  if (!PD.up()) return box.show("error");
+  box.show("loading");
+  let r;
+  try { r = await PD.ask("sms", "threads"); } catch (e) { return box.show("error", e.message); }
   // Chats from WhatsApp, Telegram, Signal and the like come from their notifications, beside the texts.
   const chats = PD.notifs.list.filter((n) => n.conv?.length).map((n) => ({ id: `n:${n.key}`, name: n.chat || n.title, app: n.appName, date: n.when, snippet: n.conv.at(-1).text, notif: n }));
   PD.sms.threads = [...chats, ...(r.threads || [])].sort((a, b) => b.date - a.date);
   PD.badge("messages", (r.threads || []).filter((t) => t.unread).length);
-  list.replaceChildren(...PD.sms.threads.map((t) => h("button", { className: `item${PD.sms.open?.id === t.id ? " on" : ""}`, onclick: () => openThread(t) },
+  const rows = PD.sms.threads.map((t) => h("button", { className: `item${PD.sms.open?.id === t.id ? " on" : ""}`, onclick: () => openThread(t) },
     h("div", { className: "row" }, h("b", { className: "grow", textContent: t.name || t.address }), t.app ? h("span", { className: "pill", textContent: t.app }) : "", h("span", { className: "dim", textContent: rel(t.date) })),
-    h("div", { className: `dim clip${t.unread ? " unread" : ""}`, textContent: t.snippet || "" }))));
-  if (!PD.sms.threads.length) list.append(empty(r.error || "No conversations, or the app has no permission to read texts yet."));
+    h("div", { className: `dim clip${t.unread ? " unread" : ""}`, textContent: t.snippet || "" })));
+  if (!rows.length) return box.show("empty");
+  box.clear();
+  list.replaceChildren(...rows);
 }
 /** A chat app's conversation, as its notification carries it; replies go through the notification's Reply. */
 function openChat(t) {
@@ -473,14 +483,25 @@ PD.page("calls", {
   show() { loadCalls(); },
 });
 async function loadCalls() {
-  const box = $("#callLog");
-  if (!PD.hub.online) return box.replaceChildren(needApp());
-  const r = await run(() => PD.ask("calls", "log"));
+  const list = $("#callLog");
+  const box = PD.stateBox(list, { retry: loadCalls, empty: "No calls on the phone." });
+  if (!PD.hub.online) {
+    callsWaitsApp = true;
+    box.clear();
+    return list.replaceChildren(needApp());
+  }
+  callsWaitsApp = false;
+  if (!PD.up()) return box.show("error");
+  box.show("loading");
+  let r;
+  try { r = await PD.ask("calls", "log"); } catch (e) { return box.show("error", e.message); }
   const kinds = { 1: "↙ incoming", 2: "↗ outgoing", 3: "✕ missed", 5: "rejected", 6: "blocked" };
-  box.replaceChildren(...(r?.calls || []).map((c) => h("div", { className: "item row" },
+  const rows = (r.calls || []).map((c) => h("div", { className: "item row" },
     h("div", { className: "grow" }, h("b", { textContent: c.name || c.number }), h("div", { className: `dim${c.kind === 3 ? " bad" : ""}`, textContent: `${kinds[c.kind] || ""} · ${rel(c.date)}${c.duration ? ` · ${Math.round(c.duration / 60)} min` : ""}` })),
-    btn("Call", () => run(() => PD.ask("calls", "dial", { number: c.number }), "Calling on the phone")))));
-  if (!r?.calls?.length) box.append(empty("No calls, or the app has no permission to read the call log yet."));
+    btn("Call", () => run(() => PD.ask("calls", "dial", { number: c.number }), "Calling on the phone"))));
+  if (!rows.length) return box.show("empty");
+  box.clear();
+  list.replaceChildren(...rows);
 }
 let contactTimer;
 function searchContacts(q, box, num) {
@@ -538,9 +559,11 @@ PD.page("notifications", {
     const box = h("div", { id: "notifList" });
     sec.append(h("div", { className: "bar" }, btn("Clear all", () => run(() => PD.ask("notif", "dismiss_all"))), btn("Refresh", () => loadNotifs()),
       "Notification" in window && Notification.permission === "default" ? btn("Show as desktop notifications", () => Notification.requestPermission()) : ""), PD.syncCard("pcnotif"), box);
+    const state = PD.stateBox(box, { retry: loadNotifs, empty: "No notifications on the phone." });
     const draw = () => {
-      box.replaceChildren(...PD.notifs.list.map(notifRow));
-      if (!PD.notifs.list.length) box.append(PD.hub.online ? empty("No notifications on the phone.") : needApp());
+      if (!PD.hub.online) { state.clear(); box.replaceChildren(needApp()); }
+      else if (!PD.notifs.list.length) state.show("empty");
+      else { state.clear(); box.replaceChildren(...PD.notifs.list.map(notifRow)); }
       drawHomeNotifs();
       PD.badge("notifications", PD.notifs.list.length);
     };
@@ -549,8 +572,15 @@ PD.page("notifications", {
   show() { loadNotifs(); },
 });
 async function loadNotifs() {
-  const r = await PD.ask("notif", "list").catch(() => null);
-  if (r) { PD.notifs.list = r.items || []; PD.emit("notifs_changed"); }
+  const list = $("#notifList");
+  const state = PD.stateBox(list, { retry: loadNotifs, empty: "No notifications on the phone." });
+  if (!PD.hub.online) { state.clear(); return list.replaceChildren(needApp()); }
+  if (!PD.up()) return state.show("error");
+  state.show("loading");
+  let r;
+  try { r = await PD.ask("notif", "list"); } catch (e) { return state.show("error", e.message); }
+  PD.notifs.list = r.items || [];
+  PD.emit("notifs_changed");
 }
 PD.on("evt_notif", (e) => {
   if (e.op === "posted") {
@@ -562,6 +592,13 @@ PD.on("evt_notif", (e) => {
   PD.emit("notifs_changed");
 });
 PD.on("hub_changed", () => { if (PD.hub.online && !PD.notifs.loaded) { PD.notifs.loaded = true; loadNotifs(); loadThreads(); } });
+// A page opened before the phone app connected showed its "open the app" note; ask once it arrives.
+let callsWaitsApp = false, photosWaitsApp = false;
+PD.on("hub_changed", () => {
+  if (!PD.hub.online) return;
+  if (callsWaitsApp && PD.current === "calls") { callsWaitsApp = false; loadCalls(); }
+  if (photosWaitsApp && PD.current === "photos") { photosWaitsApp = false; loadPhotos(true); }
+});
 PD.on("evt_sms", () => { if (PD.current !== "messages") loadThreads(); });
 
 // ── Photos ──
@@ -576,10 +613,20 @@ PD.page("photos", {
 let photoOffset = 0;
 async function loadPhotos(reset) {
   const grid = $("#photoGrid");
-  if (!PD.hub.online) return grid.replaceChildren(needApp());
-  if (reset) { photoOffset = 0; grid.replaceChildren(); }
-  const r = await run(() => PD.ask("photos", "list", { offset: photoOffset, limit: 60 }, 60000));
-  if (!r) return;
+  const box = PD.stateBox(grid, { retry: () => loadPhotos(true), empty: "No photos on the phone." });
+  if (!PD.hub.online) {
+    photosWaitsApp = true;
+    box.clear();
+    return grid.replaceChildren(needApp());
+  }
+  photosWaitsApp = false;
+  if (!PD.up()) return box.show("error");
+  if (reset) { photoOffset = 0; box.show("loading"); }
+  let r;
+  try { r = await PD.ask("photos", "list", { offset: photoOffset, limit: 60 }, 60000); } catch (e) { return box.show("error", e.message); }
+  box.clear();
+  if (reset) grid.replaceChildren();
+  else for (const n of grid.querySelectorAll('.empty, [data-action="retry"]')) n.remove();
   photoOffset += (r.items || []).length;
   for (const p of r.items || []) {
     const tile = h("button", { className: "photo", title: `${p.name} · ${new Date(p.date).toLocaleString()}`, onclick: () => downloadPhoto(p) },
@@ -587,7 +634,7 @@ async function loadPhotos(reset) {
       p.video ? h("span", { className: "badge", textContent: "▶" }) : "");
     grid.append(tile);
   }
-  if (!grid.children.length) grid.append(empty("No photos, or the app has no permission to read them yet."));
+  if (!grid.children.length) box.show("empty");
 }
 async function downloadPhoto(p) {
   const parts = [];
@@ -728,6 +775,4 @@ async function drawApp() {
         perm("notifications", "Notifications", st.notifications), perm("sms", "Texts", st.sms), perm("calls", "Calls and call log", st.calls),
         perm("contacts", "Contacts", st.contacts), perm("photos", "Photos", st.photos), perm("dnd", "Do not disturb", st.dnd), perm("settings", "Brightness", st.writeSettings)));
 }
-
-window.addEventListener("load", () => PD.start());
 })();

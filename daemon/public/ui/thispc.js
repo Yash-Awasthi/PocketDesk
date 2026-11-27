@@ -2,10 +2,10 @@
 // "This PC": the one place for pairing, security and this install, on the PC itself.
 // It replaces the separate /pair settings page: same token, same loopback-only endpoints, but inside
 // the hub, so pairing, the QR and the switches are not a second frontend to find.
-"use strict";
+
+import { PD } from "./core.js";
 
 (() => {
-const PD = window.PD;
 const { h, $ } = PD;
 const btn = (label, onclick, cls = "") => h("button", { className: cls, textContent: label, onclick });
 const api = (p, body) => fetch(`${p}?k=${encodeURIComponent(PD.localToken)}`, body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }).then((r) => r.json());
@@ -18,7 +18,7 @@ const qrSvg = (text, cell = 8) => {
 };
 const fmt = (t) => (t ? new Date(t).toLocaleString() : "never");
 
-const S = { status: null, devices: [], totpOn: false, totpOffer: false, totpSecret: "", qrTab: "app" };
+const S = { status: null, devices: [], audit: { events: [], categories: [] }, totpOn: false, totpOffer: false, totpSecret: "", qrTab: "app" };
 let boxes = {}; // the DOM the paint step updates, so nothing is rebuilt while a field has focus
 
 PD.registerThisPc = () => PD.page("thispc", {
@@ -30,18 +30,22 @@ PD.registerThisPc = () => PD.page("thispc", {
       return;
     }
     // ── Pairing ──
-    const pwInput = h("input", { type: "password", placeholder: "Connection password (blank = none)", autocomplete: "new-password", style: "flex:1;min-width:220px" });
+    const pwInput = h("input", { type: "password", placeholder: "Connection password (blank = none)", autocomplete: "new-password", className: "pw-input" });
+    const tokenInput = h("input", { type: "text", readOnly: true, value: PD.localToken, className: "token-input", onfocus: (e) => e.target.select() });
+    tokenInput.setAttribute("aria-label", "Pairing token");
     // One code at a time. Side by side, a phone's scanner locked onto whichever it framed first (the
     // browser code, every time) instead of the app's, so the two are tabs now.
     const qrBox = h("div", { className: "qr" });
-    const qrNote = h("p", { className: "dim small", style: "margin:8px 0 0" });
+    const qrNote = h("p", { className: "dim small qr-note" });
     const hubLine = h("div", { className: "dim small" });
     const tabs = [["app", "PocketDesk app"], ["web", "Phone browser"]].map(([key, label]) =>
-      h("button", { className: "tab", textContent: label, onclick: () => { S.qrTab = key; paintQr(); } }));
+      h("button", { className: "tab", role: "tab", "aria-selected": "false", textContent: label, onclick: () => { S.qrTab = key; paintQr(); } }));
     const paintQr = () => {
       const app = S.qrTab !== "web";
       tabs[0].classList.toggle("on", app);
       tabs[1].classList.toggle("on", !app);
+      tabs[0].setAttribute("aria-selected", String(app));
+      tabs[1].setAttribute("aria-selected", String(!app));
       qrBox.innerHTML = app ? (PD.pairPayload ? qrSvg(PD.pairPayload) : "") : (PD.hubUrl ? qrSvg(PD.hubUrl) : "");
       qrNote.textContent = app
         ? "Scan with the PocketDesk app: Connect tab › Scan QR. It pairs this PC with its address and certificate fingerprint."
@@ -57,7 +61,7 @@ PD.registerThisPc = () => PD.page("thispc", {
         h("p", { className: "dim small", textContent: "If a code does not scan, enter the token by hand in the app (or in this browser's login box)." }),
         h("div", { className: "form" },
           h("label", {}, "Token"),
-          h("input", { type: "text", readOnly: true, value: PD.localToken, style: "width:min(520px,100%)", onfocus: (e) => e.target.select() }),
+          tokenInput,
           btn("Copy token", () => navigator.clipboard.writeText(PD.localToken).then(() => PD.toast("Token copied"), () => PD.toast("Could not copy", true))),
           btn("Copy app link", () => navigator.clipboard.writeText(PD.pairPayload || "").then(() => PD.toast("Pairing link copied"), () => PD.toast("Could not copy", true))))),
 
@@ -86,6 +90,13 @@ PD.registerThisPc = () => PD.page("thispc", {
         h("div", { className: "bar" }, h("h3", { className: "grow", textContent: "Devices" }), btn("Refresh", () => load())),
         (boxes.devices = h("div", { className: "list" })),
         h("p", { className: "dim small", textContent: "Revoking disconnects the device and changes the pairing token, so the old QR stops working while other phones keep their own." })),
+
+      // Activity: only what the device store timed, and a plain line for what it never kept.
+      h("div", { className: "card" },
+        h("div", { className: "bar" }, h("h3", { className: "grow", textContent: "Activity" }), btn("Refresh", () => load())),
+        (boxes.audit = h("div", { className: "list" })),
+        (boxes.auditMissing = h("div", { className: "col" })),
+        h("p", { className: "dim small", textContent: "Pairing and device events come from the device store, the only history the daemon keeps with timestamps." })),
 
       // ── Uninstall ──
       h("div", { className: "card" },
@@ -157,9 +168,20 @@ function drawDevices() {
   if (!items.length) return boxes.devices.replaceChildren(h("p", { className: "dim small", textContent: "No device has connected yet." }));
   boxes.devices.replaceChildren(...items.map((d) => {
     const row = h("div", { className: "item row" });
+    const meta = [d.platform || "unknown", `last seen ${fmt(d.lastSeen)}`];
+    if (d.lastIp) meta.push(d.lastIp);
+    meta.push(d.transport ? `via ${d.transport}` : "transport unknown");
+    const note = h("input", { type: "text", value: d.note || "", placeholder: "Note for this device", className: "device-note" });
+    note.setAttribute("aria-label", `Note for ${d.name}`);
+    note.addEventListener("change", () =>
+      api("/access/devices/note", { clientId: d.id, note: note.value }).then((r) => {
+        if (r?.ok) { d.note = note.value.trim(); PD.toast("Note saved"); }
+        else PD.toast(r?.error || "Could not save the note", true);
+      }));
     const info = h("div", { className: "grow" },
       h("b", { textContent: d.name + (d.online ? " (online)" : "") + (d.revoked ? " (revoked)" : "") }),
-      h("div", { className: "dim small", textContent: `${d.platform || "unknown"} · last seen ${fmt(d.lastSeen)}${d.lastIp ? " · " + d.lastIp : ""}` }));
+      h("div", { className: "dim small", textContent: meta.join(" · ") }),
+      note);
     row.append(info);
     if (d.revoked) {
       row.append(btn("Allow", () => api("/access/devices/allow", { clientId: d.id }).then(load)));
@@ -178,6 +200,18 @@ function drawDevices() {
   }));
 }
 
+function drawAudit() {
+  if (!boxes.audit) return;
+  const events = (S.audit.events || []).slice(0, 30);
+  boxes.audit.replaceChildren(
+    ...(events.length
+      ? events.map((e) => h("div", { className: "item" }, h("b", { textContent: e.text }), h("div", { className: "dim small", textContent: fmt(e.at) })))
+      : [h("p", { className: "dim small", textContent: "No pairing or device events recorded yet." })]));
+  const missing = (S.audit.categories || []).filter((c) => !c.recorded);
+  boxes.auditMissing.replaceChildren(
+    ...missing.map((c) => h("p", { className: "dim small", textContent: `${c.label}: not recorded; ${c.reason}.` })));
+}
+
 function uninstall(removeData) {
   if (!confirm("Uninstall PocketDesk from this PC? Every phone is disconnected and the daemon stops.")) return;
   const wipe = removeData || confirm("Also delete its settings, paired phones and saved logins?\n\nOK = delete them, Cancel = keep them for a reinstall.");
@@ -190,5 +224,6 @@ function load() {
   if (!PD.localToken) return;
   api("/access").then(paint).catch(() => {});
   api("/access/devices").then((r) => { S.devices = r.items || []; drawDevices(); }).catch(() => {});
+  api("/access/audit").then((r) => { S.audit = r || S.audit; drawAudit(); }).catch(() => {});
 }
 })();

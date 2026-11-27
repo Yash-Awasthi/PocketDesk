@@ -18,13 +18,21 @@ if (badge) {
     Number(badge[1]) === actual,
     `badge says ${badge[1]} ${badge[2]}, tree has ${actual}`,
   );
-  check("the badge counts files, which is what each npm-test entry is", badge[2] === "files", `badge unit: ${badge[2]}`);
+  check(
+    "the badge counts files, which is what each npm-test entry is",
+    badge[2] === "files",
+    `badge unit: ${badge[2]}`,
+  );
   check("the badge links to the testing section", /\]\(#testing\)/.test(readme));
 }
 
 // The testing section has to name the command that actually runs them.
 const testing = readme.slice(readme.indexOf("## 🧪 Testing"));
 check("the testing section shows the real npm command", /npm\.cmd test/.test(testing.slice(0, 600)));
-check("the testing section names the per-file entrypoints it shows", /node test\/smoke\.test\.mjs/.test(testing.slice(0, 800)) && fs.existsSync(path.join(testDir, "smoke.test.mjs")));
+check(
+  "the testing section names the per-file entrypoints it shows",
+  /node test\/smoke\.test\.mjs/.test(testing.slice(0, 800)) &&
+    fs.existsSync(path.join(testDir, "smoke.test.mjs")),
+);
 
 finish();

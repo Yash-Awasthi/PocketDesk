@@ -44,7 +44,7 @@ export function fingerprint(token, name, platform) {
   return crypto.createHash("sha256").update(`${token}|${name}|${platform}`).digest("hex").slice(0, 16);
 }
 
-export function register(clientId, { name, platform, ip }) {
+export function register(clientId, { name, platform, ip, transport }) {
   const id = String(clientId || fingerprint("anon", name, platform));
   const now = Date.now();
   const existing = devices.get(id);
@@ -53,6 +53,7 @@ export function register(clientId, { name, platform, ip }) {
     if (ip) existing.lastIp = ip;
     if (name) existing.name = name;
     if (platform) existing.platform = platform;
+    if (transport) existing.transport = transport;
   } else {
     devices.set(id, {
       id,
@@ -61,6 +62,7 @@ export function register(clientId, { name, platform, ip }) {
       firstSeen: now,
       lastSeen: now,
       lastIp: ip || null,
+      transport: transport || null,
       revoked: false,
     });
   }
@@ -76,8 +78,14 @@ export function issueToken(clientId) {
   if (!d) return null;
   const t = crypto.randomBytes(24).toString("base64url");
   d.tokenHash = hash(t);
+  d.cred = (d.cred || 0) + 1;
   save();
   return t;
+}
+
+/** Generation of this device's credential: bumps on every issue and every revoke. */
+export function credVersion(clientId) {
+  return devices.get(String(clientId))?.cred || 0;
 }
 
 /** The live, unrevoked device a device token belongs to, or null. */
@@ -86,7 +94,12 @@ export function byToken(t) {
   const h = Buffer.from(hash(t));
   for (const d of devices.values()) {
     if (!d.revoked && d.tokenHash && crypto.timingSafeEqual(Buffer.from(d.tokenHash), h)) {
-      if (Date.now() - d.lastSeen > IDLE_EXPIRE_MS) { d.revoked = true; delete d.tokenHash; save(); return null; }
+      if (Date.now() - d.lastSeen > IDLE_EXPIRE_MS) {
+        d.revoked = true;
+        delete d.tokenHash;
+        save();
+        return null;
+      }
       return d;
     }
   }
@@ -108,6 +121,7 @@ export function revoke(clientId) {
   d.revoked = true;
   delete d.tokenHash;
   delete d.endpointId;
+  d.cred = (d.cred || 0) + 1;
   save();
   return { ok: true, device: d };
 }
@@ -120,8 +134,25 @@ export function claimEndpoint(clientId, endpointId) {
   const d = devices.get(String(clientId));
   if (!d) return true;
   if (d.endpointId && d.endpointId !== endpointId) return false;
-  if (!d.endpointId) { d.endpointId = endpointId; save(); }
+  if (!d.endpointId) {
+    d.endpointId = endpointId;
+    save();
+  }
   return true;
+}
+
+// Free text the owner attaches to a device; stored beside the device so it follows a re-pair.
+export function setNote(clientId, note) {
+  const d = devices.get(String(clientId));
+  if (!d) return { ok: false, error: `unknown device: ${clientId}` };
+  const text = String(note ?? "")
+    .trim()
+    .slice(0, 200);
+  if (text) d.note = text;
+  else delete d.note;
+  save();
+  const { tokenHash: _tokenHash, cred: _cred, ...pub } = d;
+  return { ok: true, device: pub };
 }
 
 export function allow(clientId) {
@@ -144,7 +175,27 @@ export function remove(clientId) {
 
 export function list() {
   const now = Date.now();
-  return [...devices.values()].map(({ tokenHash, ...d }) => ({ ...d, online: now - d.lastSeen < 5 * 60_000 }));
+  return [...devices.values()].map(({ tokenHash, cred, ...d }) => ({
+    ...d,
+    online: now - d.lastSeen < 5 * 60_000,
+  }));
+}
+
+/** The timestamped events this store actually holds: first pairing and last connection. */
+export function audit() {
+  const out = [];
+  for (const d of devices.values()) {
+    const name = d.name || "unknown device";
+    if (d.firstSeen)
+      out.push({ at: d.firstSeen, kind: "pairing", text: `${name} paired (${d.platform || "unknown"})` });
+    if (d.lastSeen && d.lastSeen !== d.firstSeen)
+      out.push({
+        at: d.lastSeen,
+        kind: "device",
+        text: `${name} connected${d.transport ? ` over ${d.transport}` : ""}`,
+      });
+  }
+  return out.sort((a, b) => b.at - a.at);
 }
 
 export function touch(clientId) {

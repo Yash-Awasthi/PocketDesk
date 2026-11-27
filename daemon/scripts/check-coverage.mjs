@@ -26,13 +26,16 @@ for (const a of measured) {
   }
   const line = `${a.name.padEnd(12)} st ${a.statements.toFixed(1).padStart(5)}%  br ${a.branches.toFixed(1).padStart(5)}%  fn ${a.functions.toFixed(1).padStart(5)}%`;
   const under = ["statements", "branches", "functions"].filter((k) => a[k] < f.floor[k]);
-  console.log(`${under.length ? "FAIL" : "PASS"}  ${line}${under.length ? `  under floor: ${under.map((k) => `${k} ${f.floor[k]}%`).join(", ")}` : ""}`);
+  console.log(
+    `${under.length ? "FAIL" : "PASS"}  ${line}${under.length ? `  under floor: ${under.map((k) => `${k} ${f.floor[k]}%`).join(", ")}` : ""}`,
+  );
   for (const k of under) missed.push(`${a.name}: ${k} ${a[k].toFixed(1)}% < floor ${f.floor[k]}%`);
 }
 
 // An area that vanished from src/ (deleted or renamed) must not keep a stale floor.
 for (const name of Object.keys(floors)) {
-  if (!measured.some((a) => a.name === name)) missed.push(`${name}: floor declared but the area no longer exists in src/`);
+  if (!measured.some((a) => a.name === name))
+    missed.push(`${name}: floor declared but the area no longer exists in src/`);
 }
 
 if (missed.length) {

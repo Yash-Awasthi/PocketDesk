@@ -24,7 +24,8 @@ const BEHIND_BYTES = 128 << 10;
 // Acks trail by up to a quarter second plus one-way delay; past this the picture is stale.
 const LATE_MS = 1500;
 const MAX_MESSAGE = 8 << 20; // largest control message; checked before auth
-const KIND_CONFIG = 0, KIND_KEY = 1;
+const KIND_CONFIG = 0,
+  KIND_KEY = 1;
 
 // The binding drops an endpoint JS no longer references, and every connection with it.
 const live = new Set();
@@ -36,20 +37,30 @@ const live = new Set();
  */
 export async function startIroh({ dir, relays, onConnection }) {
   let iroh;
-  try { iroh = await import("@number0/iroh"); } catch { return null; }
+  try {
+    iroh = await import("@number0/iroh");
+  } catch {
+    return null;
+  }
   const { Endpoint, RelayMode, SecretKey, EndpointTicket } = iroh;
 
   const keyFile = path.join(dir, "iroh.key");
   let key;
-  try { key = SecretKey.fromBytes([...fs.readFileSync(keyFile)]); } catch {
+  try {
+    key = SecretKey.fromBytes([...fs.readFileSync(keyFile)]);
+  } catch {
     key = SecretKey.generate();
     writeFileAtomic(keyFile, Buffer.from(key.toBytes()), { mode: 0o600 });
   }
 
   const b = Endpoint.builder();
-  if (relays === "off") { b.applyMinimal(); b.relayMode(RelayMode.disabled()); }
-  else if (Array.isArray(relays) && relays.length) { b.applyMinimal(); b.relayMode(RelayMode.customFromUrls(relays)); }
-  else b.applyN0();
+  if (relays === "off") {
+    b.applyMinimal();
+    b.relayMode(RelayMode.disabled());
+  } else if (Array.isArray(relays) && relays.length) {
+    b.applyMinimal();
+    b.relayMode(RelayMode.customFromUrls(relays));
+  } else b.applyN0();
   b.secretKey(key.toBytes());
   b.alpns([[...Buffer.from(ALPN)]]);
   const ep = await b.bind();
@@ -58,7 +69,11 @@ export async function startIroh({ dir, relays, onConnection }) {
   (async () => {
     for (;;) {
       let inc;
-      try { inc = await ep.acceptNext(); } catch { return; }
+      try {
+        inc = await ep.acceptNext();
+      } catch {
+        return;
+      }
       if (!inc) return;
       (async () => {
         const conn = await (await inc.accept()).connect();
@@ -72,9 +87,14 @@ export async function startIroh({ dir, relays, onConnection }) {
   return {
     id: ep.id().toString(),
     /** Dials another PocketDesk daemon by its ticket, as this PC's own iroh identity. */
-    dial: (ticket) => new IrohClient(ep, EndpointTicket, ticket),
+    dial: (ticket, pin) => new IrohClient(ep, EndpointTicket, ticket, pin),
     ticket: () => EndpointTicket.fromAddr(ep.addr()).toString(),
-    async close() { live.delete(ep); await ep.close().catch(() => {}); },
+    /** The endpoint id a ticket points at, which is the identity to pin. */
+    ticketId: (t) => EndpointTicket.fromString(t).endpointAddr().id().toString(),
+    async close() {
+      live.delete(ep);
+      await ep.close().catch(() => {});
+    },
   };
 }
 
@@ -89,7 +109,7 @@ function frame(payload) {
  *  `io` must expose send(data), close(code, reason) and an "message" event. */
 function keepalive(io) {
   const INTERVAL = 20_000; // send a ping every 20 s while the link is otherwise idle
-  const TIMEOUT = 10_000;  // close if a ping goes unanswered for 10 s
+  const TIMEOUT = 10_000; // close if a ping goes unanswered for 10 s
   let lastPong = Date.now();
   let awaiting = false;
   let pingAt = 0;
@@ -124,12 +144,22 @@ function streamWriter(stream) {
   w.write = (buf) => {
     w.queued += buf.length;
     w.chain = w.chain.then(async () => {
-      if (!w.dead) await stream.writeAll(Array.from(buf)).catch(() => { w.dead = true; });
+      if (!w.dead)
+        await stream.writeAll(Array.from(buf)).catch(() => {
+          w.dead = true;
+        });
       w.queued -= buf.length;
     });
   };
-  w.reset = () => { if (!w.dead) { w.dead = true; stream.reset(0n).catch(() => {}); } };
-  w.finish = () => { w.chain = w.chain.then(() => (w.dead ? null : stream.finish().catch(() => {}))); };
+  w.reset = () => {
+    if (!w.dead) {
+      w.dead = true;
+      stream.reset(0n).catch(() => {});
+    }
+  };
+  w.finish = () => {
+    w.chain = w.chain.then(() => (w.dead ? null : stream.finish().catch(() => {})));
+  };
   return w;
 }
 
@@ -138,26 +168,45 @@ function streamWriter(stream) {
  * reason) and "error". Control comes on the one bidirectional stream, video one GOP stream at a time.
  */
 export class IrohClient extends EventEmitter {
-  constructor(ep, EndpointTicket, ticket) {
+  constructor(ep, EndpointTicket, ticket, pin) {
     super();
     this.readyState = 0;
     this.bufferedAmount = 0;
     this._progress = { g: 0, f: 0 };
     (async () => {
       const addr = EndpointTicket.fromString(ticket).endpointAddr();
-      const conn = await Promise.race([ep.connect(addr, [...Buffer.from(ALPN)]),
-        new Promise((_, rej) => setTimeout(() => rej(new Error("iroh connect timed out")), 15000))]);
+      // The pin, once known, is the only identity this link may talk to: a ticket alone
+      // could have been swapped, while the TLS cert here authenticates the connection, not the PC.
+      const expected = pin || addr.id().toString();
+      const conn = await Promise.race([
+        ep.connect(addr, [...Buffer.from(ALPN)]),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("iroh connect timed out")), 15000)),
+      ]);
+      if (conn.remoteId().toString() !== expected) {
+        try {
+          conn.close(BigInt(4003), [...Buffer.from("endpoint id mismatch")]);
+        } catch {}
+        this.conn = conn;
+        this._end(4003, "endpoint id mismatch");
+        return;
+      }
       this.conn = conn;
       const bi = await conn.openBi();
       this._ctl = streamWriter(bi.send);
       this.readyState = 1;
       this.emit("open");
       keepalive(this);
-      conn.closed().then((r) => this._end(1006, r), () => this._end(1006, ""));
+      conn.closed().then(
+        (r) => this._end(1006, r),
+        () => this._end(1006, ""),
+      );
       this._videoLoop(conn).catch(() => {});
       this._ackTimer = setInterval(() => {
         const p = this._progress;
-        if (p.g && p !== this._acked) { this._acked = p; this.send(JSON.stringify({ type: "video_ack", g: p.g, f: p.f })); }
+        if (p.g && p !== this._acked) {
+          this._acked = p;
+          this.send(JSON.stringify({ type: "video_ack", g: p.g, f: p.f }));
+        }
       }, 250);
       for (;;) {
         const len = Buffer.from(await bi.recv.readExact(4)).readUInt32BE(0);
@@ -166,7 +215,10 @@ export class IrohClient extends EventEmitter {
         // PC sound rides on control as [3, ...adts]; JSON always starts with "{".
         this.emit("message", m, m[0] === 3);
       }
-    })().catch((e) => { if (this.readyState === 0) this.emit("error", e); this._end(1006, e?.message || ""); });
+    })().catch((e) => {
+      if (this.readyState === 0) this.emit("error", e);
+      this._end(1006, e?.message || "");
+    });
   }
 
   async _videoLoop(conn) {
@@ -195,11 +247,15 @@ export class IrohClient extends EventEmitter {
   }
 
   close(code = 1000, reason = "") {
-    try { this.conn?.close(BigInt(code), [...Buffer.from(String(reason))]); } catch {}
+    try {
+      this.conn?.close(BigInt(code), [...Buffer.from(String(reason))]);
+    } catch {}
     this._end(code, reason);
   }
 
-  terminate() { this.close(1006); }
+  terminate() {
+    this.close(1006);
+  }
 
   _end(code, reason) {
     if (this.readyState === 3) return;
@@ -226,9 +282,14 @@ export class IrohSocket extends EventEmitter {
     this._gops = []; // { id, times: send time of each packet } for GOPs the viewer may still be reading
     this._ack = null;
     this._opening = Promise.resolve();
-    this._readLoop(bi.recv).catch(() => {}).finally(() => this._closed(1006));
+    this._readLoop(bi.recv)
+      .catch(() => {})
+      .finally(() => this._closed(1006));
     this._acceptUploads().catch(() => {});
-    conn.closed().then(() => this._closed(1006), () => this._closed(1006));
+    conn.closed().then(
+      () => this._closed(1006),
+      () => this._closed(1006),
+    );
   }
 
   /** The viewer read `f` packets of GOP `g`. */
@@ -251,12 +312,17 @@ export class IrohSocket extends EventEmitter {
   }
 
   /** Control backlog; the video path keeps its own per-GOP accounting. */
-  get bufferedAmount() { return this._ctl.queued; }
+  get bufferedAmount() {
+    return this._ctl.queued;
+  }
 
   async _readLoop(recv) {
     for (;;) {
       const len = Buffer.from(await recv.readExact(4)).readUInt32BE(0);
-      if (len > MAX_MESSAGE) { this.close(1009, "message too big"); return; }
+      if (len > MAX_MESSAGE) {
+        this.close(1009, "message too big");
+        return;
+      }
       this.emit("message", Buffer.from(await recv.readExact(len)));
     }
   }
@@ -290,7 +356,10 @@ export class IrohSocket extends EventEmitter {
     const pkt = Buffer.allocUnsafe(1 + data.length);
     pkt[0] = kind;
     data.copy(pkt, 1);
-    if (kind === KIND_CONFIG) { this._config = pkt; return true; }
+    if (kind === KIND_CONFIG) {
+      this._config = pkt;
+      return true;
+    }
     if (kind === KIND_KEY) {
       const prev = this._gop;
       this._gop = null;
@@ -300,7 +369,10 @@ export class IrohSocket extends EventEmitter {
       // gets the old GOP reset too, which also drops what QUIC still holds for it.
       const late = this.lagMs() > LATE_MS;
       const behind = !!prev && !prev.dead && (prev.queued > BEHIND_BYTES || late);
-      if (prev) { if (prev.queued > 0 || late) prev.reset(); else prev.finish(); }
+      if (prev) {
+        if (prev.queued > 0 || late) prev.reset();
+        else prev.finish();
+      }
       const head = this._config;
       const gop = { id: this._gops.length ? this._gops.at(-1).id + 1 : 1, times: [] };
       this._gops.push(gop);
@@ -308,20 +380,25 @@ export class IrohSocket extends EventEmitter {
       const now = Date.now();
       if (head) gop.times.push(now);
       gop.times.push(now);
-      this._opening = this._opening.then(async () => {
-        const st = await this.conn.openUni();
-        await st.setPriority(++this._prio).catch(() => {});
-        this._gop = streamWriter(st);
-        const id = Buffer.alloc(4);
-        id.writeUInt32BE(gop.id, 0);
-        this._gop.write(id);
-        if (head) this._gop.write(frame(head));
-        this._gop.write(frame(pkt));
-      }).catch(() => {});
+      this._opening = this._opening
+        .then(async () => {
+          const st = await this.conn.openUni();
+          await st.setPriority(++this._prio).catch(() => {});
+          this._gop = streamWriter(st);
+          const id = Buffer.alloc(4);
+          id.writeUInt32BE(gop.id, 0);
+          this._gop.write(id);
+          if (head) this._gop.write(frame(head));
+          this._gop.write(frame(pkt));
+        })
+        .catch(() => {});
       return !behind;
     }
     const gop = this._gop;
-    if (gop && !gop.dead && gop.queued > LAG_LIMIT) { gop.reset(); return false; }
+    if (gop && !gop.dead && gop.queued > LAG_LIMIT) {
+      gop.reset();
+      return false;
+    }
     this._gops.at(-1)?.times.push(Date.now());
     // Chained so deltas stay behind a GOP stream that is still opening.
     this._opening = this._opening.then(() => {
@@ -341,7 +418,9 @@ export class IrohSocket extends EventEmitter {
 
   close(code = 1000, reason = "") {
     if (this.readyState !== 1) return;
-    try { this.conn.close(BigInt(code), [...Buffer.from(String(reason))]); } catch {}
+    try {
+      this.conn.close(BigInt(code), [...Buffer.from(String(reason))]);
+    } catch {}
     this._closed(code);
   }
 

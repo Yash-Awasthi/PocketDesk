@@ -1,0 +1,18 @@
+# Golden transcript: Qwen Code (qwen)
+# package: @qwen-code/qwen-code
+# binary: qwen
+# command: qwen -p "Reply with OK" -o stream-json
+# argv: ["qwen","-p","Reply with OK","-o","stream-json"]
+# cwd: C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd
+# env-overrides: none
+# credential-probe: yes, no credentials supplied
+# outcome: exit 1 in 4759 ms
+# captured: 2026-11-26
+
+# note: no QWEN_API_KEY, DASHSCOPE_API_KEY or ~/.qwen on this machine
+
+# ---- stdout ----
+{"type":"result","subtype":"error_during_execution","uuid":"b5d75da3-5f6e-4cfc-9141-8bf318c9732d","session_id":"36b0573a-accf-495e-87ac-b0c25dd7f3fb","is_error":true,"duration_ms":0,"duration_api_ms":0,"num_turns":0,"usage":{"input_tokens":0,"output_tokens":0},"permission_denials":[],"error":{"message":"No auth type is selected. Please configure an auth type (e.g. via settings or `--auth-type`) before running in non-interactive mode."}}
+# ---- stderr ----
+INFO: Could not find files for the given pattern(s).
+# ---- end ----

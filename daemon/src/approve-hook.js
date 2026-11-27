@@ -16,14 +16,21 @@ process.stdin.on("end", async () => {
         agentSession: hook.session_id,
         tool: hook.tool_name,
         // The daemon refuses bodies over 64 KB; a large Write only needs its start shown.
-        input: Object.fromEntries(Object.entries(hook.tool_input || {}).map(([k, v]) => [k, typeof v === "string" && v.length > 12000 ? v.slice(0, 12000) + "\n…(truncated)" : v])),
+        input: Object.fromEntries(
+          Object.entries(hook.tool_input || {}).map(([k, v]) => [
+            k,
+            typeof v === "string" && v.length > 12000 ? v.slice(0, 12000) + "\n…(truncated)" : v,
+          ]),
+        ),
         cwd: hook.cwd,
       }),
     });
     const { decision, message } = await res.json();
     if (decision !== "allow" && decision !== "deny") return;
     const out = decision === "allow" ? { behavior: "allow" } : { behavior: "deny", message };
-    process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: out } }));
+    process.stdout.write(
+      JSON.stringify({ hookSpecificOutput: { hookEventName: "PermissionRequest", decision: out } }),
+    );
   } catch {
     // Daemon gone or reply malformed: fall back to the agent's own prompt.
   }

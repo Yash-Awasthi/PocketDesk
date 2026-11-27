@@ -186,6 +186,14 @@ class WsClient(
     /** Monitor names in the daemon's order; the video shows [desktopMonitor]. */
     var desktopMonitors by mutableStateOf<List<String>>(emptyList())
         private set
+    /** Capture methods the PC advertises for a window that hides itself; empty until asked. */
+    var captureChoices by mutableStateOf<List<CaptureChoice>>(emptyList())
+        private set
+    var captureChoice by mutableStateOf("")
+        private set
+    /** The last attempt's line: which method worked, or the named cause and the next step. */
+    var captureNote by mutableStateOf("")
+        private set
     var desktopMonitor by mutableStateOf(0)
     /** What the viewer shows: "local" (this PC), "adb:<serial>" (a phone on it) or "pc:<id>[/…]" (another PC). */
     var desktopSource by mutableStateOf("local")
@@ -203,6 +211,9 @@ class WsClient(
     @Volatile var audioSink: ((ByteArray) -> Unit)? = null
     /** PC clipboard content, asked for or copied on the PC while the desktop is open. */
     val pcClip = kotlinx.coroutines.flow.MutableSharedFlow<PcClip>(extraBufferCapacity = 4)
+    /** clippy recorder state: running/installed, its data folder and recent Ctrl+C captures. */
+    var clippy by mutableStateOf(ClippyState())
+        private set
     /** Daemon clock minus ours, from the fastest recent ping; frame stamps are in daemon time. */
     @Volatile private var clockOffset = 0L
     private var bestRtt = Long.MAX_VALUE
@@ -692,6 +703,18 @@ class WsClient(
     fun uploadBacklog(): Long = irohLink.get()?.uploadBacklog?.get() ?: socket.get()?.queueSize() ?: 0L
 
     fun desktopStop() { desktopStreaming = false; desktopResume = null; send(Proto.desktopStop()) }
+    /** Asks the PC for the capture methods it measured; the answer also carries the current one. */
+    fun captureModes() = send(Proto.desktopCapture())
+    /** Runs one method against the window the PC picked. */
+    fun captureUse(mode: String) = send(Proto.desktopCapture(mode))
+    /** Runs the control/gate/reverse comparison and reports the numbers. */
+    fun captureCheck() = send(Proto.desktopCaptureCheck())
+    /** A refusal has to name its cause and the next step, not say "failed". */
+    private fun captureCause(m: JsonObject): String {
+        val c = m["cause"] as? JsonObject
+        return listOfNotNull(c?.let { str(it, "say") } ?: str(m, "error"), c?.let { str(it, "next") })
+            .joinToString(" ")
+    }
     fun sourcesRefresh() = send(Proto.sourcesList())
     /** Shows another device in the viewer; the stream restarts on it. */
     fun pickSource(id: String) {
@@ -729,6 +752,14 @@ class WsClient(
     /** Positive scrolls right. */
     fun desktopHWheel(delta: Int) = control(Proto.desktopMouse(null, null, null, null, hwheel = delta))
     fun desktopType(text: String) = control(Proto.desktopType(text))
+    // ── clippy: Ctrl+C from apps with their own clipboard ──
+    fun clippyStart() = send(Proto.clippyStart())    fun clippyStop() = send(Proto.clippyStop())
+    fun clippyStatus() = send(Proto.clippyStatus())
+    fun clippyInstall() = send(Proto.clippyInstall())
+    fun clippySetDir(dir: String) = send(Proto.clippySetDir(dir))
+    fun clippyLatest() = send(Proto.clippyLatest())
+    /** Puts the newest capture (or the history entry [at]) on the PC clipboard; [paste] also presses Ctrl+V there. */
+    fun clippyPaste(paste: Boolean, at: String? = null) = control(Proto.clippyPaste(paste, at))
     /** A phone's own button (back, home, recents, notifications) when the screen in view is a phone. */
     fun desktopNav(key: String) = control(Proto.desktopNav(key))
     /** Touch and hold, on a phone in view. */
@@ -1286,8 +1317,7 @@ class WsClient(
                 val pic = if (fx != null && fy != null) desktopCalibration?.toPicture(fx, fy) ?: (fx to fy) else null
                 desktopCursor = DesktopCursor(x, y, str(m, "shape") ?: "arrow", pic?.first, pic?.second)
             }
-            "desktop_monitors" -> if (bool(m, "ok") == true) {
-                desktopMonitors = (m["monitors"] as? JsonArray)?.mapIndexed { i, e ->
+            "desktop_monitors" -> if (bool(m, "ok") == true) {                desktopMonitors = (m["monitors"] as? JsonArray)?.mapIndexed { i, e ->
                     val o = e as? JsonObject
                     val w = (o?.get("w") as? JsonPrimitive)?.intOrNull
                     val h = (o?.get("h") as? JsonPrimitive)?.intOrNull
@@ -1295,6 +1325,28 @@ class WsClient(
                         (if (o?.let { bool(it, "primary") } == true) " · main" else "")
                 } ?: emptyList()
                 pendingExtend?.let { pendingExtend = null; android.os.Handler(android.os.Looper.getMainLooper()).post(it) }
+            }
+            "desktop_capture" -> {
+                captureChoice = str(m, "current") ?: captureChoice
+                (m["modes"] as? JsonArray)?.let { arr ->
+                    captureChoices = arr.mapNotNull { e ->
+                        val o = e as? JsonObject ?: return@mapNotNull null
+                        val id = str(o, "id") ?: return@mapNotNull null
+                        CaptureChoice(id, str(o, "label") ?: id, str(o, "note") ?: "", bool(o, "current") == true)
+                    }
+                }
+                captureNote = if (bool(m, "ok") == true) {
+                    val f = m["frame"] as? JsonObject
+                    val w = (f?.get("w") as? JsonPrimitive)?.intOrNull
+                    val h = (f?.get("h") as? JsonPrimitive)?.intOrNull
+                    if (f == null) "" else "Captured with " + (str(m, "mode") ?: "the last method") +
+                        (if (w != null && h != null) " at ${w}x$h" else "")
+                } else captureCause(m)
+            }
+            "desktop_capture_check" -> {
+                val v = m["verdict"] as? JsonObject
+                val line = v?.let { str(it, "line") }
+                captureNote = line ?: captureCause(m)
             }
             "clipboard", "clipboard_changed" ->
                 if (type == "clipboard_changed" || bool(m, "ok") == true) {
@@ -1316,6 +1368,48 @@ class WsClient(
             }
             "desktop_frame_error" ->
                 _desktopError.value = str(m, "reason") ?: "capture failed"
+            "desktop_notice" -> desktopNotice = str(m, "notice") ?: ""
+            "clippy_state", "clippy_status" -> {
+                val history = (m["history"] as? JsonArray)?.mapNotNull { e ->
+                    val o = e as? JsonObject ?: return@mapNotNull null
+                    ClippyCapture(str(o, "window") ?: "", str(o, "text") ?: "", str(o, "typed") ?: "", str(o, "at") ?: "")
+                } ?: clippy.history
+                clippy = ClippyState(
+                    running = bool(m, "running") == true,
+                    installed = bool(m, "installed") == true,
+                    dir = str(m, "dir") ?: clippy.dir,
+                    history = history,
+                )
+            }
+            "clippy_start_ok", "clippy_stop_ok" -> {
+                if (bool(m, "ok") == true) clippy = clippy.copy(running = type == "clippy_start_ok")
+                else _desktopError.value = "Clippy: " + (str(m, "error") ?: "failed")
+            }
+            "clippy_install_ok" -> {
+                if (bool(m, "ok") == true) clippy = clippy.copy(installed = true)
+                else _desktopError.value = "Clippy install: " + (str(m, "error") ?: "failed")
+            }
+            "clippy_setdir_ok" -> {
+                if (bool(m, "ok") == true) str(m, "dir")?.let { clippy = clippy.copy(dir = it) }
+                else _desktopError.value = "Clippy folder: " + (str(m, "error") ?: "failed")
+            }
+            "clippy_copy", "clippy_latest" -> {
+                if (type == "clippy_latest" && bool(m, "ok") != true) {
+                    _desktopError.value = "Clippy: " + (str(m, "error") ?: "no capture yet")
+                } else {
+                    val cap = ClippyCapture(str(m, "window") ?: "", str(m, "text") ?: "", str(m, "typed") ?: "", str(m, "at") ?: "")
+                    if (cap.body.isNotBlank()) {
+                        if (type == "clippy_copy" && clippy.history.none { it.at == cap.at })
+                            clippy = clippy.copy(history = (clippy.history + cap).takeLast(20))
+                        desktopNotice = "Clippy captured ${cap.body.length} chars" +
+                            (str(m, "window")?.takeIf { it.isNotBlank() }?.let { " from \"$it\"" } ?: "")
+                    }
+                }
+            }
+            "clippy_paste_ok" -> {
+                if (bool(m, "ok") == true) desktopNotice = "Clippy pasted on the PC (" + (str(m, "typed")?.takeIf { it.isNotBlank() } ?: str(m, "text") ?: "").length + " chars)"
+                else _desktopError.value = "Clippy paste: " + (str(m, "error") ?: "failed")
+            }
             "desktop_input_ok" ->
                 if (bool(m, "ok") == false)
                     _desktopError.value = str(m, "error") ?: "input rejected"

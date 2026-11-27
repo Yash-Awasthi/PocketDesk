@@ -24,15 +24,75 @@ function realResolve(p) {
   }
 }
 
+// Names Windows hands to devices no matter which folder they appear in.
+const WIN_RESERVED = /^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]|CLOCK\$)$/i;
+
+/** Refuse device names in any component, before any fs call touches the path. */
+function assertNoDeviceNames(resolved) {
+  if (process.platform !== "win32") return;
+  for (const part of resolved.split(/[\\/]+/)) {
+    const stem = part.split(".")[0].replace(/[ .]+$/, "");
+    if (WIN_RESERVED.test(stem)) throw new Error("reserved device name not allowed: " + stem);
+  }
+}
+
+/**
+ * Input normalisation shared by resolvePath and assertConfined: reject bad
+ * types/NULs, unwrap \\?\ and \\.\ prefixes, expand ~, resolve, and screen
+ * Windows device names. Absent or blank input still means the home folder.
+ */
+function normalizePath(p) {
+  if (p === undefined || p === null) return os.homedir();
+  if (typeof p !== "string") throw new Error("path must be a string");
+  if (p.includes("\u0000")) throw new Error("path must not contain a NUL byte");
+  let s = p.trim();
+  if (!s) return os.homedir();
+  if (process.platform === "win32") {
+    if (s.startsWith("\\\\?\\")) {
+      s = s.slice(4);
+      if (/^UNC\\/i.test(s)) s = "\\\\" + s.slice(4);
+    } else if (s.startsWith("\\\\.\\")) {
+      s = s.slice(4);
+    }
+  }
+  s = s.replace(/^~(?=$|[\\/])/, os.homedir());
+  const resolved = path.resolve(s);
+  assertNoDeviceNames(resolved);
+  return resolved;
+}
+
+// One allowlist predicate for both entry points, so they cannot drift.
+function isAllowed(resolved, home, tmpRoot) {
+  return (
+    resolved === home ||
+    resolved.startsWith(home + path.sep) ||
+    resolved.startsWith(tmpRoot + path.sep) ||
+    path.dirname(resolved) === tmpRoot
+  );
+}
+
+function allowlistRoots() {
+  return { home: realResolve(os.homedir()), tmpRoot: fs.realpathSync(os.tmpdir()) };
+}
+
 export function resolvePath(p) {
-  const resolved = realResolve(p && String(p).trim() ? path.resolve(String(p).replace(/^~(?=$|\/|\\)/, os.homedir())) : os.homedir());
+  const resolved = realResolve(normalizePath(p));
+  const { home, tmpRoot } = allowlistRoots();
   // Block path traversal outside home, allowing the OS temp dir (test + transfer staging live there,
   // and /tmp is not under home on Linux). ponytail: per-user tmp roots if this ever runs multi-tenant.
-  const home = realResolve(os.homedir());
-  const tmpRoot = fs.realpathSync(os.tmpdir());
-  const allowed = resolved === home || resolved.startsWith(home + path.sep) ||
-    resolved.startsWith(tmpRoot + path.sep) || path.dirname(resolved) === tmpRoot;
-  if (!allowed) throw new Error("Path traversal not allowed");
+  if (!isAllowed(resolved, home, tmpRoot)) throw new Error("Path traversal not allowed");
+  return resolved;
+}
+
+/**
+ * Same normalisation and allowlist as resolvePath, but without realResolve:
+ * the final component may be a link, and a rename or delete must act on the
+ * link itself rather than on whatever it points to.
+ */
+export function assertConfined(p) {
+  const resolved = normalizePath(p);
+  const { home, tmpRoot } = allowlistRoots();
+  if (!isAllowed(resolved, home, tmpRoot)) throw new Error("Path traversal not allowed");
   return resolved;
 }
 
@@ -62,8 +122,15 @@ export function listDir(p, hidden = false) {
       } catch {}
       return { name: e.name, dir: e.isDirectory(), size, mtime };
     })
-    .sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name));
-  return { type: "fs", path: dir, parent: path.dirname(dir), home: realResolve(os.homedir()), items, truncated: shown.length > items.length };
+    .sort((a, b) => b.dir - a.dir || a.name.localeCompare(b.name));
+  return {
+    type: "fs",
+    path: dir,
+    parent: path.dirname(dir),
+    home: realResolve(os.homedir()),
+    items,
+    truncated: shown.length > items.length,
+  };
 }
 
 /** mkdir, rename and delete for the phone's file manager. Never overwrites an existing target. */
@@ -73,7 +140,9 @@ export async function fileOp(msg) {
   try {
     // Resolve only the parent: a rename or delete must act on a link itself, never on what it points to.
     const raw = String(msg.path || "").replace(/[\\/]+$/, "");
-    const target = path.join(resolvePath(path.dirname(raw)), path.basename(raw));
+    const base = path.basename(raw);
+    if (base === "." || base === "..") throw new Error("Path traversal not allowed");
+    const target = assertConfined(path.join(resolvePath(path.dirname(raw)), base));
     if (target === realResolve(os.homedir())) throw new Error("refusing to change the home folder itself");
     if (op === "mkdir") {
       if (fs.existsSync(target)) throw new Error("already exists");
@@ -107,17 +176,33 @@ async function removeToTrash(target) {
   const kind = fs.statSync(target).isDirectory() ? "DeleteDirectory" : "DeleteFile";
   const script = `Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.FileIO.FileSystem]::${kind}($env:RH_TRASH, 'OnlyErrorDialogs', 'SendToRecycleBin')`;
   await new Promise((resolve, reject) => {
-    execFile("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { env: { ...process.env, RH_TRASH: target }, windowsHide: true, timeout: 60000 },
-      (err, _out, stderr) => (err ? reject(new Error(String(stderr).trim().split("\n")[0] || err.message)) : resolve()));
+    execFile(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { env: { ...process.env, RH_TRASH: target }, windowsHide: true, timeout: 60000 },
+      (err, _out, stderr) =>
+        err ? reject(new Error(String(stderr).trim().split("\n")[0] || err.message)) : resolve(),
+    );
   });
   if (fs.existsSync(target)) throw new Error("could not move to the Recycle Bin");
 }
 
-const SKIP_DIRS = new Set(["node_modules", ".git", "AppData", "$Recycle.Bin", "__pycache__", ".venv", "build", "dist"]);
+const SKIP_DIRS = new Set([
+  "node_modules",
+  ".git",
+  "AppData",
+  "$Recycle.Bin",
+  "__pycache__",
+  ".venv",
+  "build",
+  "dist",
+]);
 
 /** Case-insensitive name search below a folder, breadth first, so near matches come first. */
 export async function searchFiles(p, q, limit = 200) {
-  const needle = String(q || "").trim().toLowerCase();
+  const needle = String(q || "")
+    .trim()
+    .toLowerCase();
   let root;
   try {
     root = resolvePath(p);
@@ -142,7 +227,10 @@ export async function searchFiles(p, q, limit = 200) {
       const full = path.join(dir, e.name);
       if (e.name.toLowerCase().includes(needle)) {
         let size = null;
-        if (!e.isDirectory()) try { size = (await fs.promises.stat(full)).size; } catch {}
+        if (!e.isDirectory())
+          try {
+            size = (await fs.promises.stat(full)).size;
+          } catch {}
         items.push({ path: full, name: e.name, dir: e.isDirectory(), size });
         if (items.length >= limit) break;
       }

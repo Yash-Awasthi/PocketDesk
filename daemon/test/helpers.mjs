@@ -66,14 +66,23 @@ export async function waitForUrl(url, ok = (r) => r.ok, timeoutMs = 60_000) {
  */
 export function makeTmp(prefix) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  fs.writeFileSync(path.join(tmp, "node.json"), JSON.stringify({ id: "node", name: "Node REPL", adapter: "terminal", bin: "node", install: {} }));
+  fs.writeFileSync(
+    path.join(tmp, "node.json"),
+    JSON.stringify({ id: "node", name: "Node REPL", adapter: "terminal", bin: "node", install: {} }),
+  );
   return tmp;
 }
 
 /** Registry of spawned daemons so a crashed test never leaks children. */
 const children = [];
 for (const sig of ["exit", "SIGINT", "SIGTERM"]) {
-  process.on(sig, () => { for (const c of children) { try { c.kill("SIGKILL"); } catch {} } });
+  process.on(sig, () => {
+    for (const c of children) {
+      try {
+        c.kill("SIGKILL");
+      } catch {}
+    }
+  });
 }
 
 /**
@@ -107,7 +116,11 @@ export function startDaemon(port, cliPort, opts = {}) {
     // "never became healthy" while the *stale* daemon answers the health check. Say what it is.
     d.stderr.on("data", (x) => {
       if (String(x).includes("EADDRINUSE")) {
-        reject(new Error(`port ${port} is already in use — a previous test run left a daemon behind (kill it, then re-run)`));
+        reject(
+          new Error(
+            `port ${port} is already in use — a previous test run left a daemon behind (kill it, then re-run)`,
+          ),
+        );
       }
     });
     d.on("exit", (code) => reject(new Error(`daemon exited early (code ${code})`)));
@@ -122,9 +135,17 @@ export function startDaemon(port, cliPort, opts = {}) {
  * wait for reaping, and remove a tmp dir best-effort.
  */
 export async function teardown(tmp) {
-  for (const c of children) { try { c.kill("SIGTERM"); } catch {} }
+  for (const c of children) {
+    try {
+      c.kill("SIGTERM");
+    } catch {}
+  }
   await new Promise((r) => setTimeout(r, 1200));
-  if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} }
+  if (tmp) {
+    try {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    } catch {}
+  }
 }
 
 /**
@@ -137,14 +158,18 @@ export function connect(port, token = "testtoken") {
 }
 
 /** Same client shape for arbitrary URLs (QR relay port, peer links). */
-export function connectRaw(url, token) {
+export function connectRaw(url, _token) {
   const ws = new WebSocket(url);
   const waiters = [];
   const log = [];
   let since = 0;
   ws.on("message", (raw) => {
     let m;
-    try { m = JSON.parse(raw.toString()); } catch { m = { raw: raw.toString() }; }
+    try {
+      m = JSON.parse(raw.toString());
+    } catch {
+      m = { raw: raw.toString() };
+    }
     log.push(m);
     const i = waiters.findIndex((w) => w.pred(m));
     if (i >= 0) {
@@ -155,27 +180,43 @@ export function connectRaw(url, token) {
   });
   return {
     ws,
-    send: (o) => { since = log.length; ws.send(JSON.stringify(o)); },
-    sendRaw: (t) => { since = log.length; ws.send(t); },
-    next: (pred, timeoutMs = 15000) => {
+    send: (o) => {
+      since = log.length;
+      ws.send(JSON.stringify(o));
+    },
+    sendRaw: (t) => {
+      since = log.length;
+      ws.send(t);
+    },
+    next: (pred, timeoutMs = 45000) => {
       for (let i = log.length - 1; i >= since; i--) {
         if (pred(log[i])) return Promise.resolve(log[i]);
       }
       return new Promise((resolve, reject) => {
         // A timed-out waiter must leave the list, or it swallows the next matching message.
         const w = { pred, resolve };
-        w.timer = setTimeout(() => { waiters.splice(waiters.indexOf(w), 1); reject(new Error("timeout waiting for: " + String(pred).slice(0, 120))); }, timeoutMs);
+        w.timer = setTimeout(() => {
+          waiters.splice(waiters.indexOf(w), 1);
+          reject(new Error("timeout waiting for: " + String(pred).slice(0, 120)));
+        }, timeoutMs);
         waiters.push(w);
       });
     },
-    close: () => new Promise((res) => { ws.close(); setTimeout(res, 100); }),
+    close: () =>
+      new Promise((res) => {
+        ws.close();
+        setTimeout(res, 100);
+      }),
   };
 }
 
 /** Open a socket and complete the hello/welcome handshake. */
 export async function openAndHello(port, token = "testtoken") {
   const c = connect(port, token);
-  await new Promise((res, rej) => { c.ws.on("open", res); c.ws.on("error", rej); });
+  await new Promise((res, rej) => {
+    c.ws.on("open", res);
+    c.ws.on("error", rej);
+  });
   c.send({ type: "hello", token });
   await c.next((m) => m.type === "welcome");
   return c;

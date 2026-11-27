@@ -124,7 +124,10 @@ export class SSHBastion extends EventEmitter {
         if (rule.expiresAt && rule.expiresAt < new Date()) {
           return { allowed: false, reason: "Access rule expired" };
         }
-        return { allowed: rule.allowed, reason: rule.allowed ? "Access granted by rule" : "Access denied by rule" };
+        return {
+          allowed: rule.allowed,
+          reason: rule.allowed ? "Access granted by rule" : "Access denied by rule",
+        };
       }
     }
 
@@ -148,7 +151,7 @@ export class SSHBastion extends EventEmitter {
     if (!user) return null;
 
     const activeSessions = Array.from(this.sessions.values()).filter(
-      (s) => s.userId === userId && s.isActive
+      (s) => s.userId === userId && s.isActive,
     );
     if (activeSessions.length >= user.maxSessions) return null;
 
@@ -181,9 +184,7 @@ export class SSHBastion extends EventEmitter {
   }
 
   getActiveSessions(userId) {
-    return Array.from(this.sessions.values()).filter(
-      (s) => s.userId === userId && s.isActive
-    );
+    return Array.from(this.sessions.values()).filter((s) => s.userId === userId && s.isActive);
   }
 
   getHostSessions(hostId, limit = 50) {
@@ -231,7 +232,10 @@ export class SSHBastion extends EventEmitter {
     await new Promise((resolve, reject) => {
       this.server.once("error", reject);
       this.server.listen(port, host, () => resolve());
-    }).catch((err) => { this.server = null; throw err; });
+    }).catch((err) => {
+      this.server = null;
+      throw err;
+    });
     this.port = this.server.address().port;
     this.emit("server:started", { port: this.port, host });
     return { ok: true, port: this.port, host };
@@ -267,7 +271,8 @@ export class SSHBastion extends EventEmitter {
       // Unsigned publickey probes are how clients pick among their keys, so only real attempts count.
       const fail = () => {
         if (ctx.signature) {
-          for (const [ip, r] of this.authFailures) if (now - r.at > AUTH_WINDOW_MS) this.authFailures.delete(ip);
+          for (const [ip, r] of this.authFailures)
+            if (now - r.at > AUTH_WINDOW_MS) this.authFailures.delete(ip);
           this.authFailures.set(clientIp, { n: failures + 1, at: now });
         }
         return ctx.reject();
@@ -290,7 +295,7 @@ export class SSHBastion extends EventEmitter {
     client.on("ready", () => {
       client.on("session", (accept) => {
         const chan = accept();
-        chan.once("exec", (acc, rej, execInfo) => {
+        chan.once("exec", (acc, _rej, execInfo) => {
           session.commandCount++;
           this._proxy(session, route.host, acc(), (target, done) => target.exec(execInfo.command, done));
         });
@@ -301,8 +306,12 @@ export class SSHBastion extends EventEmitter {
       });
     });
 
-    client.on("close", () => { if (session) this.endSession(session.id); });
-    client.on("error", () => { /* client vanished; close handles cleanup */ });
+    client.on("close", () => {
+      if (session) this.endSession(session.id);
+    });
+    client.on("error", () => {
+      /* client vanished; close handles cleanup */
+    });
   }
 
   /** Dial the target and pipe one channel through it, counting bytes. */
@@ -311,23 +320,45 @@ export class SSHBastion extends EventEmitter {
     session.client = target;
     target.on("ready", () => {
       open(target, (err, remote) => {
-        if (err) { stream.stderr.write(String(err.message)); stream.exit(255); return stream.end(); }
-        remote.on("data", (d) => { session.outputBytes += d.length; stream.write(d); });
+        if (err) {
+          stream.stderr.write(String(err.message));
+          stream.exit(255);
+          return stream.end();
+        }
+        remote.on("data", (d) => {
+          session.outputBytes += d.length;
+          stream.write(d);
+        });
         remote.stderr?.on("data", (d) => stream.stderr.write(d));
-        stream.on("data", (d) => { session.inputBytes += d.length; remote.write(d); });
-        remote.on("close", (code) => { stream.exit(code ?? 0); stream.end(); target.end(); });
+        stream.on("data", (d) => {
+          session.inputBytes += d.length;
+          remote.write(d);
+        });
+        remote.on("close", (code) => {
+          stream.exit(code ?? 0);
+          stream.end();
+          target.end();
+        });
         stream.on("close", () => target.end());
       });
     });
     target.on("error", (err) => {
-      try { stream.stderr.write(`bastion: ${err.message}`); stream.exit(255); stream.end(); } catch { /* client gone */ }
+      try {
+        stream.stderr.write(`bastion: ${err.message}`);
+        stream.exit(255);
+        stream.end();
+      } catch {
+        /* client gone */
+      }
     });
     target.connect({
       host: host.hostname,
       port: host.port,
       username: host.username,
       password: host.credentials?.password,
-      privateKey: host.credentials?.privateKeyPath ? fs.readFileSync(host.credentials.privateKeyPath) : undefined,
+      privateKey: host.credentials?.privateKeyPath
+        ? fs.readFileSync(host.credentials.privateKeyPath)
+        : undefined,
       // The bastion is the trust anchor for its own hosts: it records the key
       // it saw rather than refusing an unknown one on first contact.
       hostVerifier: (key) => {

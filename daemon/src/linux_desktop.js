@@ -6,14 +6,24 @@
  * The pure helpers here (argument building, xrandr parsing, key mapping) are unit-tested; the spawns
  * that touch a real display cannot run in CI, so they stay thin and degrade when a tool is missing.
  */
-import { spawn, execFile, execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 
 export const IS_LINUX = process.platform === "linux";
 const X11 = IS_LINUX && process.env.XDG_SESSION_TYPE !== "wayland" && !!process.env.DISPLAY;
 
 /** Whether a command is on PATH (used to pick xdotool/xrandr/xclip or degrade cleanly). */
-export function hasTool(name, run = (c) => { execFileSync(c, ["--version"], { stdio: "ignore" }); }) {
-  try { run(name); return true; } catch { return false; }
+export function hasTool(
+  name,
+  run = (c) => {
+    execFileSync(c, ["--version"], { stdio: "ignore" });
+  },
+) {
+  try {
+    run(name);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Monitors from `xrandr --listmonitors` output, in its order, with geometry in X pixels. */
@@ -23,22 +33,72 @@ export function parseXrandrMonitors(text) {
     // e.g. " 0: +*HDMI-1 1920/510x1080/290+0+0  HDMI-1"
     const m = line.match(/^\s*(\d+):\s+\+?(\*)?\S*?([\w.-]+)\s+(\d+)\/\d+x(\d+)\/\d+\+(\d+)\+(\d+)/);
     if (!m) continue;
-    out.push({ index: Number(m[1]), name: m[3], w: Number(m[4]), h: Number(m[5]), x: Number(m[6]), y: Number(m[7]), primary: !!m[2] });
+    out.push({
+      index: Number(m[1]),
+      name: m[3],
+      w: Number(m[4]),
+      h: Number(m[5]),
+      x: Number(m[6]),
+      y: Number(m[7]),
+      primary: !!m[2],
+    });
   }
   return out;
 }
 
 // Windows virtual-key codes (what the phone and web client send) to xdotool key names.
 const XDO_KEYS = {
-  0x08: "BackSpace", 0x09: "Tab", 0x0d: "Return", 0x13: "Pause", 0x14: "Caps_Lock", 0x1b: "Escape", 0x20: "space",
-  0x21: "Prior", 0x22: "Next", 0x23: "End", 0x24: "Home", 0x25: "Left", 0x26: "Up", 0x27: "Right", 0x28: "Down",
-  0x2c: "Print", 0x2d: "Insert", 0x2e: "Delete", 0x5b: "Super_L", 0x5c: "Super_R", 0x5d: "Menu",
-  0x6a: "KP_Multiply", 0x6b: "KP_Add", 0x6d: "KP_Subtract", 0x6e: "KP_Decimal", 0x6f: "KP_Divide",
-  0x90: "Num_Lock", 0x91: "Scroll_Lock", 0xba: "semicolon", 0xbb: "equal", 0xbc: "comma", 0xbd: "minus",
-  0xbe: "period", 0xbf: "slash", 0xc0: "grave", 0xdb: "bracketleft", 0xdc: "backslash", 0xdd: "bracketright", 0xde: "apostrophe",
-  0xa0: "Shift_L", 0xa1: "Shift_R", 0xa2: "Control_L", 0xa3: "Control_R", 0xa4: "Alt_L", 0xa5: "Alt_R",
-  0xad: "XF86AudioMute", 0xae: "XF86AudioLowerVolume", 0xaf: "XF86AudioRaiseVolume",
-  0xb0: "XF86AudioNext", 0xb1: "XF86AudioPrev", 0xb3: "XF86AudioPlay",
+  0x08: "BackSpace",
+  0x09: "Tab",
+  0x0d: "Return",
+  0x13: "Pause",
+  0x14: "Caps_Lock",
+  0x1b: "Escape",
+  0x20: "space",
+  0x21: "Prior",
+  0x22: "Next",
+  0x23: "End",
+  0x24: "Home",
+  0x25: "Left",
+  0x26: "Up",
+  0x27: "Right",
+  0x28: "Down",
+  0x2c: "Print",
+  0x2d: "Insert",
+  0x2e: "Delete",
+  0x5b: "Super_L",
+  0x5c: "Super_R",
+  0x5d: "Menu",
+  0x6a: "KP_Multiply",
+  0x6b: "KP_Add",
+  0x6d: "KP_Subtract",
+  0x6e: "KP_Decimal",
+  0x6f: "KP_Divide",
+  0x90: "Num_Lock",
+  0x91: "Scroll_Lock",
+  0xba: "semicolon",
+  0xbb: "equal",
+  0xbc: "comma",
+  0xbd: "minus",
+  0xbe: "period",
+  0xbf: "slash",
+  0xc0: "grave",
+  0xdb: "bracketleft",
+  0xdc: "backslash",
+  0xdd: "bracketright",
+  0xde: "apostrophe",
+  0xa0: "Shift_L",
+  0xa1: "Shift_R",
+  0xa2: "Control_L",
+  0xa3: "Control_R",
+  0xa4: "Alt_L",
+  0xa5: "Alt_R",
+  0xad: "XF86AudioMute",
+  0xae: "XF86AudioLowerVolume",
+  0xaf: "XF86AudioRaiseVolume",
+  0xb0: "XF86AudioNext",
+  0xb1: "XF86AudioPrev",
+  0xb3: "XF86AudioPlay",
 };
 const MODS = { ctrl: "ctrl", alt: "alt", shift: "shift", win: "super" };
 
@@ -65,7 +125,9 @@ export class LinuxDesktop {
     this.xrandr = X11 && hasTool("xrandr");
   }
 
-  get supported() { return !!this.xdotool; }
+  get supported() {
+    return !!this.xdotool;
+  }
 
   async monitors() {
     if (!this.xrandr) return [];
@@ -86,8 +148,10 @@ export class LinuxDesktop {
     }
     if (press === "down") args.push("mousedown", String(btn));
     if (press === "up") args.push("mouseup", String(btn));
-    for (let n = Math.round(Math.abs(Number(wheel) || 0) / 120); n > 0; n--) args.push("click", wheel > 0 ? "4" : "5");
-    for (let n = Math.round(Math.abs(Number(hwheel) || 0) / 120); n > 0; n--) args.push("click", hwheel > 0 ? "7" : "6");
+    for (let n = Math.round(Math.abs(Number(wheel) || 0) / 120); n > 0; n--)
+      args.push("click", wheel > 0 ? "4" : "5");
+    for (let n = Math.round(Math.abs(Number(hwheel) || 0) / 120); n > 0; n--)
+      args.push("click", hwheel > 0 ? "7" : "6");
     if (!args.length) return { ok: true };
     return this._xdo(args);
   }
@@ -111,13 +175,18 @@ export class LinuxDesktop {
   async pointer() {
     if (!this.xdotool) return null;
     const out = await this._run("xdotool", ["getmouselocation", "--shell"]).catch(() => "");
-    const x = /X=(\d+)/.exec(out), y = /Y=(\d+)/.exec(out);
+    const x = /X=(\d+)/.exec(out),
+      y = /Y=(\d+)/.exec(out);
     return x && y ? { x: Number(x[1]), y: Number(y[1]), shape: "arrow", visible: true } : null;
   }
 
   async _xdo(args) {
-    try { await this._run("xdotool", args); return { ok: true }; }
-    catch (e) { return { ok: false, error: e.message }; }
+    try {
+      await this._run("xdotool", args);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
   }
 
   _run(cmd, args) {

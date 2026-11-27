@@ -10,7 +10,10 @@ const TOKEN = "authtoken";
 
 async function hello(msg) {
   const c = connect(PORT, TOKEN);
-  await new Promise((res, rej) => { c.ws.on("open", res); c.ws.on("error", rej); });
+  await new Promise((res, rej) => {
+    c.ws.on("open", res);
+    c.ws.on("error", rej);
+  });
   const closed = new Promise((res) => c.ws.once("close", (code) => res(code)));
   c.send({ type: "hello", ...msg });
   const first = await Promise.race([c.next((m) => m.type === "welcome"), closed]);
@@ -24,63 +27,167 @@ async function main() {
 
   const phone = await hello({ token: TOKEN, name: "phone" });
   const deviceToken = phone.first.deviceToken;
-  check("pairing with the master token issues a device token", typeof deviceToken === "string" && deviceToken.length > 20);
-  check("device id is server-assigned", typeof phone.first.clientId === "string" && phone.first.clientId.length > 20);
+  check(
+    "pairing with the master token issues a device token",
+    typeof deviceToken === "string" && deviceToken.length > 20,
+  );
+  check(
+    "device id is server-assigned",
+    typeof phone.first.clientId === "string" && phone.first.clientId.length > 20,
+  );
   await phone.c.close();
 
   const again = await hello({ token: deviceToken });
-  check("device token authenticates as the same device", again.first.clientId === phone.first.clientId && !again.first.deviceToken);
+  check(
+    "device token authenticates as the same device",
+    again.first.clientId === phone.first.clientId && !again.first.deviceToken,
+  );
 
   const thief = await hello({ token: TOKEN, clientId: phone.first.clientId, name: "thief" });
   check("pairing cannot claim a paired device's id", thief.first.clientId !== phone.first.clientId);
   await thief.c.close();
   const stillMine = await hello({ token: deviceToken });
-  check("paired device keeps its token after a claim attempt", stillMine.first.clientId === phone.first.clientId);
+  check(
+    "paired device keeps its token after a claim attempt",
+    stillMine.first.clientId === phone.first.clientId,
+  );
   await stillMine.c.close();
 
   const listed = await fetch(`http://127.0.0.1:${PORT}/access/devices?k=${TOKEN}`).then((r) => r.json());
-  check("settings page lists the paired device", listed.items.some((x) => x.id === phone.first.clientId && !("tokenHash" in x)));
-  const revokeAt = (host) => new Promise((res) => {
-    const req = http.request({ host: "127.0.0.1", port: PORT, method: "POST", path: `/access/devices/revoke?k=${TOKEN}`, headers: { host } }, (r) => {
-      let b = ""; r.on("data", (d) => { b += d; }); r.on("end", () => res({ status: r.statusCode, body: b }));
+  check(
+    "settings page lists the paired device",
+    listed.items.some((x) => x.id === phone.first.clientId && !("tokenHash" in x)),
+  );
+  const revokeAt = (host) =>
+    new Promise((res) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port: PORT,
+          method: "POST",
+          path: `/access/devices/revoke?k=${TOKEN}`,
+          headers: { host },
+        },
+        (r) => {
+          let b = "";
+          r.on("data", (d) => {
+            b += d;
+          });
+          r.on("end", () => res({ status: r.statusCode, body: b }));
+        },
+      );
+      req.end(JSON.stringify({ clientId: phone.first.clientId }));
     });
-    req.end(JSON.stringify({ clientId: phone.first.clientId }));
-  });
   check("revoke refuses a non-loopback Host", (await revokeAt(`evil.example:${PORT}`)).status === 403);
   const rev = JSON.parse((await revokeAt(`127.0.0.1:${PORT}`)).body);
-  check("revoke acks with a fresh pairing token", rev.ok === true && typeof rev.pairingToken === "string" && rev.pairingToken !== TOKEN);
+  check(
+    "revoke acks with a fresh pairing token",
+    rev.ok === true && typeof rev.pairingToken === "string" && rev.pairingToken !== TOKEN,
+  );
   check("revoked device's live socket is closed", (await again.closed) === 4003);
 
-  const removed = await fetch(`http://127.0.0.1:${PORT}/access/devices/remove?k=${rev.pairingToken}`, { method: "POST", body: JSON.stringify({ clientId: phone.first.clientId }) }).then((r) => r.json());
+  const removed = await fetch(`http://127.0.0.1:${PORT}/access/devices/remove?k=${rev.pairingToken}`, {
+    method: "POST",
+    body: JSON.stringify({ clientId: phone.first.clientId }),
+  }).then((r) => r.json());
   check("remove deletes a revoked device", removed.ok === true);
-  const afterRemove = await fetch(`http://127.0.0.1:${PORT}/access/devices?k=${rev.pairingToken}`).then((r) => r.json());
+  const afterRemove = await fetch(`http://127.0.0.1:${PORT}/access/devices?k=${rev.pairingToken}`).then((r) =>
+    r.json(),
+  );
   check("removed device drops off the list", !afterRemove.items.some((x) => x.id === phone.first.clientId));
 
-  check("pair page refuses a request without the pairing key", (await fetch(`http://127.0.0.1:${PORT}/pair`)).status === 403);
-  check("pair page refuses a stale pairing key", (await fetch(`http://127.0.0.1:${PORT}/pair?k=${TOKEN}`)).status === 403);
+  check(
+    "pair page refuses a request without the pairing key",
+    (await fetch(`http://127.0.0.1:${PORT}/pair`)).status === 403,
+  );
+  check(
+    "pair page refuses a stale pairing key",
+    (await fetch(`http://127.0.0.1:${PORT}/pair?k=${TOKEN}`)).status === 403,
+  );
   const pairHtml = await fetch(`http://127.0.0.1:${PORT}/pair?k=${rev.pairingToken}`).then((r) => r.text());
-  const pairPayload = JSON.parse(Buffer.from(pairHtml.match(/pocketdesk:\/\/pair#([\w-]+)/)[1], "base64url").toString());
+  const pairPayload = JSON.parse(
+    Buffer.from(pairHtml.match(/pocketdesk:\/\/pair#([\w-]+)/)[1], "base64url").toString(),
+  );
   check("pairing QR carries the rotated token", pairPayload.t === rev.pairingToken);
   // A machine label is opt-in: it rides in the payload only when RH_LABEL names this PC.
-  check("pairing QR omits the machine label when RH_LABEL is unset", !("n" in pairPayload), JSON.stringify(pairPayload));
-  check("pairing QR carries the relay/token fields the app reads", typeof pairPayload.u === "string" && pairPayload.u.startsWith("ws"));
+  check(
+    "pairing QR omits the machine label when RH_LABEL is unset",
+    !("n" in pairPayload),
+    JSON.stringify(pairPayload),
+  );
+  check(
+    "pairing QR carries the relay/token fields the app reads",
+    typeof pairPayload.u === "string" && pairPayload.u.startsWith("ws"),
+  );
 
   // Same daemon, one env var: the label appears, and nothing else in the payload changes.
   const LABEL_PORT = 8834;
-  const labelled = startDaemon(LABEL_PORT, 46834, { token: TOKEN, manifests: tmp, dataDir: ".pocketdesk-authlabel", env: { RH_LABEL: "Studio PC" } });
+  const labelled = startDaemon(LABEL_PORT, 46834, {
+    token: TOKEN,
+    manifests: tmp,
+    dataDir: ".pocketdesk-authlabel",
+    env: { RH_LABEL: "Studio PC" },
+  });
   await labelled.ready;
   const labelHtml = await fetch(`http://127.0.0.1:${LABEL_PORT}/pair?k=${TOKEN}`).then((r) => r.text());
-  const labelPayload = JSON.parse(Buffer.from(labelHtml.match(/pocketdesk:\/\/pair#([\w-]+)/)[1], "base64url").toString());
-  check("pairing QR carries the machine label when RH_LABEL is set", labelPayload.n === "Studio PC", JSON.stringify(labelPayload.n));
-  check("the label changes nothing else in the payload", Object.keys(labelPayload).filter((k) => k !== "n" && k !== "u" && k !== "t").sort().join() === Object.keys(pairPayload).filter((k) => k !== "u" && k !== "t").sort().join());
+  const labelPayload = JSON.parse(
+    Buffer.from(labelHtml.match(/pocketdesk:\/\/pair#([\w-]+)/)[1], "base64url").toString(),
+  );
+  check(
+    "pairing QR carries the machine label when RH_LABEL is set",
+    labelPayload.n === "Studio PC",
+    JSON.stringify(labelPayload.n),
+  );
+  check(
+    "the label changes nothing else in the payload",
+    Object.keys(labelPayload)
+      .filter((k) => k !== "n" && k !== "u" && k !== "t")
+      .sort()
+      .join() ===
+      Object.keys(pairPayload)
+        .filter((k) => k !== "u" && k !== "t")
+        .sort()
+        .join(),
+  );
   labelled.kill();
   // DNS rebinding: a web page's request reaches 127.0.0.1 but still names its own host.
-  const rebound = await new Promise((res) => http.get({ host: "127.0.0.1", port: PORT, path: `/pair?k=${rev.pairingToken}`, headers: { host: `evil.example:${PORT}` } }, (r) => { r.resume(); res(r.statusCode); }));
+  const rebound = await new Promise((res) =>
+    http.get(
+      {
+        host: "127.0.0.1",
+        port: PORT,
+        path: `/pair?k=${rev.pairingToken}`,
+        headers: { host: `evil.example:${PORT}` },
+      },
+      (r) => {
+        r.resume();
+        res(r.statusCode);
+      },
+    ),
+  );
   check("pair page refuses a non-loopback Host", rebound === 403);
-  const cliStatus = (host, token = rev.pairingToken) => new Promise((res) => http.get({ host: "127.0.0.1", port: CLI_PORT, path: "/status", headers: { host, authorization: `Bearer ${token}` } }, (r) => { r.resume(); res(r.statusCode); }));
+  const cliStatus = (host, token = rev.pairingToken) =>
+    new Promise((res) =>
+      http.get(
+        {
+          host: "127.0.0.1",
+          port: CLI_PORT,
+          path: "/status",
+          headers: { host, authorization: `Bearer ${token}` },
+        },
+        (r) => {
+          r.resume();
+          res(r.statusCode);
+        },
+      ),
+    );
   check("CLI endpoint serves loopback hosts", (await cliStatus(`localhost:${CLI_PORT}`)) === 200);
   check("CLI endpoint refuses a non-loopback Host", (await cliStatus(`evil.example:${CLI_PORT}`)) === 403);
-  check("CLI endpoint refuses a missing or stale token", (await cliStatus(`localhost:${CLI_PORT}`, "")) === 401 && (await cliStatus(`localhost:${CLI_PORT}`, TOKEN)) === 401);
+  check(
+    "CLI endpoint refuses a missing or stale token",
+    (await cliStatus(`localhost:${CLI_PORT}`, "")) === 401 &&
+      (await cliStatus(`localhost:${CLI_PORT}`, TOKEN)) === 401,
+  );
 
   const big = await hello({ token: "x".repeat(20_000) });
   check("oversized pre-auth message closes the socket", big.first === 1009);
@@ -92,8 +199,13 @@ async function main() {
   check("new master token pairs", byNewMaster.first.type === "welcome");
   await byNewMaster.c.close();
 
-  admin.send({ type: "constructor" });
-  check("prototype names are not handler types", /unknown type/.test((await admin.next((m) => m.type === "error")).message));
+  const rotated = await openAndHello(PORT, rev.pairingToken);
+  rotated.send({ type: "constructor" });
+  check(
+    "prototype names are not handler types",
+    /unknown type/.test((await rotated.next((m) => m.type === "error")).message),
+  );
+  await rotated.close();
   await admin.close();
 }
 

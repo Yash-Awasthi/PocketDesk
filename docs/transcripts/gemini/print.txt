@@ -1,0 +1,18 @@
+# Golden transcript: Gemini CLI (gemini)
+# package: @google/gemini-cli
+# binary: gemini
+# command: gemini -p "Reply with OK" -o stream-json
+# argv: ["gemini","-p","Reply with OK","-o","stream-json"]
+# cwd: C:\Users\Yash\AppData\Local\Temp\pocketdesk-transcripts-cwd
+# env-overrides: none
+# credential-probe: yes, no credentials supplied
+# outcome: exit 41 in 3687 ms
+# captured: 2026-11-26
+
+# note: no GEMINI_API_KEY, GOOGLE_API_KEY or oauth_creds.json on this machine
+
+# ---- stdout ----
+(empty)
+# ---- stderr ----
+Please set an Auth method in your C:\Users\Yash\.gemini\settings.json or specify one of the following environment variables before running: GEMINI_API_KEY, GOOGLE_GENAI_USE_VERTEXAI, GOOGLE_GENAI_USE_GCA
+# ---- end ----

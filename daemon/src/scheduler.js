@@ -112,7 +112,10 @@ export function schedule({ chatId, text, kind = "interval", intervalMs, delayMs,
     done: false,
     running: false,
     createdAt: now,
-    nextRunAt: k === "once" ? now + Math.max(0, Number(delayMs) || 0) : now + Math.max(MIN_INTERVAL_MS, Number(intervalMs) || MIN_INTERVAL_MS),
+    nextRunAt:
+      k === "once"
+        ? now + Math.max(0, Number(delayMs) || 0)
+        : now + Math.max(MIN_INTERVAL_MS, Number(intervalMs) || MIN_INTERVAL_MS),
   };
   jobs.push(job);
   persist();
