@@ -24,6 +24,18 @@ On Windows every run is preceded by a host snapshot: the `Win32_Processor` load 
 top CPU consumers over a 500 ms sample. A loaded host is not an idle baseline, and the snapshot is
 what tells the two apart.
 
+## Readiness table
+
+`node scripts/cold-start.mjs` (`npm run cold-start`) is the wider measurement, and it is the one
+that answers the budget row directly: 12 fresh processes with no `NODE_COMPILE_CACHE`, and a table
+of min / median / max / spread for three milestones of the same spawn - spawn to listening, spawn
+to the first `/health` answer, and spawn to `registry scanned`, the banner `test/helpers.mjs` waits
+for. It also measures the host's own `node -e ""` spawn floor in the same window, because a machine
+whose bare spawn alone costs hundreds of milliseconds cannot answer a 400 ms question. The verdict
+gates on the median of spawn to `registry scanned` and prints the listening median for contrast.
+`--quiet=PCT` waits once, before the batch, for the host to fall to that load; if it never does the
+run says `measuring anyway` and the numbers are an upper bound with the load printed per run.
+
 ## The gate
 
 CI runs the script on the normal daemon runners with nothing warmed up and prints every number.
@@ -48,6 +60,15 @@ per process, so a normal start never pays for it.
 
 ## Measurements
 
+- 2026-11-27, readiness table (`node scripts/cold-start.mjs --runs=12 --quiet=70`, exit 1): 12 cold
+  starts on a busy host (load 26-84%; gradle `java`, `git status` sweeps, Docker and ffmpeg from
+  other sessions; the 120 s quiet gate did not open). Spawn -> `registry scanned` min 3864 ms,
+  median 4802 ms, max 9150 ms, spread 5286 ms; spawn -> listening min 384 ms, median 670 ms, max
+  1049 ms; the first `/health` answer came 12-28 ms after listening in every run; bare
+  `node -e ""` floor min 60 ms, median 109 ms, max 1185 ms. The 400 ms budget is missed on the
+  readiness line by about 12x, and the scan itself (17 manifests, one `bin --version` probe each)
+  took 3.4-4.4 s even at 27-40% load, so this is not a loaded-host artifact alone. Hardware:
+  i7-13650HX, 14 cores / 20 logical, 23.8 GB RAM, Samsung MZAL8512HDLU NVMe SSD, Windows 11 26300.
 - 2026-11-26, loaded host (7-31% CPU load, about 1-3 of 20 logical cores busy): five cold starts
   at 1275, 1408, 1068, 631 and 674 ms; worst 1408 ms, median 1068 ms. Over budget; the budget row
   stays open. Full snapshot: `C:/GITHUB/.fleet/evidence/PocketDesk/row-332.md`.

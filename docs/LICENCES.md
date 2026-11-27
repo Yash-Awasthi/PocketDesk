@@ -80,6 +80,7 @@ JNA is LGPL-2.1-or-later, which the GPL permits for a dynamically linked library
 | `junit-bom` | `org.junit:junit-bom` | 6.1.3 | Eclipse Public License v2.0 |
 | `junit-jupiter` | `org.junit.jupiter:junit-jupiter` | 6.1.3 | Eclipse Public License v2.0 |
 | `junit-platform-launcher` | `org.junit.platform:junit-platform-launcher` | 6.1.3 | Eclipse Public License v2.0 |
+| `androidx-window` | `androidx.window:window` | 1.5.0 | The Apache Software License, Version 2.0 |
 | `androidx-test-junit` | `androidx.test.ext:junit` | 1.3.0 | The Apache Software License, Version 2.0 |
 | `androidx-test-runner` | `androidx.test:runner` | 1.7.0 | The Apache Software License, Version 2.0 |
 | `androidx-test-core` | `androidx.test:core` | 1.7.0 | The Apache Software License, Version 2.0 |

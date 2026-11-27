@@ -920,7 +920,8 @@ public static class RHGate {
       uint before = 0;
       bool beforeKnown = GetWindowDisplayAffinity(hwnd, out before);
       string r = Step(on ? "on" : "off", p, hwnd, pid, beforeKnown, before);
-      if (r.IndexOf("\\\"ok\\\":true") < 0) { error = r; return false; }
+      string q = ((char)34).ToString();
+      if (r.IndexOf(q + "ok" + q + ":true") < 0) { error = r; return false; }
       return true;
     } catch (Exception ex) { error = ex.GetType().Name; return false; }
     finally { CloseHandle(p); }

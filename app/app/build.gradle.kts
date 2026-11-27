@@ -109,6 +109,8 @@ dependencies {
     implementation(libs.doc.scanner)
     implementation(libs.zxing.core)
     implementation(libs.lifecycle.runtime.compose)
+    // The window info tracker is how the app sees a fold hinge.
+    implementation(libs.androidx.window)
     implementation(libs.navigation3.runtime)
     implementation(libs.navigation3.ui)
     implementation(platform(libs.okhttp.bom))
